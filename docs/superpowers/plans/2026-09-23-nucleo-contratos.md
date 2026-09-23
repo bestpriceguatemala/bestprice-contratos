@@ -1644,7 +1644,33 @@ Al guardar:
 - Se pide el correlativo con `siguienteNumeroContrato()`.
 - Del número de tarjeta se guardan **solo los últimos 4 dígitos**; el CBC no se guarda (ADR-001). El número completo queda en una variable de la pantalla, se usa para imprimir y se descarta al salir.
 - Se guarda el pago de la salida con su forma de pago y su porcentaje de tarjeta.
-- Se guarda `porcentajeComision` copiado del empleado elegido.
+- Se guarda `porcentajeComision` copiado del empleado elegido. **Nunca se guarda un contrato sin ese campo**: sin él la comisión saldría en cero sin avisar.
+- Se guarda `garantiaMonto` (el monto autorizado en la tarjeta), con ese nombre, que ya usa la pantalla de la flota.
+- Se guarda `estado: 'rentado'`.
+
+- [ ] **Step 3b: Que la capa de datos traiga los contratos que siguen vivos**
+
+`cargarContratosAbiertos()` hoy solo trae los que no tienen `cierre.fechaReal`, así que la
+lista de **garantías por liberar** de la pantalla principal saldría siempre vacía: esos
+contratos ya tienen fecha real de entrada, lo que les falta es soltar la garantía.
+
+En `js/datos.js`, que la consulta traiga **los contratos que no están cerrados**, apoyándose en
+el campo `estado` que ahora guarda cada contrato:
+
+```js
+/**
+ * Los contratos que todavía piden algo: el carro anda fuera, falta cobrar un
+ * saldo o falta soltar la garantía de la tarjeta. Los cerrados no se traen al
+ * abrir: se buscan cuando alguien los busca.
+ */
+export async function cargarContratosAbiertos() {
+  return cargarConSincronia('contratos', (fs, db) =>
+    fs.query(fs.collection(db, 'contratos'), fs.where('estado', 'in', ['rentado', 'devuelto'])));
+}
+```
+
+Un contrato guardado sin `estado` (no debería existir, pero por si acaso) se trata como
+`rentado` al leerlo, para que nunca desaparezca de la pantalla.
 
 - [ ] **Step 4: Verificar en el navegador**
 
@@ -1722,6 +1748,55 @@ git commit -m "Reglas de Firestore y aviso de version nueva"
 ```
 
 ---
+
+---
+
+### Task 13: Agregar y editar carros
+
+**Files:**
+- Create: `js/pantallas/carros.js`
+- Modify: `js/app.js` (registrar `#/carros`, `#/carros/nuevo`, `#/carros/:id` y `#/habilitar/:id`)
+
+**Interfaces:**
+- Consumes: `cargarFlota`, `guardarVehiculo` de `datos.js`; `estadoCarro` de `estados.js`; `aviso` de `ui.js`.
+- Produces: `pintarCarros(contenedor, carroId)`; en `datos.js`, `guardarVehiculo(vehiculo)` que sella `actualizado` y asigna el código correlativo con `siguienteCodigoCarro()`.
+
+Sin esta pantalla el sistema no se puede estrenar: no hay forma de meter la flota, y sin flota
+no se puede sacar ningún carro. La hoja VEHICULOS del Excel es la referencia de los campos.
+
+- [ ] **Step 1: La lista de la flota**
+
+`#/carros` muestra la flota completa en una tabla: código, placas, tipo, marca y línea, color,
+modelo, propiedad (propio o de quién) y estado. Arriba, el botón **Agregar carro**. Cada fila
+se abre para editar. Los carros subarrendados **no** aparecen aquí: viven dentro de su contrato.
+
+- [ ] **Step 2: El formulario de un carro**
+
+Campos, los mismos de la hoja VEHICULOS: placas, tipo de vehículo, marca y línea, color, modelo,
+propiedad (propio / subarrendado) y dueño del carro cuando no es propio. El **código se pone
+solo**, correlativo, como en el Excel. Al guardar se vuelve a la lista con un aviso de
+confirmación.
+
+- [ ] **Step 3: Fuera de servicio**
+
+En la ficha del carro, un botón para **marcarlo fuera de servicio** pidiendo el motivo en una
+línea (taller, golpe, revisión), y otro para **volver a habilitarlo**. La ruta `#/habilitar/:id`
+que ya usa la pantalla de la flota entra aquí: habilita el carro directamente y regresa a la
+flota con un aviso.
+
+- [ ] **Step 4: Verificar en el navegador**
+
+- Agregar un carro y verlo aparecer en la flota con su código.
+- Editarle las placas y ver el cambio en las dos pantallas.
+- Marcarlo fuera de servicio con un motivo: se ve gris en la flota, con el motivo, y sin botón de sacar.
+- Volver a habilitarlo desde la flota: vuelve a estar disponible.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add js/pantallas/carros.js js/datos.js js/app.js
+git commit -m "Alta y edicion de carros, y el fuera de servicio"
+```
 
 ## Al terminar el plan
 
