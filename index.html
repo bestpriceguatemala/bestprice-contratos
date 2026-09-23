@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Best Price — Contratos</title>
+<link rel="stylesheet" href="css/estilos.css?v=1">
+</head>
+<body>
+  <div id="entrada" class="entrada">
+    <form id="forma-entrada" class="tarjeta-entrada">
+      <h1>Best Price</h1>
+      <p class="sub">Contratos de renta</p>
+      <label>Usuario <input type="email" id="usuario" autocomplete="username" required></label>
+      <label>Contraseña <input type="password" id="clave" autocomplete="current-password" required></label>
+      <button type="submit" class="btn btn-primario">Entrar</button>
+      <p id="error-entrada" class="error" hidden></p>
+    </form>
+  </div>
+
+  <div id="app" hidden>
+    <header class="barra">
+      <strong>Best Price — Contratos</strong>
+      <input type="search" id="buscador" placeholder="Buscar cliente, placas o número de contrato">
+      <nav>
+        <a href="#/flota">Flota</a>
+        <a href="#/clientes">Clientes</a>
+        <a href="#/contratos">Contratos</a>
+        <a href="#/dinero">Dinero</a>
+        <a href="#/ajustes">Ajustes</a>
+      </nav>
+      <button id="salir" class="btn">Salir</button>
+    </header>
+    <main id="pantalla"></main>
+  </div>
+
+  <div id="avisos" class="avisos"></div>
+  <script type="module" src="js/app.js?v=1"></script>
+</body>
+</html>
