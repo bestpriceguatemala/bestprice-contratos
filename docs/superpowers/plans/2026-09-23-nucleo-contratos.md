@@ -235,9 +235,11 @@ Crear `pruebas/fechas.test.mjs`:
 // si se usara la hora local, un contrato que sale a las 3 de la tarde en
 // Guatemala podía contar un día de más o de menos según el horario de verano de
 // otro país. Un día de diferencia son Q700.
+process.env.TZ = 'America/Guatemala';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sumarDias, diasEntre, devolucionPrevista, diasAtraso } from '../js/nucleo/fechas.js';
+import { sumarDias, diasEntre, devolucionPrevista, diasAtraso, hoyISO } from '../js/nucleo/fechas.js';
 
 test('suma días cruzando fin de mes y fin de año', () => {
   assert.equal(sumarDias('2026-08-20', 5), '2026-08-25');
@@ -265,6 +267,13 @@ test('el atraso nunca es negativo', () => {
 test('sin fecha real todavía no hay atraso que cobrar', () => {
   assert.equal(diasAtraso('2026-08-24', ''), 0);
   assert.equal(diasAtraso('2026-08-24', undefined), 0);
+});
+
+test('hoy es el día del calendario de aquí, no el de Londres', () => {
+  // Las ocho de la noche del 22 de septiembre en Guatemala ya son las dos de la
+  // madrugada del 23 en UTC. En el mostrador todavía es 22.
+  assert.equal(hoyISO(new Date('2026-09-23T02:00:00Z')), '2026-09-22');
+  assert.equal(hoyISO(new Date('2026-09-22T18:00:00Z')), '2026-09-22');
 });
 ```
 
@@ -297,9 +306,17 @@ function aISO(ms) {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-/** La fecha de hoy, en texto. */
-export function hoyISO() {
-  return aISO(Date.now());
+/**
+ * La fecha de hoy, en texto, según el calendario de aquí.
+ *
+ * No se usa `toISOString()` a propósito: eso da el día de UTC, y Guatemala va
+ * seis horas atrás. De seis de la tarde a medianoche, un carro que regresa hoy
+ * quedaría registrado mañana — y un día de más es un día de renta de más.
+ */
+export function hoyISO(momento = new Date()) {
+  const mes = String(momento.getMonth() + 1).padStart(2, '0');
+  const dia = String(momento.getDate()).padStart(2, '0');
+  return `${momento.getFullYear()}-${mes}-${dia}`;
 }
 
 /** Una fecha más (o menos) días. */
@@ -332,7 +349,7 @@ export function diasAtraso(prevista, fechaReal) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 12 pruebas en total.
+Se espera: PASA, 13 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -592,7 +609,7 @@ export function saldoConTarjeta(c, porcentaje) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 22 pruebas en total.
+Se espera: PASA, 23 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -737,7 +754,7 @@ export function comisionDe(c) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 30 pruebas en total.
+Se espera: PASA, 31 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -896,7 +913,7 @@ export function estadoCarro(carro, contratos = [], hoy) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 37 pruebas en total.
+Se espera: PASA, 38 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -1034,7 +1051,7 @@ export function filtrar(items, consulta, textoDe) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 42 pruebas en total.
+Se espera: PASA, 43 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -1216,7 +1233,7 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 51 pruebas en total.
+Se espera: PASA, 52 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -1492,7 +1509,7 @@ Crear `js/datos.js` sobre `firebase-config.js` y `cache.js`: lee primero de la c
 - [ ] **Step 5: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 56 pruebas en total.
+Se espera: PASA, 57 pruebas en total.
 
 - [ ] **Step 6: Commit**
 
