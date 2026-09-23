@@ -9,10 +9,16 @@ import { resumen } from './contrato.js';
 const alto = (mensaje) => ({ nivel: 'alto', mensaje });
 const medio = (mensaje) => ({ nivel: 'medio', mensaje });
 
-/** ¿Se encima [a1, a2] con [b1, b2]? */
+/**
+ * ¿Se encima [a1, a2] con [b1, b2]?
+ *
+ * Tocarse no es encimarse: un carro que regresa el 20 puede volver a salir el
+ * 20, y eso pasa a diario. Solo hay choque cuando de verdad se traslapan días,
+ * por eso la comparación es estricta.
+ */
 function seEnciman(a1, a2, b1, b2) {
   if (!a1 || !a2 || !b1 || !b2) return false;
-  return diasEntre(a1, b2) >= 0 && diasEntre(b1, a2) >= 0;
+  return diasEntre(a1, b2) > 0 && diasEntre(b1, a2) > 0;
 }
 
 export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente = [], contratosDelCarro = [], ajustes = {}, hoy }) {
@@ -32,7 +38,8 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
 
   const tardes = contratosDelCliente.filter((c) => resumen(c).diasAtraso > 0).length;
   if (tardes > 0) {
-    avisos.push(medio(`Este cliente ya devolvió tarde ${tardes} vez(ces).`));
+    const plural = tardes === 1 ? 'vez' : 'veces';
+    avisos.push(medio(`Este cliente ya devolvió tarde ${tardes} ${plural}.`));
   }
 
   const encimado = contratosDelCarro.find((otro) =>
@@ -43,10 +50,12 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
   }
 
   if (ajustes.precioMinimoDia && contrato?.precioDia && contrato.precioDia < ajustes.precioMinimoDia) {
-    avisos.push(medio(`El precio está por debajo del mínimo de Q${ajustes.precioMinimoDia} por día.`));
+    avisos.push(medio(`Cobraste Q${contrato.precioDia} por día; tu mínimo es Q${ajustes.precioMinimoDia}.`));
   }
   if (ajustes.diasMinimos && contrato?.dias && contrato.dias < ajustes.diasMinimos) {
-    avisos.push(medio(`Son menos de los ${ajustes.diasMinimos} días mínimos de renta.`));
+    const palabra = contrato.dias === 1 ? 'día' : 'días';
+    const palabraMin = ajustes.diasMinimos === 1 ? 'día' : 'días';
+    avisos.push(medio(`Son ${contrato.dias} ${palabra}; tu mínimo son ${ajustes.diasMinimos} ${palabraMin}.`));
   }
 
   return [...avisos.filter((a) => a.nivel === 'alto'), ...avisos.filter((a) => a.nivel === 'medio')];

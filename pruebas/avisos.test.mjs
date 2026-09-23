@@ -53,6 +53,7 @@ test('avisa si el cliente ya devolvió tarde antes', () => {
   const r = avisosDeSalida({ ...base, contratosDelCliente: tarde });
   assert.equal(r[0].nivel, 'medio');
   assert.match(r[0].mensaje, /tarde/i);
+  assert.match(r[0].mensaje, /1 vez/, 'singular cuando es una sola vez');
 });
 
 test('avisa si el carro ya está comprometido en esas fechas', () => {
@@ -69,10 +70,12 @@ test('no avisa si las fechas no se enciman', () => {
 
 test('avisa si el precio está por debajo del mínimo o son menos de dos días', () => {
   const barato = avisosDeSalida({ ...base, contrato: { ...contrato, precioDia: 250 } });
-  assert.match(mensajes(barato).join(' '), /mínimo/i);
+  assert.match(mensajes(barato).join(' '), /250/);
+  assert.match(mensajes(barato).join(' '), /300/);
 
   const corto = avisosDeSalida({ ...base, contrato: { ...contrato, dias: 1 } });
-  assert.match(mensajes(corto).join(' '), /días mínimos/i);
+  assert.match(mensajes(corto).join(' '), /1 día/);
+  assert.match(mensajes(corto).join(' '), /2 días/);
 });
 
 test('los avisos altos van primero', () => {
@@ -83,4 +86,28 @@ test('los avisos altos van primero', () => {
   });
   assert.equal(r[0].nivel, 'alto');
   assert.equal(r[r.length - 1].nivel, 'medio');
+});
+
+test('una renta seguida el mismo día no es un choque', () => {
+  // El carro regresa el 20 en la mañana y vuelve a salir el 20 en la tarde:
+  // es el día a día del negocio, no un carro comprometido dos veces.
+  const anterior = [{ id: 'c7', carroId: 'v1', fechaSalida: '2026-08-15', devolucionPrevista: '2026-08-20' }];
+  const seguido = {
+    ...base,
+    contrato: { ...contrato, fechaSalida: '2026-08-20', devolucionPrevista: '2026-08-24' },
+    contratosDelCarro: anterior,
+  };
+  assert.deepEqual(avisosDeSalida(seguido), []);
+});
+
+test('un día de traslape sí es un choque', () => {
+  const anterior = [{ id: 'c7', carroId: 'v1', fechaSalida: '2026-08-15', devolucionPrevista: '2026-08-21' }];
+  const encimado = {
+    ...base,
+    contrato: { ...contrato, fechaSalida: '2026-08-20', devolucionPrevista: '2026-08-24' },
+    contratosDelCarro: anterior,
+  };
+  const r = avisosDeSalida(encimado);
+  assert.equal(r[0].nivel, 'alto');
+  assert.match(r[0].mensaje, /2026-08-21/);
 });
