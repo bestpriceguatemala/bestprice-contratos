@@ -33,9 +33,10 @@ function verEntrada() {
 function verCascaron() {
   pantallaEntrada.hidden = true;
   pantallaApp.hidden = false;
-  // Si ya venía con una ruta del sistema (#/algo) se respeta; si no, arranca en flota.
-  if (!location.hash.startsWith('#/')) location.hash = RUTA_INICIAL;
-  mostrar(location.hash);
+  // Cambiar el hash no redibuja si ya era ese mismo valor (no hay 'hashchange'),
+  // por eso también se llama mostrar() aquí de una vez.
+  location.hash = RUTA_INICIAL;
+  mostrar(RUTA_INICIAL);
 }
 
 forma.addEventListener('submit', async (ev) => {
