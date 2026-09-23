@@ -248,14 +248,21 @@ Se abre con contraseña y se cierra sola por inactividad o al salir del sistema.
   la fecha. Los pagados se separan de los pendientes. Se baja en Excel y PDF.
 - **Dueños de carros ajenos**: lo que se le debe a cada uno, contrato por
   contrato, con las mismas casillas de selección y marcado de pago.
+- **Empleados**: alta, baja y el porcentaje de comisión de cada uno. Se ven
+  desde el mostrador (para elegir quién rentó el carro) pero solo se cambian
+  aquí.
 - **El negocio**: cobrado del mes, utilidad, pendientes de cobro y cuánto ha
   producido cada carro.
 
 ### Ajustes
 
-Empleados y su porcentaje, precios sugeridos por tipo de vehículo, porcentaje de
-tarjeta por defecto, calibración de impresión, contraseña del área de dinero y
-botón de respaldo.
+Precios sugeridos por tipo de vehículo, porcentaje de tarjeta por defecto,
+calibración de impresión, contraseña del área de dinero y botón de respaldo.
+
+**Los empleados y su porcentaje de comisión NO viven aquí**: viven dentro del
+área de dinero, detrás de la contraseña. El porcentaje de un empleado es dinero
+suyo, y quien puede cambiarlo puede subirse la comisión. Quien esté en el
+mostrador puede ver la lista para decir quién rentó el carro, pero no tocarla.
 
 ## 7. Datos
 

@@ -8,28 +8,28 @@ const VERSION = '2026-09-23.1';
 /** Recarga los archivos CSS y JS sin usar caché, luego recarga la página. */
 async function recargarConVersionNueva() {
   try {
-    // Buscar todos los <link rel="stylesheet"> y <script> de módulo, y hacerles
-    // un fetch con cache: 'reload' para forzar una descarga desde el servidor.
-    const hojas = document.querySelectorAll('link[rel="stylesheet"]');
-    const scripts = document.querySelectorAll('script[type="module"]');
+    // Preguntarle al navegador qué archivos ya cargó (el performance API), que
+    // incluye todos los módulos del gráfico de importaciones, no solo los nodos
+    // del DOM. Recargar todos ellos con cache: 'reload' evita el cache de 10
+    // minutos de GitHub Pages y garantiza que el código nuevo está descargado
+    // y guardado antes de recargar la página.
+    const archivos = performance.getEntriesByType('resource')
+      .map((r) => r.name)
+      .filter((n) => n.startsWith(location.origin) && /\.(js|css)(\?|$)/.test(n));
 
-    const promesas = [];
-    hojas.forEach(hoja => {
-      promesas.push(fetch(hoja.href, { cache: 'reload' }));
-    });
-    scripts.forEach(script => {
-      promesas.push(fetch(script.src, { cache: 'reload' }));
-    });
-
-    await Promise.all(promesas);
+    // Usar allSettled para que si falla alguno, los otros siguen intentando.
+    // Sin cache: 'reload', fetch() puede devolver los módulos de la caché
+    // mientras no venzan, y la página quedaría con código viejo. Con cache:
+    // 'reload', obligamos al navegador a ir al servidor ahora mismo.
+    await Promise.allSettled(archivos.map((n) => fetch(n, { cache: 'reload' })));
   } catch (err) {
     console.error('Error al precargar archivos nuevos:', err);
     // Aunque falle la precarga, recargamos de todas formas para que el navegador
     // traiga la versión nueva del servidor.
   }
 
-  // Recargar la página después de traer la versión nueva.
-  window.location.reload();
+  // Recargar la página después de traer la versión nueva con cache: 'reload'.
+  location.reload();
 }
 
 /** Muestra la barra de aviso de versión con un botón para actualizar. */
@@ -46,6 +46,16 @@ function mostrarAvisoVersion() {
   `;
 
   document.body.insertBefore(barra, document.body.firstChild);
+
+  // La barra empuja el sistema hacia abajo en vez de taparlo: mientras el aviso
+  // está arriba, él tiene que poder seguir usando su buscador y sus menús.
+  // Medir la altura de la barra (no hard-codear) porque el texto se ajusta
+  // diferente según el ancho de la ventana.
+  const alturaBarra = barra.offsetHeight;
+  const app = document.getElementById('app');
+  if (app) {
+    app.style.paddingTop = `${alturaBarra}px`;
+  }
 
   barra.querySelector('.btn-actualizar').addEventListener('click', async () => {
     barra.remove();
