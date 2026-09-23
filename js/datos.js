@@ -113,6 +113,33 @@ export async function cargarContratosAbiertos(alLlegar) {
   return soloAbiertos(todos);
 }
 
+// Todavía no hay pantalla de Ajustes (§6 del diseño) — es de un plan futuro
+// — así que mientras el documento `ajustes/general` no exista en Firestore
+// se usan estos, que son los que confirmó el dueño. El precio por día NO
+// lleva mínimo aquí a propósito: él lo pone caso por caso y el sistema no
+// opina ("yo pongo el precio que yo quiera").
+const AJUSTES_POR_DEFECTO = {
+  porcentajeTarjeta: 12,
+  porcentajeComision: 5,
+};
+
+/**
+ * La configuración general del negocio que usa "Sacar carro": porcentaje de
+ * tarjeta y de comisión por defecto. Una lectura simple, sin copia local ni
+ * sincronía de fondo (a diferencia de cargarFlota/cargarContratosAbiertos):
+ * es un solo documento chico que casi no cambia, y si la nube no responde o
+ * el documento todavía no existe, los valores del dueño sirven igual.
+ */
+export async function cargarAjustes() {
+  try {
+    const { db, fsMod } = await iniciarFirebase();
+    const doc = await conLimiteDeTiempo(fsMod.getDoc(fsMod.doc(db, 'ajustes', 'general')));
+    return doc.exists() ? { ...AJUSTES_POR_DEFECTO, ...doc.data() } : AJUSTES_POR_DEFECTO;
+  } catch {
+    return AJUSTES_POR_DEFECTO;
+  }
+}
+
 // Los clientes se sincronizan una sola vez por sesión: buscar mientras se
 // escribe no puede depender de la nube en cada letra (§9 del diseño). Si esa
 // única sincronización no trae nada (sin copia local y sin nube), se olvida
@@ -179,4 +206,20 @@ export async function guardarContrato(contrato) {
   await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
   await guardarLocal('contratos', [guardado]);
   return guardado;
+}
+
+/**
+ * Un id nuevo para un contrato, sin escribir nada todavía (Firestore lo
+ * genera localmente, sin ida y vuelta a la nube). "Sacar carro" lo pide una
+ * sola vez por alquiler, antes del primer intento de guardar, y lo guarda en
+ * su propio estado: si el internet se pone lento y `conLimiteDeTiempo` se da
+ * por vencido antes de que la escritura en verdad llegue, un reintento con
+ * `guardarContrato` cae en este mismo documento (lo sobreescribe con
+ * `merge: true`) en vez de crear uno nuevo — dos contratos del mismo
+ * alquiler significarían un carro comprometido dos veces y una tarjeta
+ * autorizada dos veces.
+ */
+export async function nuevoIdContrato() {
+  const { db, fsMod } = await iniciarFirebase();
+  return fsMod.doc(fsMod.collection(db, 'contratos')).id;
 }

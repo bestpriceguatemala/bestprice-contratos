@@ -21,7 +21,10 @@ function seEnciman(a1, a2, b1, b2) {
   return diasEntre(a1, b2) > 0 && diasEntre(b1, a2) > 0;
 }
 
-export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente = [], contratosDelCarro = [], ajustes = {}, hoy }) {
+// El precio y los días NO se avisan: el dueño pone el precio que quiera en cada
+// renta y el sistema no opina. Un aviso que él no quiere lo entrena a ignorar
+// los que sí importan.
+export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente = [], contratosDelCarro = [], hoy }) {
   const avisos = [];
 
   if (cliente?.licenciaExpira && diasEntre(cliente.licenciaExpira, hoy) > 0) {
@@ -47,15 +50,6 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
     seEnciman(contrato?.fechaSalida, contrato?.devolucionPrevista, otro.fechaSalida, otro.devolucionPrevista));
   if (encimado) {
     avisos.push(alto(`Este carro tiene otro contrato del ${encimado.fechaSalida} al ${encimado.devolucionPrevista}.`));
-  }
-
-  if (ajustes.precioMinimoDia && contrato?.precioDia && contrato.precioDia < ajustes.precioMinimoDia) {
-    avisos.push(medio(`Cobraste Q${contrato.precioDia} por día; tu mínimo es Q${ajustes.precioMinimoDia}.`));
-  }
-  if (ajustes.diasMinimos && contrato?.dias && contrato.dias < ajustes.diasMinimos) {
-    const palabra = contrato.dias === 1 ? 'día' : 'días';
-    const palabraMin = ajustes.diasMinimos === 1 ? 'día' : 'días';
-    avisos.push(medio(`Son ${contrato.dias} ${palabra}; tu mínimo son ${ajustes.diasMinimos} ${palabraMin}.`));
   }
 
   return [...avisos.filter((a) => a.nivel === 'alto'), ...avisos.filter((a) => a.nivel === 'medio')];

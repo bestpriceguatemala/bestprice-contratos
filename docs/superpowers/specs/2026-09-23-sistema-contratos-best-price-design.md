@@ -202,7 +202,6 @@ Avisos mientras se escribe:
 - El cliente tiene saldo pendiente de otro contrato.
 - El cliente ya devolvió tarde antes.
 - El carro tiene otro contrato encima de esas fechas.
-- El precio está por debajo del mínimo configurado, o son menos de dos días.
 
 Al final: el total estimado, el pago que se recibe (monto, forma de pago,
 porcentaje de tarjeta si aplica) y el botón **Guardar e imprimir contrato**.
@@ -255,8 +254,8 @@ Se abre con contraseña y se cierra sola por inactividad o al salir del sistema.
 ### Ajustes
 
 Empleados y su porcentaje, precios sugeridos por tipo de vehículo, porcentaje de
-tarjeta por defecto, mínimos que disparan avisos, calibración de impresión,
-contraseña del área de dinero y botón de respaldo.
+tarjeta por defecto, calibración de impresión, contraseña del área de dinero y
+botón de respaldo.
 
 ## 7. Datos
 

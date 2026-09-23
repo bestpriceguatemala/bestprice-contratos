@@ -1168,14 +1168,6 @@ test('no avisa si las fechas no se enciman', () => {
   assert.deepEqual(avisosDeSalida({ ...base, contratosDelCarro: despues }), []);
 });
 
-test('avisa si el precio está por debajo del mínimo o son menos de dos días', () => {
-  const barato = avisosDeSalida({ ...base, contrato: { ...contrato, precioDia: 250 } });
-  assert.match(mensajes(barato).join(' '), /250.*300/, 'dice lo que cobró y su mínimo');
-
-  const corto = avisosDeSalida({ ...base, contrato: { ...contrato, dias: 1 } });
-  assert.match(mensajes(corto).join(' '), /mínimo son 2 días/i);
-});
-
 test('una renta seguida el mismo día no es un choque', () => {
   // El carro regresa el 20 en la mañana y vuelve a salir el 20 en la tarde:
   // es el día a día del negocio, no un carro comprometido dos veces.
@@ -1245,7 +1237,10 @@ function seEnciman(a1, a2, b1, b2) {
   return diasEntre(a1, b2) > 0 && diasEntre(b1, a2) > 0;
 }
 
-export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente = [], contratosDelCarro = [], ajustes = {}, hoy }) {
+// El precio y los días NO se avisan: el dueño pone el precio que quiera en cada
+// renta y el sistema no opina. Un aviso que él no quiere lo entrena a ignorar
+// los que sí importan.
+export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente = [], contratosDelCarro = [], hoy }) {
   const avisos = [];
 
   if (cliente?.licenciaExpira && diasEntre(cliente.licenciaExpira, hoy) > 0) {
@@ -1273,15 +1268,6 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
   }
 
   // Los dos números juntos, para no tener que regresar a ver el formulario.
-  if (ajustes.precioMinimoDia && contrato?.precioDia && contrato.precioDia < ajustes.precioMinimoDia) {
-    avisos.push(medio(`Cobraste Q${contrato.precioDia} por día; tu mínimo es Q${ajustes.precioMinimoDia}.`));
-  }
-  if (ajustes.diasMinimos && contrato?.dias && contrato.dias < ajustes.diasMinimos) {
-    const dia = contrato.dias === 1 ? 'día' : 'días';
-    const minimo = ajustes.diasMinimos === 1 ? 'día' : 'días';
-    avisos.push(medio(`Son ${contrato.dias} ${dia}; tu mínimo son ${ajustes.diasMinimos} ${minimo}.`));
-  }
-
   return [...avisos.filter((a) => a.nivel === 'alto'), ...avisos.filter((a) => a.nivel === 'medio')];
 }
 ```
