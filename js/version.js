@@ -52,10 +52,7 @@ function mostrarAvisoVersion() {
   // Medir la altura de la barra (no hard-codear) porque el texto se ajusta
   // diferente según el ancho de la ventana.
   const alturaBarra = barra.offsetHeight;
-  const app = document.getElementById('app');
-  if (app) {
-    app.style.paddingTop = `${alturaBarra}px`;
-  }
+  document.body.style.paddingTop = `${alturaBarra}px`;
 
   barra.querySelector('.btn-actualizar').addEventListener('click', async () => {
     barra.remove();
@@ -66,7 +63,11 @@ function mostrarAvisoVersion() {
 /** Oculta la barra de aviso de versión. */
 function ocultarAvisoVersion() {
   const barra = document.getElementById('barra-version');
-  if (barra) barra.remove();
+  if (barra) {
+    barra.remove();
+    // Quitar el espacio que la barra dejó en la parte superior de la página.
+    document.body.style.paddingTop = '';
+  }
 }
 
 /** Consulta el servidor por la versión actual, sin usar caché. */
