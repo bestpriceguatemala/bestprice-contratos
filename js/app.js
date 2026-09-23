@@ -2,7 +2,10 @@
 // formulario de entrada con la sesión y reacciona cuando esta cambia.
 import { entrar, salir, alCambiarSesion } from './auth.js';
 import { aviso } from './ui.js';
-import { mostrar } from './router.js';
+import { registrarPantalla, mostrar } from './router.js';
+import { pintarFlota } from './pantallas/flota.js';
+
+registrarPantalla('#/flota', pintarFlota);
 
 const pantallaEntrada = document.getElementById('entrada');
 const pantallaApp = document.getElementById('app');
