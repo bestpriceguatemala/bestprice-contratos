@@ -88,8 +88,17 @@ subtotal         = renta + cobro de atraso + seguros extra
 **El precio por día ya incluye** el seguro y el seguro de terceros; esos dos
 montos solo se desglosan en el contrato impreso, nunca se suman aparte.
 El **deducible bajo** se cobra una sola vez, no por día.
-Los **daños**, el **combustible** y los **varios** se escriben a mano al
-recibir el carro.
+Los **daños** y el **combustible** se escriben a mano al recibir el carro.
+
+### Qué se cobra en cada momento
+
+Al salir el carro se cobra **todo lo que ya se sabe**: la renta de los días
+contratados, los seguros por día de esos días, el deducible bajo, la carta poder
+y los varios.
+
+En la devolución se cobra **solo lo que apareció después**: los días de atraso,
+los seguros por día de esos días de atraso, los daños y el combustible, menos el
+descuento que se le dé.
 
 ### El porcentaje de tarjeta
 
@@ -112,15 +121,20 @@ Q350 de carta poder, Q130 de combustible, Q300 de descuento y 12 % de tarjeta:
 | Momento | Concepto | Monto |
 |---|---|---:|
 | Salida | Renta (4 × 700) | 2,800.00 |
-| Salida | 12 % de tarjeta | 336.00 |
-| Salida | **Pagado** | **3,136.00** |
+| Salida | Carta poder | 350.00 |
+| Salida | 12 % de tarjeta sobre 3,150 | 378.00 |
+| Salida | **Pagado** | **3,528.00** |
 | Devolución | Atraso (1 × 700) | 700.00 |
 | Devolución | Daños | 200.00 |
 | Devolución | Combustible | 130.00 |
 | Devolución | ( − ) Descuento | −300.00 |
 | Devolución | 12 % de tarjeta sobre 730 | 87.60 |
 | Devolución | **Saldo por cobrar** | **817.60** |
-| | **Total cobrado** | **3,953.60** |
+| | **Total cobrado** | **4,345.60** |
+
+El subtotal sin recargos de tarjeta es 3,880.00, que es lo que daría la hoja
+CONTRATOS del Excel: 2,800 de renta + 700 de atraso + 350 de carta poder + 200
+de daños + 130 de combustible − 300 de descuento.
 
 ### Carros subarrendados
 
