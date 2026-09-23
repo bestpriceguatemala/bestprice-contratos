@@ -773,7 +773,7 @@ git commit -m "Comision del empleado: 5 por ciento configurable, con atraso y de
 
 **Interfaces:**
 - Consumes: `resumen` de `contrato.js`; `diasAtraso` de `fechas.js`.
-- Produces: `estadoContrato(c) -> 'rentado' | 'devuelto' | 'cerrado'`, `puedeCerrar(c) -> boolean`, `pendientesDe(c) -> {saldo, garantia}`, `estadoCarro(carro, contratos, hoy) -> {estado, contrato, diasAtraso}` con estado `'disponible' | 'rentado' | 'atrasado' | 'fuera de servicio'`.
+- Produces: `estadoContrato(c) -> 'rentado' | 'devuelto' | 'cerrado'`, `puedeCerrar(c) -> boolean`, `pendientesDe(c) -> {saldo, garantia}`, `estadoCarro(carro, contratos, hoy = hoyISO()) -> {estado, contrato, diasAtraso, fueraDeServicio, motivo}` con estado `'disponible' | 'rentado' | 'atrasado' | 'fuera de servicio'`. Un carro rentado que además está marcado fuera de servicio sale como `rentado`/`atrasado` con `fueraDeServicio: true`: dónde está el carro manda, la etiqueta se muestra aparte.
 
 - [ ] **Step 1: Escribir la prueba que falla**
 
@@ -866,7 +866,7 @@ Crear `js/nucleo/estados.js`:
 // que falte y se le suelte la garantía de la tarjeta. Si se amarraran, un
 // cliente que no paga unos daños dejaría el carro parado sin necesidad.
 import { resumen } from './contrato.js';
-import { diasAtraso } from './fechas.js';
+import { diasAtraso, hoyISO } from './fechas.js';
 
 /** Lo que falta para poder cerrar: saldo por cobrar y garantía por liberar. */
 export function pendientesDe(c) {
@@ -892,20 +892,26 @@ export function estadoContrato(c) {
  * El estado del carro para la pantalla principal.
  *
  * `contratos` son los de ese carro; se busca el que todavía no ha regresado.
+ * Estar marcado fuera de servicio no borra al cliente que lo tiene: si el carro
+ * se accidentó con él, la pantalla todavía necesita decir quién lo lleva, si
+ * viene tarde y dar el botón para recibirlo. Por eso va como etiqueta aparte.
  */
-export function estadoCarro(carro, contratos = [], hoy) {
-  if (carro?.fueraDeServicio) {
-    return { estado: 'fuera de servicio', contrato: null, diasAtraso: 0 };
-  }
+export function estadoCarro(carro, contratos = [], hoy = hoyISO()) {
+  const fueraDeServicio = Boolean(carro?.fueraDeServicio);
+  const motivo = carro?.motivoFueraDeServicio || '';
+  const afuera = contratos.find((c) => c?.carroId === carro?.id && !c?.cierre?.fechaReal);
 
-  const afuera = contratos.find((c) => c.carroId === carro?.id && !c?.cierre?.fechaReal);
-  if (!afuera) return { estado: 'disponible', contrato: null, diasAtraso: 0 };
+  if (!afuera) {
+    return {
+      estado: fueraDeServicio ? 'fuera de servicio' : 'disponible',
+      contrato: null, diasAtraso: 0, fueraDeServicio, motivo,
+    };
+  }
 
   const atraso = diasAtraso(afuera.devolucionPrevista, hoy);
   return {
     estado: atraso > 0 ? 'atrasado' : 'rentado',
-    contrato: afuera,
-    diasAtraso: atraso,
+    contrato: afuera, diasAtraso: atraso, fueraDeServicio, motivo,
   };
 }
 ```
@@ -913,7 +919,7 @@ export function estadoCarro(carro, contratos = [], hoy) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 38 pruebas en total.
+Se espera: PASA, 41 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -1051,7 +1057,7 @@ export function filtrar(items, consulta, textoDe) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 43 pruebas en total.
+Se espera: PASA, 46 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -1233,7 +1239,7 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 52 pruebas en total.
+Se espera: PASA, 55 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -1509,7 +1515,7 @@ Crear `js/datos.js` sobre `firebase-config.js` y `cache.js`: lee primero de la c
 - [ ] **Step 5: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 57 pruebas en total.
+Se espera: PASA, 60 pruebas en total.
 
 - [ ] **Step 6: Commit**
 
@@ -1537,6 +1543,7 @@ git commit -m "Copia local y capa de datos: abre al instante y sincroniza detras
 - `rentado`: punto azul, nombre del cliente, *vuelve el 25 ago*, botón **Recibir carro**.
 - `atrasado`: cuadro rojo, *atrasado 2 días*, botón **Recibir carro**.
 - `fuera de servicio`: cuadro gris con el motivo y botón **Volver a habilitar**.
+- Un carro rentado o atrasado que además trae `fueraDeServicio: true` conserva su cuadro y su botón de recibir, con una etiqueta gris que dice el motivo.
 
 - [ ] **Step 2: Agregar las dos listas de pendientes**
 
