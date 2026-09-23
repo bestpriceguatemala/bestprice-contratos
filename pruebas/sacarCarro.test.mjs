@@ -1,0 +1,79 @@
+// Pruebas de "Sacar carro": la parte pura, sin DOM.
+//
+// La que más importa es la del ADR-001: construirContrato no puede filtrar el
+// número completo de la tarjeta ni el CBC porque ni siquiera los recibe —
+// quien llama ya le pasa solo los últimos 4 dígitos.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { construirContrato, ultimos4Digitos } from '../js/pantallas/sacarCarro.js';
+import { resumen } from '../js/nucleo/contrato.js';
+
+test('ultimos4Digitos se queda solo con los últimos 4 dígitos', () => {
+  assert.equal(ultimos4Digitos('4111 1111 1111 3343'), '3343');
+  assert.equal(ultimos4Digitos('4111-1111-1111-3343'), '3343');
+  assert.equal(ultimos4Digitos('123'), '123');
+  assert.equal(ultimos4Digitos(''), '');
+  assert.equal(ultimos4Digitos(undefined), '');
+});
+
+const datosBase = () => ({
+  numero: 42,
+  cliente: { id: 'k1', nombre1: 'Juan', apellido1: 'Pérez' },
+  ajeno: false,
+  carro: { id: 'v1', placas: 'P-999TST', marca: 'Toyota', linea: 'Corolla' },
+  fechaSalida: '2026-09-23',
+  dias: 4,
+  precioDia: 700,
+  cartaPoderDestino: 'Ciudad de Guatemala',
+  cartaPoderPrecio: 350,
+  tarjetas: [{ ultimos4: '3343', vencimiento: '08/28', banco: 'BAC', autorizacion: 'A1', montoAutorizado: 5000 }],
+  formaPago: 'tarjeta',
+  porcentajeTarjeta: 12,
+  montoPago: 3150,
+  rentadoPor: 'Ana',
+  porcentajeComision: 5,
+});
+
+test('el ejemplo del diseño: 4 días a Q700, carta poder Q350 y 12% de tarjeta dan Q3,528.00 a cobrar', () => {
+  const contrato = construirContrato(datosBase());
+  assert.equal(resumen(contrato).pagado, 3528, 'el ejemplo del diseño y de la pantalla');
+});
+
+test('guarda el estado, la garantía y la comisión que otras tareas dan por hecho', () => {
+  const contrato = construirContrato(datosBase());
+  assert.equal(contrato.estado, 'rentado');
+  assert.equal(contrato.garantiaLiberada, false);
+  assert.equal(contrato.garantiaMonto, 5000, 'lo autorizado en la tarjeta');
+  assert.equal(contrato.porcentajeComision, 5);
+});
+
+test('nunca guarda un contrato sin porcentajeComision: usa el 5% por defecto si viene vacío', () => {
+  const contrato = construirContrato({ ...datosBase(), porcentajeComision: '' });
+  assert.equal(contrato.porcentajeComision, 5);
+});
+
+test('ADR-001: el contrato guardado no tiene el número completo de la tarjeta ni el CBC', () => {
+  const contrato = construirContrato(datosBase());
+  const texto = JSON.stringify(contrato);
+  assert.equal(texto.includes('3343'.padStart(16, '4')), false); // ningún rastro de un número completo
+  assert.equal('numeroCompleto' in contrato.tarjetas[0], false);
+  assert.equal('cbc' in contrato.tarjetas[0], false);
+  assert.equal(contrato.tarjetas[0].ultimos4, '3343');
+});
+
+test('un carro ajeno no toca carroId, y sus datos quedan dentro del contrato', () => {
+  const contrato = construirContrato({
+    ...datosBase(),
+    ajeno: true,
+    carro: null,
+    carroAjeno: { placas: 'P-1AJN', tipo: 'Pickup', marca: 'Ford', color: 'Rojo', modelo: '2019', dueño: 'Don Mario', costoDia: 400 },
+  });
+  assert.equal(contrato.carroId, null, 'nunca se cruza con un carro de la flota');
+  assert.equal(contrato.carroPlacas, 'P-1AJN');
+  assert.equal(contrato.subarriendo.costoDia, 400);
+});
+
+test('un carro propio no tiene costo de subarriendo', () => {
+  const contrato = construirContrato(datosBase());
+  assert.equal(contrato.subarriendo, null);
+});

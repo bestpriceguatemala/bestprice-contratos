@@ -401,3 +401,286 @@ body {
   padding: 10px 16px;
   font-size: 13px;
 }
+
+/* ---------- Pantalla: sacar carro ---------- */
+
+.sacar-carro {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 24px;
+  align-items: start;
+  max-width: 1200px;
+}
+
+.sc-bloques {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.sc-bloque {
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 20px 24px;
+}
+
+.sc-bloque h2 {
+  margin: 0 0 16px;
+  font-size: 15px;
+  color: var(--navy);
+}
+
+.sc-campos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px 16px;
+}
+
+.sc-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.sc-campo.ancho {
+  grid-column: 1 / -1;
+}
+
+.sc-campo input,
+.sc-campo select,
+.sc-campo textarea {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--texto);
+  padding: 9px 11px;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  background: var(--fondo);
+}
+
+.sc-campo input:focus,
+.sc-campo select:focus,
+.sc-campo textarea:focus {
+  outline: none;
+  border-color: var(--azul);
+  background: var(--blanco);
+  box-shadow: 0 0 0 3px rgba(2, 90, 179, 0.15);
+}
+
+.sc-campo textarea {
+  resize: vertical;
+}
+
+.sc-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navy);
+  margin-top: 12px;
+}
+
+.sc-nota {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--gris);
+  line-height: 1.5;
+}
+
+.sc-nota .btn {
+  padding: 3px 10px;
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+/* Cliente: buscador con resultados flotando encima del resto del formulario. */
+
+.sc-cliente-buscar {
+  position: relative;
+}
+
+.sc-cliente-resultados {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(7, 58, 122, 0.12);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.sc-cliente-resultados li {
+  padding: 8px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.sc-cliente-resultados li:hover {
+  background: var(--fondo);
+}
+
+.sc-cliente-resultados li span {
+  color: var(--gris);
+  font-size: 12px;
+}
+
+.sc-cliente-elegido {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--fondo);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 10px;
+}
+
+/* Carro */
+
+.sc-carro-info {
+  background: var(--fondo);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--gris);
+  margin-bottom: 12px;
+}
+
+.sc-carro-info strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+  color: var(--texto);
+}
+
+.sc-carro-info.sc-carro-aviso {
+  color: var(--rojo);
+  border-color: var(--rojo);
+  background: #fbeaea;
+}
+
+/* El resumen: totales, avisos y el botón de guardar, siempre a la vista. */
+
+.sc-resumen {
+  position: sticky;
+  top: 16px;
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sc-resumen h2 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--navy);
+}
+
+.sc-lineas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sc-lineas li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.sc-lineas li small {
+  display: block;
+  color: var(--gris);
+  font-weight: 400;
+}
+
+.sc-lineas .sc-vacio {
+  color: var(--gris);
+  justify-content: flex-start;
+}
+
+.sc-avisos-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sc-avisos-lista:empty {
+  display: none;
+}
+
+.sc-avisos-lista li {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.sc-avisos-lista li.nivel-alto {
+  background: #fbeaea;
+  color: var(--rojo);
+  font-weight: 600;
+}
+
+.sc-avisos-lista li.nivel-medio {
+  background: #fff6e0;
+  color: #8a5b00;
+}
+
+.sc-garantia-linea {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: var(--gris);
+}
+
+.sc-total-linea {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-top: 1px solid var(--borde);
+  padding-top: 14px;
+}
+
+.sc-total-linea strong {
+  font-size: 12px;
+  color: var(--gris);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.sc-total-linea span {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--navy);
+}

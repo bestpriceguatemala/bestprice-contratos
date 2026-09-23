@@ -4,8 +4,10 @@ import { entrar, salir, alCambiarSesion } from './auth.js';
 import { aviso } from './ui.js';
 import { registrarPantalla, mostrar } from './router.js';
 import { pintarFlota } from './pantallas/flota.js';
+import { pintarSacarCarro } from './pantallas/sacarCarro.js';
 
 registrarPantalla('#/flota', pintarFlota);
+registrarPantalla('#/sacar/:carroId', pintarSacarCarro);
 
 const pantallaEntrada = document.getElementById('entrada');
 const pantallaApp = document.getElementById('app');

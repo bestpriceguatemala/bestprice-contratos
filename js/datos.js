@@ -89,16 +89,23 @@ export async function cargarFlota(alLlegar) {
 }
 
 /**
- * Los contratos abiertos. Este plan todavía no tiene cómo cerrar un contrato
- * (eso lo trae el plan de "recibir y cobrar"), así que por ahora el filtro
- * casi nunca quita nada; queda puesto para cuando sí pueda haber cerrados, y
- * de paso deja lista la forma en que la pantalla de flota los espera.
+ * Los contratos que todavía piden algo: el carro anda fuera, falta cobrar un
+ * saldo o falta soltar la garantía de la tarjeta. Los cerrados no se traen al
+ * abrir: se buscan cuando alguien los busca.
+ *
+ * Antes este filtro miraba `cierre.fechaReal`, así que un contrato ya
+ * devuelto pero con la garantía todavía bloqueada desaparecía de aquí — y la
+ * lista de "garantías por liberar" de la flota se quedaba vacía siempre. Se
+ * mira en cambio el campo `estado` que graba "Sacar carro" (T11): un
+ * contrato guardado sin ese campo (no debería pasar, pero por si acaso) se
+ * trata como 'rentado' al leerlo, para que nunca desaparezca de la pantalla.
  *
  * `alLlegar(abiertos)` recibe la misma lista ya filtrada, no la colección
  * completa — quien llama no debería tener que saber que este filtro existe.
  */
 export async function cargarContratosAbiertos(alLlegar) {
-  const soloAbiertos = (contratos) => contratos.filter((c) => !c?.cierre?.fechaReal);
+  const estaAbierto = (c) => ['rentado', 'devuelto'].includes(c?.estado || 'rentado');
+  const soloAbiertos = (contratos) => contratos.filter(estaAbierto);
   const todos = await cargarConSincronia(
     'contratos',
     alLlegar && ((mezclados) => alLlegar(soloAbiertos(mezclados))),
