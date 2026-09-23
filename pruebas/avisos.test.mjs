@@ -1,0 +1,86 @@
+// Pruebas de los avisos al sacar un carro.
+//
+// Son las cosas que el Excel deja pasar y que cuestan dinero: rentarle a alguien
+// con la licencia vencida, rentarle al que quedó debiendo, prometer un carro que
+// ya está comprometido, o rentar por debajo del mínimo.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { avisosDeSalida } from '../js/nucleo/avisos.js';
+
+const ajustes = { precioMinimoDia: 300, diasMinimos: 2 };
+const cliente = { id: 'k1', licenciaExpira: '2030-02-09', documentoExpira: '2030-02-09' };
+const carro = { id: 'v1', placas: 'P-234IFN' };
+const contrato = { carroId: 'v1', dias: 4, precioDia: 700, fechaSalida: '2026-08-20', devolucionPrevista: '2026-08-24' };
+const base = { cliente, carro, contrato, contratosDelCliente: [], contratosDelCarro: [], ajustes, hoy: '2026-08-20' };
+const mensajes = (r) => r.map((a) => a.mensaje);
+
+test('un contrato normal no dispara ningún aviso', () => {
+  assert.deepEqual(avisosDeSalida(base), []);
+});
+
+test('avisa si la licencia está vencida', () => {
+  const r = avisosDeSalida({ ...base, cliente: { ...cliente, licenciaExpira: '2026-08-01' } });
+  assert.equal(r[0].nivel, 'alto');
+  assert.match(r[0].mensaje, /licencia/i);
+});
+
+test('avisa si el DPI o pasaporte está vencido', () => {
+  const r = avisosDeSalida({ ...base, cliente: { ...cliente, documentoExpira: '2026-08-19' } });
+  assert.match(mensajes(r).join(' '), /documento/i);
+});
+
+test('avisa si el cliente quedó debiendo de otra renta', () => {
+  const deudor = [{
+    id: 'c9', dias: 2, precioDia: 600,
+    devolucionPrevista: '2026-07-10',
+    cierre: { fechaReal: '2026-07-10' },
+    pagos: [{ monto: 400, porcentajeTarjeta: 0 }],
+  }];
+  const r = avisosDeSalida({ ...base, contratosDelCliente: deudor });
+  assert.equal(r[0].nivel, 'alto');
+  assert.match(r[0].mensaje, /debe|saldo/i);
+  assert.match(r[0].mensaje, /800/, 'dice cuánto debe');
+});
+
+test('avisa si el cliente ya devolvió tarde antes', () => {
+  const tarde = [{
+    id: 'c8', dias: 2, precioDia: 600,
+    devolucionPrevista: '2026-07-08',
+    cierre: { fechaReal: '2026-07-10' },
+    pagos: [{ monto: 2400, porcentajeTarjeta: 0 }],
+    garantiaLiberada: true,
+  }];
+  const r = avisosDeSalida({ ...base, contratosDelCliente: tarde });
+  assert.equal(r[0].nivel, 'medio');
+  assert.match(r[0].mensaje, /tarde/i);
+});
+
+test('avisa si el carro ya está comprometido en esas fechas', () => {
+  const encima = [{ id: 'c7', carroId: 'v1', fechaSalida: '2026-08-22', devolucionPrevista: '2026-08-27' }];
+  const r = avisosDeSalida({ ...base, contratosDelCarro: encima });
+  assert.equal(r[0].nivel, 'alto');
+  assert.match(r[0].mensaje, /otro contrato|comprometido/i);
+});
+
+test('no avisa si las fechas no se enciman', () => {
+  const despues = [{ id: 'c7', carroId: 'v1', fechaSalida: '2026-08-25', devolucionPrevista: '2026-08-28' }];
+  assert.deepEqual(avisosDeSalida({ ...base, contratosDelCarro: despues }), []);
+});
+
+test('avisa si el precio está por debajo del mínimo o son menos de dos días', () => {
+  const barato = avisosDeSalida({ ...base, contrato: { ...contrato, precioDia: 250 } });
+  assert.match(mensajes(barato).join(' '), /mínimo/i);
+
+  const corto = avisosDeSalida({ ...base, contrato: { ...contrato, dias: 1 } });
+  assert.match(mensajes(corto).join(' '), /días mínimos/i);
+});
+
+test('los avisos altos van primero', () => {
+  const r = avisosDeSalida({
+    ...base,
+    cliente: { ...cliente, licenciaExpira: '2026-08-01' },
+    contrato: { ...contrato, dias: 1 },
+  });
+  assert.equal(r[0].nivel, 'alto');
+  assert.equal(r[r.length - 1].nivel, 'medio');
+});
