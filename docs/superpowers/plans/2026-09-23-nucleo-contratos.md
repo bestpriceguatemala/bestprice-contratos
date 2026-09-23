@@ -1170,10 +1170,34 @@ test('no avisa si las fechas no se enciman', () => {
 
 test('avisa si el precio está por debajo del mínimo o son menos de dos días', () => {
   const barato = avisosDeSalida({ ...base, contrato: { ...contrato, precioDia: 250 } });
-  assert.match(mensajes(barato).join(' '), /mínimo/i);
+  assert.match(mensajes(barato).join(' '), /250.*300/, 'dice lo que cobró y su mínimo');
 
   const corto = avisosDeSalida({ ...base, contrato: { ...contrato, dias: 1 } });
-  assert.match(mensajes(corto).join(' '), /días mínimos/i);
+  assert.match(mensajes(corto).join(' '), /mínimo son 2 días/i);
+});
+
+test('una renta seguida el mismo día no es un choque', () => {
+  // El carro regresa el 20 en la mañana y vuelve a salir el 20 en la tarde:
+  // es el día a día del negocio, no un carro comprometido dos veces.
+  const anterior = [{ id: 'c7', carroId: 'v1', fechaSalida: '2026-08-15', devolucionPrevista: '2026-08-20' }];
+  const seguido = {
+    ...base,
+    contrato: { ...contrato, fechaSalida: '2026-08-20', devolucionPrevista: '2026-08-24' },
+    contratosDelCarro: anterior,
+  };
+  assert.deepEqual(avisosDeSalida(seguido), []);
+});
+
+test('un día de traslape sí es un choque', () => {
+  const anterior = [{ id: 'c7', carroId: 'v1', fechaSalida: '2026-08-15', devolucionPrevista: '2026-08-21' }];
+  const encimado = {
+    ...base,
+    contrato: { ...contrato, fechaSalida: '2026-08-20', devolucionPrevista: '2026-08-24' },
+    contratosDelCarro: anterior,
+  };
+  const r = avisosDeSalida(encimado);
+  assert.equal(r[0].nivel, 'alto');
+  assert.match(r[0].mensaje, /2026-08-21/);
 });
 
 test('los avisos altos van primero', () => {
@@ -1208,10 +1232,17 @@ import { resumen } from './contrato.js';
 const alto = (mensaje) => ({ nivel: 'alto', mensaje });
 const medio = (mensaje) => ({ nivel: 'medio', mensaje });
 
-/** ¿Se encima [a1, a2] con [b1, b2]? */
+/**
+ * ¿Se encima [a1, a2] con [b1, b2]?
+ *
+ * Tocarse no es encimarse: un carro que regresa el 20 puede volver a salir el
+ * 20, y eso pasa a diario. Solo hay choque cuando de verdad se traslapan días,
+ * por eso la comparación es estricta. Un rojo falso en cada vuelta entrena al
+ * dueño a ignorar los avisos, y entonces el aviso bueno tampoco lo lee.
+ */
 function seEnciman(a1, a2, b1, b2) {
   if (!a1 || !a2 || !b1 || !b2) return false;
-  return diasEntre(a1, b2) >= 0 && diasEntre(b1, a2) >= 0;
+  return diasEntre(a1, b2) > 0 && diasEntre(b1, a2) > 0;
 }
 
 export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente = [], contratosDelCarro = [], ajustes = {}, hoy }) {
@@ -1231,7 +1262,7 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
 
   const tardes = contratosDelCliente.filter((c) => resumen(c).diasAtraso > 0).length;
   if (tardes > 0) {
-    avisos.push(medio(`Este cliente ya devolvió tarde ${tardes} vez(ces).`));
+    avisos.push(medio(`Este cliente ya devolvió tarde ${tardes} ${tardes === 1 ? 'vez' : 'veces'}.`));
   }
 
   const encimado = contratosDelCarro.find((otro) =>
@@ -1241,11 +1272,14 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
     avisos.push(alto(`Este carro tiene otro contrato del ${encimado.fechaSalida} al ${encimado.devolucionPrevista}.`));
   }
 
+  // Los dos números juntos, para no tener que regresar a ver el formulario.
   if (ajustes.precioMinimoDia && contrato?.precioDia && contrato.precioDia < ajustes.precioMinimoDia) {
-    avisos.push(medio(`El precio está por debajo del mínimo de Q${ajustes.precioMinimoDia} por día.`));
+    avisos.push(medio(`Cobraste Q${contrato.precioDia} por día; tu mínimo es Q${ajustes.precioMinimoDia}.`));
   }
   if (ajustes.diasMinimos && contrato?.dias && contrato.dias < ajustes.diasMinimos) {
-    avisos.push(medio(`Son menos de los ${ajustes.diasMinimos} días mínimos de renta.`));
+    const dia = contrato.dias === 1 ? 'día' : 'días';
+    const minimo = ajustes.diasMinimos === 1 ? 'día' : 'días';
+    avisos.push(medio(`Son ${contrato.dias} ${dia}; tu mínimo son ${ajustes.diasMinimos} ${minimo}.`));
   }
 
   return [...avisos.filter((a) => a.nivel === 'alto'), ...avisos.filter((a) => a.nivel === 'medio')];
@@ -1255,7 +1289,7 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 56 pruebas en total.
+Se espera: PASA, 58 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -1531,7 +1565,7 @@ Crear `js/datos.js` sobre `firebase-config.js` y `cache.js`: lee primero de la c
 - [ ] **Step 5: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 61 pruebas en total.
+Se espera: PASA, 63 pruebas en total.
 
 - [ ] **Step 6: Commit**
 
