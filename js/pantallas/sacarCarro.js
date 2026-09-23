@@ -20,16 +20,19 @@ import { avisosDeSalida } from '../nucleo/avisos.js';
 import { devolucionPrevista, hoyISO } from '../nucleo/fechas.js';
 import { q, suma } from '../nucleo/dinero.js';
 import {
-  cargarFlota, cargarContratosAbiertos, buscarClientes,
-  guardarCliente, guardarContrato, siguienteNumeroContrato,
+  cargarFlota, cargarContratosAbiertos, cargarAjustes, buscarClientes,
+  guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato,
 } from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
 
 // El diseño (§5) dice: "el porcentaje por defecto es 5 %". Este plan todavía
-// no tiene una pantalla de Ajustes ni una lista de empleados con su propio
-// porcentaje (eso es de un plan futuro), así que el mostrador escribe quién
-// rentó y puede ajustar el porcentaje a mano; si lo deja en blanco, se usa
-// este default en vez de guardar el contrato sin el campo.
+// no tiene una lista de empleados con su propio porcentaje (eso es de un
+// plan futuro), así que el mostrador escribe quién rentó y puede ajustar el
+// porcentaje a mano. En pantalla el campo arranca con el de cargarAjustes()
+// (datos.js) en cuanto llega; esta constante es el respaldo de
+// construirContrato() — una función pura, sin acceso a los ajustes ya
+// cargados — para que, si el campo llegara vacío por cualquier motivo,
+// nunca se guarde el contrato sin porcentajeComision.
 const PORCENTAJE_COMISION_DEFECTO = 5;
 
 // El texto libre que escribe el mostrador (nombre del cliente, destino de la
@@ -59,10 +62,15 @@ const descripcionCarroAjeno = (c) => [c?.marca, c?.modelo].filter(Boolean).join(
  * número completo de la tarjeta ni el CBC — `tarjetas` ya viene con
  * `ultimos4` puesto de antemano. No hay ningún campo de este objeto de
  * salida que pueda filtrar ese dato porque nunca entra aquí.
+ *
+ * `id` es opcional: si quien llama ya decidió el id del documento (para que
+ * un reintento de guardar caiga en el mismo contrato, ver `guardar()` más
+ * abajo), se conserva tal cual; si no, se deja en null y guardarContrato()
+ * (datos.js) le asigna uno nuevo la primera vez que de verdad se guarde.
  */
 export function construirContrato(datos) {
   const {
-    numero, cliente, ajeno, carro, carroAjeno,
+    id, numero, cliente, ajeno, carro, carroAjeno,
     fechaSalida, horaSalida, lugar, dias, precioDia, kilometrajeSalida, combustibleSalida, horaTardia,
     seguroDia, seguroTercerosDia, seguroMenoresDia, seguroPaiDia, deducible, deducibleBajo,
     cartaPoderDestino, cartaPoderPrecio, variosDescripcion, variosPrecio,
@@ -90,6 +98,7 @@ export function construirContrato(datos) {
     : q(porcentajeComision);
 
   return {
+    id: id || null,
     numero: numero ?? null,
     clienteId: cliente?.id ?? null,
     clienteNombre: nombreCompletoCliente(cliente),
@@ -362,10 +371,20 @@ export async function pintarSacarCarro(contenedor, carroId) {
 
   let flota = [];
   let contratosAbiertos = [];
+  let ajustes = {};
   let clienteSeleccionado = null;
   let ultimosResultados = [];
   let montoPagoTocado = false;
+  let comisionTocada = false;
   let guardando = false;
+  // El id y el número de este alquiler se deciden una sola vez, la primera
+  // vez que se intenta guardar (ver guardar() más abajo), y se quedan fijos
+  // para cualquier reintento: si el internet se pone lento y hay que
+  // reintentar, el reintento tiene que caer en el mismo contrato — dos
+  // contratos del mismo alquiler significan un carro comprometido dos veces
+  // y una tarjeta autorizada dos veces.
+  let contratoId = null;
+  let numeroContrato = null;
 
   contenedor.innerHTML = plantilla();
 
@@ -404,6 +423,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
   function leerFormulario(numero) {
     const ajeno = marcado('sc-ajeno');
     return {
+      id: contratoId,
       numero,
       cliente: clienteSeleccionado,
       ajeno,
@@ -499,13 +519,15 @@ export async function pintarSacarCarro(contenedor, carroId) {
       ? []
       : contratosAbiertos.filter((c) => c.carroId === carroId);
 
+    // avisosDeSalida (avisos.js) ya no avisa por precio ni por días mínimos
+    // a propósito — pedido del dueño: "yo pongo el precio que yo quiera" —
+    // así que esta pantalla ni siquiera le manda esos dos campos.
     const avisos = avisosDeSalida({
       cliente: clienteSeleccionado,
       carro: ajeno ? null : carroPropio(),
       contrato: borrador,
       contratosDelCliente,
       contratosDelCarro,
-      ajustes: {},
       hoy: hoyISO(),
     });
     el('sc-avisos').innerHTML = avisos.map(lineaAviso).join('');
@@ -597,8 +619,14 @@ export async function pintarSacarCarro(contenedor, carroId) {
     const boton = el('sc-guardar');
     boton.disabled = true;
     try {
-      const numero = await siguienteNumeroContrato();
-      const contrato = construirContrato(leerFormulario(numero));
+      // El id y el número se piden una sola vez por alquiler (arriba, junto
+      // con el resto del estado de la pantalla) y de ahí en adelante se
+      // reutilizan: si esta llamada es un reintento porque la anterior se
+      // dio por vencida sin saberse si en verdad llegó a guardar, tiene que
+      // caer en el mismo documento y no gastar un número nuevo.
+      if (!contratoId) contratoId = await nuevoIdContrato();
+      if (!numeroContrato) numeroContrato = await siguienteNumeroContrato();
+      const contrato = construirContrato(leerFormulario(numeroContrato));
       const guardado = await guardarContrato(contrato);
       aviso(`Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro.`, 'exito');
       location.hash = '#/flota';
@@ -614,6 +642,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
 
   el('sc-form').addEventListener('input', (ev) => {
     if (ev.target.id === 'sc-pago-monto') montoPagoTocado = true;
+    if (ev.target.id === 'sc-porcentaje-comision') comisionTocada = true;
     recalcular();
   });
   el('sc-form').addEventListener('change', (ev) => {
@@ -643,12 +672,21 @@ export async function pintarSacarCarro(contenedor, carroId) {
   recalcular();
 
   // cargarFlota/cargarContratosAbiertos sirven la copia local al instante y
-  // nunca rechazan (T9), igual que en flota.js.
-  [flota, contratosAbiertos] = await Promise.all([
+  // nunca rechazan (T9), igual que en flota.js. cargarAjustes() tampoco
+  // rechaza (se queda con los valores del dueño si la nube falla o el
+  // documento no existe todavía), así que tampoco hace falta un try/catch.
+  [flota, contratosAbiertos, ajustes] = await Promise.all([
     cargarFlota((nueva) => { flota = nueva; if (sigoVigente()) refrescarCarro(); }),
     cargarContratosAbiertos((nuevos) => { contratosAbiertos = nuevos; if (sigoVigente()) recalcular(); }),
+    cargarAjustes(),
   ]);
   if (!sigoVigente()) return;
+  // El % de comisión del formulario arranca en el default fijo de esta
+  // pantalla (por si la nube tarda); en cuanto llegan los ajustes reales se
+  // actualiza al de verdad, salvo que el mostrador ya lo haya cambiado a mano.
+  if (!comisionTocada && ajustes.porcentajeComision !== undefined) {
+    el('sc-porcentaje-comision').value = ajustes.porcentajeComision;
+  }
   refrescarCarro();
   recalcular();
 }

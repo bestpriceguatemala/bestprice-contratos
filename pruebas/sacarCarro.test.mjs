@@ -77,3 +77,30 @@ test('un carro propio no tiene costo de subarriendo', () => {
   const contrato = construirContrato(datosBase());
   assert.equal(contrato.subarriendo, null);
 });
+
+// Ronda de revisión 1, hallazgo importante: un reintento de guardar (por
+// ejemplo porque conLimiteDeTiempo se dio por vencido sin saber si la
+// escritura anterior en verdad llegó) tiene que caer en el MISMO contrato,
+// nunca crear uno segundo — dos contratos del mismo alquiler serían un carro
+// comprometido dos veces y una tarjeta autorizada dos veces.
+test('sin id, el contrato sale con id: null (lo asigna guardarContrato la primera vez)', () => {
+  const contrato = construirContrato(datosBase());
+  assert.equal(contrato.id, null);
+});
+
+test('con id, lo conserva tal cual — es lo que hace que un reintento no duplique el contrato', () => {
+  const contrato = construirContrato({ ...datosBase(), id: 'contrato-abc' });
+  assert.equal(contrato.id, 'contrato-abc');
+});
+
+test('el mismo id y número, llamados dos veces (como en un reintento), dan el mismo contrato', () => {
+  // Simula lo que hace guardar() en sacarCarro.js: decide el id y el número
+  // una sola vez y arma el contrato con construirContrato en cada intento.
+  // Si el primer intento se cae y el mostrador vuelve a hacer clic, esta es
+  // la llamada que se repite — debe apuntar exactamente al mismo documento.
+  const datosDelIntento = { ...datosBase(), id: 'contrato-abc', numero: 42 };
+  const primerIntento = construirContrato(datosDelIntento);
+  const segundoIntento = construirContrato(datosDelIntento);
+  assert.equal(primerIntento.id, segundoIntento.id);
+  assert.equal(primerIntento.numero, segundoIntento.numero);
+});
