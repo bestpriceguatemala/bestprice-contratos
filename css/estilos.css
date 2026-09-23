@@ -684,3 +684,39 @@ body {
   font-weight: 700;
   color: var(--navy);
 }
+
+/* ---------- Aviso de versión nueva ---------- */
+
+.barra-version {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: var(--amarillo);
+  color: var(--navy);
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 9999;
+  box-shadow: 0 2px 8px rgba(255, 188, 1, 0.2);
+}
+
+.barra-version .btn-actualizar {
+  flex: 0 0 auto;
+  background: var(--navy);
+  border: none;
+  color: var(--blanco);
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.barra-version .btn-actualizar:hover {
+  background: var(--azul-oscuro);
+}

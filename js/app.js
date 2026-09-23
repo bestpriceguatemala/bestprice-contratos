@@ -5,6 +5,7 @@ import { aviso } from './ui.js';
 import { registrarPantalla, mostrar } from './router.js';
 import { pintarFlota } from './pantallas/flota.js';
 import { pintarSacarCarro } from './pantallas/sacarCarro.js';
+import { vigilarVersion } from './version.js';
 
 registrarPantalla('#/flota', pintarFlota);
 registrarPantalla('#/sacar/:carroId', pintarSacarCarro);
@@ -66,6 +67,9 @@ botonSalir.addEventListener('click', () => {
     aviso('No se pudo cerrar la sesión. Intenta de nuevo.', 'error');
   });
 });
+
+// Comienza a vigilar la versión desde el arranque.
+vigilarVersion();
 
 // Escucha la sesión antes de dibujar nada: mientras Firebase no exista de
 // verdad (claves sin pegar en firebase-config.js) esta promesa se rechaza, y
