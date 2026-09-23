@@ -3,12 +3,12 @@
 const SDK = '12.0.0';
 
 export const CONFIG = {
-  apiKey: 'PEGAR_DE_LA_CONSOLA',
+  apiKey: 'AIzaSyB0NCVqgMhiy_cTpUv7WyYVn8C4LryeGO4',
   authDomain: 'bestprice-contratos.firebaseapp.com',
   projectId: 'bestprice-contratos',
   storageBucket: 'bestprice-contratos.firebasestorage.app',
-  messagingSenderId: 'PEGAR_DE_LA_CONSOLA',
-  appId: 'PEGAR_DE_LA_CONSOLA',
+  messagingSenderId: '222026060734',
+  appId: '1:222026060734:web:0be7c3f50faca5efba9fef',
 };
 
 let listo = null;
