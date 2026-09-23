@@ -36,3 +36,16 @@ test('sin porcentaje, el monto no cambia', () => {
   assert.equal(conTarjeta(3150, undefined), 3150);
   assert.equal(recargoTarjeta(3150, 0), 0);
 });
+
+test('el medio centavo sube, sin importar el tamaño del monto', () => {
+  assert.equal(q(3.005), 3.01);
+  assert.equal(q(5.015), 5.02);
+  assert.equal(q(1234.565), 1234.57);
+  assert.equal(q(0.615), 0.62);
+});
+
+test('un monto negativo se redondea igual que su positivo', () => {
+  assert.equal(q(-3.005), -3.01);
+  assert.equal(q(-5.015), -5.02);
+  assert.ok(Object.is(q(-0.001), 0), 'no queda un menos cero suelto');
+});

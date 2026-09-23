@@ -9,7 +9,15 @@
 export function q(n) {
   const x = Number(n);
   if (!Number.isFinite(x)) return 0;
-  return Math.round((x + Number.EPSILON) * 100) / 100;
+  // Se corre el punto con el texto decimal del número ('5.015' -> '5.015e2')
+  // en vez de multiplicar por 100: multiplicar arrastra el error binario y
+  // hace que 5.015 se redondee para abajo. Se redondea el valor absoluto para
+  // que un negativo caiga del mismo lado que su positivo.
+  const escalado = Number(`${Math.abs(x)}e2`);
+  if (!Number.isFinite(escalado)) return Math.round(x * 100) / 100;
+  const redondeado = Math.round(escalado) / 100;
+  if (redondeado === 0) return 0;
+  return x < 0 ? -redondeado : redondeado;
 }
 
 /** Suma montos redondeando el resultado. */
