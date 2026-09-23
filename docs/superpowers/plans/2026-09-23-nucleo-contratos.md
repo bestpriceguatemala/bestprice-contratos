@@ -111,6 +111,18 @@ test('redondea a dos decimales', () => {
   assert.equal(q(700), 700);
 });
 
+test('el medio centavo sube, sin importar el tamaño del monto', () => {
+  assert.equal(q(5.015), 5.02);
+  assert.equal(q(1234.565), 1234.57);
+  assert.equal(q(0.615), 0.62);
+});
+
+test('un monto negativo se redondea igual que su positivo', () => {
+  assert.equal(q(-3.005), -3.01);
+  assert.equal(q(-5.015), -5.02);
+  assert.ok(Object.is(q(-0.001), 0), 'no queda un menos cero suelto');
+});
+
 test('lo vacío vale cero, no rompe la cuenta', () => {
   assert.equal(q(undefined), 0);
   assert.equal(q(null), 0);
@@ -162,7 +174,14 @@ Crear `js/nucleo/dinero.js`:
 export function q(n) {
   const x = Number(n);
   if (!Number.isFinite(x)) return 0;
-  return Math.round((x + Number.EPSILON) * 100) / 100;
+  // Se corre el punto con el texto decimal del número ('5.015' -> '5.015e2')
+  // en vez de multiplicar por 100: multiplicar arrastra el error binario y hace
+  // que 5.015 se redondee para abajo. Se redondea el valor absoluto para que un
+  // negativo caiga del mismo lado que su positivo.
+  const escalado = Number(`${Math.abs(x)}e2`);
+  if (!Number.isFinite(escalado)) return Math.round(x * 100) / 100;
+  const redondeado = Math.round(escalado) / 100;
+  return x < 0 ? -redondeado : redondeado;
 }
 
 /** Suma montos redondeando el resultado. */
@@ -184,7 +203,7 @@ export function recargoTarjeta(monto, porcentaje) {
 - [ ] **Step 5: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 5 pruebas.
+Se espera: PASA, 7 pruebas.
 
 - [ ] **Step 6: Commit**
 
@@ -313,7 +332,7 @@ export function diasAtraso(prevista, fechaReal) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 10 pruebas en total.
+Se espera: PASA, 12 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -573,7 +592,7 @@ export function saldoConTarjeta(c, porcentaje) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 20 pruebas en total.
+Se espera: PASA, 22 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -718,7 +737,7 @@ export function comisionDe(c) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 28 pruebas en total.
+Se espera: PASA, 30 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -877,7 +896,7 @@ export function estadoCarro(carro, contratos = [], hoy) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 35 pruebas en total.
+Se espera: PASA, 37 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -1015,7 +1034,7 @@ export function filtrar(items, consulta, textoDe) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 40 pruebas en total.
+Se espera: PASA, 42 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -1197,7 +1216,7 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 49 pruebas en total.
+Se espera: PASA, 51 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -1473,7 +1492,7 @@ Crear `js/datos.js` sobre `firebase-config.js` y `cache.js`: lee primero de la c
 - [ ] **Step 5: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 54 pruebas en total.
+Se espera: PASA, 56 pruebas en total.
 
 - [ ] **Step 6: Commit**
 
