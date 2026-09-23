@@ -50,3 +50,9 @@ test('una búsqueda vacía devuelve todo', () => {
   assert.equal(filtrar(lista, '   ', textoDeCliente).length, 2);
   assert.equal(filtrar(lista, 'briones', textoDeCliente).length, 1);
 });
+
+test('la ñ no estorba: Peña se encuentra escribiendo pena', () => {
+  const peña = { ...cliente, id: 'k3', apellido1: 'PEÑA' };
+  assert.equal(filtrar([peña], 'pena', textoDeCliente).length, 1);
+  assert.equal(filtrar([peña], 'PEÑA', textoDeCliente).length, 1);
+});
