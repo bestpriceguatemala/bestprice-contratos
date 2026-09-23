@@ -17,9 +17,17 @@ function aISO(ms) {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-/** La fecha de hoy, en texto. */
-export function hoyISO() {
-  return aISO(Date.now());
+/**
+ * La fecha de hoy, en texto, según el calendario de aquí.
+ *
+ * No se usa `toISOString()` a propósito: eso da el día de UTC, y Guatemala va
+ * seis horas atrás. De seis de la tarde a medianoche, un carro que regresa hoy
+ * quedaría registrado mañana — y un día de más es un día de renta de más.
+ */
+export function hoyISO(momento = new Date()) {
+  const mes = String(momento.getMonth() + 1).padStart(2, '0');
+  const dia = String(momento.getDate()).padStart(2, '0');
+  return `${momento.getFullYear()}-${mes}-${dia}`;
 }
 
 /** Una fecha más (o menos) días. */

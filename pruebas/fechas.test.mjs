@@ -1,3 +1,5 @@
+process.env.TZ = 'America/Guatemala';
+
 // Pruebas de fechas y días.
 //
 // Las fechas se manejan como texto 'YYYY-MM-DD' y se cuentan en UTC a propósito:
@@ -6,7 +8,7 @@
 // otro país. Un día de diferencia son Q700.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sumarDias, diasEntre, devolucionPrevista, diasAtraso } from '../js/nucleo/fechas.js';
+import { sumarDias, diasEntre, devolucionPrevista, diasAtraso, hoyISO } from '../js/nucleo/fechas.js';
 
 test('suma días cruzando fin de mes y fin de año', () => {
   assert.equal(sumarDias('2026-08-20', 5), '2026-08-25');
@@ -34,4 +36,11 @@ test('el atraso nunca es negativo', () => {
 test('sin fecha real todavía no hay atraso que cobrar', () => {
   assert.equal(diasAtraso('2026-08-24', ''), 0);
   assert.equal(diasAtraso('2026-08-24', undefined), 0);
+});
+
+test('hoy es el día del calendario de aquí, no el de Londres', () => {
+  // Las ocho de la noche del 22 de septiembre en Guatemala ya son las dos de la
+  // madrugada del 23 en UTC. En el mostrador todavía es 22.
+  assert.equal(hoyISO(new Date('2026-09-23T02:00:00Z')), '2026-09-22');
+  assert.equal(hoyISO(new Date('2026-09-22T18:00:00Z')), '2026-09-22');
 });
