@@ -10,7 +10,7 @@
 // pendientes de abajo son la única excepción que permite el diseño, porque ahí
 // el monto es lo que falta para poder cerrar el contrato, no una cifra de
 // negocio.
-import { estadoCarro } from '../nucleo/estados.js';
+import { estadoCarro, pendientesDe } from '../nucleo/estados.js';
 import { resumen } from '../nucleo/contrato.js';
 import { diasEntre, hoyISO } from '../nucleo/fechas.js';
 import { cargarFlota, cargarContratosAbiertos } from '../datos.js';
@@ -116,8 +116,12 @@ function dibujar(contenedor, flota, contratos, hoy) {
   // `garantiaMonto` es el monto autorizado que describe la §6 del diseño para
   // el bloque de tarjetas; ninguna tarea anterior lo guarda todavía, así que
   // "Sacar carro" (T11) deberá escribirlo junto con `garantiaLiberada`.
+  //
+  // pendientesDe(c).garantia (no `garantiaLiberada === false`): un contrato
+  // guardado sin ese campo cuenta como pendiente, igual que en el resto del
+  // sistema — olvidar una garantía bloqueada es peor que mostrarla de más.
   const filasGarantia = contratos
-    .filter((c) => c?.cierre?.fechaReal && c?.garantiaLiberada === false)
+    .filter((c) => c?.cierre?.fechaReal && pendientesDe(c).garantia)
     .map((c) => filaPendiente(
       c?.clienteNombre || 'Cliente sin nombre',
       dinero(c?.garantiaMonto),
@@ -141,12 +145,39 @@ function dibujar(contenedor, flota, contratos, hoy) {
   `;
 }
 
+const RUTA = '#/flota';
+
+// Cuenta cuántas veces se ha llamado pintarFlota, para que una sincronía que
+// llega tarde sepa si su llamada sigue siendo la última (ver `repintar` más
+// abajo). El router de esta pantalla reutiliza siempre el mismo <main
+// id="pantalla">, solo le cambia el contenido — por eso comprobar si el nodo
+// sigue "conectado" al documento no serviría de nada, nunca deja de estarlo.
+let ultimoToken = 0;
+
 /** Dibuja la pantalla principal dentro de `contenedor`. */
 export async function pintarFlota(contenedor) {
+  const miToken = ++ultimoToken;
   const hoy = hoyISO();
+  let flota = [];
+  let contratos = [];
+
+  // Redibuja en el mismo cuadro de carros cuando la nube trae algo distinto
+  // de lo que ya se sirvió (T9 solo avisa si de verdad cambió). Antes de
+  // pintar se comprueba que esta llamada siga siendo la vigente: que el hash
+  // no se haya ido a otra pantalla, y que no haya entrado una llamada más
+  // nueva a pintarFlota (por ejemplo, salir de la flota y volver a entrar).
+  // Cualquiera de las dos formas de quedar obsoleto se ignora en silencio.
+  const sigoVigente = () => location.hash === RUTA && miToken === ultimoToken;
+  const repintar = () => {
+    if (sigoVigente()) dibujar(contenedor, flota, contratos, hoy);
+  };
+
   // cargarFlota/cargarContratosAbiertos sirven la copia local al instante y
   // nunca rechazan (T9): no hace falta un try/catch para que esta pantalla no
   // se rompa si la nube falla.
-  const [flota, contratos] = await Promise.all([cargarFlota(), cargarContratosAbiertos()]);
-  dibujar(contenedor, flota, contratos, hoy);
+  [flota, contratos] = await Promise.all([
+    cargarFlota((nuevaFlota) => { flota = nuevaFlota; repintar(); }),
+    cargarContratosAbiertos((nuevosContratos) => { contratos = nuevosContratos; repintar(); }),
+  ]);
+  if (sigoVigente()) dibujar(contenedor, flota, contratos, hoy);
 }

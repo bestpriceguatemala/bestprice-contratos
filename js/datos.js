@@ -35,12 +35,29 @@ async function leerRemoto(coleccion) {
 }
 
 /**
+ * Compara dos copias de una colección por cantidad y por el sello
+ * `actualizado` de cada documento — suficiente para saber si vale la pena
+ * redibujar una pantalla, sin comparar campo por campo.
+ */
+function distintos(antes, despues) {
+  if (antes.length !== despues.length) return true;
+  const sellos = new Set(antes.map((x) => `${x.id}:${x.actualizado || 0}`));
+  return despues.some((x) => !sellos.has(`${x.id}:${x.actualizado || 0}`));
+}
+
+/**
  * Sirve una colección local al instante y, por detrás, la mezcla con lo que
  * haya en la nube y guarda el resultado — así la próxima vez que se abra ya
  * está al día. Si no hay nada local todavía (primera vez en esta computadora)
  * sí se espera a la nube: no hay copia que mostrar mientras tanto.
+ *
+ * `alLlegar(mezclados)`, si se da, avisa cuando la sincronía de atrás termina
+ * y trajo algo distinto de lo que ya se sirvió — así una pantalla que ya
+ * dibujó con la copia local puede volver a pintarse sin que el dueño tenga
+ * que recargar. No se avisa si la nube contesta exactamente lo mismo: para
+ * eso está la comparación, en vez de redibujar cada vez que llega la nube.
  */
-async function cargarConSincronia(coleccion) {
+async function cargarConSincronia(coleccion, alLlegar) {
   const locales = await leerLocal(coleccion);
   const sincronizar = leerRemoto(coleccion).then(async (remotos) => {
     const mezclados = mezclar(locales, remotos);
@@ -49,7 +66,14 @@ async function cargarConSincronia(coleccion) {
   });
 
   if (locales.length) {
-    sincronizar.catch(() => {}); // sigue por detrás; la pantalla ya dibujó con lo local
+    // Sigue por detrás; la pantalla ya dibujó con lo local. El aviso de
+    // cambio solo tiene sentido aquí — en la rama de abajo la nube es la
+    // primera respuesta, no una que llega después de haber mostrado algo.
+    sincronizar
+      .then((mezclados) => {
+        if (alLlegar && distintos(locales, mezclados)) alLlegar(mezclados);
+      })
+      .catch(() => {});
     return locales;
   }
   try {
@@ -59,9 +83,9 @@ async function cargarConSincronia(coleccion) {
   }
 }
 
-/** La flota completa. */
-export async function cargarFlota() {
-  return cargarConSincronia('vehiculos');
+/** La flota completa. `alLlegar(flota)` avisa si la sincronía trae cambios. */
+export async function cargarFlota(alLlegar) {
+  return cargarConSincronia('vehiculos', alLlegar);
 }
 
 /**
@@ -69,10 +93,17 @@ export async function cargarFlota() {
  * (eso lo trae el plan de "recibir y cobrar"), así que por ahora el filtro
  * casi nunca quita nada; queda puesto para cuando sí pueda haber cerrados, y
  * de paso deja lista la forma en que la pantalla de flota los espera.
+ *
+ * `alLlegar(abiertos)` recibe la misma lista ya filtrada, no la colección
+ * completa — quien llama no debería tener que saber que este filtro existe.
  */
-export async function cargarContratosAbiertos() {
-  const todos = await cargarConSincronia('contratos');
-  return todos.filter((c) => !c?.cierre?.fechaReal);
+export async function cargarContratosAbiertos(alLlegar) {
+  const soloAbiertos = (contratos) => contratos.filter((c) => !c?.cierre?.fechaReal);
+  const todos = await cargarConSincronia(
+    'contratos',
+    alLlegar && ((mezclados) => alLlegar(soloAbiertos(mezclados))),
+  );
+  return soloAbiertos(todos);
 }
 
 // Los clientes se sincronizan una sola vez por sesión: buscar mientras se
