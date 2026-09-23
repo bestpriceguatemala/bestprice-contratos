@@ -89,7 +89,7 @@ pruebas/
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test pruebas/"
+    "test": "node --test 'pruebas/**/*.test.mjs'"
   }
 }
 ```
@@ -143,6 +143,8 @@ test('sin porcentaje, el monto no cambia', () => {
 
 Correr: `npm test`
 Se espera: FALLA, porque `js/nucleo/dinero.js` todavía no existe.
+
+> Nota: en Node 24 `node --test pruebas/` ya no acepta una carpeta suelta; por eso el script usa el patrón `pruebas/**/*.test.mjs`.
 
 - [ ] **Step 4: Escribir el módulo**
 
