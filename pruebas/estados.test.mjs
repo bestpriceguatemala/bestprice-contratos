@@ -65,3 +65,29 @@ test('un carro marcado fuera de servicio no se puede rentar', () => {
   const carro = { id: 'v1', placas: 'P-234IFN', fueraDeServicio: true, motivoFueraDeServicio: 'En el taller' };
   assert.equal(estadoCarro(carro, [], '2026-08-26').estado, 'fuera de servicio');
 });
+
+test('un carro fuera de servicio que anda rentado sigue mostrando a quién se lo llevaron', () => {
+  // Se accidentó con el cliente: el dueño lo marca fuera de servicio el mismo
+  // día. Si la pantalla solo dijera "fuera de servicio", nadie sabría quién lo
+  // tiene, ni que viene tarde, ni habría botón para recibirlo.
+  const carro = { id: 'v1', placas: 'P-234IFN', fueraDeServicio: true, motivoFueraDeServicio: 'Golpe en la puerta' };
+  const e = estadoCarro(carro, [rentado], '2026-08-26');
+  assert.equal(e.estado, 'atrasado');
+  assert.equal(e.contrato.id, 'c1');
+  assert.equal(e.diasAtraso, 2);
+  assert.equal(e.fueraDeServicio, true);
+  assert.equal(e.motivo, 'Golpe en la puerta');
+});
+
+test('un carro parado en el taller sí sale fuera de servicio', () => {
+  const carro = { id: 'v1', placas: 'P-234IFN', fueraDeServicio: true, motivoFueraDeServicio: 'En el taller' };
+  const e = estadoCarro(carro, [], '2026-08-26');
+  assert.equal(e.estado, 'fuera de servicio');
+  assert.equal(e.motivo, 'En el taller');
+  assert.equal(e.contrato, null);
+});
+
+test('si no se dice qué día es, no se asume que el carro viene a tiempo', () => {
+  const viejo = { ...rentado, devolucionPrevista: '2020-01-01' };
+  assert.equal(estadoCarro({ id: 'v1' }, [viejo]).estado, 'atrasado');
+});
