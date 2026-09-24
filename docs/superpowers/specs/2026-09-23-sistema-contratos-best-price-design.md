@@ -352,11 +352,67 @@ clientes, y merece el mismo cuidado que el Excel de hoy.
 Queda afuera a propósito, para que sea simple y rápido:
 
 - Fotos de los vehículos, de los daños o de los documentos.
-- Reservas en línea o desde la página web.
+- Reservas hechas por el cliente desde la página web. Las reservaciones las
+  anota él (ver §14); lo que queda afuera es que el público reserve solo.
 - Uso en celular (se usa en computadora de escritorio).
 - Varias cuentas de usuario con permisos distintos.
-- Facturación electrónica (FEL), contabilidad y control de mantenimiento.
+- Facturación electrónica (FEL) y contabilidad.
 - Seguimiento por GPS.
+
+## 12b. Lo que se agregó después de aprobar el diseño
+
+El 24 de septiembre de 2026, con el plan 1 casi terminado, el dueño pidió tres
+cosas más. Quedan aquí para que el diseño no mienta sobre lo que el sistema va
+a ser:
+
+### Reservaciones y calendario
+
+Una **reservación** aparta un carro antes de que salga: cliente (o solo nombre y
+teléfono si todavía no está registrado), fechas, **tipo de vehículo y, cuando el
+cliente lo pide, el carro exacto**, precio por día acordado, anticipo y una nota.
+Estados: *pendiente*, *entregada* (ya se volvió contrato) o *cancelada*.
+
+**Cambiar la unidad es un clic**: la reservación es la misma, solo cambia qué
+carro la cumple. Él lo pidió así porque los planes cambian a última hora.
+
+El **calendario** es su propia pestaña, para verlo cuando quiera. Muestra el mes
+con dos cosas por día: cuántos carros salen (reservaciones) y cuántos regresan
+(contratos). Al abrir un día: quién sale, con qué carro o qué tipo, y si dejó
+anticipo; y quién regresa, con *"pendiente de pagar Q817.60"* o *"ya pagó"*.
+Desde ahí se saca o se recibe el carro sin buscar nada.
+
+Al entrar al sistema, arriba de la flota, un **resumen del día** de cuatro
+números y nada más: hoy salen, hoy regresan, atrasados, garantías por liberar.
+Cada número lleva a su detalle. Es para saber de un vistazo si el día viene
+tranquilo, no para leerlo.
+
+El aviso de **"este carro ya está comprometido"** pasa a mirar también las
+reservaciones, no solo los contratos: ahí es donde se pierde un cliente.
+
+### Mantenimiento de la flota propia
+
+Cada carro propio lleva el control de sus servicios: **aceite y filtro, pastillas
+de freno, llantas, batería, alineación y balanceo, y servicio general**. Cada uno
+con dos intervalos — kilómetros y tiempo — y **toca con el que llegue primero**.
+
+El kilometraje no se escribe aparte: sale del que ya se anota al recibir cada
+carro. En la ficha se ve cuándo se hizo cada servicio, a qué kilometraje, y
+cuánto falta para el siguiente. Cuando falte poco, aparece donde ya aparecen los
+demás avisos.
+
+### Orden de construcción
+
+1. Núcleo (sacar carros, flota, cálculos) — el plan 1.
+2. Recibir y cobrar: cerrar el contrato, cobrar el saldo, liberar la garantía.
+3. Reservaciones y calendario.
+4. Impresión sobre el formulario preimpreso.
+5. Dinero: comisiones, pagos a dueños, empleados.
+6. Mantenimiento.
+7. Respaldo en su propio Excel.
+
+El cierre va antes que las reservaciones por una razón práctica: hoy el sistema
+puede sacar un carro pero no recibirlo, así que un contrato se quedaría abierto
+para siempre.
 
 ## 13. Publicación
 
