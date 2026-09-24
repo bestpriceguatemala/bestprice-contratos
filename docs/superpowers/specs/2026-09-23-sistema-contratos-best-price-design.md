@@ -286,6 +286,18 @@ Colecciones en Firestore:
 Los carros subarrendados **no entran a `vehiculos`**: sus datos viven dentro del
 contrato, igual que en el Excel.
 
+**Nota para el plan de dinero:** el núcleo (plan 1) todavía no tiene dónde
+escribir `contratos/{id}/privado/dinero` — esa subcolección es de este plan de
+dinero, que todavía no existe — así que "Sacar carro" guarda `subarriendo.costoDia`
+(el costo por día del dueño en un carro ajeno) y `porcentajeComision` directo en
+`contratos/{id}`, donde los lee cualquier sesión con acceso a `contratos` (ver
+`firestore.rules`), no solo quien tiene la contraseña de dinero. Es a propósito,
+para no bloquear el núcleo por un plan que todavía no se diseña, pero es una
+concesión, no el destino final: el plan de dinero tiene que mover los dos
+campos a `privado/dinero` **y migrar los contratos que el núcleo ya escribió**
+— no basta con cambiar dónde escribe el sistema de ahora en adelante, los
+contratos viejos se quedarían con el dato expuesto.
+
 ## 8. Impresión
 
 **Contrato sobre el formulario preimpreso.** El sistema imprime únicamente los
