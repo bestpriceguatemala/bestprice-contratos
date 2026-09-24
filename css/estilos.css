@@ -954,43 +954,6 @@ body {
   box-shadow: 0 0 0 3px rgba(2, 90, 179, 0.15);
 }
 
-.carro-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 400;
-  color: var(--texto);
-  cursor: pointer;
-}
-
-.carro-checkbox input[type="checkbox"],
-.carro-checkbox input[type="radio"] {
-  cursor: pointer;
-  width: 16px;
-  height: 16px;
-}
-
-.carro-avisos {
-  background: #fff6e0;
-  border: 1px solid #f5d480;
-  border-radius: 6px;
-  padding: 12px 16px;
-  margin: 24px 0;
-  display: none;
-}
-
-.carro-avisos:not(:empty) {
-  display: block;
-}
-
-.carro-avisos p {
-  margin: 0;
-  font-size: 13px;
-  color: #8a5b00;
-  line-height: 1.4;
-}
-
 .carro-botones {
   display: flex;
   gap: 12px;
