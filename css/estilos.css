@@ -747,6 +747,7 @@ body {
 
 .carros-encabezado .btn {
   flex: 0 0 auto;
+  width: auto;
 }
 
 .tabla-carros {
@@ -980,4 +981,5 @@ body {
 
 .carro-botones .btn {
   flex: 0 1 auto;
+  width: auto;
 }

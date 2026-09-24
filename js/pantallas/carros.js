@@ -11,6 +11,22 @@ import { estadoCarro } from '../nucleo/estados.js';
 import { cargarFlota, cargarContratosAbiertos, guardarVehiculo } from '../datos.js';
 import { fecha, aviso } from '../ui.js';
 
+/**
+ * Construye el objeto vehículo para guardar, preservando campos que no vienen
+ * del formulario (como fueraDeServicio). La copia local en IndexedDB se reemplaza
+ * entera, así que lo que no se copia aquí desaparece de la pantalla aunque
+ * siga en la nube — por eso es crítico hacer un merge.
+ */
+export function construirVehiculo(carroExistente, campos) {
+  return {
+    // Preservar el carro existente (si hay), luego sobreescribir con campos nuevos
+    ...carroExistente,
+    ...campos,
+    // Garantizar que propiedad sea siempre 'Propio' en esta pantalla
+    propiedad: 'Propio',
+  };
+}
+
 // El texto libre que escribe el usuario se escapa antes de entrar al HTML
 // para que un "&" o un "<" sueltos no rompan la pantalla.
 function esc(texto) {
@@ -149,24 +165,14 @@ function formularioHTML() {
             </div>
           </section>
 
-          <section class="carro-seccion">
-            <h2>Propiedad</h2>
+          <section class="carro-seccion" id="frm-motivo-seccion" style="display: none;">
+            <h2>Fuera de servicio</h2>
             <div class="carro-campos">
-              <label class="carro-checkbox">
-                <input type="radio" name="propiedad" value="Propio" id="frm-propio" checked>
-                Propio
-              </label>
-              <label class="carro-checkbox">
-                <input type="radio" name="propiedad" value="Subarrendado" id="frm-subarrendado">
-                Subarrendado
-              </label>
-              <label class="carro-campo">Dueño del carro (si no es propio)
-                <input type="text" id="frm-dueno">
+              <label class="carro-campo">Motivo
+                <input type="text" id="frm-motivo-display" disabled readonly>
               </label>
             </div>
           </section>
-
-          <div id="frm-avisos" class="carro-avisos"></div>
 
           <div class="carro-botones">
             <button type="button" id="frm-volver" class="btn">Cancelar</button>
@@ -204,11 +210,11 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy) {
     el('frm-color').value = carro.color || '';
     el('frm-modelo').value = carro.modelo || '';
 
-    // Radio buttons de propiedad
-    if (carro.propiedad === 'Subarrendado') {
-      el('frm-subarrendado').checked = true;
+    // Mostrar motivo si está fuera de servicio
+    if (carro.fueraDeServicio) {
+      el('frm-motivo-seccion').style.display = 'block';
+      el('frm-motivo-display').value = carro.motivoFueraDeServicio || 'Sin motivo registrado';
     }
-    el('frm-dueno').value = carro.dueno || '';
 
     // Mostrar botones de fuera de servicio
     const info = estadoCarro(carro, contratos, hoy);
@@ -234,7 +240,8 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy) {
 
     el('frm-guardar').disabled = true;
     try {
-      const vehiculo = {
+      // Leer campos del formulario
+      const campos = {
         id: carro?.id,
         codigo: carro?.codigo,
         placas,
@@ -243,9 +250,11 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy) {
         linea: texto('frm-linea'),
         color: texto('frm-color'),
         modelo: texto('frm-modelo'),
-        propiedad: marcado('frm-propio') ? 'Propio' : 'Subarrendado',
-        dueno: texto('frm-dueno'),
       };
+
+      // Usar construirVehiculo para preservar campos del servidor
+      // (fueraDeServicio, motivoFueraDeServicio, etc.)
+      const vehiculo = construirVehiculo(carro || {}, campos);
 
       await guardarVehiculo(vehiculo);
       aviso(`Carro ${vehiculo.codigo} guardado.`, 'exito');
@@ -262,13 +271,19 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy) {
     const motivo = prompt('¿Por qué está fuera de servicio? (taller, golpe, revisión, etc.)');
     if (motivo === null) return; // Canceló
 
+    const motivoTrim = motivo.trim();
+    if (!motivoTrim) {
+      aviso('Escribe un motivo para marcar el carro fuera de servicio.', 'error');
+      return;
+    }
+
     el('frm-fuera').disabled = true;
     try {
       const actualizado = {
         id: carro.id,
         ...carro,
         fueraDeServicio: true,
-        motivoFueraDeServicio: motivo.trim(),
+        motivoFueraDeServicio: motivoTrim,
       };
       await guardarVehiculo(actualizado);
       aviso('Carro marcado fuera de servicio.', 'exito');
