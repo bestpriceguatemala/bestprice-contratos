@@ -9,7 +9,9 @@
 // el cliente puede pagar la renta con tarjeta y el saldo en efectivo, y solo lo
 // que se pagó con tarjeta lleva recargo. Cuando todo se paga con tarjeta, el
 // total coincide con el de la hoja CONTRATOS del Excel.
-import { q, suma, conTarjeta, recargoTarjeta } from './dinero.js';
+import {
+  q, suma, conTarjeta, recargoTarjeta, textoDosDecimales,
+} from './dinero.js';
 import { diasAtraso as calcularAtraso } from './fechas.js';
 
 /** Los días de atraso de un contrato, 0 si todavía no ha regresado. */
@@ -24,7 +26,7 @@ export function lineasSalida(c) {
   const lineas = [];
 
   if (dias && precio) {
-    lineas.push({ concepto: 'Renta', detalle: `${dias} días × Q${precio}`, monto: q(dias * precio) });
+    lineas.push({ concepto: 'Renta', detalle: `${dias} días × Q${textoDosDecimales(precio)}`, monto: q(dias * precio) });
   }
 
   const porDia = suma(c?.seguroMenoresDia, c?.seguroPaiDia);
@@ -50,7 +52,7 @@ export function lineasDevolucion(c) {
   const lineas = [];
 
   if (atraso) {
-    lineas.push({ concepto: 'Cobro días de atraso', detalle: `${atraso} × Q${precio}`, monto: q(atraso * precio) });
+    lineas.push({ concepto: 'Cobro días de atraso', detalle: `${atraso} × Q${textoDosDecimales(precio)}`, monto: q(atraso * precio) });
   }
 
   const porDia = suma(c?.seguroMenoresDia, c?.seguroPaiDia);
@@ -80,7 +82,17 @@ export function resumen(c) {
 
   // El saldo se muestra sin recargo mientras no se sepa cómo lo va a pagar; el
   // recargo se le suma en el momento de recibir el pago con tarjeta.
-  const saldo = q(Math.max(0, subtotal - cubierto));
+  //
+  // Sin Math.max(0, ...): un saldo negativo es una sobrepago real (por
+  // ejemplo, un descuento grande aplicado después de haber cobrado de más al
+  // salir) y "nunca ajustar una cifra para que cuadre" (regla del dueño)
+  // incluye no esconder ese número detrás de un 0 que diría "está a mano"
+  // cuando en realidad el negocio le debe al cliente. Quien llama decide cómo
+  // mostrarlo (flota.js, por ejemplo, ya filtra `saldo > 0` para "pendientes
+  // de cobro", así que un sobrepago simplemente no aparece ahí — correcto,
+  // eso no es un cobro pendiente) pero la cifra que sale de aquí es la
+  // honesta, no una ya recortada.
+  const saldo = q(subtotal - cubierto);
 
   const atraso = atrasoDe(c);
   const costoDia = q(c?.subarriendo?.costoDia);

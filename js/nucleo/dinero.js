@@ -34,3 +34,17 @@ export function conTarjeta(monto, porcentaje) {
 export function recargoTarjeta(monto, porcentaje) {
   return q(conTarjeta(monto, porcentaje) - q(monto));
 }
+
+/**
+ * Un monto en texto con dos decimales y separador de miles ('700.00',
+ * '1,234.56'), sin el símbolo de moneda — para los detalles de línea que
+ * arma el núcleo (contrato.js), que van pegados a un 'Q' ya puesto en el
+ * texto (`Q${...}`). No se importa dinero() de ui.js a propósito: el núcleo
+ * no depende de la capa de presentación, aunque el formato sea el mismo que
+ * ve el dueño en toda la pantalla — antes estos detalles mostraban "Q700" en
+ * vez de "Q700.00", un monto sin sus centavos en el mismo lugar donde el
+ * resto del sistema siempre los muestra.
+ */
+export function textoDosDecimales(n) {
+  return q(n).toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}

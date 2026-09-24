@@ -32,6 +32,15 @@ test('al salir se cobra la renta, la carta poder y los varios', () => {
   ]);
 });
 
+// Revisión final: el detalle mostraba "4 días × Q700" en vez de "Q700.00",
+// un monto sin centavos en el único lugar del sistema donde eso pasaba.
+test('el detalle de la renta y del atraso llevan el precio con dos decimales', () => {
+  const salida = lineasSalida(ejemplo()).find((l) => l.concepto === 'Renta');
+  assert.equal(salida.detalle, '4 días × Q700.00');
+  const devolucion = lineasDevolucion(ejemplo()).find((l) => l.concepto === 'Cobro días de atraso');
+  assert.equal(devolucion.detalle, '1 × Q700.00');
+});
+
 test('los seguros por día se cobran por los días contratados', () => {
   const c = { ...ejemplo(), seguroMenoresDia: 50, seguroPaiDia: 25, deducibleBajo: 400 };
   const lineas = lineasSalida(c);
@@ -82,6 +91,24 @@ test('sin devolución todavía, solo se debe lo de la salida', () => {
   assert.equal(r.totalDevolucion, 0);
   assert.equal(r.saldo, 3150, 'la renta y la carta poder');
   assert.equal(r.totalCobrado, 0);
+});
+
+// Revisión final: un descuento grande podía dejar el saldo negativo, y
+// Math.max(0, ...) lo escondía detrás de un 0 que decía "está a mano" cuando
+// en realidad el negocio le debe al cliente. "Nunca ajustar una cifra para
+// que cuadre" — el número honesto es negativo, no cero.
+test('un descuento grande deja un saldo negativo: se le debe al cliente, no está a mano', () => {
+  const c = {
+    dias: 4,
+    precioDia: 700,
+    devolucionPrevista: '2026-08-24',
+    cierre: { fechaReal: '2026-08-24', descuento: 500 }, // sin atraso, sin daños
+    pagos: [{ monto: 2800, porcentajeTarjeta: 0 }], // cobrado al salir, antes de saber del descuento
+  };
+  const r = resumen(c);
+  assert.equal(r.subtotal, 2300, '2,800 de renta menos 500 de descuento');
+  assert.equal(r.pagado, 2800, 'lo que ya se cobró, sin recargo (pagó en efectivo)');
+  assert.equal(r.saldo, -500, 'se le debe Q500 al cliente, no "está a mano"');
 });
 
 test('lo que se paga en efectivo no lleva recargo', () => {

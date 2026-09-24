@@ -2,12 +2,22 @@
 // flotantes en pantalla. Nada de esto decide reglas del negocio, solo formatea
 // lo que el núcleo ya calculó.
 
-/** Un monto en quetzales con separador de miles y dos decimales: 'Q1,234.56'. */
+/**
+ * Un monto en quetzales con separador de miles y dos decimales: 'Q1,234.56'.
+ * Un negativo sale '-Q50.00', con el signo antes de la Q — no 'Q-50.00',
+ * que es como lo dejaba `toLocaleString` antes de este arreglo. El plan de
+ * dinero (descuentos, reembolsos) y el saldo sobrepagado de `resumen()`
+ * (nucleo/contrato.js) son los primeros que van a mostrar montos negativos,
+ * y 'Q-50.00' se lee como un monto raro pegado a un signo, no como "menos
+ * cincuenta quetzales".
+ */
 export function dinero(n) {
   const x = Number(n);
   const monto = Number.isFinite(x) ? x : 0;
+  const negativo = monto < 0;
   // es-GT usa coma de millares y punto decimal, igual que en el Excel del dueño.
-  return `Q${monto.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const texto = Math.abs(monto).toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${negativo ? '-' : ''}Q${texto}`;
 }
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];

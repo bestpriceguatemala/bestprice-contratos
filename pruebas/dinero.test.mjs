@@ -2,7 +2,9 @@
 // Correr con:  npm test
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { q, suma, conTarjeta, recargoTarjeta } from '../js/nucleo/dinero.js';
+import {
+  q, suma, conTarjeta, recargoTarjeta, textoDosDecimales,
+} from '../js/nucleo/dinero.js';
 
 test('redondea a dos decimales', () => {
   assert.equal(q(3.005), 3.01);
@@ -48,4 +50,14 @@ test('un monto negativo se redondea igual que su positivo', () => {
   assert.equal(q(-3.005), -3.01);
   assert.equal(q(-5.015), -5.02);
   assert.ok(Object.is(q(-0.001), 0), 'no queda un menos cero suelto');
+});
+
+// Revisión final: los detalles de línea del núcleo (contrato.js) mostraban
+// "Q700" en vez de "Q700.00" — un monto sin sus centavos justo donde el
+// resto del sistema siempre los muestra.
+test('textoDosDecimales siempre lleva dos decimales y separador de miles', () => {
+  assert.equal(textoDosDecimales(700), '700.00');
+  assert.equal(textoDosDecimales(1234.5), '1,234.50');
+  assert.equal(textoDosDecimales(0), '0.00');
+  assert.equal(textoDosDecimales(undefined), '0.00');
 });
