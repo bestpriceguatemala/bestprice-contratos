@@ -34,7 +34,10 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
     avisos.push(alto(`El documento del cliente venció el ${cliente.documentoExpira}.`));
   }
 
-  const deuda = contratosDelCliente.reduce((total, c) => total + resumen(c).saldo, 0);
+  // Solo cuenta lo que debe, no lo que se le debe: si en un contrato pagó de
+  // más y en otro quedó debiendo, esas dos cosas no se cancelan entre sí. El
+  // mostrador tiene que enterarse de la deuda, aunque el neto dé a favor.
+  const deuda = contratosDelCliente.reduce((total, c) => total + Math.max(0, resumen(c).saldo), 0);
   if (deuda > 0) {
     avisos.push(alto(`Este cliente debe Q${deuda.toFixed(2)} de una renta anterior.`));
   }

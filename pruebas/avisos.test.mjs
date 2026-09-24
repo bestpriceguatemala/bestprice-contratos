@@ -43,6 +43,28 @@ test('avisa si el cliente quedó debiendo de otra renta', () => {
   assert.match(r[0].mensaje, /800/, 'dice cuánto debe');
 });
 
+// Revisión final (hallazgo de un solo renglón, efecto secundario de
+// "saldo ya no se recorta en 0"): un sobrepago en un contrato no debe tapar
+// la deuda real de otro. Antes de este arreglo, sumar los saldos tal cual
+// (uno negativo, uno positivo) daba un neto que podía no disparar el aviso.
+test('un sobrepago en un contrato no tapa la deuda real de otro (no se netean)', () => {
+  const sobrepagado = {
+    id: 'c10', dias: 4, precioDia: 700,
+    devolucionPrevista: '2026-07-05',
+    cierre: { fechaReal: '2026-07-05' },
+    pagos: [{ monto: 3300, porcentajeTarjeta: 0 }], // pagó Q500 de más (subtotal 2800)
+  };
+  const debiendo = {
+    id: 'c11', dias: 1, precioDia: 300,
+    devolucionPrevista: '2026-07-12',
+    cierre: { fechaReal: '2026-07-12' },
+    pagos: [], // debe los Q300 completos
+  };
+  const r = avisosDeSalida({ ...base, contratosDelCliente: [sobrepagado, debiendo] });
+  assert.equal(r[0]?.nivel, 'alto');
+  assert.match(r[0]?.mensaje ?? '', /300/, 'la deuda real, no el neto (-200, que no avisaría nada)');
+});
+
 test('avisa si el cliente ya devolvió tarde antes', () => {
   const tarde = [{
     id: 'c8', dias: 2, precioDia: 600,
