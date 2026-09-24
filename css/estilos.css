@@ -277,6 +277,26 @@ body {
 
 /* ---------- Pantalla: la flota ---------- */
 
+/* Barra roja cuando una lectura falló (T9/CRÍTICO 2): nunca se dibuja un
+   mundo vacío o verde a partir de un fallo, se avisa arriba de lo que sí se
+   pudo mostrar. */
+.barra-lectura-fallida {
+  background: var(--rojo);
+  color: var(--blanco);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.barra-lectura-fallida p {
+  margin: 0;
+}
+
+.barra-lectura-fallida p + p {
+  margin-top: 6px;
+}
+
 .flota-cuadros {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));

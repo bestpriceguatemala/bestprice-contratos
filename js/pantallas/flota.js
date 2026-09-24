@@ -50,9 +50,6 @@ function tarjetaCarro(carro, info) {
     boton = botonAccion('Sacar carro', `#/sacar/${carro.id}`);
   } else if (estado === 'fuera de servicio') {
     cuerpo = `<p class="carro-detalle">${esc(motivo || 'Sin motivo registrado')}</p>`;
-    // Ningún plan hecho todavía trae una pantalla que reactive un carro; la
-    // ruta queda a la espera igual que #/sacar y #/recibir (el enrutador ya
-    // sabe avisar "Todavía no está lista esta pantalla" mientras tanto).
     boton = botonAccion('Volver a habilitar', `#/habilitar/${carro.id}`, false);
   } else {
     // rentado o atrasado: en los dos manda quién tiene el carro (§5, Estados).
@@ -92,11 +89,36 @@ function seccionPendientes(titulo, filas) {
   return `<section class="pendientes"><h2>${esc(titulo)}</h2><ul class="lista-pendientes">${filas.join('')}</ul></section>`;
 }
 
-function dibujar(contenedor, flota, contratos, hoy) {
+/**
+ * La barra roja de arriba cuando una lectura falló (hallazgo crítico de la
+ * revisión final). Nunca se inventa un mundo vacío o verde a partir de un
+ * fallo: en vez de eso se avisa, arriba de lo que sí se pudo mostrar, que lo
+ * que se ve puede estar mal o incompleto.
+ */
+function barraFallo(falloFlota, falloContratos) {
+  const mensajes = [];
+  if (falloFlota) {
+    mensajes.push('No se pudo leer la flota. Puede que falten carros o que la lista esté incompleta.');
+  }
+  if (falloContratos) {
+    mensajes.push('No se pudieron leer los contratos. Los estados que ves pueden estar equivocados.');
+  }
+  if (!mensajes.length) return '';
+  return `<div class="barra-lectura-fallida">${mensajes.map((m) => `<p>${esc(m)}</p>`).join('')}</div>`;
+}
+
+function dibujar(contenedor, flota, contratos, hoy, { falloFlota = false, falloContratos = false } = {}) {
+  const barra = barraFallo(falloFlota, falloContratos);
+
   if (!flota.length) {
-    contenedor.innerHTML = `
-      <p class="pendiente">Todavía no hay carros en la flota.<br>
-      Pide que te agreguen los carros para empezar a usar el sistema.</p>`;
+    // Una flota vacía por un fallo de lectura no es lo mismo que una flota
+    // vacía de verdad (CRÍTICO 2): con la nube caída y sin copia local no se
+    // sabe si hay carros o no, así que no se invita a "agregar el primero"
+    // como si el negocio estuviera arrancando de cero.
+    contenedor.innerHTML = falloFlota
+      ? `${barra}<p class="pendiente">No se pudo leer la flota. Intenta de nuevo o revisa la conexión.</p>`
+      : `${barra}<p class="pendiente">Todavía no hay carros en la flota.<br>
+        <a href="#/carros/nuevo" class="btn btn-primario">Agregar el primer carro</a></p>`;
     return;
   }
 
@@ -107,15 +129,6 @@ function dibujar(contenedor, flota, contratos, hoy) {
   // Garantías por liberar: solo contratos que ya regresaron (tienen cierre) y
   // cuya garantía sigue bloqueada — mientras el carro sigue afuera, la
   // garantía está bien retenida, eso no es algo "por liberar" todavía.
-  //
-  // Ojo: `cargarContratosAbiertos()` (T9) hoy filtra fuera cualquier contrato
-  // con `cierre.fechaReal`, así que esta lista se queda vacía en la pantalla
-  // real hasta que esa función también entregue los devueltos — no es un
-  // límite de este archivo, es la forma en que T9 carga los datos.
-  //
-  // `garantiaMonto` es el monto autorizado que describe la §6 del diseño para
-  // el bloque de tarjetas; ninguna tarea anterior lo guarda todavía, así que
-  // "Sacar carro" (T11) deberá escribirlo junto con `garantiaLiberada`.
   //
   // pendientesDe(c).garantia (no `garantiaLiberada === false`): un contrato
   // guardado sin ese campo cuenta como pendiente, igual que en el resto del
@@ -139,6 +152,7 @@ function dibujar(contenedor, flota, contratos, hoy) {
     ));
 
   contenedor.innerHTML = `
+    ${barra}
     <div class="flota-cuadros">${tarjetas}</div>
     ${seccionPendientes('Garantías por liberar', filasGarantia)}
     ${seccionPendientes('Pendientes de cobro', filasCobro)}
@@ -160,24 +174,43 @@ export async function pintarFlota(contenedor) {
   const hoy = hoyISO();
   let flota = [];
   let contratos = [];
+  let falloFlota = false;
+  let falloContratos = false;
+  let flotaLista = false;
 
   // Redibuja en el mismo cuadro de carros cuando la nube trae algo distinto
-  // de lo que ya se sirvió (T9 solo avisa si de verdad cambió). Antes de
-  // pintar se comprueba que esta llamada siga siendo la vigente: que el hash
-  // no se haya ido a otra pantalla, y que no haya entrado una llamada más
-  // nueva a pintarFlota (por ejemplo, salir de la flota y volver a entrar).
+  // de lo que ya se sirvió, o cuando falla (T9/CRÍTICO 2). Antes de pintar se
+  // comprueba que esta llamada siga siendo la vigente: que el hash no se haya
+  // ido a otra pantalla, y que no haya entrado una llamada más nueva a
+  // pintarFlota (por ejemplo, salir de la flota y volver a entrar).
   // Cualquiera de las dos formas de quedar obsoleto se ignora en silencio.
   const sigoVigente = () => location.hash === RUTA && miToken === ultimoToken;
   const repintar = () => {
-    if (sigoVigente()) dibujar(contenedor, flota, contratos, hoy);
+    if (!sigoVigente()) return;
+    // Mientras los carros todavía no llegan ni una sola vez no hay nada
+    // confiable que dibujar: se avisa que se está cargando en vez de dejar
+    // la pantalla en blanco (hallazgo importante de la revisión final).
+    if (!flotaLista) { contenedor.innerHTML = '<p class="pendiente">Cargando…</p>'; return; }
+    dibujar(contenedor, flota, contratos, hoy, { falloFlota, falloContratos });
   };
+  repintar();
 
-  // cargarFlota/cargarContratosAbiertos sirven la copia local al instante y
-  // nunca rechazan (T9): no hace falta un try/catch para que esta pantalla no
-  // se rompa si la nube falla.
-  [flota, contratos] = await Promise.all([
-    cargarFlota((nuevaFlota) => { flota = nuevaFlota; repintar(); }),
-    cargarContratosAbiertos((nuevosContratos) => { contratos = nuevosContratos; repintar(); }),
-  ]);
-  if (sigoVigente()) dibujar(contenedor, flota, contratos, hoy);
+  // Los contratos se piden sin esperarlos: cargarContratosAbiertos ya avisa
+  // por su cuenta (alLlegar) en cuanto tiene algo, y su propia promesa
+  // también se recoge aquí para el primer dato. No se hace `await` de esto
+  // antes de pedir la flota — ese `await` era justo el problema (importante
+  // 5): con Promise.all, un primer arranque sin copia local de contratos
+  // (hasta los 8 s de LIMITE_NUBE_MS en datos.js) bloqueaba también el dibujo
+  // de los carros, que la mayoría de las veces sí tenían copia local lista.
+  cargarContratosAbiertos((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); })
+    .then((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); });
+
+  // La flota sí se espera: es lo mínimo que hace falta para dibujar algo con
+  // sentido (el diseño promete la pantalla principal en menos de un segundo,
+  // y cargarFlota() sirve la copia local al instante casi siempre).
+  const rFlota = await cargarFlota((r) => { flota = r.datos; falloFlota = r.fallo; repintar(); });
+  flota = rFlota.datos;
+  falloFlota = rFlota.fallo;
+  flotaLista = true;
+  repintar();
 }
