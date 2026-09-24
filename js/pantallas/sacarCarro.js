@@ -35,6 +35,14 @@ import { dinero, fecha, aviso } from '../ui.js';
 // nunca se guarde el contrato sin porcentajeComision.
 const PORCENTAJE_COMISION_DEFECTO = 5;
 
+// Mismo respaldo que PORCENTAJE_COMISION_DEFECTO, pero para el recargo de
+// tarjeta (§5 del diseño: "12 % de tarjeta"). Sin este valor el campo nacía
+// vacío en la plantilla y, si el mostrador elegía "Tarjeta" y guardaba antes
+// de que cargarAjustes() (datos.js) contestara, el recargo se leía como 0 —
+// cada renta pagada con tarjeta se cobraba de menos por ese 12 % (hallazgo
+// crítico de la revisión final).
+const PORCENTAJE_TARJETA_DEFECTO = 12;
+
 // El texto libre que escribe el mostrador (nombre del cliente, destino de la
 // carta poder, observaciones...) se escapa antes de entrar al HTML, igual
 // que en flota.js, para que un "&" o un "<" sueltos no rompan la pantalla.
@@ -320,9 +328,9 @@ function plantilla() {
             </select>
           </label>
           <label class="sc-campo" id="sc-pago-porcentaje-campo" hidden>% de tarjeta
-            <input type="number" id="sc-pago-porcentaje" step="0.01" min="0">
+            <input type="number" id="sc-pago-porcentaje" step="0.01" min="0" value="${PORCENTAJE_TARJETA_DEFECTO}">
           </label>
-          <label class="sc-campo">Monto que se recibe
+          <label class="sc-campo">Monto sin recargo de tarjeta
             <input type="number" id="sc-pago-monto" step="0.01" min="0">
           </label>
         </div>
@@ -333,6 +341,11 @@ function plantilla() {
         </div>
 
         <ul id="sc-avisos" class="sc-avisos-lista"></ul>
+
+        <div class="sc-garantia-linea">
+          <span>Recargo de tarjeta</span>
+          <strong id="sc-recargo-tarjeta">Q0.00</strong>
+        </div>
 
         <div class="sc-total-linea">
           <strong>Total a cobrar</strong>
@@ -376,6 +389,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
   let ultimosResultados = [];
   let montoPagoTocado = false;
   let comisionTocada = false;
+  let tarjetaTocada = false;
   let guardando = false;
   // El id y el número de este alquiler se deciden una sola vez, la primera
   // vez que se intenta guardar (ver guardar() más abajo), y se quedan fijos
@@ -430,7 +444,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
       carro: ajeno ? null : carroPropio(),
       carroAjeno: ajeno ? {
         placas: texto('sc-ajeno-placas'), tipo: texto('sc-ajeno-tipo'), marca: texto('sc-ajeno-marca'),
-        color: texto('sc-ajeno-color'), modelo: texto('sc-ajeno-modelo'), dueño: texto('sc-ajeno-dueno'),
+        color: texto('sc-ajeno-color'), modelo: texto('sc-ajeno-modelo'), dueno: texto('sc-ajeno-dueno'),
         costoDia: num('sc-ajeno-costo'),
       } : null,
       fechaSalida: texto('sc-fecha-salida') || hoyISO(),
@@ -509,7 +523,16 @@ export async function pintarSacarCarro(contenedor, carroId) {
     // reflejar ese valor ya sincronizado, no el que había antes de sincronizarlo.
     const conPago = construirContrato(leerFormulario(null));
     const r = resumen(conPago);
+    // "Monto sin recargo de tarjeta" es lo que el mostrador escribe (lo que
+    // dice la terminal antes del recargo); el recargo se calcula aparte para
+    // que nunca se confunda con el total. Si se mostrara solo el total, un
+    // mostrador que cobrara mirando la terminal (que ya muestra el monto sin
+    // recargo) terminaría cobrando el recargo dos veces (hallazgo importante
+    // de la revisión final).
+    const montoSinRecargo = q(conPago.pagos[0]?.monto ?? 0);
+    const recargoTarjetaCobrado = q(r.pagado - montoSinRecargo);
     el('sc-total').textContent = dinero(r.pagado);
+    el('sc-recargo-tarjeta').textContent = dinero(recargoTarjetaCobrado);
     el('sc-garantia').textContent = dinero(borrador.garantiaMonto);
 
     const contratosDelCliente = clienteSeleccionado
@@ -643,6 +666,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
   el('sc-form').addEventListener('input', (ev) => {
     if (ev.target.id === 'sc-pago-monto') montoPagoTocado = true;
     if (ev.target.id === 'sc-porcentaje-comision') comisionTocada = true;
+    if (ev.target.id === 'sc-pago-porcentaje') tarjetaTocada = true;
     recalcular();
   });
   el('sc-form').addEventListener('change', (ev) => {
@@ -672,20 +696,36 @@ export async function pintarSacarCarro(contenedor, carroId) {
   recalcular();
 
   // cargarFlota/cargarContratosAbiertos sirven la copia local al instante y
-  // nunca rechazan (T9), igual que en flota.js. cargarAjustes() tampoco
-  // rechaza (se queda con los valores del dueño si la nube falla o el
-  // documento no existe todavía), así que tampoco hace falta un try/catch.
-  [flota, contratosAbiertos, ajustes] = await Promise.all([
-    cargarFlota((nueva) => { flota = nueva; if (sigoVigente()) refrescarCarro(); }),
-    cargarContratosAbiertos((nuevos) => { contratosAbiertos = nuevos; if (sigoVigente()) recalcular(); }),
+  // nunca rechazan (T9), igual que en flota.js; ahora entregan { datos, fallo
+  // } (CRÍTICO 2 de la revisión final) — esta pantalla todavía no tiene dónde
+  // mostrar ese fallo (no hay una barra como la de flota.js), así que por
+  // ahora solo toma `datos`, que nunca inventa un arreglo vacío: cae a la
+  // copia local si la nube falló. cargarAjustes() tampoco rechaza (se queda
+  // con los valores del dueño si la nube falla o el documento no existe
+  // todavía), así que tampoco hace falta un try/catch.
+  const [rFlota, rContratos, ajustesCargados] = await Promise.all([
+    cargarFlota((r) => { flota = r.datos; if (sigoVigente()) refrescarCarro(); }),
+    cargarContratosAbiertos((r) => { contratosAbiertos = r.datos; if (sigoVigente()) recalcular(); }),
     cargarAjustes(),
   ]);
+  flota = rFlota.datos;
+  contratosAbiertos = rContratos.datos;
+  ajustes = ajustesCargados;
   if (!sigoVigente()) return;
   // El % de comisión del formulario arranca en el default fijo de esta
   // pantalla (por si la nube tarda); en cuanto llegan los ajustes reales se
   // actualiza al de verdad, salvo que el mostrador ya lo haya cambiado a mano.
   if (!comisionTocada && ajustes.porcentajeComision !== undefined) {
     el('sc-porcentaje-comision').value = ajustes.porcentajeComision;
+  }
+  // Mismo mecanismo para el recargo de tarjeta (hallazgo crítico de la
+  // revisión final): el campo arranca en PORCENTAJE_TARJETA_DEFECTO (por si
+  // la nube tarda) y se actualiza al valor real de cargarAjustes() en cuanto
+  // llega, salvo que el mostrador ya lo haya tocado a mano — para que su
+  // propio valor escrito nunca se pise con una lectura de ajustes que llega
+  // tarde.
+  if (!tarjetaTocada && ajustes.porcentajeTarjeta !== undefined) {
+    el('sc-pago-porcentaje').value = ajustes.porcentajeTarjeta;
   }
   refrescarCarro();
   recalcular();

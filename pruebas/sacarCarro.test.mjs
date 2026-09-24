@@ -66,7 +66,7 @@ test('un carro ajeno no toca carroId, y sus datos quedan dentro del contrato', (
     ...datosBase(),
     ajeno: true,
     carro: null,
-    carroAjeno: { placas: 'P-1AJN', tipo: 'Pickup', marca: 'Ford', color: 'Rojo', modelo: '2019', dueño: 'Don Mario', costoDia: 400 },
+    carroAjeno: { placas: 'P-1AJN', tipo: 'Pickup', marca: 'Ford', color: 'Rojo', modelo: '2019', dueno: 'Don Mario', costoDia: 400 },
   });
   assert.equal(contrato.carroId, null, 'nunca se cruza con un carro de la flota');
   assert.equal(contrato.carroPlacas, 'P-1AJN');
