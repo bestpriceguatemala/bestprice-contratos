@@ -720,3 +720,264 @@ body {
 .barra-version .btn-actualizar:hover {
   background: var(--azul-oscuro);
 }
+
+/* ---------- Pantalla: carros (flota propia) ---------- */
+
+.carros-contenido {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.carros-encabezado {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.carros-encabezado h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--navy);
+  flex: 1;
+}
+
+.carros-encabezado .btn {
+  flex: 0 0 auto;
+}
+
+.tabla-carros {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.tabla-carros thead {
+  background: var(--navy);
+  color: var(--blanco);
+}
+
+.tabla-carros th {
+  padding: 14px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tabla-carros th:last-child {
+  border-right: none;
+}
+
+.tabla-carros tbody tr {
+  border-bottom: 1px solid var(--borde);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.tabla-carros tbody tr:hover {
+  background: var(--fondo);
+}
+
+.tabla-carros td {
+  padding: 14px 16px;
+  font-size: 14px;
+  color: var(--texto);
+}
+
+.tabla-carros tr.es-disponible {
+  border-left: 4px solid var(--verde);
+}
+
+.tabla-carros tr.es-rentado {
+  border-left: 4px solid var(--azul);
+}
+
+.tabla-carros tr.es-atrasado {
+  border-left: 4px solid var(--rojo);
+  background: #fbeaea;
+}
+
+.tabla-carros tr.es-fuera {
+  border-left: 4px solid var(--gris);
+  background: var(--fondo);
+  color: var(--gris);
+}
+
+.tabla-carros a {
+  color: var(--azul);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.tabla-carros a:hover {
+  text-decoration: underline;
+}
+
+.etiqueta-estado {
+  display: inline-block;
+  background: var(--fondo);
+  color: var(--gris);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-right: 8px;
+}
+
+.tabla-carros tr.es-disponible .etiqueta-estado {
+  background: rgba(30, 122, 61, 0.1);
+  color: var(--verde);
+}
+
+.tabla-carros tr.es-rentado .etiqueta-estado {
+  background: rgba(2, 90, 179, 0.1);
+  color: var(--azul);
+}
+
+.tabla-carros tr.es-atrasado .etiqueta-estado {
+  background: rgba(179, 38, 30, 0.1);
+  color: var(--rojo);
+}
+
+.tabla-carros tr.es-fuera .etiqueta-estado {
+  background: var(--borde);
+  color: var(--gris);
+}
+
+/* Formulario de carros */
+
+.carro-forma {
+  padding: 24px;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.carro-formulario {
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 32px;
+}
+
+.carro-formulario h1 {
+  margin: 0 0 24px;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.carro-seccion {
+  margin-bottom: 32px;
+}
+
+.carro-seccion h2 {
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--texto);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-bottom: 1px solid var(--borde);
+  padding-bottom: 12px;
+}
+
+.carro-campos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+}
+
+.carro-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.carro-campo input,
+.carro-campo textarea {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--texto);
+  padding: 10px 12px;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  background: var(--blanco);
+}
+
+.carro-campo input:disabled {
+  background: var(--fondo);
+  color: var(--gris);
+  cursor: not-allowed;
+}
+
+.carro-campo input:focus,
+.carro-campo textarea:focus {
+  outline: none;
+  border-color: var(--azul);
+  background: var(--blanco);
+  box-shadow: 0 0 0 3px rgba(2, 90, 179, 0.15);
+}
+
+.carro-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--texto);
+  cursor: pointer;
+}
+
+.carro-checkbox input[type="checkbox"],
+.carro-checkbox input[type="radio"] {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+}
+
+.carro-avisos {
+  background: #fff6e0;
+  border: 1px solid #f5d480;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 24px 0;
+  display: none;
+}
+
+.carro-avisos:not(:empty) {
+  display: block;
+}
+
+.carro-avisos p {
+  margin: 0;
+  font-size: 13px;
+  color: #8a5b00;
+  line-height: 1.4;
+}
+
+.carro-botones {
+  display: flex;
+  gap: 12px;
+  margin-top: 32px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.carro-botones .btn {
+  flex: 0 1 auto;
+}

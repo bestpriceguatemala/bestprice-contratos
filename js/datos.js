@@ -223,3 +223,40 @@ export async function nuevoIdContrato() {
   const { db, fsMod } = await iniciarFirebase();
   return fsMod.doc(fsMod.collection(db, 'contratos')).id;
 }
+
+/**
+ * Toma el siguiente código de carro dentro de una transacción sobre
+ * `contadores/vehiculos`, igual que `siguienteNumeroContrato()` sobre
+ * `contadores/contratos` — el mismo mecanismo, para que dos mostradores
+ * nunca den de alta dos carros con el mismo código correlativo.
+ */
+export async function siguienteCodigoCarro() {
+  const { db, fsMod } = await iniciarFirebase();
+  const ref = fsMod.doc(db, 'contadores', 'vehiculos');
+  return conLimiteDeTiempo(fsMod.runTransaction(db, async (tx) => {
+    const actual = await tx.get(ref);
+    const siguiente = (Number(actual.exists() ? actual.data().ultimo : 0) || 0) + 1;
+    tx.set(ref, { ultimo: siguiente });
+    return siguiente;
+  }));
+}
+
+/**
+ * Guarda un carro de la flota propia en la nube y refresca la copia local.
+ * Mismo patrón que `guardarContrato()`: si no trae código todavía (alta
+ * nueva) lo toma de `siguienteCodigoCarro()`; si ya lo trae (edición de un
+ * carro existente) se respeta ese mismo código en vez de gastar uno nuevo.
+ * `vehiculo.id`, si viene, hace que se edite ese mismo documento en vez de
+ * crear uno — así "marcar fuera de servicio" y "volver a habilitar" (que
+ * llaman a esto de nuevo sobre un carro ya dado de alta) actualizan el carro
+ * que ya existe.
+ */
+export async function guardarVehiculo(vehiculo) {
+  const codigo = vehiculo?.codigo || (await siguienteCodigoCarro());
+  const { db, fsMod } = await iniciarFirebase();
+  const ref = vehiculo?.id ? fsMod.doc(db, 'vehiculos', vehiculo.id) : fsMod.doc(fsMod.collection(db, 'vehiculos'));
+  const guardado = { ...vehiculo, id: ref.id, codigo, actualizado: Date.now() };
+  await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
+  await guardarLocal('vehiculos', [guardado]);
+  return guardado;
+}

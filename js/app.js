@@ -5,10 +5,14 @@ import { aviso } from './ui.js';
 import { registrarPantalla, mostrar } from './router.js';
 import { pintarFlota } from './pantallas/flota.js';
 import { pintarSacarCarro } from './pantallas/sacarCarro.js';
+import { pintarCarros } from './pantallas/carros.js';
 import { vigilarVersion } from './version.js';
 
 registrarPantalla('#/flota', pintarFlota);
 registrarPantalla('#/sacar/:carroId', pintarSacarCarro);
+registrarPantalla('#/carros', pintarCarros);
+registrarPantalla('#/carros/:carroId', pintarCarros);
+registrarPantalla('#/habilitar/:carroId', pintarCarros);
 
 const pantallaEntrada = document.getElementById('entrada');
 const pantallaApp = document.getElementById('app');
