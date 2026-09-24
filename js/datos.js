@@ -9,6 +9,7 @@
 import { iniciarFirebase } from './firebase-config.js';
 import { mezclar, guardarLocal, leerLocal } from './cache.js';
 import { filtrar, textoDeCliente } from './nucleo/busqueda.js';
+import { estadoContrato } from './nucleo/estados.js';
 
 // Comprobado a mano: con las claves de Firebase todavía sin pegar (o sin
 // internet), el SDK de Firestore no falla rápido — reintenta por su cuenta y
@@ -46,16 +47,41 @@ function distintos(antes, despues) {
 }
 
 /**
+ * Decide qué se le entrega a quien pidió una colección, a partir de la copia
+ * local y de cómo terminó el intento de leer la nube. Función pura — no toca
+ * Firestore ni IndexedDB — para poder probar la regla sin depender de
+ * ninguno de los dos.
+ *
+ * La regla (hallazgo crítico de la revisión final): **nunca se inventa una
+ * lista vacía a partir de una lectura fallida.** Antes, sin copia local y con
+ * la nube caída, `cargarConSincronia` devolvía `[]` sin más — y una pantalla
+ * no tiene forma de distinguir eso de "de verdad no hay nada". Por eso esta
+ * función siempre devuelve `datos` (lo mejor que hay: lo remoto si llegó, si
+ * no lo local, si no vacío) junto con `fallo` (si la nube no contestó), y
+ * quien la llama decide qué avisar con esa bandera en vez de que se le
+ * escondan carros o contratos reales detrás de una pantalla que se ve limpia.
+ */
+export function resultadoLectura(locales, remoto) {
+  if (remoto.ok) return { datos: remoto.valor, fallo: false };
+  return { datos: locales, fallo: true };
+}
+
+/**
  * Sirve una colección local al instante y, por detrás, la mezcla con lo que
  * haya en la nube y guarda el resultado — así la próxima vez que se abra ya
  * está al día. Si no hay nada local todavía (primera vez en esta computadora)
  * sí se espera a la nube: no hay copia que mostrar mientras tanto.
  *
- * `alLlegar(mezclados)`, si se da, avisa cuando la sincronía de atrás termina
- * y trajo algo distinto de lo que ya se sirvió — así una pantalla que ya
- * dibujó con la copia local puede volver a pintarse sin que el dueño tenga
- * que recargar. No se avisa si la nube contesta exactamente lo mismo: para
- * eso está la comparación, en vez de redibujar cada vez que llega la nube.
+ * Devuelve `{ datos, fallo }` (ver `resultadoLectura`), nunca solo el arreglo:
+ * `fallo` en true dice que la nube no contestó, para que la pantalla nunca
+ * confunda "no pude leer" con "no hay nada".
+ *
+ * `alLlegar({ datos, fallo })`, si se da, avisa cuando la sincronía de atrás
+ * termina — trajo algo distinto de lo que ya se sirvió, o falló — así una
+ * pantalla que ya dibujó con la copia local puede volver a pintarse (con los
+ * datos nuevos, o con el aviso de que la nube falló) sin que el dueño tenga
+ * que recargar. No se avisa por un éxito que contesta exactamente lo mismo:
+ * para eso está la comparación, en vez de redibujar cada vez que llega la nube.
  */
 async function cargarConSincronia(coleccion, alLlegar) {
   const locales = await leerLocal(coleccion);
@@ -71,19 +97,29 @@ async function cargarConSincronia(coleccion, alLlegar) {
     // primera respuesta, no una que llega después de haber mostrado algo.
     sincronizar
       .then((mezclados) => {
-        if (alLlegar && distintos(locales, mezclados)) alLlegar(mezclados);
+        const r = resultadoLectura(locales, { ok: true, valor: mezclados });
+        if (alLlegar && distintos(locales, r.datos)) alLlegar(r);
       })
-      .catch(() => {});
-    return locales;
+      .catch(() => {
+        // La nube falló, pero ya se sirvió la copia local — se avisa igual,
+        // para que la pantalla pueda decir que lo que se ve puede estar
+        // desactualizado, sin dejar de mostrar lo que sí tiene.
+        if (alLlegar) alLlegar(resultadoLectura(locales, { ok: false }));
+      });
+    return resultadoLectura(locales, { ok: true, valor: locales });
   }
   try {
-    return await sincronizar;
+    const remotos = await sincronizar;
+    return resultadoLectura(locales, { ok: true, valor: remotos });
   } catch {
-    return []; // sin local y sin nube: no hay nada que mostrar, pero no se rompe la pantalla
+    return resultadoLectura(locales, { ok: false });
   }
 }
 
-/** La flota completa. `alLlegar(flota)` avisa si la sincronía trae cambios. */
+/**
+ * La flota completa, como `{ datos, fallo }` (ver `resultadoLectura`).
+ * `alLlegar` avisa si la sincronía trae cambios o si falló.
+ */
 export async function cargarFlota(alLlegar) {
   return cargarConSincronia('vehiculos', alLlegar);
 }
@@ -100,17 +136,18 @@ export async function cargarFlota(alLlegar) {
  * contrato guardado sin ese campo (no debería pasar, pero por si acaso) se
  * trata como 'rentado' al leerlo, para que nunca desaparezca de la pantalla.
  *
- * `alLlegar(abiertos)` recibe la misma lista ya filtrada, no la colección
- * completa — quien llama no debería tener que saber que este filtro existe.
+ * Devuelve `{ datos, fallo }` igual que `cargarFlota`. `alLlegar({ datos,
+ * fallo })` recibe la misma forma, ya con `datos` filtrado — quien llama no
+ * debería tener que saber que este filtro existe.
  */
 export async function cargarContratosAbiertos(alLlegar) {
   const estaAbierto = (c) => ['rentado', 'devuelto'].includes(c?.estado || 'rentado');
   const soloAbiertos = (contratos) => contratos.filter(estaAbierto);
-  const todos = await cargarConSincronia(
+  const r = await cargarConSincronia(
     'contratos',
-    alLlegar && ((mezclados) => alLlegar(soloAbiertos(mezclados))),
+    alLlegar && ((res) => alLlegar({ datos: soloAbiertos(res.datos), fallo: res.fallo })),
   );
-  return soloAbiertos(todos);
+  return { datos: soloAbiertos(r.datos), fallo: r.fallo };
 }
 
 // Todavía no hay pantalla de Ajustes (§6 del diseño) — es de un plan futuro
@@ -149,9 +186,13 @@ let clientesListos = null;
 
 function clientesDeLaSesion() {
   if (!clientesListos) {
-    clientesListos = cargarConSincronia('clientes').then((clientes) => {
-      if (!clientes.length) clientesListos = null;
-      return clientes;
+    // El buscador no tiene dónde avisar un fallo de la nube (no hay pantalla
+    // de resultados con una barra de arriba); si la lectura falló y no hay
+    // nada local, `clientesListos` se olvida igual para reintentar en la
+    // próxima búsqueda, en vez de quedar con una sesión de clientes vacía.
+    clientesListos = cargarConSincronia('clientes').then((r) => {
+      if (!r.datos.length) clientesListos = null;
+      return r.datos;
     });
   }
   return clientesListos;
@@ -193,6 +234,27 @@ export async function siguienteNumeroContrato() {
 }
 
 /**
+ * Arma el documento que de verdad se guarda para un contrato, a partir de lo
+ * que pide guardar la pantalla más el id y número ya decididos. Función
+ * pura — sin Firestore — para poder probar la regla del estado sin
+ * depender de la red.
+ *
+ * El campo `estado` se pisa siempre con `estadoContrato(contrato)`
+ * (nucleo/estados.js) en vez de confiar en lo que traiga `contrato` —
+ * hallazgo importante de la revisión final: antes "Sacar carro" escribía
+ * `estado: 'rentado'` a mano y nada más lo volvía a tocar, así que ese campo
+ * y lo que de verdad calcula `estadoContrato()` (cierre + saldo + garantía)
+ * podían desacordarse en cuanto existiera una pantalla que cerrara contratos.
+ * Calculándolo aquí, en el único lugar que arma lo que se guarda, el campo
+ * guardado nunca puede quedar atrás de lo que la fórmula dice.
+ */
+export function contratoParaGuardar(contrato, { id, numero, ahora = Date.now() } = {}) {
+  return {
+    ...contrato, id, numero, actualizado: ahora, estado: estadoContrato(contrato),
+  };
+}
+
+/**
  * Guarda un contrato ya completo en la nube y refresca la copia local. Si no
  * trae número todavía, lo toma de `siguienteNumeroContrato()`; si ya lo trae
  * (por ejemplo porque la pantalla lo pidió antes para imprimirlo) se respeta
@@ -202,7 +264,7 @@ export async function guardarContrato(contrato) {
   const numero = contrato?.numero || (await siguienteNumeroContrato());
   const { db, fsMod } = await iniciarFirebase();
   const ref = contrato?.id ? fsMod.doc(db, 'contratos', contrato.id) : fsMod.doc(fsMod.collection(db, 'contratos'));
-  const guardado = { ...contrato, id: ref.id, numero, actualizado: Date.now() };
+  const guardado = contratoParaGuardar(contrato, { id: ref.id, numero });
   await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
   await guardarLocal('contratos', [guardado]);
   return guardado;
