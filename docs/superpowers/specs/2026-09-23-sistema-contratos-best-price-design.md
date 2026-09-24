@@ -412,6 +412,19 @@ carro. En la ficha se ve cuándo se hizo cada servicio, a qué kilometraje, y
 cuánto falta para el siguiente. Cuando falte poco, aparece donde ya aparecen los
 demás avisos.
 
+### El porcentaje de comisión no se toca en el mostrador
+
+Al probar el sistema publicado (24-sep-2026) el dueño lo dijo claro: hay cosas
+que solo él, como administrador, debe controlar, y el porcentaje de comisión es
+una de ellas. Hoy el formulario de salida lo muestra como un campo editable con
+5 % por defecto, porque todavía no existe la lista de empleados.
+
+Cuando se construya el área de dinero (plan 5), ese campo **desaparece del
+formulario de salida**: en su lugar se elige al empleado de una lista, y el
+contrato se queda con el porcentaje que ese empleado tenga guardado, sin
+mostrarlo ni dejarlo cambiar desde el mostrador. El porcentaje solo se edita
+detrás de la contraseña.
+
 ### Orden de construcción
 
 1. Núcleo (sacar carros, flota, cálculos) — el plan 1.
