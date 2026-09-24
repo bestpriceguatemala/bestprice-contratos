@@ -14,7 +14,11 @@ const MENSAJES = {
   'auth/network-request-failed': 'No se pudo conectar. Revisa tu conexión a internet.',
 };
 
-const MENSAJE_GENERICO = 'No se pudo conectar con el sistema. Intenta de nuevo en unos minutos.';
+// "o vuelve a cargar la página": ya no hace falta para que el siguiente
+// intento funcione (firebase-config.js reintenta solo desde el hallazgo
+// importante de la revisión final), pero se deja como salida de emergencia
+// visible para el dueño si la conexión sigue fallando.
+const MENSAJE_GENERICO = 'No se pudo conectar con el sistema. Intenta de nuevo en unos minutos, o vuelve a cargar la página.';
 
 /** Convierte un error de Firebase (o de conexión) en un mensaje en español simple. */
 function mensajeDeError(error) {
