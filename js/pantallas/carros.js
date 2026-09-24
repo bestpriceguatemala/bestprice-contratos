@@ -8,8 +8,9 @@
 // - #/carros/:id: formulario para editar un carro existente
 // - #/habilitar/:id: marcar un carro como disponible de nuevo
 import { estadoCarro } from '../nucleo/estados.js';
+import { hoyISO } from '../nucleo/fechas.js';
 import { cargarFlota, cargarContratosAbiertos, guardarVehiculo } from '../datos.js';
-import { fecha, aviso } from '../ui.js';
+import { aviso } from '../ui.js';
 
 /**
  * Construye el objeto vehículo para guardar, preservando campos que no vienen
@@ -46,11 +47,10 @@ const ESTADOS = {
 const el = (id) => document.getElementById(id);
 const val = (id) => el(id)?.value ?? '';
 const texto = (id) => val(id).trim();
-const marcado = (id) => Boolean(el(id)?.checked);
 
 // ---------- Vista: lista de carros ----------
 
-function filaCarro(carro, info, contratos, hoy) {
+function filaCarro(carro, info) {
   const { estado, motivo, fueraDeServicio } = info;
   const cfg = ESTADOS[estado];
 
@@ -91,7 +91,7 @@ function dibujarLista(contenedor, flota, contratos, hoy) {
   }
 
   const filas = flota
-    .map((carro) => filaCarro(carro, estadoCarro(carro, contratos, hoy), contratos, hoy))
+    .map((carro) => filaCarro(carro, estadoCarro(carro, contratos, hoy)))
     .join('');
 
   contenedor.innerHTML = `
@@ -256,8 +256,14 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy) {
       // (fueraDeServicio, motivoFueraDeServicio, etc.)
       const vehiculo = construirVehiculo(carro || {}, campos);
 
-      await guardarVehiculo(vehiculo);
-      aviso(`Carro ${vehiculo.codigo} guardado.`, 'exito');
+      // guardarVehiculo() (datos.js) es quien de verdad asigna el código a un
+      // carro nuevo (vehiculo.codigo sale vacío hasta ese momento) — por eso
+      // el aviso usa lo que devuelve guardarVehiculo, no el objeto que se le
+      // mandó. Antes se usaba `vehiculo.codigo`, y el primer carro que el
+      // dueño daba de alta se guardaba bien pero el aviso decía "Carro
+      // undefined guardado" (hallazgo importante de la revisión final).
+      const guardado = await guardarVehiculo(vehiculo);
+      aviso(`Carro ${guardado.codigo} guardado.`, 'exito');
       location.hash = '#/carros';
     } catch (error) {
       aviso('No se pudo guardar el carro. Intenta de nuevo.', 'error');
@@ -329,14 +335,15 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy) {
 
 async function habilitarDesdeFlota(contenedor, carroId) {
   try {
-    let flota = [];
-    let contratos = [];
-
-    // Cargar datos
-    [flota, contratos] = await Promise.all([
+    // cargarFlota/cargarContratosAbiertos devuelven { datos, fallo } (T9,
+    // CRÍTICO 2 de la revisión final) — aquí solo se necesitan los datos: si
+    // la lectura falló, `find` simplemente no encuentra el carro y cae en el
+    // mismo aviso de error de abajo.
+    const [rFlota] = await Promise.all([
       cargarFlota(),
       cargarContratosAbiertos(),
     ]);
+    const flota = rFlota.datos;
 
     const carro = flota.find((c) => c.id === carroId);
     if (!carro) {
@@ -381,7 +388,12 @@ export async function pintarCarros(contenedor, carroId) {
   // Cargar datos
   let flota = [];
   let contratos = [];
-  const hoy = new Date().toISOString().split('T')[0];
+  // hoyISO() (nucleo/fechas.js), no new Date().toISOString(): esta última da
+  // el día en UTC, y Guatemala va seis horas atrás — de seis de la tarde en
+  // adelante un carro que regresa hoy salía "Rentado" en la flota y
+  // "Atrasado" aquí, un día antes de tiempo (hallazgo importante de la
+  // revisión final, el mismo bug que ya se había corregido en fechas.js).
+  const hoy = hoyISO();
 
   const repintar = () => {
     if (!sigoVigente()) return;
@@ -390,10 +402,18 @@ export async function pintarCarros(contenedor, carroId) {
     }
   };
 
-  [flota, contratos] = await Promise.all([
-    cargarFlota((nueva) => { flota = nueva; repintar(); }),
-    cargarContratosAbiertos((nuevos) => { contratos = nuevos; repintar(); }),
+  // cargarFlota/cargarContratosAbiertos devuelven { datos, fallo } (T9,
+  // CRÍTICO 2 de la revisión final); esta pantalla todavía no tiene una barra
+  // de error como la de flota.js, así que por ahora solo toma `datos` — un
+  // fallo aquí se ve como "sigue como estaba", nunca como "se vació la
+  // flota", porque `datos` cae a la copia local en vez de a un arreglo vacío
+  // inventado.
+  const [rFlota, rContratos] = await Promise.all([
+    cargarFlota((r) => { flota = r.datos; repintar(); }),
+    cargarContratosAbiertos((r) => { contratos = r.datos; repintar(); }),
   ]);
+  flota = rFlota.datos;
+  contratos = rContratos.datos;
 
   if (!sigoVigente()) return;
 
