@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function haySesion() { return request.auth != null; }
+    function esDinero() { return request.auth != null && request.auth.uid == 'UID_DE_LA_CUENTA_DE_DINERO'; }
+
+    match /clientes/{id}   { allow read, write: if haySesion(); }
+    match /vehiculos/{id}  { allow read, write: if haySesion(); }
+    match /empleados/{id}  { allow read: if haySesion(); allow write: if esDinero(); }
+    match /ajustes/{id}    { allow read: if haySesion(); allow write: if haySesion(); }
+    match /contadores/{id} { allow read, write: if haySesion(); }
+
+    match /contratos/{id} {
+      allow read, write: if haySesion();
+      // El costo del dueño y la comisión se escriben al crear el contrato,
+      // pero solo se pueden LEER con la credencial del área de dinero.
+      // NOTA: mientras 'UID_DE_LA_CUENTA_DE_DINERO' sea un placeholder, la subcolección
+      // 'privado' y la colección 'pagosComision' están cerradas a todos (estado seguro).
+      match /privado/{doc} {
+        allow create, update: if haySesion();
+        allow read, delete: if esDinero();
+      }
+    }
+
+    match /pagosComision/{id} { allow read, write: if esDinero(); }
+  }
+}

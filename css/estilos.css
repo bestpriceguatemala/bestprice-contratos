@@ -1,0 +1,968 @@
+/* Best Price — Contratos: estilos del sistema.
+   Solo se usa en computadora de escritorio, así que no hay que resolver
+   celular; lo que importa es que se vea serio, simple y se dibuje rápido:
+   sin fuentes externas ni imágenes, para no depender de la red al abrir. */
+
+:root {
+  --azul: #025AB3;
+  --azul-oscuro: #014a92;
+  --amarillo: #FFBC01;
+  --fondo: #F3F5F8;
+  --navy: #073A7A;
+  --texto: #1c2733;
+  --gris: #6b7785;
+  --borde: #d7dee6;
+  --blanco: #ffffff;
+  --rojo: #b3261e;
+  --verde: #1e7a3d;
+  --fuente: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--fuente);
+  color: var(--texto);
+  background: var(--fondo);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* ---------- Pantalla de entrada ---------- */
+
+.entrada {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    linear-gradient(180deg, rgba(2, 90, 179, 0.06), rgba(2, 90, 179, 0) 40%),
+    var(--fondo);
+  padding: 24px;
+}
+
+.tarjeta-entrada {
+  width: 100%;
+  max-width: 360px;
+  background: var(--blanco);
+  border-top: 4px solid var(--amarillo);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(7, 58, 122, 0.12);
+  padding: 40px 36px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tarjeta-entrada h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--navy);
+  letter-spacing: 0.2px;
+}
+
+.tarjeta-entrada .sub {
+  margin: 0 0 24px;
+  color: var(--gris);
+  font-size: 14px;
+}
+
+.tarjeta-entrada label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navy);
+  margin-bottom: 16px;
+}
+
+.tarjeta-entrada input {
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--texto);
+  padding: 10px 12px;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  background: var(--fondo);
+}
+
+.tarjeta-entrada input:focus {
+  outline: none;
+  border-color: var(--azul);
+  background: var(--blanco);
+  box-shadow: 0 0 0 3px rgba(2, 90, 179, 0.15);
+}
+
+.tarjeta-entrada .error {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #fbeaea;
+  color: var(--rojo);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* ---------- Botones ---------- */
+
+.btn {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 18px;
+  border-radius: 6px;
+  border: 1px solid var(--borde);
+  background: var(--blanco);
+  color: var(--texto);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn:hover {
+  background: var(--fondo);
+}
+
+.btn-primario {
+  margin-top: 8px;
+  width: 100%;
+  background: var(--azul);
+  border-color: var(--azul);
+  color: var(--blanco);
+  padding: 11px 18px;
+}
+
+.btn-primario:hover {
+  background: var(--azul-oscuro);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---------- Cascarón: barra superior y contenido ---------- */
+
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.barra {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  background: var(--navy);
+  color: var(--blanco);
+  padding: 0 24px;
+  height: 56px;
+  flex: 0 0 auto;
+}
+
+.barra strong {
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.barra #buscador {
+  flex: 1 1 320px;
+  max-width: 420px;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--blanco);
+}
+
+.barra #buscador::placeholder {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.barra #buscador:focus {
+  outline: none;
+  background: var(--blanco);
+  color: var(--texto);
+}
+
+.barra nav {
+  display: flex;
+  gap: 4px;
+  flex: 1 1 auto;
+}
+
+.barra nav a {
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-bottom: 2px solid transparent;
+}
+
+.barra nav a:hover {
+  color: var(--blanco);
+  border-bottom-color: var(--amarillo);
+}
+
+.barra .btn {
+  flex: 0 0 auto;
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.35);
+  color: var(--blanco);
+}
+
+.barra .btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+#pantalla {
+  flex: 1 1 auto;
+  padding: 32px;
+}
+
+.pendiente {
+  color: var(--gris);
+  font-size: 15px;
+  text-align: center;
+  margin-top: 80px;
+}
+
+/* ---------- Avisos flotantes ---------- */
+
+.avisos {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 1000;
+  max-width: 320px;
+}
+
+.aviso {
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--blanco);
+  background: var(--navy);
+  box-shadow: 0 6px 18px rgba(7, 58, 122, 0.25);
+}
+
+.aviso-error {
+  background: var(--rojo);
+}
+
+.aviso-exito {
+  background: var(--verde);
+}
+
+.aviso-info {
+  background: var(--azul);
+}
+
+/* ---------- Pantalla: la flota ---------- */
+
+/* Barra roja cuando una lectura falló (T9/CRÍTICO 2): nunca se dibuja un
+   mundo vacío o verde a partir de un fallo, se avisa arriba de lo que sí se
+   pudo mostrar. */
+.barra-lectura-fallida {
+  background: var(--rojo);
+  color: var(--blanco);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.barra-lectura-fallida p {
+  margin: 0;
+}
+
+.barra-lectura-fallida p + p {
+  margin-top: 6px;
+}
+
+.flota-cuadros {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.tarjeta-carro {
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tarjeta-carro header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tarjeta-carro .punto {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--gris);
+  flex: 0 0 auto;
+}
+
+.tarjeta-carro.es-disponible .punto {
+  background: var(--verde);
+}
+
+.tarjeta-carro.es-rentado .punto {
+  background: var(--azul);
+}
+
+.tarjeta-carro.es-atrasado .punto {
+  background: var(--rojo);
+}
+
+.tarjeta-carro.es-atrasado {
+  border-color: var(--rojo);
+  background: #fbeaea;
+}
+
+.tarjeta-carro.es-fuera {
+  background: var(--fondo);
+  color: var(--gris);
+}
+
+.carro-estado {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gris);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.carro-cliente {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.carro-detalle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--gris);
+}
+
+.carro-atraso {
+  color: var(--rojo);
+  font-weight: 600;
+}
+
+.etiqueta-fuera {
+  align-self: flex-start;
+  background: var(--gris);
+  color: var(--blanco);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+}
+
+.tarjeta-carro .btn {
+  margin-top: 8px;
+  text-align: center;
+}
+
+/* ---------- Pantalla: pendientes de la flota ---------- */
+
+.pendientes {
+  margin-top: 32px;
+}
+
+.pendientes h2 {
+  font-size: 15px;
+  color: var(--navy);
+  margin: 0 0 12px;
+}
+
+.lista-pendientes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lista-pendientes li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+}
+
+/* ---------- Pantalla: sacar carro ---------- */
+
+.sacar-carro {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 24px;
+  align-items: start;
+  max-width: 1200px;
+}
+
+.sc-bloques {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.sc-bloque {
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 20px 24px;
+}
+
+.sc-bloque h2 {
+  margin: 0 0 16px;
+  font-size: 15px;
+  color: var(--navy);
+}
+
+.sc-campos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px 16px;
+}
+
+.sc-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.sc-campo.ancho {
+  grid-column: 1 / -1;
+}
+
+.sc-campo input,
+.sc-campo select,
+.sc-campo textarea {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--texto);
+  padding: 9px 11px;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  background: var(--fondo);
+}
+
+.sc-campo input:focus,
+.sc-campo select:focus,
+.sc-campo textarea:focus {
+  outline: none;
+  border-color: var(--azul);
+  background: var(--blanco);
+  box-shadow: 0 0 0 3px rgba(2, 90, 179, 0.15);
+}
+
+.sc-campo textarea {
+  resize: vertical;
+}
+
+.sc-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navy);
+  margin-top: 12px;
+}
+
+.sc-nota {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--gris);
+  line-height: 1.5;
+}
+
+.sc-nota .btn {
+  padding: 3px 10px;
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+/* Cliente: buscador con resultados flotando encima del resto del formulario. */
+
+.sc-cliente-buscar {
+  position: relative;
+}
+
+.sc-cliente-resultados {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(7, 58, 122, 0.12);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.sc-cliente-resultados li {
+  padding: 8px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.sc-cliente-resultados li:hover {
+  background: var(--fondo);
+}
+
+.sc-cliente-resultados li span {
+  color: var(--gris);
+  font-size: 12px;
+}
+
+.sc-cliente-elegido {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--fondo);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 10px;
+}
+
+/* Carro */
+
+.sc-carro-info {
+  background: var(--fondo);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--gris);
+  margin-bottom: 12px;
+}
+
+.sc-carro-info strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+  color: var(--texto);
+}
+
+.sc-carro-info.sc-carro-aviso {
+  color: var(--rojo);
+  border-color: var(--rojo);
+  background: #fbeaea;
+}
+
+/* El resumen: totales, avisos y el botón de guardar, siempre a la vista. */
+
+.sc-resumen {
+  position: sticky;
+  top: 16px;
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sc-resumen h2 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--navy);
+}
+
+.sc-lineas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sc-lineas li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.sc-lineas li small {
+  display: block;
+  color: var(--gris);
+  font-weight: 400;
+}
+
+.sc-lineas .sc-vacio {
+  color: var(--gris);
+  justify-content: flex-start;
+}
+
+.sc-avisos-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sc-avisos-lista:empty {
+  display: none;
+}
+
+.sc-avisos-lista li {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.sc-avisos-lista li.nivel-alto {
+  background: #fbeaea;
+  color: var(--rojo);
+  font-weight: 600;
+}
+
+.sc-avisos-lista li.nivel-medio {
+  background: #fff6e0;
+  color: #8a5b00;
+}
+
+.sc-garantia-linea {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: var(--gris);
+}
+
+.sc-total-linea {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-top: 1px solid var(--borde);
+  padding-top: 14px;
+}
+
+.sc-total-linea strong {
+  font-size: 12px;
+  color: var(--gris);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.sc-total-linea span {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+/* ---------- Aviso de versión nueva ---------- */
+
+.barra-version {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: var(--amarillo);
+  color: var(--navy);
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 9999;
+  box-shadow: 0 2px 8px rgba(255, 188, 1, 0.2);
+}
+
+.barra-version .btn-actualizar {
+  flex: 0 0 auto;
+  background: var(--navy);
+  border: none;
+  color: var(--blanco);
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.barra-version .btn-actualizar:hover {
+  background: var(--azul-oscuro);
+}
+
+/* ---------- Pantalla: carros (flota propia) ---------- */
+
+.carros-contenido {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.carros-encabezado {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.carros-encabezado h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--navy);
+  flex: 1;
+}
+
+.carros-encabezado .btn {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.tabla-carros {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.tabla-carros thead {
+  background: var(--navy);
+  color: var(--blanco);
+}
+
+.tabla-carros th {
+  padding: 14px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tabla-carros th:last-child {
+  border-right: none;
+}
+
+.tabla-carros tbody tr {
+  border-bottom: 1px solid var(--borde);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.tabla-carros tbody tr:hover {
+  background: var(--fondo);
+}
+
+.tabla-carros td {
+  padding: 14px 16px;
+  font-size: 14px;
+  color: var(--texto);
+}
+
+.tabla-carros tr.es-disponible {
+  border-left: 4px solid var(--verde);
+}
+
+.tabla-carros tr.es-rentado {
+  border-left: 4px solid var(--azul);
+}
+
+.tabla-carros tr.es-atrasado {
+  border-left: 4px solid var(--rojo);
+  background: #fbeaea;
+}
+
+.tabla-carros tr.es-fuera {
+  border-left: 4px solid var(--gris);
+  background: var(--fondo);
+  color: var(--gris);
+}
+
+.tabla-carros a {
+  color: var(--azul);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.tabla-carros a:hover {
+  text-decoration: underline;
+}
+
+.etiqueta-estado {
+  display: inline-block;
+  background: var(--fondo);
+  color: var(--gris);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-right: 8px;
+}
+
+.tabla-carros tr.es-disponible .etiqueta-estado {
+  background: rgba(30, 122, 61, 0.1);
+  color: var(--verde);
+}
+
+.tabla-carros tr.es-rentado .etiqueta-estado {
+  background: rgba(2, 90, 179, 0.1);
+  color: var(--azul);
+}
+
+.tabla-carros tr.es-atrasado .etiqueta-estado {
+  background: rgba(179, 38, 30, 0.1);
+  color: var(--rojo);
+}
+
+.tabla-carros tr.es-fuera .etiqueta-estado {
+  background: var(--borde);
+  color: var(--gris);
+}
+
+/* Formulario de carros */
+
+.carro-forma {
+  padding: 24px;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.carro-formulario {
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 32px;
+}
+
+.carro-formulario h1 {
+  margin: 0 0 24px;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.carro-seccion {
+  margin-bottom: 32px;
+}
+
+.carro-seccion h2 {
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--texto);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-bottom: 1px solid var(--borde);
+  padding-bottom: 12px;
+}
+
+.carro-campos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+}
+
+.carro-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.carro-campo input,
+.carro-campo textarea {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--texto);
+  padding: 10px 12px;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  background: var(--blanco);
+}
+
+.carro-campo input:disabled {
+  background: var(--fondo);
+  color: var(--gris);
+  cursor: not-allowed;
+}
+
+.carro-campo input:focus,
+.carro-campo textarea:focus {
+  outline: none;
+  border-color: var(--azul);
+  background: var(--blanco);
+  box-shadow: 0 0 0 3px rgba(2, 90, 179, 0.15);
+}
+
+.carro-botones {
+  display: flex;
+  gap: 12px;
+  margin-top: 32px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.carro-botones .btn {
+  flex: 0 1 auto;
+  width: auto;
+}

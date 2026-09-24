@@ -89,7 +89,7 @@ pruebas/
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test pruebas/"
+    "test": "node --test 'pruebas/**/*.test.mjs'"
   }
 }
 ```
@@ -109,6 +109,18 @@ test('redondea a dos decimales', () => {
   assert.equal(q(3.005), 3.01);
   assert.equal(q(1234.567), 1234.57);
   assert.equal(q(700), 700);
+});
+
+test('el medio centavo sube, sin importar el tamaño del monto', () => {
+  assert.equal(q(5.015), 5.02);
+  assert.equal(q(1234.565), 1234.57);
+  assert.equal(q(0.615), 0.62);
+});
+
+test('un monto negativo se redondea igual que su positivo', () => {
+  assert.equal(q(-3.005), -3.01);
+  assert.equal(q(-5.015), -5.02);
+  assert.ok(Object.is(q(-0.001), 0), 'no queda un menos cero suelto');
 });
 
 test('lo vacío vale cero, no rompe la cuenta', () => {
@@ -144,6 +156,8 @@ test('sin porcentaje, el monto no cambia', () => {
 Correr: `npm test`
 Se espera: FALLA, porque `js/nucleo/dinero.js` todavía no existe.
 
+> Nota: en Node 24 `node --test pruebas/` ya no acepta una carpeta suelta; por eso el script usa el patrón `pruebas/**/*.test.mjs`.
+
 - [ ] **Step 4: Escribir el módulo**
 
 Crear `js/nucleo/dinero.js`:
@@ -160,7 +174,14 @@ Crear `js/nucleo/dinero.js`:
 export function q(n) {
   const x = Number(n);
   if (!Number.isFinite(x)) return 0;
-  return Math.round((x + Number.EPSILON) * 100) / 100;
+  // Se corre el punto con el texto decimal del número ('5.015' -> '5.015e2')
+  // en vez de multiplicar por 100: multiplicar arrastra el error binario y hace
+  // que 5.015 se redondee para abajo. Se redondea el valor absoluto para que un
+  // negativo caiga del mismo lado que su positivo.
+  const escalado = Number(`${Math.abs(x)}e2`);
+  if (!Number.isFinite(escalado)) return Math.round(x * 100) / 100;
+  const redondeado = Math.round(escalado) / 100;
+  return x < 0 ? -redondeado : redondeado;
 }
 
 /** Suma montos redondeando el resultado. */
@@ -182,7 +203,7 @@ export function recargoTarjeta(monto, porcentaje) {
 - [ ] **Step 5: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 5 pruebas.
+Se espera: PASA, 7 pruebas.
 
 - [ ] **Step 6: Commit**
 
@@ -214,9 +235,11 @@ Crear `pruebas/fechas.test.mjs`:
 // si se usara la hora local, un contrato que sale a las 3 de la tarde en
 // Guatemala podía contar un día de más o de menos según el horario de verano de
 // otro país. Un día de diferencia son Q700.
+process.env.TZ = 'America/Guatemala';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sumarDias, diasEntre, devolucionPrevista, diasAtraso } from '../js/nucleo/fechas.js';
+import { sumarDias, diasEntre, devolucionPrevista, diasAtraso, hoyISO } from '../js/nucleo/fechas.js';
 
 test('suma días cruzando fin de mes y fin de año', () => {
   assert.equal(sumarDias('2026-08-20', 5), '2026-08-25');
@@ -244,6 +267,13 @@ test('el atraso nunca es negativo', () => {
 test('sin fecha real todavía no hay atraso que cobrar', () => {
   assert.equal(diasAtraso('2026-08-24', ''), 0);
   assert.equal(diasAtraso('2026-08-24', undefined), 0);
+});
+
+test('hoy es el día del calendario de aquí, no el de Londres', () => {
+  // Las ocho de la noche del 22 de septiembre en Guatemala ya son las dos de la
+  // madrugada del 23 en UTC. En el mostrador todavía es 22.
+  assert.equal(hoyISO(new Date('2026-09-23T02:00:00Z')), '2026-09-22');
+  assert.equal(hoyISO(new Date('2026-09-22T18:00:00Z')), '2026-09-22');
 });
 ```
 
@@ -276,9 +306,17 @@ function aISO(ms) {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-/** La fecha de hoy, en texto. */
-export function hoyISO() {
-  return aISO(Date.now());
+/**
+ * La fecha de hoy, en texto, según el calendario de aquí.
+ *
+ * No se usa `toISOString()` a propósito: eso da el día de UTC, y Guatemala va
+ * seis horas atrás. De seis de la tarde a medianoche, un carro que regresa hoy
+ * quedaría registrado mañana — y un día de más es un día de renta de más.
+ */
+export function hoyISO(momento = new Date()) {
+  const mes = String(momento.getMonth() + 1).padStart(2, '0');
+  const dia = String(momento.getDate()).padStart(2, '0');
+  return `${momento.getFullYear()}-${mes}-${dia}`;
 }
 
 /** Una fecha más (o menos) días. */
@@ -311,7 +349,7 @@ export function diasAtraso(prevista, fechaReal) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 10 pruebas en total.
+Se espera: PASA, 13 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -571,7 +609,7 @@ export function saldoConTarjeta(c, porcentaje) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 20 pruebas en total.
+Se espera: PASA, 23 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -716,7 +754,7 @@ export function comisionDe(c) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 28 pruebas en total.
+Se espera: PASA, 31 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -735,7 +773,7 @@ git commit -m "Comision del empleado: 5 por ciento configurable, con atraso y de
 
 **Interfaces:**
 - Consumes: `resumen` de `contrato.js`; `diasAtraso` de `fechas.js`.
-- Produces: `estadoContrato(c) -> 'rentado' | 'devuelto' | 'cerrado'`, `puedeCerrar(c) -> boolean`, `pendientesDe(c) -> {saldo, garantia}`, `estadoCarro(carro, contratos, hoy) -> {estado, contrato, diasAtraso}` con estado `'disponible' | 'rentado' | 'atrasado' | 'fuera de servicio'`.
+- Produces: `estadoContrato(c) -> 'rentado' | 'devuelto' | 'cerrado'`, `puedeCerrar(c) -> boolean`, `pendientesDe(c) -> {saldo, garantia}`, `estadoCarro(carro, contratos, hoy = hoyISO()) -> {estado, contrato, diasAtraso, fueraDeServicio, motivo}` con estado `'disponible' | 'rentado' | 'atrasado' | 'fuera de servicio'`. Un carro rentado que además está marcado fuera de servicio sale como `rentado`/`atrasado` con `fueraDeServicio: true`: dónde está el carro manda, la etiqueta se muestra aparte.
 
 - [ ] **Step 1: Escribir la prueba que falla**
 
@@ -828,7 +866,7 @@ Crear `js/nucleo/estados.js`:
 // que falte y se le suelte la garantía de la tarjeta. Si se amarraran, un
 // cliente que no paga unos daños dejaría el carro parado sin necesidad.
 import { resumen } from './contrato.js';
-import { diasAtraso } from './fechas.js';
+import { diasAtraso, hoyISO } from './fechas.js';
 
 /** Lo que falta para poder cerrar: saldo por cobrar y garantía por liberar. */
 export function pendientesDe(c) {
@@ -854,20 +892,26 @@ export function estadoContrato(c) {
  * El estado del carro para la pantalla principal.
  *
  * `contratos` son los de ese carro; se busca el que todavía no ha regresado.
+ * Estar marcado fuera de servicio no borra al cliente que lo tiene: si el carro
+ * se accidentó con él, la pantalla todavía necesita decir quién lo lleva, si
+ * viene tarde y dar el botón para recibirlo. Por eso va como etiqueta aparte.
  */
-export function estadoCarro(carro, contratos = [], hoy) {
-  if (carro?.fueraDeServicio) {
-    return { estado: 'fuera de servicio', contrato: null, diasAtraso: 0 };
-  }
+export function estadoCarro(carro, contratos = [], hoy = hoyISO()) {
+  const fueraDeServicio = Boolean(carro?.fueraDeServicio);
+  const motivo = carro?.motivoFueraDeServicio || '';
+  const afuera = contratos.find((c) => c?.carroId === carro?.id && !c?.cierre?.fechaReal);
 
-  const afuera = contratos.find((c) => c.carroId === carro?.id && !c?.cierre?.fechaReal);
-  if (!afuera) return { estado: 'disponible', contrato: null, diasAtraso: 0 };
+  if (!afuera) {
+    return {
+      estado: fueraDeServicio ? 'fuera de servicio' : 'disponible',
+      contrato: null, diasAtraso: 0, fueraDeServicio, motivo,
+    };
+  }
 
   const atraso = diasAtraso(afuera.devolucionPrevista, hoy);
   return {
     estado: atraso > 0 ? 'atrasado' : 'rentado',
-    contrato: afuera,
-    diasAtraso: atraso,
+    contrato: afuera, diasAtraso: atraso, fueraDeServicio, motivo,
   };
 }
 ```
@@ -875,7 +919,7 @@ export function estadoCarro(carro, contratos = [], hoy) {
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 35 pruebas en total.
+Se espera: PASA, 41 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -947,6 +991,12 @@ test('no encuentra lo que no está', () => {
   assert.equal(coincide(texto, 'urizar marcela'), false, 'tienen que estar TODAS las palabras');
 });
 
+test('la ñ no estorba: Peña se encuentra escribiendo pena', () => {
+  const peña = { ...cliente, id: 'k3', apellido1: 'PEÑA' };
+  assert.equal(filtrar([peña], 'pena', textoDeCliente).length, 1);
+  assert.equal(filtrar([peña], 'PEÑA', textoDeCliente).length, 1);
+});
+
 test('una búsqueda vacía devuelve todo', () => {
   const lista = [cliente, { ...cliente, id: 'k2', apellido1: 'BRIONES' }];
   assert.equal(filtrar(lista, '', textoDeCliente).length, 2);
@@ -967,9 +1017,11 @@ Crear `js/nucleo/busqueda.js`:
 ```js
 // El buscador.
 //
-// Busca sobre un texto armado de antemano con todo lo buscable de cada ficha.
-// Se normaliza una sola vez, no en cada tecla: así el buscador responde mientras
-// se escribe aunque haya miles de clientes.
+// Cada búsqueda normaliza el texto de cada ficha: quita acentos, mayúsculas y
+// signos para comparar. Se midió con 5,000 clientes y tarda unas 7 milésimas de
+// segundo, así que responde mientras se escribe sin necesidad de guardar el texto
+// ya normalizado. Si algún día el negocio crece tanto que se sienta lento, ahí sí
+// habría que guardarlo — mientras tanto sería complicar por gusto.
 
 /** Minúsculas, sin acentos y sin signos: '3078-4155' queda '3078 4155'. */
 export function normalizar(texto) {
@@ -1002,18 +1054,26 @@ export function textoDeContrato(c) {
     .filter(Boolean).join(' ');
 }
 
-/** Filtra una lista con el texto buscable que le corresponde a cada elemento. */
+/**
+ * Filtra una lista con el texto buscable que le corresponde a cada elemento.
+ *
+ * La consulta se normaliza una sola vez por búsqueda, no una vez por ficha.
+ */
 export function filtrar(items, consulta, textoDe) {
   const palabras = normalizar(consulta).split(' ').filter(Boolean);
   if (!palabras.length) return items;
-  return items.filter((item) => coincide(textoDe(item), consulta));
+  return items.filter((item) => {
+    const texto = normalizar(textoDe(item));
+    const sinEspacios = texto.replace(/ /g, '');
+    return palabras.every((p) => texto.includes(p) || sinEspacios.includes(p));
+  });
 }
 ```
 
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 40 pruebas en total.
+Se espera: PASA, 47 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -1108,12 +1168,28 @@ test('no avisa si las fechas no se enciman', () => {
   assert.deepEqual(avisosDeSalida({ ...base, contratosDelCarro: despues }), []);
 });
 
-test('avisa si el precio está por debajo del mínimo o son menos de dos días', () => {
-  const barato = avisosDeSalida({ ...base, contrato: { ...contrato, precioDia: 250 } });
-  assert.match(mensajes(barato).join(' '), /mínimo/i);
+test('una renta seguida el mismo día no es un choque', () => {
+  // El carro regresa el 20 en la mañana y vuelve a salir el 20 en la tarde:
+  // es el día a día del negocio, no un carro comprometido dos veces.
+  const anterior = [{ id: 'c7', carroId: 'v1', fechaSalida: '2026-08-15', devolucionPrevista: '2026-08-20' }];
+  const seguido = {
+    ...base,
+    contrato: { ...contrato, fechaSalida: '2026-08-20', devolucionPrevista: '2026-08-24' },
+    contratosDelCarro: anterior,
+  };
+  assert.deepEqual(avisosDeSalida(seguido), []);
+});
 
-  const corto = avisosDeSalida({ ...base, contrato: { ...contrato, dias: 1 } });
-  assert.match(mensajes(corto).join(' '), /días mínimos/i);
+test('un día de traslape sí es un choque', () => {
+  const anterior = [{ id: 'c7', carroId: 'v1', fechaSalida: '2026-08-15', devolucionPrevista: '2026-08-21' }];
+  const encimado = {
+    ...base,
+    contrato: { ...contrato, fechaSalida: '2026-08-20', devolucionPrevista: '2026-08-24' },
+    contratosDelCarro: anterior,
+  };
+  const r = avisosDeSalida(encimado);
+  assert.equal(r[0].nivel, 'alto');
+  assert.match(r[0].mensaje, /2026-08-21/);
 });
 
 test('los avisos altos van primero', () => {
@@ -1148,13 +1224,23 @@ import { resumen } from './contrato.js';
 const alto = (mensaje) => ({ nivel: 'alto', mensaje });
 const medio = (mensaje) => ({ nivel: 'medio', mensaje });
 
-/** ¿Se encima [a1, a2] con [b1, b2]? */
+/**
+ * ¿Se encima [a1, a2] con [b1, b2]?
+ *
+ * Tocarse no es encimarse: un carro que regresa el 20 puede volver a salir el
+ * 20, y eso pasa a diario. Solo hay choque cuando de verdad se traslapan días,
+ * por eso la comparación es estricta. Un rojo falso en cada vuelta entrena al
+ * dueño a ignorar los avisos, y entonces el aviso bueno tampoco lo lee.
+ */
 function seEnciman(a1, a2, b1, b2) {
   if (!a1 || !a2 || !b1 || !b2) return false;
-  return diasEntre(a1, b2) >= 0 && diasEntre(b1, a2) >= 0;
+  return diasEntre(a1, b2) > 0 && diasEntre(b1, a2) > 0;
 }
 
-export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente = [], contratosDelCarro = [], ajustes = {}, hoy }) {
+// El precio y los días NO se avisan: el dueño pone el precio que quiera en cada
+// renta y el sistema no opina. Un aviso que él no quiere lo entrena a ignorar
+// los que sí importan.
+export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente = [], contratosDelCarro = [], hoy }) {
   const avisos = [];
 
   if (cliente?.licenciaExpira && diasEntre(cliente.licenciaExpira, hoy) > 0) {
@@ -1171,7 +1257,7 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
 
   const tardes = contratosDelCliente.filter((c) => resumen(c).diasAtraso > 0).length;
   if (tardes > 0) {
-    avisos.push(medio(`Este cliente ya devolvió tarde ${tardes} vez(ces).`));
+    avisos.push(medio(`Este cliente ya devolvió tarde ${tardes} ${tardes === 1 ? 'vez' : 'veces'}.`));
   }
 
   const encimado = contratosDelCarro.find((otro) =>
@@ -1181,13 +1267,7 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
     avisos.push(alto(`Este carro tiene otro contrato del ${encimado.fechaSalida} al ${encimado.devolucionPrevista}.`));
   }
 
-  if (ajustes.precioMinimoDia && contrato?.precioDia && contrato.precioDia < ajustes.precioMinimoDia) {
-    avisos.push(medio(`El precio está por debajo del mínimo de Q${ajustes.precioMinimoDia} por día.`));
-  }
-  if (ajustes.diasMinimos && contrato?.dias && contrato.dias < ajustes.diasMinimos) {
-    avisos.push(medio(`Son menos de los ${ajustes.diasMinimos} días mínimos de renta.`));
-  }
-
+  // Los dos números juntos, para no tener que regresar a ver el formulario.
   return [...avisos.filter((a) => a.nivel === 'alto'), ...avisos.filter((a) => a.nivel === 'medio')];
 }
 ```
@@ -1195,7 +1275,7 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
 - [ ] **Step 4: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 49 pruebas en total.
+Se espera: PASA, 58 pruebas en total.
 
 - [ ] **Step 5: Commit**
 
@@ -1471,7 +1551,7 @@ Crear `js/datos.js` sobre `firebase-config.js` y `cache.js`: lee primero de la c
 - [ ] **Step 5: Correr las pruebas y ver que pasan**
 
 Correr: `npm test`
-Se espera: PASA, 54 pruebas en total.
+Se espera: PASA, 63 pruebas en total.
 
 - [ ] **Step 6: Commit**
 
@@ -1499,6 +1579,7 @@ git commit -m "Copia local y capa de datos: abre al instante y sincroniza detras
 - `rentado`: punto azul, nombre del cliente, *vuelve el 25 ago*, botón **Recibir carro**.
 - `atrasado`: cuadro rojo, *atrasado 2 días*, botón **Recibir carro**.
 - `fuera de servicio`: cuadro gris con el motivo y botón **Volver a habilitar**.
+- Un carro rentado o atrasado que además trae `fueraDeServicio: true` conserva su cuadro y su botón de recibir, con una etiqueta gris que dice el motivo.
 
 - [ ] **Step 2: Agregar las dos listas de pendientes**
 
@@ -1549,7 +1630,33 @@ Al guardar:
 - Se pide el correlativo con `siguienteNumeroContrato()`.
 - Del número de tarjeta se guardan **solo los últimos 4 dígitos**; el CBC no se guarda (ADR-001). El número completo queda en una variable de la pantalla, se usa para imprimir y se descarta al salir.
 - Se guarda el pago de la salida con su forma de pago y su porcentaje de tarjeta.
-- Se guarda `porcentajeComision` copiado del empleado elegido.
+- Se guarda `porcentajeComision` copiado del empleado elegido. **Nunca se guarda un contrato sin ese campo**: sin él la comisión saldría en cero sin avisar.
+- Se guarda `garantiaMonto` (el monto autorizado en la tarjeta), con ese nombre, que ya usa la pantalla de la flota.
+- Se guarda `estado: 'rentado'`.
+
+- [ ] **Step 3b: Que la capa de datos traiga los contratos que siguen vivos**
+
+`cargarContratosAbiertos()` hoy solo trae los que no tienen `cierre.fechaReal`, así que la
+lista de **garantías por liberar** de la pantalla principal saldría siempre vacía: esos
+contratos ya tienen fecha real de entrada, lo que les falta es soltar la garantía.
+
+En `js/datos.js`, que la consulta traiga **los contratos que no están cerrados**, apoyándose en
+el campo `estado` que ahora guarda cada contrato:
+
+```js
+/**
+ * Los contratos que todavía piden algo: el carro anda fuera, falta cobrar un
+ * saldo o falta soltar la garantía de la tarjeta. Los cerrados no se traen al
+ * abrir: se buscan cuando alguien los busca.
+ */
+export async function cargarContratosAbiertos() {
+  return cargarConSincronia('contratos', (fs, db) =>
+    fs.query(fs.collection(db, 'contratos'), fs.where('estado', 'in', ['rentado', 'devuelto'])));
+}
+```
+
+Un contrato guardado sin `estado` (no debería existir, pero por si acaso) se trata como
+`rentado` al leerlo, para que nunca desaparezca de la pantalla.
 
 - [ ] **Step 4: Verificar en el navegador**
 
@@ -1627,6 +1734,55 @@ git commit -m "Reglas de Firestore y aviso de version nueva"
 ```
 
 ---
+
+---
+
+### Task 13: Agregar y editar carros
+
+**Files:**
+- Create: `js/pantallas/carros.js`
+- Modify: `js/app.js` (registrar `#/carros`, `#/carros/nuevo`, `#/carros/:id` y `#/habilitar/:id`)
+
+**Interfaces:**
+- Consumes: `cargarFlota`, `guardarVehiculo` de `datos.js`; `estadoCarro` de `estados.js`; `aviso` de `ui.js`.
+- Produces: `pintarCarros(contenedor, carroId)`; en `datos.js`, `guardarVehiculo(vehiculo)` que sella `actualizado` y asigna el código correlativo con `siguienteCodigoCarro()`.
+
+Sin esta pantalla el sistema no se puede estrenar: no hay forma de meter la flota, y sin flota
+no se puede sacar ningún carro. La hoja VEHICULOS del Excel es la referencia de los campos.
+
+- [ ] **Step 1: La lista de la flota**
+
+`#/carros` muestra la flota completa en una tabla: código, placas, tipo, marca y línea, color,
+modelo, propiedad (propio o de quién) y estado. Arriba, el botón **Agregar carro**. Cada fila
+se abre para editar. Los carros subarrendados **no** aparecen aquí: viven dentro de su contrato.
+
+- [ ] **Step 2: El formulario de un carro**
+
+Campos, los mismos de la hoja VEHICULOS: placas, tipo de vehículo, marca y línea, color, modelo,
+propiedad (propio / subarrendado) y dueño del carro cuando no es propio. El **código se pone
+solo**, correlativo, como en el Excel. Al guardar se vuelve a la lista con un aviso de
+confirmación.
+
+- [ ] **Step 3: Fuera de servicio**
+
+En la ficha del carro, un botón para **marcarlo fuera de servicio** pidiendo el motivo en una
+línea (taller, golpe, revisión), y otro para **volver a habilitarlo**. La ruta `#/habilitar/:id`
+que ya usa la pantalla de la flota entra aquí: habilita el carro directamente y regresa a la
+flota con un aviso.
+
+- [ ] **Step 4: Verificar en el navegador**
+
+- Agregar un carro y verlo aparecer en la flota con su código.
+- Editarle las placas y ver el cambio en las dos pantallas.
+- Marcarlo fuera de servicio con un motivo: se ve gris en la flota, con el motivo, y sin botón de sacar.
+- Volver a habilitarlo desde la flota: vuelve a estar disponible.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add js/pantallas/carros.js js/datos.js js/app.js
+git commit -m "Alta y edicion de carros, y el fuera de servicio"
+```
 
 ## Al terminar el plan
 

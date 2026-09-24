@@ -202,7 +202,6 @@ Avisos mientras se escribe:
 - El cliente tiene saldo pendiente de otro contrato.
 - El cliente ya devolvió tarde antes.
 - El carro tiene otro contrato encima de esas fechas.
-- El precio está por debajo del mínimo configurado, o son menos de dos días.
 
 Al final: el total estimado, el pago que se recibe (monto, forma de pago,
 porcentaje de tarjeta si aplica) y el botón **Guardar e imprimir contrato**.
@@ -249,14 +248,21 @@ Se abre con contraseña y se cierra sola por inactividad o al salir del sistema.
   la fecha. Los pagados se separan de los pendientes. Se baja en Excel y PDF.
 - **Dueños de carros ajenos**: lo que se le debe a cada uno, contrato por
   contrato, con las mismas casillas de selección y marcado de pago.
+- **Empleados**: alta, baja y el porcentaje de comisión de cada uno. Se ven
+  desde el mostrador (para elegir quién rentó el carro) pero solo se cambian
+  aquí.
 - **El negocio**: cobrado del mes, utilidad, pendientes de cobro y cuánto ha
   producido cada carro.
 
 ### Ajustes
 
-Empleados y su porcentaje, precios sugeridos por tipo de vehículo, porcentaje de
-tarjeta por defecto, mínimos que disparan avisos, calibración de impresión,
-contraseña del área de dinero y botón de respaldo.
+Precios sugeridos por tipo de vehículo, porcentaje de tarjeta por defecto,
+calibración de impresión, contraseña del área de dinero y botón de respaldo.
+
+**Los empleados y su porcentaje de comisión NO viven aquí**: viven dentro del
+área de dinero, detrás de la contraseña. El porcentaje de un empleado es dinero
+suyo, y quien puede cambiarlo puede subirse la comisión. Quien esté en el
+mostrador puede ver la lista para decir quién rentó el carro, pero no tocarla.
 
 ## 7. Datos
 
@@ -279,6 +285,18 @@ Colecciones en Firestore:
 
 Los carros subarrendados **no entran a `vehiculos`**: sus datos viven dentro del
 contrato, igual que en el Excel.
+
+**Nota para el plan de dinero:** el núcleo (plan 1) todavía no tiene dónde
+escribir `contratos/{id}/privado/dinero` — esa subcolección es de este plan de
+dinero, que todavía no existe — así que "Sacar carro" guarda `subarriendo.costoDia`
+(el costo por día del dueño en un carro ajeno) y `porcentajeComision` directo en
+`contratos/{id}`, donde los lee cualquier sesión con acceso a `contratos` (ver
+`firestore.rules`), no solo quien tiene la contraseña de dinero. Es a propósito,
+para no bloquear el núcleo por un plan que todavía no se diseña, pero es una
+concesión, no el destino final: el plan de dinero tiene que mover los dos
+campos a `privado/dinero` **y migrar los contratos que el núcleo ya escribió**
+— no basta con cambiar dónde escribe el sistema de ahora en adelante, los
+contratos viejos se quedarían con el dato expuesto.
 
 ## 8. Impresión
 
@@ -346,11 +364,67 @@ clientes, y merece el mismo cuidado que el Excel de hoy.
 Queda afuera a propósito, para que sea simple y rápido:
 
 - Fotos de los vehículos, de los daños o de los documentos.
-- Reservas en línea o desde la página web.
+- Reservas hechas por el cliente desde la página web. Las reservaciones las
+  anota él (ver §14); lo que queda afuera es que el público reserve solo.
 - Uso en celular (se usa en computadora de escritorio).
 - Varias cuentas de usuario con permisos distintos.
-- Facturación electrónica (FEL), contabilidad y control de mantenimiento.
+- Facturación electrónica (FEL) y contabilidad.
 - Seguimiento por GPS.
+
+## 12b. Lo que se agregó después de aprobar el diseño
+
+El 24 de septiembre de 2026, con el plan 1 casi terminado, el dueño pidió tres
+cosas más. Quedan aquí para que el diseño no mienta sobre lo que el sistema va
+a ser:
+
+### Reservaciones y calendario
+
+Una **reservación** aparta un carro antes de que salga: cliente (o solo nombre y
+teléfono si todavía no está registrado), fechas, **tipo de vehículo y, cuando el
+cliente lo pide, el carro exacto**, precio por día acordado, anticipo y una nota.
+Estados: *pendiente*, *entregada* (ya se volvió contrato) o *cancelada*.
+
+**Cambiar la unidad es un clic**: la reservación es la misma, solo cambia qué
+carro la cumple. Él lo pidió así porque los planes cambian a última hora.
+
+El **calendario** es su propia pestaña, para verlo cuando quiera. Muestra el mes
+con dos cosas por día: cuántos carros salen (reservaciones) y cuántos regresan
+(contratos). Al abrir un día: quién sale, con qué carro o qué tipo, y si dejó
+anticipo; y quién regresa, con *"pendiente de pagar Q817.60"* o *"ya pagó"*.
+Desde ahí se saca o se recibe el carro sin buscar nada.
+
+Al entrar al sistema, arriba de la flota, un **resumen del día** de cuatro
+números y nada más: hoy salen, hoy regresan, atrasados, garantías por liberar.
+Cada número lleva a su detalle. Es para saber de un vistazo si el día viene
+tranquilo, no para leerlo.
+
+El aviso de **"este carro ya está comprometido"** pasa a mirar también las
+reservaciones, no solo los contratos: ahí es donde se pierde un cliente.
+
+### Mantenimiento de la flota propia
+
+Cada carro propio lleva el control de sus servicios: **aceite y filtro, pastillas
+de freno, llantas, batería, alineación y balanceo, y servicio general**. Cada uno
+con dos intervalos — kilómetros y tiempo — y **toca con el que llegue primero**.
+
+El kilometraje no se escribe aparte: sale del que ya se anota al recibir cada
+carro. En la ficha se ve cuándo se hizo cada servicio, a qué kilometraje, y
+cuánto falta para el siguiente. Cuando falte poco, aparece donde ya aparecen los
+demás avisos.
+
+### Orden de construcción
+
+1. Núcleo (sacar carros, flota, cálculos) — el plan 1.
+2. Recibir y cobrar: cerrar el contrato, cobrar el saldo, liberar la garantía.
+3. Reservaciones y calendario.
+4. Impresión sobre el formulario preimpreso.
+5. Dinero: comisiones, pagos a dueños, empleados.
+6. Mantenimiento.
+7. Respaldo en su propio Excel.
+
+El cierre va antes que las reservaciones por una razón práctica: hoy el sistema
+puede sacar un carro pero no recibirlo, así que un contrato se quedaría abierto
+para siempre.
 
 ## 13. Publicación
 
