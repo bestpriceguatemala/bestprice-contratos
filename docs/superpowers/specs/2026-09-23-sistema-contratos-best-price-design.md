@@ -329,8 +329,13 @@ los nombres que el sistema entero usa.
 **Los puentes de lectura que siguen en el código:**
 - `pantallas/contratos.js:formaDePago()` — lee `forma` o `formaPago`, por los pagos de la salida que
   salieron guardados con el segundo nombre.
-- `pantallas/contratos.js:seccionSalida()` y el resumen en `nucleo/contrato.js` — leen `kmSalida` o
-  `kilometrajeSalida`, por los contratos antiguos que lo salvaron con ambos.
+- `pantallas/recibirCarro.js:conKmSalidaNormalizado()` — el puente real entre `kmSalida` y
+  `kilometrajeSalida`, por los contratos antiguos que lo salvaron con el nombre viejo.
+  `pantallas/contratos.js:dibujarDetalleEntrada()` llama a esta misma función antes de pintar el
+  detalle de un contrato, para que un contrato viejo también muestre su kilometraje ahí — corregido en
+  la revisión final de este plan, que encontró esta nota apuntando al lugar equivocado (decía que el
+  puente vivía en `contratos.js:seccionSalida()` y en `nucleo/contrato.js`, y ninguno de los dos lo
+  tiene).
 - `pantallas/clientes.js` y `nucleo/cliente.js` — leen `nombres` o `nombre1`, por los clientes que
   llegaron con ambos del Excel.
 

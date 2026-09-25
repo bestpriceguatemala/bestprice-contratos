@@ -20,10 +20,16 @@
 import { lineasSalida, lineasDevolucion, resumen } from '../nucleo/contrato.js';
 import { estadoContrato, pendientesDe } from '../nucleo/estados.js';
 import { filtrar, textoDeContrato } from '../nucleo/busqueda.js';
-import { textoDosDecimales } from '../nucleo/dinero.js';
+import { textoDosDecimales, textoEntero } from '../nucleo/dinero.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import { cargarContratos, cargarContrato } from '../datos.js';
 import { dinero, fecha } from '../ui.js';
+// El puente entre kmSalida y kilometrajeSalida (contratos antiguos que
+// guardaron el kilometraje de salida con el nombre viejo) vive en
+// recibirCarro.js: conKmSalidaNormalizado(). Esta pantalla lo reutiliza tal
+// cual en vez de reimplementarlo, para que exista un solo lugar que decida
+// cómo leer ese campo (§7b del diseño).
+import { conKmSalidaNormalizado } from './recibirCarro.js';
 
 // Mismo escape que clientes.js/carros.js/flota.js: el texto libre del
 // contrato (nombre del cliente, observaciones, destino de la carta poder...)
@@ -293,6 +299,21 @@ function filaLinea(l) {
   return `<li><span>${esc(l.concepto)}${detalle}</span><strong>${dinero(l.monto)}</strong></li>`;
 }
 
+// Un carro ajeno (no es de la flota propia) guarda tipo, color, modelo y
+// dueño en `carroAjeno` (sacarCarro.js) — se guardaban pero nunca se veían
+// en este detalle, que es la única pantalla donde se puede consultar cómo
+// era el carro de una renta pasada (hallazgo de la revisión final). Marca y
+// modelo ya viajan combinados en `carroDescripcion` (mostrado como "Carro"
+// arriba); aquí se agregan los que faltaban.
+function camposCarroAjeno(c) {
+  if (!c?.ajeno || !c?.carroAjeno) return '';
+  return `
+        ${campoSoloLectura('Tipo de vehículo', c.carroAjeno.tipo)}
+        ${campoSoloLectura('Color', c.carroAjeno.color)}
+        ${campoSoloLectura('Modelo', c.carroAjeno.modelo)}
+        ${campoSoloLectura('Dueño del carro', c.carroAjeno.dueno)}`;
+}
+
 function seccionSalida(c) {
   const carro = [c?.carroPlacas, c?.carroDescripcion].filter(Boolean).join(' · ') || '—';
   const conductor = c?.conductorAdicional?.nombre || '';
@@ -308,8 +329,9 @@ function seccionSalida(c) {
         ${campoSoloLectura('Lugar', c?.lugar)}
         ${campoSoloLectura('Días contratados', c?.dias)}
         ${campoSoloLectura('Precio por día', c?.precioDia != null ? dinero(c.precioDia) : '')}
-        ${campoSoloLectura('Kilometraje de salida', c?.kmSalida)}
+        ${campoSoloLectura('Kilometraje de salida', c?.kmSalida != null ? textoEntero(c.kmSalida) : '')}
         ${campoSoloLectura('Combustible de salida', c?.combustibleSalida)}
+        ${camposCarroAjeno(c)}
         ${campoSoloLectura('Devolución prevista', fecha(c?.devolucionPrevista))}
         ${campoSoloLectura('Quién lo rentó', c?.rentadoPor)}
         ${campoSoloLectura('Conductor adicional', conductor)}
@@ -477,6 +499,12 @@ async function dibujarDetalleEntrada(contenedor, contratoId, sigoVigente) {
     contenedor.innerHTML = `<p class="pendiente">No se encontró el contrato ${esc(contratoId)}.</p>`;
     return;
   }
+
+  // IMPORTANTE de la revisión final: sin este puente, un contrato viejo
+  // (guardado antes de que "Sacar carro" empezara a escribir `kmSalida`)
+  // mostraba "Kilometraje de salida —" aquí, y este detalle es el único
+  // lugar donde se puede consultar el kilometraje de una renta pasada.
+  contrato = conKmSalidaNormalizado(contrato);
 
   contenedor.innerHTML = plantillaDetalle(contrato);
   el('ct-volver')?.addEventListener('click', () => { location.hash = '#/contratos'; });
