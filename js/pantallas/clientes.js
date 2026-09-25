@@ -74,9 +74,17 @@ export function contratosDe(cliente, contratos) {
  * uno con `resumen()` (nucleo/contrato.js) — nunca una cifra propia — porque
  * "nunca ajustar una cifra para que cuadre" (regla del dueño) empieza por no
  * inventar aquí un total que el núcleo no calculó.
+ *
+ * IMPORTANTE de la revisión final: se suma `Math.max(0, ...)` de cada saldo,
+ * no el saldo tal cual — igual que ya corrigió el plan 1 en avisos.js
+ * (`avisosDeSalida`, commit edb1c06). Sin el recorte, un cliente que debe
+ * Q500 en un contrato y quedó con Q500 a favor en otro sumaba neto 0: la
+ * ficha no mostraba ninguna marca roja mientras que "Sacar carro" sí avisaba
+ * "Este cliente debe Q500.00" — la misma persona, dos respuestas distintas.
+ * Una deuda y un saldo a favor son dos hechos distintos y no se cancelan.
  */
 export function saldoPendienteDe(contratosCliente) {
-  return suma(...contratosCliente.map((c) => resumen(c).saldo));
+  return suma(...contratosCliente.map((c) => Math.max(0, resumen(c).saldo)));
 }
 
 /** Cuántas veces regresó tarde, contando solo lo que ya se cerró (con cierre). */
@@ -399,6 +407,12 @@ export async function pintarClientes(contenedor, clienteId) {
   // UTC y Guatemala va seis horas atrás — el mismo motivo por el que
   // carros.js y flota.js ya lo hacen así (ver sus comentarios).
   const hoy = hoyISO();
+
+  // En un abrir en frío (sin nada todavía en memoria de esta sesión) esta
+  // pantalla se quedaba en blanco mientras cargarClientes/cargarContratosAbiertos
+  // contestaban — las otras tres pantallas (flota.js, contratos.js,
+  // recibirCarro.js) ya avisan "Cargando…" en ese mismo momento.
+  contenedor.innerHTML = '<p class="pendiente">Cargando…</p>';
 
   let clientes = [];
   let contratos = [];

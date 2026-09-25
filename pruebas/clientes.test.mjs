@@ -68,6 +68,20 @@ test('saldoPendienteDe: suma el saldo real de cada contrato, con resumen()', () 
   assert.equal(saldoPendienteDe([]), 0);
 });
 
+// IMPORTANTE de la revisión final: mismo hallazgo que ya corrigió el plan 1
+// en avisos.js (commit edb1c06) reapareciendo en esta pantalla. Un cliente
+// que debe Q500 en un contrato y quedó con Q500 a favor en otro sumaba neto
+// 0 (sin marca roja en la ficha), mientras "Sacar carro" sí avisaba "Este
+// cliente debe Q500.00" — la misma persona, dos respuestas distintas. Una
+// deuda y un saldo a favor son dos hechos distintos y no se cancelan.
+test('saldoPendienteDe: una deuda real no se cancela con un sobrepago en otro contrato (no se netean)', () => {
+  const debe500 = { dias: 5, precioDia: 100, pagos: [] }; // saldo 500
+  const sobrepago500 = {
+    dias: 1, precioDia: 100, devolucionPrevista: '2026-07-01', cierre: { fechaReal: '2026-07-01' }, pagos: [{ monto: 600, porcentajeTarjeta: 0 }],
+  }; // saldo -500
+  assert.equal(saldoPendienteDe([debe500, sobrepago500]), 500, 'la deuda real, no el neto (0, que escondería la deuda)');
+});
+
 test('vecesTarde: cuenta solo los contratos que de verdad tuvieron atraso', () => {
   const contratos = [
     { dias: 2, precioDia: 100, devolucionPrevista: '2026-09-10', cierre: { fechaReal: '2026-09-12' } }, // 2 días tarde
