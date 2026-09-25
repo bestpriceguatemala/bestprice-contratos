@@ -166,6 +166,75 @@ export async function cargarContratosAbiertos(alLlegar) {
 }
 
 /**
+ * Los contratos de un rango de fechas (por `fechaSalida`), como `{ datos,
+ * fallo }` (ver resultadoLectura). Es lo que abre la pantalla de historial
+ * (#/contratos, Tarea 8): entra con el mes en curso y solo pide un rango
+ * distinto cuando el dueño lo cambia.
+ *
+ * A propósito NO se apoya en `cargarConSincronia`: esa función siempre trae
+ * LA COLECCIÓN ENTERA (bien para clientes y flota, que de por sí son chicos,
+ * pero mal para contratos — un negocio de años puede acumular miles, y el
+ * diseño promete que "los años viejos no se cargan al abrir" — §9 del
+ * diseño: "el sistema se queda rápido con el negocio entero adentro"). En
+ * cambio arma una consulta a Firestore filtrada por `fechaSalida` (que
+ * compara bien como texto por venir en 'YYYY-MM-DD', formato ISO, igual que
+ * el resto de fechas.js), y solo guarda localmente lo que ese rango trajo.
+ * `guardarLocal` (cache.js) escribe documento por documento (`put`), así que
+ * un rango ya guardado antes convive con este sin perderse — la copia local
+ * de contratos crece rango por rango, nunca de un solo golpe.
+ *
+ * Mismo contrato que cargarFlota/cargarClientes en todo lo demás: sirve la
+ * copia local (la que ya cayera dentro de este mismo rango) al instante,
+ * sincroniza por detrás, y nunca confunde "vacío" con "la nube falló"
+ * (resultadoLectura). `alLlegar({ datos, fallo })` avisa solo cuando la
+ * sincronía de atrás trae algo distinto de lo ya servido, o cuando falla.
+ */
+export async function cargarContratos({ desde, hasta } = {}, alLlegar) {
+  const enRango = (c) => (!desde || (c?.fechaSalida || '') >= desde)
+    && (!hasta || (c?.fechaSalida || '') <= hasta);
+
+  const locales = (await leerLocal('contratos')).filter(enRango);
+
+  async function leerRemotoDelRango() {
+    const { db, fsMod } = await iniciarFirebase();
+    const restricciones = [];
+    if (desde) restricciones.push(fsMod.where('fechaSalida', '>=', desde));
+    if (hasta) restricciones.push(fsMod.where('fechaSalida', '<=', hasta));
+    const referencia = fsMod.collection(db, 'contratos');
+    const consulta = restricciones.length ? fsMod.query(referencia, ...restricciones) : referencia;
+    const instantanea = await conLimiteDeTiempo(fsMod.getDocs(consulta));
+    return instantanea.docs.map((d) => ({ id: d.id, ...d.data() }));
+  }
+
+  const sincronizar = leerRemotoDelRango().then(async (remotos) => {
+    const mezclados = mezclar(locales, remotos);
+    await guardarLocal('contratos', mezclados);
+    return mezclados;
+  });
+
+  if (locales.length) {
+    // Mismo mecanismo que cargarConSincronia: la pantalla ya dibujó con lo
+    // local, y esto sigue por detrás para avisar si la nube trae algo
+    // distinto o si falló — nunca antes de servir lo que ya había.
+    sincronizar
+      .then((mezclados) => {
+        const r = resultadoLectura(locales, { ok: true, valor: mezclados });
+        if (alLlegar && distintos(locales, r.datos)) alLlegar(r);
+      })
+      .catch(() => {
+        if (alLlegar) alLlegar(resultadoLectura(locales, { ok: false }));
+      });
+    return resultadoLectura(locales, { ok: true, valor: locales });
+  }
+  try {
+    const remotos = await sincronizar;
+    return resultadoLectura(locales, { ok: true, valor: remotos });
+  } catch {
+    return resultadoLectura(locales, { ok: false });
+  }
+}
+
+/**
  * Un contrato por su id: la copia local primero (para no esperar la nube si
  * ya se tiene), y si no está ahí, se pide directo a Firestore por su id (no
  * hace falta traer toda la colección para esto). `null` si en verdad no

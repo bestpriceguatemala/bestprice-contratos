@@ -8,6 +8,7 @@ import { pintarSacarCarro } from './pantallas/sacarCarro.js';
 import { pintarRecibirCarro } from './pantallas/recibirCarro.js';
 import { pintarCarros } from './pantallas/carros.js';
 import { pintarClientes } from './pantallas/clientes.js';
+import { pintarContratos } from './pantallas/contratos.js';
 import { vigilarVersion } from './version.js';
 
 registrarPantalla('#/flota', pintarFlota);
@@ -24,6 +25,8 @@ registrarPantalla('#/habilitar/:carroId', pintarCarros);
 // ya usa carros.js para '#/carros/nuevo'.
 registrarPantalla('#/clientes', pintarClientes);
 registrarPantalla('#/clientes/:clienteId', pintarClientes);
+registrarPantalla('#/contratos', pintarContratos);
+registrarPantalla('#/contratos/:contratoId', pintarContratos);
 
 const pantallaEntrada = document.getElementById('entrada');
 const pantallaApp = document.getElementById('app');
