@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  q, suma, conTarjeta, recargoTarjeta, textoDosDecimales,
+  q, suma, conTarjeta, recargoTarjeta, textoDosDecimales, textoConQ, textoEntero,
 } from '../js/nucleo/dinero.js';
 
 test('redondea a dos decimales', () => {
@@ -60,4 +60,26 @@ test('textoDosDecimales siempre lleva dos decimales y separador de miles', () =>
   assert.equal(textoDosDecimales(1234.5), '1,234.50');
   assert.equal(textoDosDecimales(0), '0.00');
   assert.equal(textoDosDecimales(undefined), '0.00');
+});
+
+// Revisión final: cierre.js interpolaba textoDosDecimales de un subtotal
+// negativo directo en un texto "Q${...}", y el signo de un negativo queda
+// pegado adentro de la Q: "Q-95,819.00". textoConQ es la versión del núcleo
+// que ya pone el signo antes, igual que dinero() en ui.js.
+test('textoConQ: el signo va antes de la Q, nunca pegado adentro', () => {
+  assert.equal(textoConQ(-95819), '-Q95,819.00');
+  assert.equal(textoConQ(730), 'Q730.00');
+  assert.equal(textoConQ(0), 'Q0.00');
+  assert.equal(textoConQ(undefined), 'Q0.00');
+});
+
+// Revisión final: el kilometraje se mostraba distinto en dos pantallas —
+// "45,000.00" (textoDosDecimales) en recibirCarro.js y "45000" (crudo) en
+// contratos.js. textoEntero es el único formato que ahora usan las dos: con
+// separador de miles, sin decimales.
+test('textoEntero: separador de miles, sin decimales, para kilometrajes', () => {
+  assert.equal(textoEntero(45000), '45,000');
+  assert.equal(textoEntero(0), '0');
+  assert.equal(textoEntero(undefined), '0');
+  assert.equal(textoEntero(45600.7), '45,601', 'redondea, no trunca');
 });
