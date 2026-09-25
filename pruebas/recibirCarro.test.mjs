@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   conKmSalidaNormalizado, textoBotonPago, textoAvisoRecibido, textoSaldo, totalDeEstaCobranza,
-  leerParametroRuta, textoAvisoCobro,
+  leerParametroRuta, textoAvisoCobro, valoresIniciales, textoCorreccion,
 } from '../js/pantallas/recibirCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { agregarPago } from '../js/datos.js';
@@ -144,4 +144,40 @@ test('textoAvisoCobro: saldo en cero, dice que se cobró por completo', () => {
 
 test('textoAvisoCobro: saldo a favor del cliente, tampoco falta cobrar', () => {
   assert.equal(textoAvisoCobro(14, -50), 'Contrato 14 cobrado por completo.');
+});
+
+// CRÍTICO de la revisión final: el botón "atrás" del navegador reabría un
+// cierre ya hecho sobre una pantalla en blanco, lista para pisar los daños y
+// el descuento negociados con `{fechaReal: hoy, danos: 0, descuento: 0}`.
+// valoresIniciales es lo que ahora decide con qué se prellena el formulario.
+test('valoresIniciales: sin cierre todavía, arranca en blanco con la fecha de hoy (no es corrección)', () => {
+  assert.deepEqual(valoresIniciales({ id: 'c1' }, '2026-09-25'), { fechaReal: '2026-09-25' });
+  assert.deepEqual(valoresIniciales(null, '2026-09-25'), { fechaReal: '2026-09-25' });
+});
+
+test('valoresIniciales: con un cierre ya guardado, prellena TODO el cierre real (modo de corrección)', () => {
+  const contrato = {
+    id: 'c1',
+    cierre: {
+      fechaReal: '2026-08-25', horaReal: '10:30', lugarEntrada: 'OFICINA',
+      kmEntrada: 45600, combustible: 130, danos: 200, danosDetalle: 'Rayón en la puerta',
+      varios: 0, descuento: 300,
+    },
+  };
+  const iniciales = valoresIniciales(contrato, '2026-09-25');
+  // El cierre real entero, tal cual — nunca la fecha de hoy ni campos en
+  // blanco: es justo lo que hubiera pisado los daños y el descuento.
+  assert.deepEqual(iniciales, contrato.cierre);
+  assert.equal(iniciales.danos, 200, 'los daños negociados no desaparecen');
+  assert.equal(iniciales.descuento, 300, 'el descuento negociado no desaparece');
+});
+
+test('textoCorreccion: null cuando el contrato todavía no tiene cierre', () => {
+  assert.equal(textoCorreccion({ id: 'c1' }), null);
+  assert.equal(textoCorreccion(null), null);
+});
+
+test('textoCorreccion: nombra la fecha real, formateada, cuando ya se recibió', () => {
+  const contrato = { id: 'c1', cierre: { fechaReal: '2026-08-25' } };
+  assert.equal(textoCorreccion(contrato), 'Este contrato ya se recibió el 25 ago 2026 — estás corrigiendo el cierre.');
 });

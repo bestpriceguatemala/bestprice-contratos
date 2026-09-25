@@ -24,7 +24,7 @@
 // desde aquí.
 import { construirCierre, problemasDelCierre } from '../nucleo/cierre.js';
 import { lineasDevolucion, resumen } from '../nucleo/contrato.js';
-import { q, textoDosDecimales } from '../nucleo/dinero.js';
+import { q, textoEntero } from '../nucleo/dinero.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
   cargarContrato, agregarPago, guardarContrato, cargarAjustes,
@@ -66,6 +66,44 @@ export function conKmSalidaNormalizado(contrato) {
   if (!contrato) return contrato;
   if (contrato.kmSalida) return contrato;
   return { ...contrato, kmSalida: q(contrato.kilometrajeSalida) };
+}
+
+/**
+ * Con qué valores arranca el bloque "Al recibir el carro": vacíos y la fecha
+ * de hoy si el contrato todavía no tiene cierre, o el cierre YA GUARDADO,
+ * completo, si el mostrador volvió a esta pantalla sobre un contrato que ya
+ * se recibió — por ejemplo con el botón "atrás" del navegador después de
+ * guardar (CRÍTICO de la revisión final).
+ *
+ * Antes esta pantalla no distinguía los dos casos: siempre arrancaba en
+ * blanco con la fecha de hoy, así que reabrir un cierre ya hecho se veía
+ * igual que recibir el carro por primera vez — con 32 días de atraso
+ * inventados de la nada y lista para guardar `{fechaReal: hoy, danos: 0,
+ * descuento: 0}` encima de los daños y el descuento que el dueño ya había
+ * negociado. Al prellenar con el cierre real, esta misma pantalla se
+ * convierte en la única forma de corregir un cierre mal tecleado — que hoy
+ * no existía de ninguna otra manera.
+ *
+ * Se apoya en el spread de `contrato.cierre`: los mismos nombres de campo
+ * que ya arma `construirCierre` (nucleo/cierre.js), así que un campo nuevo
+ * que se agregue ahí algún día llega solo, sin tener que tocar esta función.
+ * Función pura — nada de DOM ni de `location` — para poder probarla sola.
+ */
+export function valoresIniciales(contrato, hoy = hoyISO()) {
+  const cierre = contrato?.cierre;
+  if (!cierre?.fechaReal) return { fechaReal: hoy };
+  return { ...cierre };
+}
+
+/**
+ * El aviso de que esta pantalla está en modo de corrección, con la fecha en
+ * que de verdad se recibió el carro — o `null` si el contrato todavía no
+ * tiene cierre y esto es un "recibir carro" normal.
+ */
+export function textoCorreccion(contrato) {
+  const fechaReal = contrato?.cierre?.fechaReal;
+  if (!fechaReal) return null;
+  return `Este contrato ya se recibió el ${fecha(fechaReal)} — estás corrigiendo el cierre.`;
 }
 
 /**
@@ -169,24 +207,32 @@ function plantilla(contrato, soloCobro) {
   const pagadoSalida = resumen(contrato).pagado;
   const encabezado = [contrato.carroDescripcion, contrato.carroPlacas].filter(Boolean).join(' · ');
 
+  // Modo de corrección (CRÍTICO de la revisión final): el contrato ya tiene
+  // un cierre guardado, así que esto no es "recibir carro" por primera vez —
+  // es corregir uno mal tecleado. `iniciales` trae ese cierre completo (ver
+  // valoresIniciales más arriba) para prellenar cada campo con lo que de
+  // verdad se guardó, en vez de arrancar en blanco listo para pisarlo.
+  const enCorreccion = Boolean(textoCorreccion(contrato));
+  const iniciales = valoresIniciales(contrato);
+
   // Modo de solo cobro: el bloque "Al recibir el carro" no se dibuja en
   // absoluto (ni fecha real, ni kilometraje, ni daños) — no hay nada de eso
   // que reeditar aquí, el cierre ya está hecho (o el carro ni ha vuelto, si
   // el abono viene de un contrato que aún anda afuera con saldo pendiente).
   const bloqueCierre = soloCobro ? '' : `
         <section class="sc-bloque">
-          <h2>Al recibir el carro</h2>
+          <h2>${enCorreccion ? esc(textoCorreccion(contrato)) : 'Al recibir el carro'}</h2>
           <div class="sc-campos">
-            ${campo('rc-fecha-real', 'Fecha real de entrada', { tipo: 'date', valor: hoyISO() })}
-            ${campo('rc-hora-real', 'Hora real de entrada', { tipo: 'time' })}
-            ${campo('rc-lugar-entrada', 'Lugar de entrada')}
-            ${campo('rc-km-entrada', 'Kilometraje de entrada', { tipo: 'number', paso: '1', minimo: '0' })}
-            ${campo('rc-combustible', 'Combustible (monto a cobrar)', { tipo: 'number', paso: '0.01', minimo: '0' })}
-            ${campo('rc-danos', 'Daños', { tipo: 'number', paso: '0.01', minimo: '0' })}
-            ${campo('rc-danos-detalle', 'Daños — detalle')}
-            ${campo('rc-varios', 'Varios', { tipo: 'number', paso: '0.01', minimo: '0' })}
-            ${campo('rc-varios-detalle', 'Varios — detalle')}
-            ${campo('rc-descuento', 'Descuento', { tipo: 'number', paso: '0.01', minimo: '0' })}
+            ${campo('rc-fecha-real', 'Fecha real de entrada', { tipo: 'date', valor: iniciales.fechaReal })}
+            ${campo('rc-hora-real', 'Hora real de entrada', { tipo: 'time', valor: iniciales.horaReal })}
+            ${campo('rc-lugar-entrada', 'Lugar de entrada', { valor: iniciales.lugarEntrada })}
+            ${campo('rc-km-entrada', 'Kilometraje de entrada', { tipo: 'number', paso: '1', minimo: '0', valor: iniciales.kmEntrada })}
+            ${campo('rc-combustible', 'Combustible (monto a cobrar)', { tipo: 'number', paso: '0.01', minimo: '0', valor: iniciales.combustible })}
+            ${campo('rc-danos', 'Daños', { tipo: 'number', paso: '0.01', minimo: '0', valor: iniciales.danos })}
+            ${campo('rc-danos-detalle', 'Daños — detalle', { valor: iniciales.danosDetalle })}
+            ${campo('rc-varios', 'Varios', { tipo: 'number', paso: '0.01', minimo: '0', valor: iniciales.varios })}
+            ${campo('rc-varios-detalle', 'Varios — detalle', { valor: iniciales.variosDetalle })}
+            ${campo('rc-descuento', 'Descuento', { tipo: 'number', paso: '0.01', minimo: '0', valor: iniciales.descuento })}
           </div>
           <p class="sc-nota">
             El combustible se escribe a mano, como un monto a cobrar: el sistema no lo calcula por nivel de tanque.
@@ -207,8 +253,8 @@ function plantilla(contrato, soloCobro) {
             ${esc(encabezado || 'Sin datos del carro')}<br>
             Fecha de salida: ${esc(fecha(contrato.fechaSalida) || '—')}<br>
             Devolución prevista: ${esc(fecha(contrato.devolucionPrevista) || '—')}<br>
-            Kilometraje de salida: ${esc(textoDosDecimales(contrato.kmSalida))}<br>
-            Ya pagó al salir: ${esc(dinero(pagadoSalida))}
+            Kilometraje de salida: ${esc(textoEntero(contrato.kmSalida))}<br>
+            Pagado hasta ahora: ${esc(dinero(pagadoSalida))}
           </div>
           ${soloCobro ? '<p class="sc-nota">El cierre de este contrato ya está hecho: aquí solo se registra el abono.</p>' : ''}
         </section>
@@ -250,7 +296,7 @@ ${bloqueCierre}
 
         <ul id="rc-problemas" class="sc-avisos-lista"></ul>
 
-        <button type="submit" id="rc-guardar" class="btn btn-primario">${soloCobro ? 'Cobrar' : 'Recibir y cobrar'}</button>
+        <button type="submit" id="rc-guardar" class="btn btn-primario">${soloCobro ? 'Cobrar' : (enCorreccion ? 'Guardar correcciones' : 'Recibir y cobrar')}</button>
       </aside>
     </form>`;
 }
@@ -296,6 +342,11 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
   }
 
   contrato = conKmSalidaNormalizado(contrato);
+  // CRÍTICO de la revisión final: si el contrato ya tiene un cierre guardado
+  // (por ejemplo, el botón "atrás" del navegador volvió aquí después de
+  // guardar), esto es un modo de corrección, no un "recibir carro" nuevo —
+  // ver valoresIniciales/textoCorreccion más arriba.
+  const enCorreccion = Boolean(textoCorreccion(contrato));
 
   let tarjetaTocada = false;
   let montoPagoTocado = false;
@@ -342,7 +393,7 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
     // cuenta hecha aquí mismo con los campos del formulario.
     const lineas = lineasDevolucion(contratoActual);
     el('rc-lineas').innerHTML = [
-      `<li><span>Ya pagó al salir</span><strong>${dinero(pagadoSalida)}</strong></li>`,
+      `<li><span>Pagado hasta ahora</span><strong>${dinero(pagadoSalida)}</strong></li>`,
       ...lineas.map(filaLinea),
     ].join('');
 
@@ -394,7 +445,10 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
       return;
     }
 
-    el('rc-guardar').textContent = textoBotonPago(saldo, montoField);
+    // En modo de corrección el botón siempre dice "Guardar correcciones":
+    // aquí no se está "recibiendo" el carro (ya volvió hace rato), así que
+    // "Recibir y cobrar"/"Recibir y abonar" contarían una historia que no es.
+    el('rc-guardar').textContent = enCorreccion ? 'Guardar correcciones' : textoBotonPago(saldo, montoField);
 
     // Los problemas de problemasDelCierre (nucleo/cierre.js) van en rojo,
     // justo arriba del botón, y mientras haya alguno el botón no guarda.
@@ -467,11 +521,8 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
 
       // agregarPago (datos.js) es pura y ya decide si el monto de verdad
       // suma algo (ignora vacíos, ceros y negativos): "Recibir sin cobrar"
-      // no necesita su propio camino aparte.
-      //
-      // A propósito NO se usa registrarPago aquí: esa función se salta el
-      // guardado entero cuando el pago no suma nada, y aquí el contrato
-      // SIEMPRE tiene que guardarse — con o sin cobro — porque lo que
+      // no necesita su propio camino aparte. El contrato SIEMPRE se guarda
+      // aquí abajo con guardarContrato — con o sin cobro — porque lo que
       // cambió es el cierre completo, no solo un pago.
       const contratoConPago = montoField > 0
         ? agregarPago(contratoConCierre, {

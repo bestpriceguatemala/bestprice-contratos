@@ -2,7 +2,7 @@
 // se le entrega a la pantalla, sin tocar Firestore ni IndexedDB.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resultadoLectura, contratoParaGuardar } from '../js/datos.js';
+import { resultadoLectura, contratoParaGuardar, guardarContrato } from '../js/datos.js';
 
 // CRÍTICO de la revisión final: una lectura de contratos fallida se dibujaba
 // como "todos los carros disponibles" porque cargarConSincronia devolvía []
@@ -67,4 +67,23 @@ test('un contrato devuelto pero con saldo o garantía pendiente se guarda como "
   };
   const guardado = contratoParaGuardar(contrato, { id: 'c1', numero: 1 });
   assert.equal(guardado.estado, 'devuelto');
+});
+
+// CRÍTICO de la revisión final: el mismo hueco que deja reabrir un cierre ya
+// hecho en blanco (recibirCarro.js) podría, en teoría, guardar una garantía
+// liberada sobre un contrato que en realidad sigue debiendo. Candado barato:
+// guardarContrato rechaza esa combinación ANTES de tocar la nube — por eso
+// esta prueba puede llamarlo directo, sin mock de Firestore, y esperar el
+// rechazo (el chequeo corre antes del primer `await` que de verdad usa la
+// red).
+test('CRÍTICO: guardarContrato rechaza una garantía liberada si todavía hay saldo pendiente', async () => {
+  const contrato = {
+    dias: 4,
+    precioDia: 700,
+    devolucionPrevista: '2026-08-24',
+    cierre: { fechaReal: '2026-08-25', danos: 200, descuento: 0 },
+    pagos: [], // no pagó nada
+    garantiaLiberada: true, // el mismo hueco que abre CRÍTICO 2
+  };
+  await assert.rejects(() => guardarContrato(contrato), /todavía debe/i);
 });

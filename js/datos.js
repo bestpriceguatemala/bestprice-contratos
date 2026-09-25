@@ -369,6 +369,20 @@ export function contratoParaGuardar(contrato, { id, numero, ahora = Date.now() }
  * ese mismo número en vez de gastar uno nuevo.
  */
 export async function guardarContrato(contrato) {
+  // Candado barato (CRÍTICO 2 de la revisión final): reabrir "Recibir carro"
+  // sobre un contrato ya cerrado — por ejemplo con el botón "atrás" del
+  // navegador — podía guardar un cierre en blanco encima del real sin que
+  // nada lo impidiera. Hoy solo liberarGarantia() escribe
+  // `garantiaLiberada: true`, pero el hueco es el mismo: nada evitaba que
+  // ALGUNA pantalla guardara una garantía liberada sobre un contrato que en
+  // realidad sigue debiendo. Se revisa aquí, en el único lugar donde de
+  // verdad se escribe a la nube, no en cada pantalla que llama a esto — y
+  // con el mismo mensaje que ya usa liberarGarantia(), para que el dueño
+  // nunca lea dos frases distintas para el mismo motivo.
+  if (contrato?.garantiaLiberada) {
+    const motivo = puedeLiberarse(contrato);
+    if (motivo) throw new Error(motivo);
+  }
   const numero = contrato?.numero || (await siguienteNumeroContrato());
   const { db, fsMod } = await iniciarFirebase();
   const ref = contrato?.id ? fsMod.doc(db, 'contratos', contrato.id) : fsMod.doc(fsMod.collection(db, 'contratos'));
@@ -403,19 +417,6 @@ export function agregarPago(contrato, {
   };
   const pagos = Array.isArray(contrato?.pagos) ? contrato.pagos : [];
   return { ...contrato, pagos: [...pagos, pago] };
-}
-
-/**
- * Registra un abono nuevo y guarda el contrato con `guardarContrato`. Si el
- * pago no aportó nada (`agregarPago` lo ignoró — ver arriba), `agregarPago`
- * devuelve el mismísimo objeto `contrato` que recibió, así que compararlos
- * por referencia basta para saber que no hay nada que guardar: no tiene
- * sentido gastar una escritura en Firestore por un pago vacío.
- */
-export async function registrarPago(contrato, pago) {
-  const actualizado = agregarPago(contrato, pago);
-  if (actualizado === contrato) return contrato;
-  return guardarContrato(actualizado);
 }
 
 /**
