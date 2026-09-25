@@ -21,14 +21,20 @@
   <div id="app" hidden>
     <header class="barra">
       <strong>Best Price — Contratos</strong>
-      <input type="search" id="buscador" placeholder="Buscar cliente, placas o número de contrato">
+      <!--
+        Revisión final: este buscador y los enlaces a Dinero/Ajustes no
+        tienen ninguna pantalla detrás todavía (ni app.js ni router.js los
+        cablean) — un cuadro de búsqueda que se traga lo que se escribe es
+        peor que no tener buscador. Se ocultan hasta que esos planes existan.
+      -->
+      <input type="search" id="buscador" placeholder="Buscar cliente, placas o número de contrato" hidden>
       <nav>
         <a href="#/flota">Flota</a>
         <a href="#/carros">Carros</a>
         <a href="#/clientes">Clientes</a>
         <a href="#/contratos">Contratos</a>
-        <a href="#/dinero">Dinero</a>
-        <a href="#/ajustes">Ajustes</a>
+        <a href="#/dinero" hidden>Dinero</a>
+        <a href="#/ajustes" hidden>Ajustes</a>
       </nav>
       <button id="salir" class="btn">Salir</button>
     </header>
