@@ -6,19 +6,38 @@
 // cliente que no paga unos daños dejaría el carro parado sin necesidad.
 import { resumen } from './contrato.js';
 import { diasAtraso, hoyISO } from './fechas.js';
+import { q } from './dinero.js';
 
-/** Lo que falta para poder cerrar: saldo por cobrar y garantía por liberar. */
+/**
+ * Lo que falta para poder cerrar: saldo por cobrar y garantía por liberar.
+ *
+ * `garantia` ya no es solo `!garantiaLiberada` (hallazgo importante de la
+ * revisión final): una renta pagada en efectivo, sin tarjeta de por medio,
+ * tiene `garantiaMonto` en 0 — no hay nada que liberar, así que exigir el
+ * mismo candado de "Liberar garantía" (con su confirm de "¿Liberar la
+ * garantía de Q0.00...? Esto no se puede deshacer") era pedir una acción sin
+ * sentido para poder cerrar un contrato que ya no debe nada.
+ */
 export function pendientesDe(c) {
   return {
     saldo: resumen(c).saldo,
-    garantia: !c?.garantiaLiberada,
+    garantia: q(c?.garantiaMonto) > 0 && !c?.garantiaLiberada,
   };
 }
 
-/** Un contrato se cierra cuando no debe nada y la garantía ya se liberó. */
+/**
+ * Un contrato se cierra cuando no debe nada y la garantía ya se liberó.
+ *
+ * `saldo <= 0`, no `saldo === 0` (hallazgo importante de la revisión final):
+ * un descuento dado después de haber cobrado de más deja el saldo negativo
+ * (resumen() a propósito no lo recorta a 0, ver su comentario), y con
+ * `=== 0` ese contrato se quedaba "devuelto" para siempre, aunque ya no le
+ * debiera nada a nadie — cargarContratosAbiertos() lo seguía trayendo en
+ * cada apertura sin que hubiera nada más que hacer con él.
+ */
 export function puedeCerrar(c) {
   const { saldo, garantia } = pendientesDe(c);
-  return saldo === 0 && !garantia;
+  return saldo <= 0 && !garantia;
 }
 
 /** 'rentado' mientras el carro anda fuera, 'devuelto' hasta cerrarlo, 'cerrado' al final. */

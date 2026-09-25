@@ -24,6 +24,14 @@ import {
   guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato,
 } from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
+// El alta rápida de aquí y la ficha de clientes.js tienen que pedir
+// exactamente los mismos campos (Tarea 7) — por eso esta pantalla ya no
+// inventa su propia lista de siete campos sueltos ni su propia forma de
+// armar el objeto a guardar: se dibuja desde CAMPOS_CLIENTE y se guarda con
+// construirCliente, igual que la ficha.
+import {
+  CAMPOS_CLIENTE, construirCliente, nombreCompleto, faltaAlgo,
+} from '../nucleo/cliente.js';
 
 // El diseño (§5) dice: "el porcentaje por defecto es 5 %". Este plan todavía
 // no tiene una lista de empleados con su propio porcentaje (eso es de un
@@ -57,9 +65,18 @@ export function ultimos4Digitos(numero) {
   return String(numero ?? '').replace(/\D/g, '').slice(-4);
 }
 
-const nombreCompletoCliente = (c) => [c?.nombre1, c?.nombre2, c?.apellido1, c?.apellido2].filter(Boolean).join(' ');
 const descripcionCarroPropio = (c) => [c?.marca, c?.linea].filter(Boolean).join(' ');
 const descripcionCarroAjeno = (c) => [c?.marca, c?.modelo].filter(Boolean).join(' ');
+
+/**
+ * ¿Esta tarjeta tiene algo escrito? La primera tarjeta del formulario
+ * siempre se leía (ver `leerTarjetas` más abajo) aunque el mostrador nunca
+ * hubiera tocado esos campos, así que un contrato pagado en efectivo
+ * guardaba una tarjeta vacía de todos modos — el detalle del contrato
+ * mostraba un renglón de "•••• / — / — / Q0.00" que no era ninguna tarjeta
+ * de verdad.
+ */
+const tarjetaTieneDatos = (t) => Boolean(t?.ultimos4 || t?.vencimiento || t?.banco || t?.autorizacion || q(t?.montoAutorizado));
 
 /**
  * Arma el contrato tal como se guarda (§7 del diseño), a partir de lo que ya
@@ -79,10 +96,10 @@ const descripcionCarroAjeno = (c) => [c?.marca, c?.modelo].filter(Boolean).join(
 export function construirContrato(datos) {
   const {
     id, numero, cliente, ajeno, carro, carroAjeno,
-    fechaSalida, horaSalida, lugar, dias, precioDia, kilometrajeSalida, combustibleSalida, horaTardia,
+    fechaSalida, horaSalida, lugar, dias, precioDia, kmSalida, combustibleSalida, horaTardia,
     seguroDia, seguroTercerosDia, seguroMenoresDia, seguroPaiDia, deducible, deducibleBajo,
     cartaPoderDestino, cartaPoderPrecio, variosDescripcion, variosPrecio,
-    tarjetas = [], formaPago, porcentajeTarjeta, montoPago,
+    tarjetas = [], forma, porcentajeTarjeta, montoPago,
     rentadoPor, porcentajeComision,
     conductorAdicional, observaciones,
   } = datos;
@@ -91,11 +108,22 @@ export function construirContrato(datos) {
   const precioDiaNum = q(precioDia);
   const fechaSalidaVal = fechaSalida || hoyISO();
 
-  const garantiaMonto = suma(...tarjetas.map((t) => t.montoAutorizado));
+  // Solo se guardan las tarjetas que de verdad traen algo escrito (ver
+  // tarjetaTieneDatos arriba): así una renta en efectivo no arrastra un
+  // renglón de tarjeta vacío en `tarjetas`, y garantiaMonto no cuenta un
+  // Q0.00 que tampoco era una tarjeta.
+  const tarjetasConDatos = tarjetas.filter(tarjetaTieneDatos);
+  const garantiaMonto = suma(...tarjetasConDatos.map((t) => t.montoAutorizado));
 
   const montoPagoNum = q(montoPago);
+  // §7b del diseño: un pago es {monto, forma, porcentajeTarjeta, fecha}. Sin
+  // `fecha` aquí, el pago más grande de cada contrato (el de la salida)
+  // quedaba con la celda de Fecha vacía en el detalle del contrato — el único
+  // pago de todo el sistema que no la traía.
   const pagos = montoPagoNum
-    ? [{ monto: montoPagoNum, formaPago: formaPago || 'efectivo', porcentajeTarjeta: formaPago === 'tarjeta' ? q(porcentajeTarjeta) : 0 }]
+    ? [{
+      monto: montoPagoNum, forma: forma || 'efectivo', porcentajeTarjeta: forma === 'tarjeta' ? q(porcentajeTarjeta) : 0, fecha: fechaSalidaVal,
+    }]
     : [];
 
   // Nunca se guarda un contrato sin porcentajeComision: sin él la comisión
@@ -109,7 +137,7 @@ export function construirContrato(datos) {
     id: id || null,
     numero: numero ?? null,
     clienteId: cliente?.id ?? null,
-    clienteNombre: nombreCompletoCliente(cliente),
+    clienteNombre: nombreCompleto(cliente),
 
     ajeno: Boolean(ajeno),
     // Un carro ajeno nunca toca `carroId`: así estadoCarro() (nucleo/estados.js)
@@ -128,7 +156,7 @@ export function construirContrato(datos) {
     lugar: lugar || '',
     dias: diasNum,
     precioDia: precioDiaNum,
-    kilometrajeSalida: q(kilometrajeSalida),
+    kmSalida: q(kmSalida),
     combustibleSalida: combustibleSalida || '',
     horaTardia: Boolean(horaTardia),
     devolucionPrevista: devolucionPrevista(fechaSalidaVal, diasNum),
@@ -149,7 +177,7 @@ export function construirContrato(datos) {
     variosDescripcion: variosDescripcion || '',
     variosPrecio: q(variosPrecio),
 
-    tarjetas,
+    tarjetas: tarjetasConDatos,
     garantiaMonto,
     garantiaLiberada: false,
 
@@ -179,6 +207,28 @@ function campo(id, etiqueta, opciones = {}) {
     </label>`;
 }
 
+// El tipo de input HTML que le corresponde a cada tipo de CAMPOS_CLIENTE
+// (nucleo/cliente.js) — misma tabla que usa la ficha en clientes.js, para que
+// un campo de fecha o de correo se vea y valide igual en las dos pantallas.
+const TIPO_INPUT_CLIENTE = { fecha: 'date', correo: 'email', telefono: 'tel' };
+
+/**
+ * Lo que hace falta para entregar el carro con el cliente esperando en el
+ * mostrador: su nombre, sus documentos y cómo contactarlo. El resto de
+ * CAMPOS_CLIENTE (nacionalidad, direcciones adicionales, facturación...) se
+ * pide igual, pero detrás de "Más datos" — nadie debería tener que escribir
+ * una nacionalidad para que el carro salga del lote.
+ */
+const CAMPOS_ALTA_VISIBLES = [
+  'nombres', 'apellidos', 'documento', 'documentoExpira',
+  'licencia', 'licenciaExpira', 'telefono', 'correo', 'direccionReferencia',
+];
+
+/** El campo de CAMPOS_CLIENTE `c`, dibujado con el input id `sc-nc-<id>`. */
+function campoAlta(c) {
+  return campo(`sc-nc-${c.id}`, c.etiqueta, { tipo: TIPO_INPUT_CLIENTE[c.tipo] || 'text' });
+}
+
 function plantilla() {
   // novalidate: la validación nativa del navegador sale en el idioma del
   // navegador, no en español. Los avisos de guardar() (aviso(), en ui.js)
@@ -203,14 +253,16 @@ function plantilla() {
             ¿No está en la lista?
             <button type="button" id="sc-cliente-nuevo" class="btn">+ Nuevo cliente</button>
           </p>
-          <div id="sc-cliente-alta" class="sc-campos" hidden>
-            ${campo('sc-nc-nombre1', 'Nombre')}
-            ${campo('sc-nc-apellido1', 'Apellido')}
-            ${campo('sc-nc-documento', 'DPI o pasaporte')}
-            ${campo('sc-nc-licencia', 'Licencia')}
-            ${campo('sc-nc-licencia-expira', 'Licencia vence', { tipo: 'date' })}
-            ${campo('sc-nc-documento-expira', 'Documento vence', { tipo: 'date' })}
-            ${campo('sc-nc-telefono', 'Teléfono')}
+          <div id="sc-cliente-alta" hidden>
+            <div class="sc-campos">
+              ${CAMPOS_CLIENTE.filter((c) => CAMPOS_ALTA_VISIBLES.includes(c.id)).map(campoAlta).join('')}
+            </div>
+            <label class="sc-checkbox">
+              <input type="checkbox" id="sc-nc-mas-datos"> Más datos
+            </label>
+            <div id="sc-nc-mas-datos-campos" class="sc-campos" hidden>
+              ${CAMPOS_CLIENTE.filter((c) => !CAMPOS_ALTA_VISIBLES.includes(c.id)).map(campoAlta).join('')}
+            </div>
             <div class="sc-campo ancho">
               <button type="button" id="sc-cliente-guardar" class="btn btn-primario">Guardar cliente</button>
             </div>
@@ -369,7 +421,7 @@ function lineaAviso(a) {
 }
 
 function filaCliente(c) {
-  const nombre = nombreCompletoCliente(c) || 'Sin nombre';
+  const nombre = nombreCompleto(c) || 'Sin nombre';
   const detalle = [c?.documento && `DPI ${c.documento}`, c?.telefono].filter(Boolean).join(' · ');
   return `<li data-id="${esc(c.id)}"><strong>${esc(nombre)}</strong>${detalle ? `<span>${esc(detalle)}</span>` : ''}</li>`;
 }
@@ -452,7 +504,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
       lugar: texto('sc-lugar'),
       dias: num('sc-dias'),
       precioDia: num('sc-precio-dia'),
-      kilometrajeSalida: num('sc-km-salida'),
+      kmSalida: num('sc-km-salida'),
       combustibleSalida: texto('sc-combustible-salida'),
       horaTardia: marcado('sc-hora-tardia'),
       seguroDia: num('sc-seguro-dia'),
@@ -466,7 +518,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
       variosDescripcion: texto('sc-varios-descripcion'),
       variosPrecio: num('sc-varios-precio'),
       tarjetas: leerTarjetas(),
-      formaPago: texto('sc-pago-forma') || 'efectivo',
+      forma: texto('sc-pago-forma') || 'efectivo',
       porcentajeTarjeta: num('sc-pago-porcentaje'),
       montoPago: num('sc-pago-monto'),
       rentadoPor: texto('sc-rentado-por'),
@@ -564,7 +616,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
     el('sc-cliente-buscar').value = '';
     el('sc-cliente-alta').hidden = true;
     el('sc-cliente-elegido').hidden = false;
-    el('sc-cliente-elegido-nombre').textContent = nombreCompletoCliente(c) || 'Cliente sin nombre';
+    el('sc-cliente-elegido-nombre').textContent = nombreCompleto(c) || 'Cliente sin nombre';
     recalcular();
   }
 
@@ -583,24 +635,31 @@ export async function pintarSacarCarro(contenedor, carroId) {
     lista.hidden = false;
   }
 
+  // Recorre CAMPOS_CLIENTE, igual que clientes.js — nunca a mano campo por
+  // campo — así el alta rápida lee tanto los visibles como los de "Más
+  // datos" con el mismo código, y un campo nuevo que se agregue ahí algún
+  // día se lee solo.
+  function leerCamposAlta() {
+    const campos = {};
+    CAMPOS_CLIENTE.forEach((c) => { campos[c.id] = texto(`sc-nc-${c.id}`); });
+    return campos;
+  }
+
   async function guardarClienteNuevo() {
-    const nombre1 = texto('sc-nc-nombre1');
-    const apellido1 = texto('sc-nc-apellido1');
-    if (!nombre1 || !apellido1) {
-      aviso('Escribe al menos el nombre y el apellido del cliente.', 'error');
+    // construirCliente(nucleo/cliente.js) con {} como "existente": es un
+    // cliente nuevo, no hay nada previo que arrastrar. faltaAlgo es la misma
+    // regla que usa la ficha (solo nombres y apellidos son obligatorios), así
+    // las dos pantallas nunca piden cosas distintas para dar de alta.
+    const nuevo = construirCliente({}, leerCamposAlta());
+    const falta = faltaAlgo(nuevo);
+    if (falta.length) {
+      aviso(`Falta completar: ${falta.join(', ')}.`, 'error');
       return;
     }
     const boton = el('sc-cliente-guardar');
     boton.disabled = true;
     try {
-      const cliente = await guardarCliente({
-        nombre1, apellido1,
-        documento: texto('sc-nc-documento'),
-        licencia: texto('sc-nc-licencia'),
-        licenciaExpira: texto('sc-nc-licencia-expira'),
-        documentoExpira: texto('sc-nc-documento-expira'),
-        telefono: texto('sc-nc-telefono'),
-      });
+      const cliente = await guardarCliente(nuevo);
       elegirCliente(cliente);
       aviso('Cliente guardado.', 'exito');
     } catch {
@@ -672,6 +731,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
   el('sc-form').addEventListener('change', (ev) => {
     if (ev.target.id === 'sc-ajeno') refrescarCarro();
     if (ev.target.id === 'sc-t2-agregar') el('sc-t2-campos').hidden = !marcado('sc-t2-agregar');
+    if (ev.target.id === 'sc-nc-mas-datos') el('sc-nc-mas-datos-campos').hidden = !marcado('sc-nc-mas-datos');
     if (ev.target.id === 'sc-pago-forma') el('sc-pago-porcentaje-campo').hidden = texto('sc-pago-forma') !== 'tarjeta';
     recalcular();
   });

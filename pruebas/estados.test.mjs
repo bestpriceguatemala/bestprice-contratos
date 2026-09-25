@@ -12,6 +12,7 @@ const rentado = {
   id: 'c1', carroId: 'v1', dias: 4, precioDia: 700,
   devolucionPrevista: '2026-08-24',
   pagos: [{ monto: 2800, porcentajeTarjeta: 0 }],
+  garantiaMonto: 500, // pagó con tarjeta: sí hay algo que liberar
 };
 const devuelto = {
   ...rentado,
@@ -44,6 +45,50 @@ test('no se cierra un contrato con la garantía todavía bloqueada', () => {
 test('se cierra cuando ya no debe nada y la garantía está liberada', () => {
   assert.equal(puedeCerrar(cerrado), true);
   assert.deepEqual(pendientesDe(cerrado), { saldo: 0, garantia: false });
+});
+
+// IMPORTANTE de la revisión final: un descuento dado después de haber
+// cobrado de más deja el saldo negativo (resumen() a propósito no lo
+// recorta), y con `saldo === 0` ese contrato se quedaba "devuelto" para
+// siempre aunque el negocio ya no tuviera nada más que cobrarle — al
+// contrario, le debía al cliente. cargarContratosAbiertos() lo seguía
+// trayendo en cada apertura sin que hubiera nada más que hacer con él.
+test('un contrato sobrepagado (saldo negativo) sí se puede cerrar, con la garantía liberada', () => {
+  const sobrepagado = {
+    ...devuelto,
+    cierre: { fechaReal: '2026-08-24', descuento: 500 }, // sin atraso ni daños
+    pagos: [{ monto: 2800, porcentajeTarjeta: 0 }], // ya había cobrado antes de saber del descuento
+    garantiaLiberada: true,
+  };
+  const pend = pendientesDe(sobrepagado);
+  assert.equal(pend.saldo, -500, 'se le debe Q500 al cliente, no "está a mano"');
+  assert.equal(pend.garantia, false);
+  assert.equal(puedeCerrar(sobrepagado), true, 'saldo <= 0, no solo === 0');
+});
+
+test('con saldo === 0 antes del fix ya cerraba; el cambio es que un saldo negativo también cierra', () => {
+  // Guarda contra una regresión al revés: que alguien vuelva a "=== 0" y
+  // nadie lo note porque el caso normal (saldo exacto) sigue pasando.
+  assert.equal(puedeCerrar(cerrado), true);
+});
+
+// IMPORTANTE de la revisión final: una renta pagada en efectivo, sin ninguna
+// tarjeta de por medio, tiene garantiaMonto en 0 — no hay nada que liberar,
+// así que exigir el mismo candado de "Liberar garantía" (con su confirm de
+// "¿Liberar la garantía de Q0.00...? Esto no se puede deshacer") era pedir
+// una acción sin sentido. Este contrato tiene que poder cerrarse con solo
+// saldar el saldo, sin pasar por ese botón.
+test('una renta en efectivo (garantiaMonto 0) cierra solo con el saldo, sin pedir "Liberar garantía"', () => {
+  const enEfectivo = {
+    id: 'c2', carroId: 'v1', dias: 2, precioDia: 300,
+    devolucionPrevista: '2026-08-10',
+    cierre: { fechaReal: '2026-08-10' },
+    pagos: [{ monto: 600, porcentajeTarjeta: 0 }],
+    garantiaMonto: 0,
+    garantiaLiberada: false, // nunca se tocó, y no hace falta
+  };
+  assert.deepEqual(pendientesDe(enEfectivo), { saldo: 0, garantia: false });
+  assert.equal(puedeCerrar(enEfectivo), true);
 });
 
 test('el carro queda disponible al recibirlo, aunque el contrato siga abierto', () => {

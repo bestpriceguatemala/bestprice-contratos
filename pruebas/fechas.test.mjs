@@ -8,7 +8,9 @@ process.env.TZ = 'America/Guatemala';
 // otro país. Un día de diferencia son Q700.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sumarDias, diasEntre, devolucionPrevista, diasAtraso, hoyISO } from '../js/nucleo/fechas.js';
+import {
+  sumarDias, diasEntre, devolucionPrevista, diasAtraso, hoyISO, textoFecha,
+} from '../js/nucleo/fechas.js';
 
 test('suma días cruzando fin de mes y fin de año', () => {
   assert.equal(sumarDias('2026-08-20', 5), '2026-08-25');
@@ -43,4 +45,14 @@ test('hoy es el día del calendario de aquí, no el de Londres', () => {
   // madrugada del 23 en UTC. En el mostrador todavía es 22.
   assert.equal(hoyISO(new Date('2026-09-23T02:00:00Z')), '2026-09-22');
   assert.equal(hoyISO(new Date('2026-09-22T18:00:00Z')), '2026-09-22');
+});
+
+// Revisión final: cierre.js y avisos.js armaban sus mensajes con la fecha
+// ISO cruda ('2026-08-25') en vez del formato que lee el dueño. textoFecha
+// es la versión que puede usar el propio núcleo (duplica a fecha(), en
+// ui.js, a propósito — ver el comentario de textoDosDecimales en dinero.js).
+test('textoFecha da el formato que lee el dueño, igual que fecha() en ui.js', () => {
+  assert.equal(textoFecha('2026-08-25'), '25 ago 2026');
+  assert.equal(textoFecha(''), '');
+  assert.equal(textoFecha(undefined), '');
 });

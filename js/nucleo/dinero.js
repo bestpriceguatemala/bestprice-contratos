@@ -48,3 +48,28 @@ export function recargoTarjeta(monto, porcentaje) {
 export function textoDosDecimales(n) {
   return q(n).toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+/**
+ * Un monto con el símbolo Q y el signo antes de la Q ('-Q50.00', nunca
+ * 'Q-50.00'): lo mismo que hace dinero() en ui.js, pero para los mensajes que
+ * arma el propio núcleo (cierre.js) sobre montos que sí pueden salir
+ * negativos, como un subtotal que un descuento dejó en contra. Interpolar
+ * textoDosDecimales de un negativo directo en un texto `Q${...}` deja el
+ * signo pegado adentro de la Q, que es justo lo que esto evita.
+ */
+export function textoConQ(n) {
+  const monto = q(n);
+  const negativo = monto < 0;
+  return `${negativo ? '-' : ''}Q${textoDosDecimales(Math.abs(monto))}`;
+}
+
+/**
+ * Un número entero con separador de miles y sin decimales ('45,000'): para
+ * kilometrajes, que no llevan centavos. Revisión final: recibirCarro.js
+ * mostraba el kilometraje de salida con textoDosDecimales ('45,000.00') y
+ * contratos.js lo mostraba crudo ('45000') — el mismo dato con dos caras
+ * distintas en dos pantallas.
+ */
+export function textoEntero(n) {
+  return Math.round(q(n)).toLocaleString('es-GT', { maximumFractionDigits: 0 });
+}

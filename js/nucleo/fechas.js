@@ -55,3 +55,20 @@ export function diasAtraso(prevista, fechaReal) {
   if (!prevista || !fechaReal) return 0;
   return Math.max(0, diasEntre(prevista, fechaReal));
 }
+
+const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+/**
+ * Una fecha ISO ('2026-08-25') en el formato que lee el dueño: '25 ago 2026'.
+ * Duplica a propósito el formato de fecha() en ui.js — igual que
+ * textoDosDecimales duplica a dinero() en dinero.js — para que el núcleo
+ * (cierre.js, avisos.js) pueda armar mensajes legibles sin depender de la
+ * capa de presentación. Revisión final: los mensajes de cierre.js mostraban
+ * la fecha cruda ('2026-08-25') en vez de este formato.
+ */
+export function textoFecha(iso) {
+  if (typeof iso !== 'string' || iso.trim() === '') return iso ?? '';
+  const [anio, mes, dia] = iso.split('-').map(Number);
+  if (!anio || !mes || !dia) return iso;
+  return `${dia} ${MESES[mes - 1]} ${anio}`;
+}

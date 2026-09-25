@@ -10,6 +10,9 @@ import { iniciarFirebase } from './firebase-config.js';
 import { mezclar, guardarLocal, leerLocal } from './cache.js';
 import { filtrar, textoDeCliente } from './nucleo/busqueda.js';
 import { estadoContrato } from './nucleo/estados.js';
+import { resumen } from './nucleo/contrato.js';
+import { q, textoDosDecimales } from './nucleo/dinero.js';
+import { hoyISO } from './nucleo/fechas.js';
 
 // Comprobado a mano: con las claves de Firebase todavía sin pegar (o sin
 // internet), el SDK de Firestore no falla rápido — reintenta por su cuenta y
@@ -125,6 +128,18 @@ export async function cargarFlota(alLlegar) {
 }
 
 /**
+ * Todos los clientes, como `{ datos, fallo }` (ver `resultadoLectura`).
+ * `alLlegar` avisa si la sincronía trae cambios o si falló. Mismo patrón que
+ * `cargarFlota`: copia local primero, nube por detrás — la pantalla de
+ * clientes (Tarea 6) necesita la lista completa para su buscador y para
+ * marcar licencias vencidas y saldos pendientes, así que no le sirve la
+ * sesión compartida de `buscarClientes` (pensada solo para "Sacar carro").
+ */
+export async function cargarClientes(alLlegar) {
+  return cargarConSincronia('clientes', alLlegar);
+}
+
+/**
  * Los contratos que todavía piden algo: el carro anda fuera, falta cobrar un
  * saldo o falta soltar la garantía de la tarjeta. Los cerrados no se traen al
  * abrir: se buscan cuando alguien los busca.
@@ -148,6 +163,99 @@ export async function cargarContratosAbiertos(alLlegar) {
     alLlegar && ((res) => alLlegar({ datos: soloAbiertos(res.datos), fallo: res.fallo })),
   );
   return { datos: soloAbiertos(r.datos), fallo: r.fallo };
+}
+
+/**
+ * Los contratos de un rango de fechas (por `fechaSalida`), como `{ datos,
+ * fallo }` (ver resultadoLectura). Es lo que abre la pantalla de historial
+ * (#/contratos, Tarea 8): entra con el mes en curso y solo pide un rango
+ * distinto cuando el dueño lo cambia.
+ *
+ * A propósito NO se apoya en `cargarConSincronia`: esa función siempre trae
+ * LA COLECCIÓN ENTERA (bien para clientes y flota, que de por sí son chicos,
+ * pero mal para contratos — un negocio de años puede acumular miles, y el
+ * diseño promete que "los años viejos no se cargan al abrir" — §9 del
+ * diseño: "el sistema se queda rápido con el negocio entero adentro"). En
+ * cambio arma una consulta a Firestore filtrada por `fechaSalida` (que
+ * compara bien como texto por venir en 'YYYY-MM-DD', formato ISO, igual que
+ * el resto de fechas.js), y solo guarda localmente lo que ese rango trajo.
+ * `guardarLocal` (cache.js) escribe documento por documento (`put`), así que
+ * un rango ya guardado antes convive con este sin perderse — la copia local
+ * de contratos crece rango por rango, nunca de un solo golpe.
+ *
+ * Mismo contrato que cargarFlota/cargarClientes en todo lo demás: sirve la
+ * copia local (la que ya cayera dentro de este mismo rango) al instante,
+ * sincroniza por detrás, y nunca confunde "vacío" con "la nube falló"
+ * (resultadoLectura). `alLlegar({ datos, fallo })` avisa solo cuando la
+ * sincronía de atrás trae algo distinto de lo ya servido, o cuando falla.
+ */
+export async function cargarContratos({ desde, hasta } = {}, alLlegar) {
+  const enRango = (c) => (!desde || (c?.fechaSalida || '') >= desde)
+    && (!hasta || (c?.fechaSalida || '') <= hasta);
+
+  const locales = (await leerLocal('contratos')).filter(enRango);
+
+  async function leerRemotoDelRango() {
+    const { db, fsMod } = await iniciarFirebase();
+    const restricciones = [];
+    if (desde) restricciones.push(fsMod.where('fechaSalida', '>=', desde));
+    if (hasta) restricciones.push(fsMod.where('fechaSalida', '<=', hasta));
+    const referencia = fsMod.collection(db, 'contratos');
+    const consulta = restricciones.length ? fsMod.query(referencia, ...restricciones) : referencia;
+    const instantanea = await conLimiteDeTiempo(fsMod.getDocs(consulta));
+    return instantanea.docs.map((d) => ({ id: d.id, ...d.data() }));
+  }
+
+  const sincronizar = leerRemotoDelRango().then(async (remotos) => {
+    const mezclados = mezclar(locales, remotos);
+    await guardarLocal('contratos', mezclados);
+    return mezclados;
+  });
+
+  if (locales.length) {
+    // Mismo mecanismo que cargarConSincronia: la pantalla ya dibujó con lo
+    // local, y esto sigue por detrás para avisar si la nube trae algo
+    // distinto o si falló — nunca antes de servir lo que ya había.
+    sincronizar
+      .then((mezclados) => {
+        const r = resultadoLectura(locales, { ok: true, valor: mezclados });
+        if (alLlegar && distintos(locales, r.datos)) alLlegar(r);
+      })
+      .catch(() => {
+        if (alLlegar) alLlegar(resultadoLectura(locales, { ok: false }));
+      });
+    return resultadoLectura(locales, { ok: true, valor: locales });
+  }
+  try {
+    const remotos = await sincronizar;
+    return resultadoLectura(locales, { ok: true, valor: remotos });
+  } catch {
+    return resultadoLectura(locales, { ok: false });
+  }
+}
+
+/**
+ * Un contrato por su id: la copia local primero (para no esperar la nube si
+ * ya se tiene), y si no está ahí, se pide directo a Firestore por su id (no
+ * hace falta traer toda la colección para esto). `null` si en verdad no
+ * existe en ningún lado.
+ *
+ * A propósito no se atrapa un fallo de red al consultar la nube: si el
+ * documento no existe, `getDoc` contesta igual (`exists()` en false) y eso sí
+ * es un `null` de verdad; pero si la nube no contesta (`conLimiteDeTiempo` la
+ * da por vencida), eso es un fallo, no un "no existe" — confundirlos sería
+ * repetir el error que resultadoLectura ya corrigió para las listas (ver más
+ * arriba): una pantalla de cobro no debe decirle al dueño "este contrato no
+ * existe" cuando lo que en verdad pasó es que no hubo internet.
+ */
+export async function cargarContrato(id) {
+  if (!id) return null;
+  const locales = await leerLocal('contratos');
+  const local = locales.find((c) => c.id === id);
+  if (local) return local;
+  const { db, fsMod } = await iniciarFirebase();
+  const doc = await conLimiteDeTiempo(fsMod.getDoc(fsMod.doc(db, 'contratos', id)));
+  return doc.exists() ? { id: doc.id, ...doc.data() } : null;
 }
 
 // Todavía no hay pantalla de Ajustes (§6 del diseño) — es de un plan futuro
@@ -261,6 +369,20 @@ export function contratoParaGuardar(contrato, { id, numero, ahora = Date.now() }
  * ese mismo número en vez de gastar uno nuevo.
  */
 export async function guardarContrato(contrato) {
+  // Candado barato (CRÍTICO 2 de la revisión final): reabrir "Recibir carro"
+  // sobre un contrato ya cerrado — por ejemplo con el botón "atrás" del
+  // navegador — podía guardar un cierre en blanco encima del real sin que
+  // nada lo impidiera. Hoy solo liberarGarantia() escribe
+  // `garantiaLiberada: true`, pero el hueco es el mismo: nada evitaba que
+  // ALGUNA pantalla guardara una garantía liberada sobre un contrato que en
+  // realidad sigue debiendo. Se revisa aquí, en el único lugar donde de
+  // verdad se escribe a la nube, no en cada pantalla que llama a esto — y
+  // con el mismo mensaje que ya usa liberarGarantia(), para que el dueño
+  // nunca lea dos frases distintas para el mismo motivo.
+  if (contrato?.garantiaLiberada) {
+    const motivo = puedeLiberarse(contrato);
+    if (motivo) throw new Error(motivo);
+  }
   const numero = contrato?.numero || (await siguienteNumeroContrato());
   const { db, fsMod } = await iniciarFirebase();
   const ref = contrato?.id ? fsMod.doc(db, 'contratos', contrato.id) : fsMod.doc(fsMod.collection(db, 'contratos'));
@@ -268,6 +390,60 @@ export async function guardarContrato(contrato) {
   await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
   await guardarLocal('contratos', [guardado]);
   return guardado;
+}
+
+/**
+ * Agrega un abono a `contrato.pagos`. Función **pura** (sin Firestore) para
+ * poder probar la cuenta del saldo sin depender de la red — el dueño cobra en
+ * dos momentos (salida y devolución) pero además "a veces abona": el cliente
+ * puede dejar parte de lo que debe al traer el carro y terminar de pagar
+ * después, en más de una visita.
+ *
+ * Un pago que no suma nada no cambia el contrato: ni sin monto (0, vacío, no
+ * numérico) ni con un monto negativo. Lo segundo importa tanto como lo
+ * primero — un "abono" negativo no libera la garantía antes de tiempo (el
+ * saldo solo subiría), pero sí ensuciaría `pagos`, que es lo que después leen
+ * los reportes de caja. Así una pantalla puede llamar a esto con lo que haya
+ * en el formulario sin tener que comprobar antes si el mostrador de verdad
+ * escribió una cifra válida.
+ */
+export function agregarPago(contrato, {
+  monto, forma, porcentajeTarjeta, fecha = hoyISO(),
+} = {}) {
+  const montoValido = q(monto);
+  if (!(montoValido > 0)) return contrato;
+  const pago = {
+    monto: montoValido, forma, porcentajeTarjeta: q(porcentajeTarjeta), fecha,
+  };
+  const pagos = Array.isArray(contrato?.pagos) ? contrato.pagos : [];
+  return { ...contrato, pagos: [...pagos, pago] };
+}
+
+/**
+ * La razón por la que la garantía todavía no se puede liberar, o `null` si ya
+ * se puede. Función **pura** — es el candado de "no libero hasta que me
+ * pague" (regla del dueño, tal cual: es la única palanca que le queda una vez
+ * que el carro ya volvió) separado de `liberarGarantia` a propósito, para que
+ * la regla más importante de este sistema se pueda probar sin necesitar
+ * Firestore ni ningún mock.
+ *
+ * El saldo se mide sin recargo de tarjeta, igual que en todo el sistema (ver
+ * resumen() en nucleo/contrato.js): dejarla ir con saldo pendiente sería
+ * dinero que el dueño ya no vuelve a ver.
+ */
+export function puedeLiberarse(contrato) {
+  const { saldo } = resumen(contrato);
+  if (saldo > 0) {
+    return `Todavía debe Q${textoDosDecimales(saldo)}. La garantía se libera cuando termine de pagar.`;
+  }
+  return null;
+}
+
+/** Libera la garantía de la tarjeta. Rechaza mientras `puedeLiberarse` diga que hay motivo. */
+export async function liberarGarantia(contrato) {
+  const motivo = puedeLiberarse(contrato);
+  if (motivo) throw new Error(motivo);
+  return guardarContrato({ ...contrato, garantiaLiberada: true, garantiaLiberadaEn: hoyISO() });
 }
 
 /**

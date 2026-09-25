@@ -27,7 +27,7 @@ const datosBase = () => ({
   cartaPoderDestino: 'Ciudad de Guatemala',
   cartaPoderPrecio: 350,
   tarjetas: [{ ultimos4: '3343', vencimiento: '08/28', banco: 'BAC', autorizacion: 'A1', montoAutorizado: 5000 }],
-  formaPago: 'tarjeta',
+  forma: 'tarjeta',
   porcentajeTarjeta: 12,
   montoPago: 3150,
   rentadoPor: 'Ana',
@@ -37,6 +37,28 @@ const datosBase = () => ({
 test('el ejemplo del diseño: 4 días a Q700, carta poder Q350 y 12% de tarjeta dan Q3,528.00 a cobrar', () => {
   const contrato = construirContrato(datosBase());
   assert.equal(resumen(contrato).pagado, 3528, 'el ejemplo del diseño y de la pantalla');
+});
+
+test('el pago usa la clave "forma", no "formaPago"', () => {
+  const contrato = construirContrato(datosBase());
+  assert.equal(contrato.pagos.length, 1);
+  assert.equal('forma' in contrato.pagos[0], true, 'el pago debe tener la clave "forma"');
+  assert.equal('formaPago' in contrato.pagos[0], false, 'el pago no debe tener la clave "formaPago"');
+  assert.equal(contrato.pagos[0].forma, 'tarjeta');
+});
+
+// IMPORTANTE de la revisión final: §7b del diseño dice que un pago es
+// {monto, forma, porcentajeTarjeta, fecha}. Sin `fecha` aquí, el pago más
+// grande de cada contrato (el de la salida) quedaba con la celda de Fecha
+// vacía en el detalle — el único pago de todo el sistema sin ella.
+test('el pago de la salida sí lleva fecha: la de fechaSalida del contrato', () => {
+  const contrato = construirContrato(datosBase());
+  assert.equal(contrato.pagos[0].fecha, '2026-09-23');
+});
+
+test('el pago de la salida usa hoyISO() si no se dio fechaSalida', () => {
+  const contrato = construirContrato({ ...datosBase(), fechaSalida: undefined });
+  assert.equal(contrato.pagos[0].fecha, contrato.fechaSalida, 'la misma fecha que quedó guardada en el contrato');
 });
 
 test('guarda el estado, la garantía y la comisión que otras tareas dan por hecho', () => {
@@ -76,6 +98,46 @@ test('un carro ajeno no toca carroId, y sus datos quedan dentro del contrato', (
 test('un carro propio no tiene costo de subarriendo', () => {
   const contrato = construirContrato(datosBase());
   assert.equal(contrato.subarriendo, null);
+});
+
+// Minor de la revisión final: la pantalla siempre leía un objeto para la
+// primera tarjeta, aunque el mostrador nunca hubiera tocado esos campos —
+// una renta en efectivo terminaba guardando un renglón de tarjeta vacío, que
+// el detalle del contrato mostraba como "•••• / — / — / Q0.00".
+test('una tarjeta sin nada escrito no se guarda (evita el renglón de ••••/—/—/Q0.00 en el detalle)', () => {
+  const contrato = construirContrato({
+    ...datosBase(),
+    tarjetas: [{
+      ultimos4: '', vencimiento: '', banco: '', autorizacion: '', montoAutorizado: 0,
+    }],
+    forma: 'efectivo',
+    porcentajeTarjeta: 0,
+  });
+  assert.deepEqual(contrato.tarjetas, []);
+  assert.equal(contrato.garantiaMonto, 0);
+});
+
+test('una tarjeta con solo el monto autorizado escrito sí cuenta (hay algo que bloquear)', () => {
+  const contrato = construirContrato({
+    ...datosBase(),
+    tarjetas: [{
+      ultimos4: '', vencimiento: '', banco: '', autorizacion: '', montoAutorizado: 2000,
+    }],
+  });
+  assert.equal(contrato.tarjetas.length, 1);
+  assert.equal(contrato.garantiaMonto, 2000);
+});
+
+test('la segunda tarjeta se descarta igual si se agrega vacía', () => {
+  const contrato = construirContrato({
+    ...datosBase(),
+    tarjetas: [
+      { ultimos4: '3343', vencimiento: '08/28', banco: 'BAC', autorizacion: 'A1', montoAutorizado: 5000 },
+      { ultimos4: '', vencimiento: '', banco: '', autorizacion: '', montoAutorizado: 0 },
+    ],
+  });
+  assert.equal(contrato.tarjetas.length, 1);
+  assert.equal(contrato.garantiaMonto, 5000);
 });
 
 // Ronda de revisión 1, hallazgo importante: un reintento de guardar (por

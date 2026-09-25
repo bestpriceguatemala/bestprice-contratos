@@ -10,11 +10,13 @@
 // pendientes de abajo son la única excepción que permite el diseño, porque ahí
 // el monto es lo que falta para poder cerrar el contrato, no una cifra de
 // negocio.
-import { estadoCarro, pendientesDe } from '../nucleo/estados.js';
+import { estadoCarro, pendientesDe, puedeCerrar } from '../nucleo/estados.js';
 import { resumen } from '../nucleo/contrato.js';
 import { diasEntre, hoyISO } from '../nucleo/fechas.js';
-import { cargarFlota, cargarContratosAbiertos } from '../datos.js';
-import { dinero, fecha } from '../ui.js';
+import {
+  cargarFlota, cargarContratosAbiertos, liberarGarantia, puedeLiberarse,
+} from '../datos.js';
+import { dinero, fecha, aviso } from '../ui.js';
 
 const ESTADOS = {
   disponible: { clase: 'es-disponible', etiqueta: 'Disponible' },
@@ -79,8 +81,61 @@ function tarjetaCarro(carro, info) {
     </article>`;
 }
 
-function filaPendiente(cliente, montoTexto, diasTexto) {
-  return `<li><strong>${esc(cliente)}</strong><span>${esc(montoTexto)}</span><span>${esc(diasTexto)}</span></li>`;
+/**
+ * El mensaje del confirm() antes de soltar una garantía (Tarea 5, Paso 1):
+ * nombra al cliente y el monto porque, según el dueño, esto "no se deshace
+ * desde el sistema" — una vez suelta, la tarjeta ya no vuelve a quedar
+ * retenida sin sacar un contrato nuevo. Función pura para poder probarla sin
+ * DOM ni `confirm()`.
+ */
+export function textoConfirmarLiberar(contrato) {
+  const cliente = contrato?.clienteNombre || 'este cliente';
+  return `¿Liberar la garantía de ${dinero(contrato?.garantiaMonto)} de ${cliente}? `
+    + 'Esto no se puede deshacer desde el sistema.';
+}
+
+/**
+ * El aviso de éxito al soltar la garantía. Se apoya en `puedeCerrar`
+ * (nucleo/estados.js, parte de las interfaces de esta tarea) en vez de
+ * asumir que el contrato queda cerrado: `liberarGarantia` ya garantiza que el
+ * saldo está en cero antes de dejar pasar (puedeLiberarse), así que en la
+ * práctica siempre cierra — pero el mensaje se arma preguntándole al núcleo,
+ * no repitiendo esa regla por su cuenta aquí.
+ */
+export function textoAvisoGarantiaLiberada(contrato) {
+  return puedeCerrar(contrato)
+    ? `Garantía liberada. Contrato N.° ${contrato?.numero ?? '—'} cerrado.`
+    : 'Garantía liberada.';
+}
+
+function filaGarantia(contrato, montoTexto, diasTexto) {
+  // `puedeLiberarse` (datos.js) decide aquí, antes de que se apriete nada,
+  // si este botón de verdad puede soltar la garantía; si no puede, su motivo
+  // ("Todavía debe Qxxx...") queda de una vez en el título del botón, para
+  // que el mostrador lo vea sin tener que apretar primero. El candado real
+  // sigue siendo `liberarGarantia`, que se llama igual al hacer clic — este
+  // adelanto es solo para que el botón no engañe con un "sí se puede" falso.
+  const motivo = puedeLiberarse(contrato);
+  const titulo = motivo ? ` title="${esc(motivo)}"` : '';
+  return `<li>
+    <strong>${esc(contrato?.clienteNombre || 'Cliente sin nombre')}</strong>
+    <span>${esc(montoTexto)}</span>
+    <span>${esc(diasTexto)}</span>
+    <button type="button" class="btn" data-accion="liberar" data-id="${esc(contrato?.id)}"${titulo}>Liberar garantía</button>
+  </li>`;
+}
+
+function filaCobro(contrato, montoTexto, diasTexto) {
+  // "Cobrar" abre Recibir carro en modo de solo cobro (Tarea 5, Paso 3): el
+  // "?cobro=1" viaja pegado al id porque el enrutador (router.js) empareja
+  // rutas por pedazos separados con "/", sin saber nada de parámetros de
+  // consulta — recibirCarro.js es quien separa el id real de ese sufijo.
+  return `<li>
+    <strong>${esc(contrato?.clienteNombre || 'Cliente sin nombre')}</strong>
+    <span>${esc(montoTexto)}</span>
+    <span>${esc(diasTexto)}</span>
+    <a class="btn" href="#/recibir/${esc(contrato?.id)}?cobro=1">Cobrar</a>
+  </li>`;
 }
 
 /** Solo aparece si hay algo que mostrar (§6: las listas son la excepción, no la regla). */
@@ -135,8 +190,8 @@ function dibujar(contenedor, flota, contratos, hoy, { falloFlota = false, falloC
   // sistema — olvidar una garantía bloqueada es peor que mostrarla de más.
   const filasGarantia = contratos
     .filter((c) => c?.cierre?.fechaReal && pendientesDe(c).garantia)
-    .map((c) => filaPendiente(
-      c?.clienteNombre || 'Cliente sin nombre',
+    .map((c) => filaGarantia(
+      c,
       dinero(c?.garantiaMonto),
       `${pluralDias(Math.max(0, diasEntre(c.cierre.fechaReal, hoy)))} esperando`,
     ));
@@ -145,8 +200,8 @@ function dibujar(contenedor, flota, contratos, hoy, { falloFlota = false, falloC
   // un cliente puede quedar debiendo desde el día que sacó el carro.
   const filasCobro = contratos
     .filter((c) => resumen(c).saldo > 0)
-    .map((c) => filaPendiente(
-      c?.clienteNombre || 'Cliente sin nombre',
+    .map((c) => filaCobro(
+      c,
       dinero(resumen(c).saldo),
       pluralDias(Math.max(0, diasEntre(c?.cierre?.fechaReal || c?.fechaSalida, hoy))),
     ));
@@ -193,6 +248,55 @@ export async function pintarFlota(contenedor) {
     if (!flotaLista) { contenedor.innerHTML = '<p class="pendiente">Cargando…</p>'; return; }
     dibujar(contenedor, flota, contratos, hoy, { falloFlota, falloContratos });
   };
+
+  // Único manejador de clics para los botones que viven dentro de las listas
+  // de pendientes (por ahora solo "Liberar garantía": "Cobrar" es un enlace
+  // normal, el enrutador ya lo resuelve solo). Se asigna con `onclick`, no
+  // `addEventListener`: el router reutiliza siempre el mismo <main
+  // id="pantalla">, así que un `addEventListener` aquí se iría acumulando
+  // cada vez que se vuelve a entrar a esta pantalla en la misma sesión, y
+  // un solo clic terminaría llamando a `liberarGarantia` varias veces.
+  contenedor.onclick = (ev) => {
+    const boton = ev.target.closest('[data-accion="liberar"]');
+    if (!boton) return;
+    const contrato = contratos.find((c) => c?.id === boton.dataset.id);
+    if (contrato) liberarDesdeLaLista(contrato, boton);
+  };
+
+  /**
+   * Suelta la garantía de un contrato desde su renglón en "Garantías por
+   * liberar", sin recargar la pantalla (Tarea 5, Pasos 1 y 2).
+   */
+  async function liberarDesdeLaLista(contrato, boton) {
+    // El candado rápido: si `puedeLiberarse` ya sabe que no se puede, se
+    // avisa de una vez —con el mismo motivo que daría `liberarGarantia`— sin
+    // molestar con un confirm() para una acción que de todas formas fallaría.
+    const motivo = puedeLiberarse(contrato);
+    if (motivo) { aviso(motivo, 'error'); return; }
+
+    // Soltar una garantía "no se deshace desde el sistema" (regla del
+    // dueño): se confirma nombrando al cliente y el monto antes de tocar nada.
+    if (!window.confirm(textoConfirmarLiberar(contrato))) return;
+
+    boton.disabled = true;
+    try {
+      const actualizado = await liberarGarantia(contrato);
+      aviso(textoAvisoGarantiaLiberada(actualizado), 'exito');
+      // El contrato recién cerrado sale de la lista en memoria: los filtros
+      // de `dibujar` (garantía liberada, saldo en cero) ya lo excluirían
+      // solos, pero quitarlo aquí evita arrastrar en `contratos` un cerrado
+      // que cargarContratosAbiertos() tampoco volvería a traer.
+      contratos = contratos.filter((c) => c?.id !== actualizado.id);
+      repintar();
+    } catch (error) {
+      // liberarGarantia es el candado de verdad (por si el saldo cambió
+      // entre que se pintó la lista y este clic — otro cobro desde otra
+      // pestaña, por ejemplo); su mensaje ya dice cuánto debe.
+      aviso(error.message, 'error');
+      boton.disabled = false;
+    }
+  }
+
   repintar();
 
   // Los contratos se piden sin esperarlos: cargarContratosAbiertos ya avisa

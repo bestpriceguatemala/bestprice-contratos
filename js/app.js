@@ -5,14 +5,28 @@ import { aviso } from './ui.js';
 import { registrarPantalla, mostrar } from './router.js';
 import { pintarFlota } from './pantallas/flota.js';
 import { pintarSacarCarro } from './pantallas/sacarCarro.js';
+import { pintarRecibirCarro } from './pantallas/recibirCarro.js';
 import { pintarCarros } from './pantallas/carros.js';
+import { pintarClientes } from './pantallas/clientes.js';
+import { pintarContratos } from './pantallas/contratos.js';
 import { vigilarVersion } from './version.js';
 
 registrarPantalla('#/flota', pintarFlota);
 registrarPantalla('#/sacar/:carroId', pintarSacarCarro);
+registrarPantalla('#/recibir/:contratoId', pintarRecibirCarro);
 registrarPantalla('#/carros', pintarCarros);
 registrarPantalla('#/carros/:carroId', pintarCarros);
 registrarPantalla('#/habilitar/:carroId', pintarCarros);
+// '#/clientes/nuevo' y '#/clientes/:id' comparten el mismo patrón con
+// parámetro: no se registra '#/clientes/nuevo' aparte porque una ruta exacta
+// en el Map de router.js se llama sin el id capturado (mostrar() hace
+// `directa(caja)`, sin argumentos) — pintarClientes(contenedor, 'nuevo')
+// necesita ese 'nuevo' para saber que es alta y no edición. Mismo patrón que
+// ya usa carros.js para '#/carros/nuevo'.
+registrarPantalla('#/clientes', pintarClientes);
+registrarPantalla('#/clientes/:clienteId', pintarClientes);
+registrarPantalla('#/contratos', pintarContratos);
+registrarPantalla('#/contratos/:contratoId', pintarContratos);
 
 const pantallaEntrada = document.getElementById('entrada');
 const pantallaApp = document.getElementById('app');

@@ -1,0 +1,183 @@
+// Pruebas de "Recibir carro": solo la parte pura, sin DOM.
+//
+// El cálculo del cobro ya vive en contrato.js/cierre.js y está probado ahí.
+// Lo que se prueba aquí es lo propio de esta pantalla: el puente del
+// kilometraje de salida, el texto del botón de pago, el aviso final, cómo
+// se rotula un saldo negativo, y — ronda de corrección 1 — cuánto cuesta de
+// verdad cobrar un abono parcial con tarjeta.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  conKmSalidaNormalizado, textoBotonPago, textoAvisoRecibido, textoSaldo, totalDeEstaCobranza,
+  leerParametroRuta, textoAvisoCobro, valoresIniciales, textoCorreccion,
+} from '../js/pantallas/recibirCarro.js';
+import { resumen } from '../js/nucleo/contrato.js';
+import { agregarPago } from '../js/datos.js';
+
+test('conKmSalidaNormalizado: compatibilidad con contratos guardados antes del cambio de nombre (kilometrajeSalida -> kmSalida)', () => {
+  const contrato = { id: 'c1', kilometrajeSalida: 45000 };
+  const normalizado = conKmSalidaNormalizado(contrato);
+  assert.equal(normalizado.kmSalida, 45000);
+  assert.equal(normalizado.kilometrajeSalida, 45000, 'no se pierde el campo original');
+});
+
+test('conKmSalidaNormalizado: si ya trae kmSalida, no lo pisa', () => {
+  const contrato = { id: 'c1', kmSalida: 40000, kilometrajeSalida: 45000 };
+  assert.equal(conKmSalidaNormalizado(contrato).kmSalida, 40000);
+});
+
+test('conKmSalidaNormalizado: sin ninguno de los dos campos, da 0 (no undefined)', () => {
+  assert.equal(conKmSalidaNormalizado({ id: 'c1' }).kmSalida, 0);
+});
+
+test('conKmSalidaNormalizado: con contrato nulo, no revienta', () => {
+  assert.equal(conKmSalidaNormalizado(null), null);
+});
+
+test('textoBotonPago: sin nada que cobrar, dice "Recibir sin cobrar"', () => {
+  assert.equal(textoBotonPago(0, 0), 'Recibir sin cobrar');
+  assert.equal(textoBotonPago(-300, 0), 'Recibir sin cobrar', 'saldo a favor del cliente tampoco cobra');
+  assert.equal(textoBotonPago(730, 0), 'Recibir sin cobrar', 'monto en cero, aunque haya saldo');
+});
+
+test('textoBotonPago: un abono menor que el saldo dice "Recibir y abonar"', () => {
+  assert.equal(textoBotonPago(730, 500), 'Recibir y abonar');
+});
+
+test('textoBotonPago: el saldo completo dice "Recibir y cobrar"', () => {
+  assert.equal(textoBotonPago(730, 730), 'Recibir y cobrar');
+  assert.equal(textoBotonPago(730, 800), 'Recibir y cobrar', 'de más también cuenta como cobrado');
+});
+
+test('textoAvisoRecibido: con saldo pendiente, dice cuánto falta', () => {
+  assert.equal(textoAvisoRecibido(14, 230), 'Contrato 14 recibido. Falta cobrar Q230.00.');
+});
+
+test('textoAvisoRecibido: sin saldo, dice que ya se cobró', () => {
+  assert.equal(textoAvisoRecibido(14, 0), 'Contrato 14 recibido y cobrado.');
+});
+
+test('textoAvisoRecibido: con saldo a favor del cliente, tampoco falta cobrar', () => {
+  assert.equal(textoAvisoRecibido(14, -50), 'Contrato 14 recibido y cobrado.');
+});
+
+test('textoSaldo: positivo se rotula "Saldo"', () => {
+  assert.deepEqual(textoSaldo(730), { etiqueta: 'Saldo', monto: 730 });
+});
+
+test('textoSaldo: en cero también es "Saldo"', () => {
+  assert.deepEqual(textoSaldo(0), { etiqueta: 'Saldo', monto: 0 });
+});
+
+test('textoSaldo: negativo se rotula "A favor del cliente" y se muestra en positivo', () => {
+  assert.deepEqual(textoSaldo(-300), { etiqueta: 'A favor del cliente', monto: 300 });
+});
+
+// El ejemplo del diseño (contrato.test.mjs / cierre.test.mjs): 4 días a
+// Q700, carta poder Q350, ya pagó Q3,150 al salir, y al recibirlo un día
+// tarde con Q200 de daños, Q130 de combustible y Q300 de descuento, el
+// saldo da Q730.00.
+const contratoConCierre = () => ({
+  dias: 4, precioDia: 700, cartaPoderPrecio: 350,
+  devolucionPrevista: '2026-08-24',
+  cierre: { fechaReal: '2026-08-25', danos: 200, combustible: 130, descuento: 300 },
+  pagos: [{ monto: 3150, porcentajeTarjeta: 12 }],
+});
+
+test('totalDeEstaCobranza: un abono de Q500 al 12% de tarjeta cuesta Q560.00, no el recargo del saldo completo', () => {
+  const r = totalDeEstaCobranza(contratoConCierre(), {
+    monto: 500, forma: 'tarjeta', porcentajeTarjeta: 12, fecha: '2026-08-25',
+  });
+  assert.deepEqual(r, { total: 560, recargo: 60 });
+});
+
+test('totalDeEstaCobranza: saldar los Q730 completos al 12% sigue dando Q817.60', () => {
+  const r = totalDeEstaCobranza(contratoConCierre(), {
+    monto: 730, forma: 'tarjeta', porcentajeTarjeta: 12, fecha: '2026-08-25',
+  });
+  assert.deepEqual(r, { total: 817.6, recargo: 87.6 });
+});
+
+test('totalDeEstaCobranza: un abono en efectivo cobra exactamente lo escrito, sin recargo', () => {
+  const r = totalDeEstaCobranza(contratoConCierre(), {
+    monto: 500, forma: 'efectivo', porcentajeTarjeta: 0, fecha: '2026-08-25',
+  });
+  assert.deepEqual(r, { total: 500, recargo: 0 });
+});
+
+test('totalDeEstaCobranza: sin monto (o en cero), no hay nada que cobrar', () => {
+  assert.deepEqual(totalDeEstaCobranza(contratoConCierre(), { monto: 0, forma: 'efectivo', porcentajeTarjeta: 0 }), { total: 0, recargo: 0 });
+});
+
+test('el abono de Q500 con tarjeta deja Q230.00 pendientes (no se toca el saldo por el recargo)', () => {
+  const conAbono = agregarPago(contratoConCierre(), { monto: 500, forma: 'tarjeta', porcentajeTarjeta: 12, fecha: '2026-08-25' });
+  assert.equal(resumen(conAbono).saldo, 230);
+});
+
+// Tarea 5: el "Cobrar" de flota.js abre esta pantalla en modo de solo cobro
+// pegando "?cobro=1" al id, porque el enrutador (router.js) no sabe nada de
+// parámetros de consulta — leerParametroRuta es quien separa las dos cosas.
+test('leerParametroRuta: un id normal (modo completo) no trae "cobro"', () => {
+  assert.deepEqual(leerParametroRuta('c1'), { contratoId: 'c1', soloCobro: false });
+});
+
+test('leerParametroRuta: "id?cobro=1" separa el id real y marca el modo de solo cobro', () => {
+  assert.deepEqual(leerParametroRuta('c1?cobro=1'), { contratoId: 'c1', soloCobro: true });
+});
+
+test('leerParametroRuta: cualquier otro valor de "cobro" no activa el modo de solo cobro', () => {
+  assert.deepEqual(leerParametroRuta('c1?cobro=0'), { contratoId: 'c1', soloCobro: false });
+  assert.deepEqual(leerParametroRuta('c1?otro=1'), { contratoId: 'c1', soloCobro: false });
+});
+
+test('leerParametroRuta: sin nada, no revienta', () => {
+  assert.deepEqual(leerParametroRuta(undefined), { contratoId: '', soloCobro: false });
+});
+
+test('textoAvisoCobro: con saldo pendiente, dice cuánto falta (nunca dice "recibido")', () => {
+  assert.equal(textoAvisoCobro(14, 230), 'Abono registrado en el contrato 14. Falta cobrar Q230.00.');
+});
+
+test('textoAvisoCobro: saldo en cero, dice que se cobró por completo', () => {
+  assert.equal(textoAvisoCobro(14, 0), 'Contrato 14 cobrado por completo.');
+});
+
+test('textoAvisoCobro: saldo a favor del cliente, tampoco falta cobrar', () => {
+  assert.equal(textoAvisoCobro(14, -50), 'Contrato 14 cobrado por completo.');
+});
+
+// CRÍTICO de la revisión final: el botón "atrás" del navegador reabría un
+// cierre ya hecho sobre una pantalla en blanco, lista para pisar los daños y
+// el descuento negociados con `{fechaReal: hoy, danos: 0, descuento: 0}`.
+// valoresIniciales es lo que ahora decide con qué se prellena el formulario.
+test('valoresIniciales: sin cierre todavía, arranca en blanco con la fecha de hoy (no es corrección)', () => {
+  assert.deepEqual(valoresIniciales({ id: 'c1' }, '2026-09-25'), { fechaReal: '2026-09-25' });
+  assert.deepEqual(valoresIniciales(null, '2026-09-25'), { fechaReal: '2026-09-25' });
+});
+
+test('valoresIniciales: con un cierre ya guardado, prellena TODO el cierre real (modo de corrección)', () => {
+  const contrato = {
+    id: 'c1',
+    cierre: {
+      fechaReal: '2026-08-25', horaReal: '10:30', lugarEntrada: 'OFICINA',
+      kmEntrada: 45600, combustible: 130, danos: 200, danosDetalle: 'Rayón en la puerta',
+      varios: 0, descuento: 300,
+    },
+  };
+  const iniciales = valoresIniciales(contrato, '2026-09-25');
+  // El cierre real entero, tal cual — nunca la fecha de hoy ni campos en
+  // blanco: es justo lo que hubiera pisado los daños y el descuento.
+  assert.deepEqual(iniciales, contrato.cierre);
+  assert.equal(iniciales.danos, 200, 'los daños negociados no desaparecen');
+  assert.equal(iniciales.descuento, 300, 'el descuento negociado no desaparece');
+});
+
+test('textoCorreccion: null cuando el contrato todavía no tiene cierre', () => {
+  assert.equal(textoCorreccion({ id: 'c1' }), null);
+  assert.equal(textoCorreccion(null), null);
+});
+
+test('textoCorreccion: nombra la fecha real, formateada, cuando ya se recibió', () => {
+  const contrato = { id: 'c1', cierre: { fechaReal: '2026-08-25' } };
+  assert.equal(textoCorreccion(contrato), 'Este contrato ya se recibió el 25 ago 2026 — estás corrigiendo el cierre.');
+});

@@ -3,8 +3,9 @@
 // Son advertencias, no candados: el dueño decide. Puede rentarle a un conocido
 // con la licencia recién vencida si así lo quiere. Lo que no puede es que nadie
 // se lo haya dicho.
-import { diasEntre } from './fechas.js';
+import { diasEntre, textoFecha } from './fechas.js';
 import { resumen } from './contrato.js';
+import { textoDosDecimales } from './dinero.js';
 
 const alto = (mensaje) => ({ nivel: 'alto', mensaje });
 const medio = (mensaje) => ({ nivel: 'medio', mensaje });
@@ -28,10 +29,10 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
   const avisos = [];
 
   if (cliente?.licenciaExpira && diasEntre(cliente.licenciaExpira, hoy) > 0) {
-    avisos.push(alto(`La licencia del cliente venció el ${cliente.licenciaExpira}.`));
+    avisos.push(alto(`La licencia del cliente venció el ${textoFecha(cliente.licenciaExpira)}.`));
   }
   if (cliente?.documentoExpira && diasEntre(cliente.documentoExpira, hoy) > 0) {
-    avisos.push(alto(`El documento del cliente venció el ${cliente.documentoExpira}.`));
+    avisos.push(alto(`El documento del cliente venció el ${textoFecha(cliente.documentoExpira)}.`));
   }
 
   // Solo cuenta lo que debe, no lo que se le debe: si en un contrato pagó de
@@ -39,7 +40,7 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
   // mostrador tiene que enterarse de la deuda, aunque el neto dé a favor.
   const deuda = contratosDelCliente.reduce((total, c) => total + Math.max(0, resumen(c).saldo), 0);
   if (deuda > 0) {
-    avisos.push(alto(`Este cliente debe Q${deuda.toFixed(2)} de una renta anterior.`));
+    avisos.push(alto(`Este cliente debe Q${textoDosDecimales(deuda)} de una renta anterior.`));
   }
 
   const tardes = contratosDelCliente.filter((c) => resumen(c).diasAtraso > 0).length;
