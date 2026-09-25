@@ -298,6 +298,45 @@ campos a `privado/dinero` **y migrar los contratos que el núcleo ya escribió**
 — no basta con cambiar dónde escribe el sistema de ahora en adelante, los
 contratos viejos se quedarían con el dato expuesto.
 
+## 7b. Los nombres de los campos
+
+El mismo dato ha quedado guardado bajo dos nombres distintos en tres ocasiones:
+`kilometrajeSalida` y `kmSalida`, `nombre1` y `nombres`, `formaPago` y `forma`.
+Cada vez costó una vuelta de revisión y dejó un puente de lectura que el
+sistema arrastra. Para evitarlo en el futuro, aquí está la lista canónica de
+los nombres que el sistema entero usa.
+
+**Del contrato:**
+`numero`, `clienteId`, `clienteNombre`, `carroId`, `carroPlacas`, `carroDescripcion`,
+`fechaSalida`, `dias`, `devolucionPrevista`, `precioDia`, `kmSalida`, `garantiaMonto`,
+`garantiaLiberada`, `garantiaLiberadaEn`, `estado`, `porcentajeComision`, `pagos[]`, `cierre{}`.
+
+**De un pago:**
+`monto`, `forma`, `porcentajeTarjeta`, `fecha`.
+
+**Del cierre:**
+`fechaReal`, `horaReal`, `lugarEntrada`, `kmEntrada`, `combustible`, `danos`,
+`danosDetalle`, `varios`, `variosDetalle`, `descuento`.
+
+**Del cliente:**
+`nombres`, `apellidos`, y el resto de las claves en `CAMPOS_CLIENTE`
+(`js/nucleo/cliente.js`), que es la lista viva.
+
+**Del carro:**
+`codigo`, `placas`, `tipo`, `marca`, `linea`, `color`, `modelo`, `propiedad`,
+`dueno`, `fueraDeServicio`, `motivoFueraDeServicio`.
+
+**Los puentes de lectura que siguen en el código:**
+- `pantallas/contratos.js:formaDePago()` — lee `forma` o `formaPago`, por los pagos de la salida que
+  salieron guardados con el segundo nombre.
+- `pantallas/contratos.js:seccionSalida()` y el resumen en `nucleo/contrato.js` — leen `kmSalida` o
+  `kilometrajeSalida`, por los contratos antiguos que lo salvaron con ambos.
+- `pantallas/clientes.js` y `nucleo/cliente.js` — leen `nombres` o `nombre1`, por los clientes que
+  llegaron con ambos del Excel.
+
+Estos puentes no van a desaparecer nunca: son la forma de que los datos de
+hace un año sigan mostrándose bien cuando se abre el sistema hoy.
+
 ## 8. Impresión
 
 **Contrato sobre el formulario preimpreso.** El sistema imprime únicamente los
