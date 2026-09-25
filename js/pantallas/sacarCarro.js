@@ -69,6 +69,16 @@ const descripcionCarroPropio = (c) => [c?.marca, c?.linea].filter(Boolean).join(
 const descripcionCarroAjeno = (c) => [c?.marca, c?.modelo].filter(Boolean).join(' ');
 
 /**
+ * ¿Esta tarjeta tiene algo escrito? La primera tarjeta del formulario
+ * siempre se leía (ver `leerTarjetas` más abajo) aunque el mostrador nunca
+ * hubiera tocado esos campos, así que un contrato pagado en efectivo
+ * guardaba una tarjeta vacía de todos modos — el detalle del contrato
+ * mostraba un renglón de "•••• / — / — / Q0.00" que no era ninguna tarjeta
+ * de verdad.
+ */
+const tarjetaTieneDatos = (t) => Boolean(t?.ultimos4 || t?.vencimiento || t?.banco || t?.autorizacion || q(t?.montoAutorizado));
+
+/**
  * Arma el contrato tal como se guarda (§7 del diseño), a partir de lo que ya
  * se leyó del formulario. Función pura: no toca el DOM, así que se puede
  * probar sola con el ejemplo del diseño.
@@ -98,11 +108,22 @@ export function construirContrato(datos) {
   const precioDiaNum = q(precioDia);
   const fechaSalidaVal = fechaSalida || hoyISO();
 
-  const garantiaMonto = suma(...tarjetas.map((t) => t.montoAutorizado));
+  // Solo se guardan las tarjetas que de verdad traen algo escrito (ver
+  // tarjetaTieneDatos arriba): así una renta en efectivo no arrastra un
+  // renglón de tarjeta vacío en `tarjetas`, y garantiaMonto no cuenta un
+  // Q0.00 que tampoco era una tarjeta.
+  const tarjetasConDatos = tarjetas.filter(tarjetaTieneDatos);
+  const garantiaMonto = suma(...tarjetasConDatos.map((t) => t.montoAutorizado));
 
   const montoPagoNum = q(montoPago);
+  // §7b del diseño: un pago es {monto, forma, porcentajeTarjeta, fecha}. Sin
+  // `fecha` aquí, el pago más grande de cada contrato (el de la salida)
+  // quedaba con la celda de Fecha vacía en el detalle del contrato — el único
+  // pago de todo el sistema que no la traía.
   const pagos = montoPagoNum
-    ? [{ monto: montoPagoNum, forma: forma || 'efectivo', porcentajeTarjeta: forma === 'tarjeta' ? q(porcentajeTarjeta) : 0 }]
+    ? [{
+      monto: montoPagoNum, forma: forma || 'efectivo', porcentajeTarjeta: forma === 'tarjeta' ? q(porcentajeTarjeta) : 0, fecha: fechaSalidaVal,
+    }]
     : [];
 
   // Nunca se guarda un contrato sin porcentajeComision: sin él la comisión
@@ -156,7 +177,7 @@ export function construirContrato(datos) {
     variosDescripcion: variosDescripcion || '',
     variosPrecio: q(variosPrecio),
 
-    tarjetas,
+    tarjetas: tarjetasConDatos,
     garantiaMonto,
     garantiaLiberada: false,
 
