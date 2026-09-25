@@ -10,6 +10,9 @@ import { iniciarFirebase } from './firebase-config.js';
 import { mezclar, guardarLocal, leerLocal } from './cache.js';
 import { filtrar, textoDeCliente } from './nucleo/busqueda.js';
 import { estadoContrato } from './nucleo/estados.js';
+import { resumen } from './nucleo/contrato.js';
+import { q, textoDosDecimales } from './nucleo/dinero.js';
+import { hoyISO } from './nucleo/fechas.js';
 
 // Comprobado a mano: con las claves de Firebase todavía sin pegar (o sin
 // internet), el SDK de Firestore no falla rápido — reintenta por su cuenta y
@@ -150,6 +153,30 @@ export async function cargarContratosAbiertos(alLlegar) {
   return { datos: soloAbiertos(r.datos), fallo: r.fallo };
 }
 
+/**
+ * Un contrato por su id: la copia local primero (para no esperar la nube si
+ * ya se tiene), y si no está ahí, se pide directo a Firestore por su id (no
+ * hace falta traer toda la colección para esto). `null` si en verdad no
+ * existe en ningún lado.
+ *
+ * A propósito no se atrapa un fallo de red al consultar la nube: si el
+ * documento no existe, `getDoc` contesta igual (`exists()` en false) y eso sí
+ * es un `null` de verdad; pero si la nube no contesta (`conLimiteDeTiempo` la
+ * da por vencida), eso es un fallo, no un "no existe" — confundirlos sería
+ * repetir el error que resultadoLectura ya corrigió para las listas (ver más
+ * arriba): una pantalla de cobro no debe decirle al dueño "este contrato no
+ * existe" cuando lo que en verdad pasó es que no hubo internet.
+ */
+export async function cargarContrato(id) {
+  if (!id) return null;
+  const locales = await leerLocal('contratos');
+  const local = locales.find((c) => c.id === id);
+  if (local) return local;
+  const { db, fsMod } = await iniciarFirebase();
+  const doc = await conLimiteDeTiempo(fsMod.getDoc(fsMod.doc(db, 'contratos', id)));
+  return doc.exists() ? { id: doc.id, ...doc.data() } : null;
+}
+
 // Todavía no hay pantalla de Ajustes (§6 del diseño) — es de un plan futuro
 // — así que mientras el documento `ajustes/general` no exista en Firestore
 // se usan estos, que son los que confirmó el dueño. El precio por día NO
@@ -268,6 +295,49 @@ export async function guardarContrato(contrato) {
   await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
   await guardarLocal('contratos', [guardado]);
   return guardado;
+}
+
+/**
+ * Agrega un abono a `contrato.pagos`. Función **pura** (sin Firestore) para
+ * poder probar la cuenta del saldo sin depender de la red — el dueño cobra en
+ * dos momentos (salida y devolución) pero además "a veces abona": el cliente
+ * puede dejar parte de lo que debe al traer el carro y terminar de pagar
+ * después, en más de una visita.
+ *
+ * Un pago sin monto no cambia nada: así una pantalla puede llamar a esto con
+ * lo que haya en el formulario sin tener que comprobar antes si el mostrador
+ * de verdad escribió una cifra.
+ */
+export function agregarPago(contrato, {
+  monto, forma, porcentajeTarjeta, fecha = hoyISO(),
+} = {}) {
+  if (!q(monto)) return contrato;
+  const pago = {
+    monto: q(monto), forma, porcentajeTarjeta: q(porcentajeTarjeta), fecha,
+  };
+  const pagos = Array.isArray(contrato?.pagos) ? contrato.pagos : [];
+  return { ...contrato, pagos: [...pagos, pago] };
+}
+
+/** Registra un abono nuevo y guarda el contrato con `guardarContrato`. */
+export async function registrarPago(contrato, pago) {
+  return guardarContrato(agregarPago(contrato, pago));
+}
+
+/**
+ * Libera la garantía de la tarjeta: "no libero hasta que me pague" (regla del
+ * dueño, tal cual) — es la única palanca que le queda una vez que el carro ya
+ * volvió, para que el cliente termine de pagar. Por eso rechaza si todavía
+ * queda saldo (medido sin recargo de tarjeta, igual que en todo el sistema —
+ * ver resumen() en nucleo/contrato.js): dejarla ir con saldo pendiente sería
+ * dinero que el dueño ya no vuelve a ver.
+ */
+export async function liberarGarantia(contrato) {
+  const { saldo } = resumen(contrato);
+  if (saldo > 0) {
+    throw new Error(`Todavía debe Q${textoDosDecimales(saldo)}: no se puede liberar la garantía hasta que pague.`);
+  }
+  return guardarContrato({ ...contrato, garantiaLiberada: true, garantiaLiberadaEn: hoyISO() });
 }
 
 /**
