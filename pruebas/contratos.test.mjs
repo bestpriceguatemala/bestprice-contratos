@@ -116,17 +116,30 @@ test('filtrarPorEstado: pendientesCobro es resumen(c).saldo > 0, sin importar si
 
 test('filtrarPorEstado: garantiasSinLiberar exige que el carro ya haya vuelto', () => {
   // Todavía afuera, sin liberar: NO cuenta (mismo criterio que flota.js).
-  const afueraSinLiberar = { dias: 2, precioDia: 100, pagos: [], garantiaLiberada: false };
+  const afueraSinLiberar = {
+    dias: 2, precioDia: 100, pagos: [], garantiaMonto: 500, garantiaLiberada: false,
+  };
   // Ya volvió, saldo en 0, pero la garantía sigue bloqueada: SÍ cuenta.
   const devueltaSinLiberar = {
-    dias: 1, precioDia: 100, devolucionPrevista: '2026-08-01', cierre: { fechaReal: '2026-08-01' }, pagos: [{ monto: 100, porcentajeTarjeta: 0 }], garantiaLiberada: false,
+    dias: 1, precioDia: 100, devolucionPrevista: '2026-08-01', cierre: { fechaReal: '2026-08-01' }, pagos: [{ monto: 100, porcentajeTarjeta: 0 }], garantiaMonto: 500, garantiaLiberada: false,
   };
   // Ya volvió y ya se liberó: no cuenta.
   const devueltaLiberada = {
-    dias: 1, precioDia: 100, devolucionPrevista: '2026-08-01', cierre: { fechaReal: '2026-08-01' }, pagos: [{ monto: 100, porcentajeTarjeta: 0 }], garantiaLiberada: true,
+    dias: 1, precioDia: 100, devolucionPrevista: '2026-08-01', cierre: { fechaReal: '2026-08-01' }, pagos: [{ monto: 100, porcentajeTarjeta: 0 }], garantiaMonto: 500, garantiaLiberada: true,
   };
   const resultado = filtrarPorEstado([afueraSinLiberar, devueltaSinLiberar, devueltaLiberada], 'garantiasSinLiberar');
   assert.deepEqual(resultado, [devueltaSinLiberar]);
+});
+
+// IMPORTANTE de la revisión final: sin tarjeta de por medio (garantiaMonto
+// 0), no hay nada que liberar — este contrato no debería aparecer aquí
+// aunque `garantiaLiberada` siga en false, porque nunca hizo falta liberar
+// nada.
+test('filtrarPorEstado: garantiasSinLiberar no cuenta una renta en efectivo (garantiaMonto 0)', () => {
+  const enEfectivoSinTocar = {
+    dias: 1, precioDia: 100, devolucionPrevista: '2026-08-01', cierre: { fechaReal: '2026-08-01' }, pagos: [{ monto: 100, porcentajeTarjeta: 0 }], garantiaMonto: 0, garantiaLiberada: false,
+  };
+  assert.deepEqual(filtrarPorEstado([enEfectivoSinTocar], 'garantiasSinLiberar'), []);
 });
 
 test('contratosVisibles: aplica el estado y luego el buscador encima', () => {
@@ -190,7 +203,7 @@ test('textoCuenta: debe, pagado, y a favor del cliente, con el monto exacto de r
 
 test('textoCuenta: agrega "garantía sin liberar" solo si ya regresó y sigue bloqueada', () => {
   const devueltoPagadoSinLiberar = {
-    dias: 1, precioDia: 100, devolucionPrevista: '2026-08-01', cierre: { fechaReal: '2026-08-01' }, pagos: [{ monto: 100, porcentajeTarjeta: 0 }], garantiaLiberada: false,
+    dias: 1, precioDia: 100, devolucionPrevista: '2026-08-01', cierre: { fechaReal: '2026-08-01' }, pagos: [{ monto: 100, porcentajeTarjeta: 0 }], garantiaMonto: 500, garantiaLiberada: false,
   };
   assert.equal(textoCuenta(devueltoPagadoSinLiberar), 'Pagado · garantía sin liberar');
 });
