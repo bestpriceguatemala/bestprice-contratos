@@ -23,11 +23,16 @@ test('avisa si la licencia está vencida', () => {
   const r = avisosDeSalida({ ...base, cliente: { ...cliente, licenciaExpira: '2026-08-01' } });
   assert.equal(r[0].nivel, 'alto');
   assert.match(r[0].mensaje, /licencia/i);
+  // Minor de la revisión final: mostraba la fecha ISO cruda ('2026-08-01')
+  // en vez del formato que lee el dueño.
+  assert.match(r[0].mensaje, /1 ago 2026/);
+  assert.doesNotMatch(r[0].mensaje, /2026-08-01/);
 });
 
 test('avisa si el DPI o pasaporte está vencido', () => {
   const r = avisosDeSalida({ ...base, cliente: { ...cliente, documentoExpira: '2026-08-19' } });
   assert.match(mensajes(r).join(' '), /documento/i);
+  assert.match(mensajes(r).join(' '), /19 ago 2026/);
 });
 
 test('avisa si el cliente quedó debiendo de otra renta', () => {
@@ -41,6 +46,9 @@ test('avisa si el cliente quedó debiendo de otra renta', () => {
   assert.equal(r[0].nivel, 'alto');
   assert.match(r[0].mensaje, /debe|saldo/i);
   assert.match(r[0].mensaje, /800/, 'dice cuánto debe');
+  // Minor de la revisión final: usaba deuda.toFixed(2) (sin separador de
+  // miles) en vez del formato de dinero del resto del sistema.
+  assert.match(r[0].mensaje, /Q800\.00/);
 });
 
 // Revisión final (hallazgo de un solo renglón, efecto secundario de
