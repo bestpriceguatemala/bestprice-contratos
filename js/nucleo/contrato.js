@@ -63,6 +63,12 @@ export function lineasDevolucion(c) {
 
   if (q(c.cierre.danos)) lineas.push({ concepto: 'Daños', detalle: c.cierre.danosDetalle || '', monto: q(c.cierre.danos) });
   if (q(c.cierre.combustible)) lineas.push({ concepto: 'Combustible', detalle: '', monto: q(c.cierre.combustible) });
+  // CRÍTICO de la revisión final: "Varios" (la llave perdida, el lavado, la
+  // silla de bebé no devuelta) se guardaba en el cierre pero nunca aparecía
+  // aquí, así que nunca subía el saldo ni se cobraba — el mostrador tecleaba
+  // el monto y la pantalla no se movía. Mismo patrón que Daños: el monto y su
+  // detalle libre, tal cual, sin inventar nada.
+  if (q(c.cierre.varios)) lineas.push({ concepto: 'Varios', detalle: c.cierre.variosDetalle || '', monto: q(c.cierre.varios) });
   if (q(c.cierre.descuento)) lineas.push({ concepto: 'Descuento', detalle: '', monto: q(-c.cierre.descuento) });
 
   return lineas;

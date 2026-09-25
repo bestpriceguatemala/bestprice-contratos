@@ -64,6 +64,27 @@ test('en la devolución se cobra el atraso, los daños y el combustible, menos e
   ]);
 });
 
+// CRÍTICO de la revisión final: "Varios" (la llave perdida, el lavado, la
+// silla de bebé no devuelta) se guardaba en el cierre pero lineasDevolucion
+// nunca emitía una línea para él, así que nunca subía el saldo — el
+// mostrador tecleaba Q150 y la pantalla no se movía. La prueba que hacía
+// falta y que dejó pasar esto dos rondas de revisión: no basta con
+// comprobar que el campo se guardó (eso ya lo hacía cierre.test.mjs), hay
+// que comprobar que el SALDO se mueve.
+test('CRÍTICO: "Varios" al recibir el carro sí se cobra — mueve el saldo, no solo se guarda', () => {
+  const c = { ...ejemplo(), cierre: { ...ejemplo().cierre, varios: 150, variosDetalle: 'Silla de bebé no devuelta' } };
+
+  const linea = lineasDevolucion(c).find((l) => l.concepto === 'Varios');
+  assert.ok(linea, 'lineasDevolucion tiene que emitir una línea de Varios');
+  assert.equal(linea.monto, 150);
+  assert.equal(linea.detalle, 'Silla de bebé no devuelta');
+
+  const saldoSinVarios = resumen(ejemplo()).saldo; // 0: el ejemplo ya está cobrado por completo
+  const saldoConVarios = resumen(c).saldo;
+  assert.equal(saldoSinVarios, 0);
+  assert.equal(saldoConVarios, 150, 'los Q150 de Varios tienen que aparecer como saldo por cobrar');
+});
+
 test('el ejemplo del diseño da Q4,345.60', () => {
   const r = resumen(ejemplo());
   assert.equal(r.diasAtraso, 1);
