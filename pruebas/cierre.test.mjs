@@ -72,3 +72,27 @@ test('devolver antes de tiempo no da crédito ni problema', () => {
   assert.equal(r.diasAtraso, 0);
   assert.deepEqual(problemasDelCierre(contrato(), { ...campos, fechaReal: '2026-08-22' }), []);
 });
+
+test('el detalle de los varios llega al cierre', () => {
+  const c = construirCierre(contrato(), { ...campos, varios: 150, variosDetalle: 'Silla de bebé no devuelta' });
+  assert.equal(c.cierre.varios, 150);
+  assert.equal(c.cierre.variosDetalle, 'Silla de bebé no devuelta');
+});
+
+test('corregir un cierre ya guardado se queda con lo nuevo', () => {
+  // Él va a corregir un cierre que ya guardó: un monto mal tecleado, un
+  // detalle mejor escrito. Lo nuevo manda; lo que no se toca se queda.
+  const yaCerrado = construirCierre(contrato(), { ...campos, varios: 150, variosDetalle: 'VIEJO' });
+  const corregido = construirCierre(yaCerrado, { ...campos, varios: 150, variosDetalle: 'NUEVO' });
+  assert.equal(corregido.cierre.variosDetalle, 'NUEVO');
+  assert.equal(corregido.cierre.danosDetalle, campos.danosDetalle, 'lo que no se corrigió sigue ahí');
+  assert.equal(corregido.cierre.kmEntrada, 45600);
+});
+
+test('sin kmSalida registrado, no se valida que el kilometraje retroceda', () => {
+  // Si no se registró kmSalida, no hay base para comparar — la validación
+  // no es un pase falso sino un skip: ningún problema devuelto.
+  const sinKmSalida = { ...contrato(), kmSalida: 0 };
+  const p = problemasDelCierre(sinKmSalida, { ...campos, kmEntrada: 44000 });
+  assert.equal(p.filter((m) => /kilometraje/i.test(m)).length, 0, 'no hay problema de km sin kmSalida');
+});

@@ -8,26 +8,27 @@
 // Nunca ajustar una cifra para que cuadre. Si el descuento es mayor que lo que
 // hay que cobrar, se lo decimos tal como es.
 
-import { q, suma } from './dinero.js';
+import { q, textoDosDecimales } from './dinero.js';
 import { diasEntre } from './fechas.js';
 import { resumen } from './contrato.js';
 
 /**
  * Arma el cierre del contrato preservando todo lo que ya traía.
- * Los campos de dinero se redondean a dos decimales con q().
+ * Se usa spread genérico para no perder campos: si se enumeran a mano,
+ * uno se cae (como pasó con variosDetalle). Los campos de dinero se
+ * redondean después con q() para evitar errores de centavos.
  */
 export function construirCierre(contrato, campos) {
+  const cierreBase = { ...contrato.cierre, ...campos };
+
+  // Redondear los campos de dinero a dos decimales
   const cierre = {
-    ...contrato.cierre,
-    fechaReal: campos.fechaReal || '',
-    horaReal: campos.horaReal || '',
-    lugarEntrada: campos.lugarEntrada || '',
-    kmEntrada: q(campos.kmEntrada),
-    combustible: q(campos.combustible),
-    danos: q(campos.danos),
-    danosDetalle: campos.danosDetalle || '',
-    varios: q(campos.varios),
-    descuento: q(campos.descuento),
+    ...cierreBase,
+    kmEntrada: q(cierreBase.kmEntrada),
+    combustible: q(cierreBase.combustible),
+    danos: q(cierreBase.danos),
+    varios: q(cierreBase.varios),
+    descuento: q(cierreBase.descuento),
   };
 
   return { ...contrato, cierre };
@@ -60,12 +61,12 @@ export function problemasDelCierre(contrato, cierre) {
     );
   }
 
-  // El kilometraje retrocede
+  // El kilometraje retrocede (solo si se registró el de salida)
   const kmSalida = q(contrato.kmSalida);
   const kmEntrada = q(cierre.kmEntrada);
-  if (kmEntrada < kmSalida) {
-    const kmSalidaTexto = kmSalida.toLocaleString('es-GT');
-    const kmEntradaTexto = kmEntrada.toLocaleString('es-GT');
+  if (kmSalida && kmEntrada < kmSalida) {
+    const kmSalidaTexto = textoDosDecimales(kmSalida);
+    const kmEntradaTexto = textoDosDecimales(kmEntrada);
     problemas.push(
       `El kilometraje de entrada (${kmEntradaTexto}) es menor que el de salida (${kmSalidaTexto}).`,
     );
@@ -77,8 +78,8 @@ export function problemasDelCierre(contrato, cierre) {
   const r = resumen(cierreTemp);
   if (r.subtotal < 0) {
     problemas.push(
-      `El descuento de Q${q(cierre.descuento).toLocaleString('es-GT')} es demasiado grande: ` +
-      `dejaría el cobro en negativo (Q${r.subtotal.toLocaleString('es-GT')}).`,
+      `El descuento de Q${textoDosDecimales(cierre.descuento)} es demasiado grande: ` +
+      `dejaría el cobro en negativo (Q${textoDosDecimales(r.subtotal)}).`,
     );
   }
 
