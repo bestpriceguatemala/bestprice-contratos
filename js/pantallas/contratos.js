@@ -296,6 +296,8 @@ function filaLinea(l) {
 function seccionSalida(c) {
   const carro = [c?.carroPlacas, c?.carroDescripcion].filter(Boolean).join(' · ') || '—';
   const conductor = c?.conductorAdicional?.nombre || '';
+  const conductorLicencia = c?.conductorAdicional?.licencia || '';
+  const conductorIdentificacion = c?.conductorAdicional?.identificacion || '';
   return `
     <section class="carro-seccion">
       <h2>Datos de la salida</h2>
@@ -311,6 +313,8 @@ function seccionSalida(c) {
         ${campoSoloLectura('Devolución prevista', fecha(c?.devolucionPrevista))}
         ${campoSoloLectura('Quién lo rentó', c?.rentadoPor)}
         ${campoSoloLectura('Conductor adicional', conductor)}
+        ${campoSoloLectura('Licencia del conductor', conductorLicencia)}
+        ${campoSoloLectura('Identificación del conductor', conductorIdentificacion)}
       </div>
     </section>`;
 }
@@ -397,11 +401,12 @@ function seccionGarantia(c) {
     ? tarjetas.map((t) => `
         <tr>
           <td>${numeroEnmascarado(t?.ultimos4)}</td>
+          <td>${esc(t?.vencimiento || '—')}</td>
           <td>${esc(t?.banco || '—')}</td>
           <td>${esc(t?.autorizacion || '—')}</td>
           <td>${dinero(t?.montoAutorizado)}</td>
         </tr>`).join('')
-    : '<tr><td colspan="4" class="pendiente">Sin tarjetas registradas.</td></tr>';
+    : '<tr><td colspan="5" class="pendiente">Sin tarjetas registradas.</td></tr>';
   const estadoGarantia = pend.garantia
     ? 'Sin liberar'
     : `Liberada${c?.garantiaLiberadaEn ? ` el ${esc(fecha(c.garantiaLiberadaEn))}` : ''}`;
@@ -412,7 +417,7 @@ function seccionGarantia(c) {
       <div class="sc-garantia-linea"><span>Monto bloqueado</span><strong>${dinero(c?.garantiaMonto)}</strong></div>
       <div class="sc-garantia-linea"><span>Estado</span><strong>${estadoGarantia}</strong></div>
       <table class="tabla-carros">
-        <thead><tr><th>Tarjeta</th><th>Banco</th><th>Autorización</th><th>Monto autorizado</th></tr></thead>
+        <thead><tr><th>Tarjeta</th><th>Vencimiento</th><th>Banco</th><th>Autorización</th><th>Monto autorizado</th></tr></thead>
         <tbody>${filasTarjetas}</tbody>
       </table>
     </section>`;
