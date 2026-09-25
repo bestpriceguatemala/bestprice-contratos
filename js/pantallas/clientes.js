@@ -12,7 +12,7 @@
 // que las dos pantallas se vean como parte del mismo sistema, sin inventar
 // una hoja de estilos aparte.
 import {
-  CAMPOS_CLIENTE, construirCliente, nombreCompleto, faltaAlgo,
+  CAMPOS_CLIENTE, construirCliente, nombreCompleto, faltaAlgo, nombresResueltos,
 } from '../nucleo/cliente.js';
 import { filtrar, textoDeCliente } from '../nucleo/busqueda.js';
 import { resumen } from '../nucleo/contrato.js';
@@ -38,6 +38,25 @@ const texto = (id) => val(id).trim();
 //
 // Separadas de todo lo que dibuja HTML para poder probarlas sin DOM, igual
 // que textoConfirmarLiberar en flota.js.
+
+/**
+ * El cliente tal como se prellena en el formulario de la ficha: si ya tiene
+ * `nombres`/`apellidos` en la forma nueva, tal cual; si no, se completan con
+ * `nombresResueltos()` (nucleo/cliente.js) a partir de la forma vieja
+ * (`nombre1`/`nombre2`/`apellido1`/`apellido2`).
+ *
+ * Puente de solo lectura (fix round 1, hallazgo Crítico): sin esto, la ficha
+ * de un cliente guardado con la forma vieja se abre con "Nombres" y
+ * "Apellidos" en blanco, y `faltaAlgo()` rechaza CUALQUIER guardado —
+ * incluso corregir solo el teléfono — hasta que alguien vuelva a escribir el
+ * nombre a mano. Al prellenar, esos dos campos viajan con el resto del
+ * formulario al guardar y el cliente queda migrado a la forma nueva sin que
+ * el mostrador tenga que hacer nada extra.
+ */
+export function clienteParaFormulario(cliente) {
+  if (!cliente) return {};
+  return { ...cliente, ...nombresResueltos(cliente) };
+}
 
 /** Cierto si una fecha ISO ya pasó respecto a "hoy". Vacía nunca cuenta como vencida. */
 export function estaVencido(fechaISO, hoy) {
@@ -313,7 +332,7 @@ async function dibujarFicha(contenedor, clienteId, clientes, contratos, hoy) {
         <h1>${esc(titulo)}</h1>
         ${barraAlertas(alertas)}
         <form id="cli-form" novalidate>
-          ${seccionesHTML(cliente || {})}
+          ${seccionesHTML(clienteParaFormulario(cliente))}
           <div class="carro-botones">
             <button type="button" id="cli-volver" class="btn">Cancelar</button>
             <button type="submit" id="cli-guardar" class="btn btn-primario">Guardar cliente</button>

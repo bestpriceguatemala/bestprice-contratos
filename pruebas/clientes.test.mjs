@@ -7,10 +7,37 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  estaVencido, contratosDe, saldoPendienteDe, vecesTarde, alertasDe,
+  estaVencido, contratosDe, saldoPendienteDe, vecesTarde, alertasDe, clienteParaFormulario,
 } from '../js/pantallas/clientes.js';
 
 const HOY = '2026-09-25';
+
+// Fix round 1, hallazgo Crítico de la revisión: sacarCarro.js todavía guarda
+// clientes con nombre1/apellido1 (se migra en la Tarea 7), y ya hay clientes
+// guardados así. Sin este puente la ficha se abre con Nombres/Apellidos en
+// blanco y faltaAlgo() rechaza cualquier guardado, aunque solo se quiera
+// corregir el teléfono.
+test('clienteParaFormulario: prellena nombres/apellidos de la forma vieja cuando faltan', () => {
+  const viejo = {
+    id: 'k9', nombre1: 'PEDRO', apellido1: 'MENDOZA', telefono: '5555-1234',
+  };
+  const prellenado = clienteParaFormulario(viejo);
+  assert.equal(prellenado.nombres, 'PEDRO');
+  assert.equal(prellenado.apellidos, 'MENDOZA');
+  // El resto del cliente viaja igual, nada se pierde ni se inventa.
+  assert.equal(prellenado.id, 'k9');
+  assert.equal(prellenado.telefono, '5555-1234');
+});
+
+test('clienteParaFormulario: un cliente de la forma nueva no cambia', () => {
+  const nuevo = { id: 'k1', nombres: 'ANA', apellidos: 'GÓMEZ' };
+  assert.deepEqual(clienteParaFormulario(nuevo), nuevo);
+});
+
+test('clienteParaFormulario: sin cliente (alta nueva), no revienta', () => {
+  assert.deepEqual(clienteParaFormulario(null), {});
+  assert.deepEqual(clienteParaFormulario(undefined), {});
+});
 
 test('estaVencido: una fecha pasada está vencida, vacía nunca lo está', () => {
   assert.equal(estaVencido('2026-01-01', HOY), true);

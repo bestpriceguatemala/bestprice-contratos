@@ -5,7 +5,9 @@
 // porque va impreso en el contrato.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CAMPOS_CLIENTE, construirCliente, nombreCompleto, faltaAlgo } from '../js/nucleo/cliente.js';
+import {
+  CAMPOS_CLIENTE, construirCliente, nombreCompleto, faltaAlgo, nombresResueltos,
+} from '../js/nucleo/cliente.js';
 
 const campos = {
   nombres: 'JONATÁN ESTEBAN',
@@ -52,4 +54,28 @@ test('sin nombre o sin apellido no se puede guardar', () => {
   assert.deepEqual(faltaAlgo(construirCliente({}, campos)), []);
   assert.deepEqual(faltaAlgo(construirCliente({}, { ...campos, apellidos: '  ' })), ['Apellidos']);
   assert.deepEqual(faltaAlgo({}), ['Nombres', 'Apellidos']);
+});
+
+// Fix round 1, hallazgo Crítico de la revisión: sacarCarro.js todavía guarda
+// clientes con la forma vieja (nombre1/apellido1, de antes de la Tarea 1), y
+// ya hay clientes guardados así. Sin este puente, nombreCompleto() devuelve
+// '' para ellos y se ven como "Cliente sin nombre" en toda la pantalla.
+test('el nombre completo entiende las fichas viejas', () => {
+  assert.equal(nombreCompleto({ nombre1: 'PEDRO', apellido1: 'MENDOZA' }), 'PEDRO MENDOZA');
+  assert.equal(nombreCompleto({ nombres: 'PEDRO', apellidos: 'MENDOZA', nombre1: 'IGNORAR' }), 'PEDRO MENDOZA');
+});
+
+test('nombresResueltos: la forma nueva gana, la vieja es respaldo, y arma nombre1+nombre2', () => {
+  // Solo la forma vieja: se arma nombres de nombre1+nombre2, apellidos de apellido1.
+  assert.deepEqual(nombresResueltos({ nombre1: 'PEDRO', nombre2: 'LUIS', apellido1: 'MENDOZA' }),
+    { nombres: 'PEDRO LUIS', apellidos: 'MENDOZA' });
+  // Las dos formas presentes: la nueva gana, la vieja se ignora.
+  assert.deepEqual(
+    nombresResueltos({
+      nombres: 'ANA', nombre1: 'IGNORAR', apellidos: 'GÓMEZ', apellido1: 'IGNORAR',
+    }),
+    { nombres: 'ANA', apellidos: 'GÓMEZ' },
+  );
+  // Ninguna de las dos: vacío, no revienta.
+  assert.deepEqual(nombresResueltos({}), { nombres: '', apellidos: '' });
 });

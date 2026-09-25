@@ -74,3 +74,19 @@ test('con nombres y apellidos en un solo campo cada uno, se encuentra por cualqu
   assert.ok(coincide(texto, 'roldan'), 'el segundo apellido, dentro del campo apellidos');
   assert.ok(coincide(texto, 'jonatan esteban urizar roldan'), 'las cuatro palabras juntas, en el orden del contrato');
 });
+
+// Fix round 1, hallazgo Crítico de la revisión: sacarCarro.js todavía guarda
+// clientes con la forma vieja (nombre1/apellido1), y ya hay clientes
+// guardados así de antes de este cambio. Sin este puente, el mostrador
+// busca "Mendoza", no encuentra a nadie, y crea al mismo señor otra vez.
+test('un cliente guardado con los nombres viejos se sigue encontrando', () => {
+  // Lo que sacarCarro.js escribía antes del cambio, y lo que ya está guardado
+  // de sus pruebas. Si no se encuentra por apellido, el mostrador lo vuelve a
+  // crear y queda el mismo señor dos veces.
+  const viejo = {
+    id: 'k9', nombre1: 'PEDRO', apellido1: 'MENDOZA', documento: '2222 33333 0303', telefono: '5555-1234',
+  };
+  assert.ok(coincide(textoDeCliente(viejo), 'mendoza'));
+  assert.ok(coincide(textoDeCliente(viejo), 'pedro mendoza'));
+  assert.ok(coincide(textoDeCliente(viejo), '2222'));
+});

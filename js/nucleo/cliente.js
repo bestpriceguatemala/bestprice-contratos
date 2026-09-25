@@ -56,10 +56,30 @@ export function construirCliente(existente, campos) {
   return merged;
 }
 
+/**
+ * Nombres y apellidos ya resueltos: los de la forma nueva (`nombres`,
+ * `apellidos`) si el cliente ya los tiene, o si no, los que se puedan armar
+ * con la forma vieja de cuatro campos (`nombre1`, `nombre2`, `apellido1`,
+ * `apellido2`) — la que `sacarCarro.js` todavía escribe hoy (se migra en la
+ * Tarea 7) y la que ya tienen los clientes guardados antes de este cambio.
+ *
+ * Puente de solo lectura, igual en espíritu al de `recibirCarro.js` para
+ * `kilometrajeSalida` → `kmSalida`: no escribe nada, solo dice qué mostrar.
+ * Sin esto, un cliente guardado con la forma vieja se ve sin nombre en toda
+ * la pantalla de clientes (la lista, el buscador, la ficha) — el mostrador
+ * busca "Mendoza", no encuentra a nadie, y crea al mismo señor otra vez.
+ */
+export function nombresResueltos(cliente) {
+  const nombres = (cliente?.nombres || '').trim()
+    || [cliente?.nombre1, cliente?.nombre2].filter(Boolean).join(' ').trim();
+  const apellidos = (cliente?.apellidos || '').trim()
+    || [cliente?.apellido1, cliente?.apellido2].filter(Boolean).join(' ').trim();
+  return { nombres, apellidos };
+}
+
 /** El nombre completo como se lee en el contrato: "NOMBRES APELLIDOS". */
 export function nombreCompleto(cliente) {
-  const nombres = (cliente?.nombres || '').trim();
-  const apellidos = (cliente?.apellidos || '').trim();
+  const { nombres, apellidos } = nombresResueltos(cliente);
 
   if (!nombres || !apellidos) return '';
 
