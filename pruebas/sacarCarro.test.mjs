@@ -27,7 +27,7 @@ const datosBase = () => ({
   cartaPoderDestino: 'Ciudad de Guatemala',
   cartaPoderPrecio: 350,
   tarjetas: [{ ultimos4: '3343', vencimiento: '08/28', banco: 'BAC', autorizacion: 'A1', montoAutorizado: 5000 }],
-  formaPago: 'tarjeta',
+  forma: 'tarjeta',
   porcentajeTarjeta: 12,
   montoPago: 3150,
   rentadoPor: 'Ana',
@@ -37,6 +37,14 @@ const datosBase = () => ({
 test('el ejemplo del diseño: 4 días a Q700, carta poder Q350 y 12% de tarjeta dan Q3,528.00 a cobrar', () => {
   const contrato = construirContrato(datosBase());
   assert.equal(resumen(contrato).pagado, 3528, 'el ejemplo del diseño y de la pantalla');
+});
+
+test('el pago usa la clave "forma", no "formaPago"', () => {
+  const contrato = construirContrato(datosBase());
+  assert.equal(contrato.pagos.length, 1);
+  assert.equal('forma' in contrato.pagos[0], true, 'el pago debe tener la clave "forma"');
+  assert.equal('formaPago' in contrato.pagos[0], false, 'el pago no debe tener la clave "formaPago"');
+  assert.equal(contrato.pagos[0].forma, 'tarjeta');
 });
 
 test('guarda el estado, la garantía y la comisión que otras tareas dan por hecho', () => {

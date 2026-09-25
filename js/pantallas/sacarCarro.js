@@ -89,7 +89,7 @@ export function construirContrato(datos) {
     fechaSalida, horaSalida, lugar, dias, precioDia, kmSalida, combustibleSalida, horaTardia,
     seguroDia, seguroTercerosDia, seguroMenoresDia, seguroPaiDia, deducible, deducibleBajo,
     cartaPoderDestino, cartaPoderPrecio, variosDescripcion, variosPrecio,
-    tarjetas = [], formaPago, porcentajeTarjeta, montoPago,
+    tarjetas = [], forma, porcentajeTarjeta, montoPago,
     rentadoPor, porcentajeComision,
     conductorAdicional, observaciones,
   } = datos;
@@ -102,7 +102,7 @@ export function construirContrato(datos) {
 
   const montoPagoNum = q(montoPago);
   const pagos = montoPagoNum
-    ? [{ monto: montoPagoNum, formaPago: formaPago || 'efectivo', porcentajeTarjeta: formaPago === 'tarjeta' ? q(porcentajeTarjeta) : 0 }]
+    ? [{ monto: montoPagoNum, forma: forma || 'efectivo', porcentajeTarjeta: forma === 'tarjeta' ? q(porcentajeTarjeta) : 0 }]
     : [];
 
   // Nunca se guarda un contrato sin porcentajeComision: sin él la comisión
@@ -497,7 +497,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
       variosDescripcion: texto('sc-varios-descripcion'),
       variosPrecio: num('sc-varios-precio'),
       tarjetas: leerTarjetas(),
-      formaPago: texto('sc-pago-forma') || 'efectivo',
+      forma: texto('sc-pago-forma') || 'efectivo',
       porcentajeTarjeta: num('sc-pago-porcentaje'),
       montoPago: num('sc-pago-monto'),
       rentadoPor: texto('sc-rentado-por'),
