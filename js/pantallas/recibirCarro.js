@@ -13,6 +13,15 @@
 // la garantía de la tarjeta NO se suelta aquí — eso es de liberarGarantia()
 // (datos.js, Tarea 5), que se niega mientras haya saldo. Esta pantalla nunca
 // escribe garantiaLiberada.
+//
+// Modo de solo cobro (Tarea 5, Paso 3): "Pendientes de cobro", en flota.js,
+// abre esta misma pantalla para un contrato cuyo cierre ya está hecho (o que
+// ni siquiera ha vuelto) — ahí lo único que falta es el abono, nunca volver a
+// tocar el cierre. En ese modo no se dibuja el bloque "Al recibir el carro"
+// (nada de fecha real, kilometraje, daños...) y guardar() nunca llama a
+// construirCierre: agrega el pago directo sobre el contrato tal como está,
+// para que un cierre ya hecho no se pueda reabrir ni reeditar por accidente
+// desde aquí.
 import { construirCierre, problemasDelCierre } from '../nucleo/cierre.js';
 import { lineasDevolucion, resumen } from '../nucleo/contrato.js';
 import { q, textoDosDecimales } from '../nucleo/dinero.js';
@@ -79,6 +88,27 @@ export function textoAvisoRecibido(numero, saldoRestante) {
 }
 
 /**
+ * El renglón de "Pendientes de cobro" (flota.js) abre esta misma pantalla
+ * pero en modo de solo cobro, agregando "?cobro=1" al final del id en el
+ * enlace — el enrutador (router.js) empareja rutas por pedazos separados con
+ * "/" y no sabe nada de parámetros de consulta, así que aquí se separa el id
+ * real de ese sufijo antes de usarlo. Función pura, sin `location` ni DOM,
+ * para poder probarla sola.
+ */
+export function leerParametroRuta(parametroRuta) {
+  const [contratoId, consulta] = String(parametroRuta || '').split('?');
+  const soloCobro = new URLSearchParams(consulta || '').get('cobro') === '1';
+  return { contratoId, soloCobro };
+}
+
+/** El aviso final del modo de solo cobro: nunca dice "recibido", el carro no se tocó aquí. */
+export function textoAvisoCobro(numero, saldoRestante) {
+  return saldoRestante > 0
+    ? `Abono registrado en el contrato ${numero}. Falta cobrar ${dinero(saldoRestante)}.`
+    : `Contrato ${numero} cobrado por completo.`;
+}
+
+/**
  * Cómo se rotula el saldo cuando sale negativo: un descuento grande o un
  * sobrepago puede dejar al negocio debiéndole al cliente (resumen(), en
  * nucleo/contrato.js, ya explica por qué ese número nunca se esconde detrás
@@ -135,9 +165,33 @@ function campo(id, etiqueta, opciones = {}) {
     </label>`;
 }
 
-function plantilla(contrato) {
+function plantilla(contrato, soloCobro) {
   const pagadoSalida = resumen(contrato).pagado;
   const encabezado = [contrato.carroDescripcion, contrato.carroPlacas].filter(Boolean).join(' · ');
+
+  // Modo de solo cobro: el bloque "Al recibir el carro" no se dibuja en
+  // absoluto (ni fecha real, ni kilometraje, ni daños) — no hay nada de eso
+  // que reeditar aquí, el cierre ya está hecho (o el carro ni ha vuelto, si
+  // el abono viene de un contrato que aún anda afuera con saldo pendiente).
+  const bloqueCierre = soloCobro ? '' : `
+        <section class="sc-bloque">
+          <h2>Al recibir el carro</h2>
+          <div class="sc-campos">
+            ${campo('rc-fecha-real', 'Fecha real de entrada', { tipo: 'date', valor: hoyISO() })}
+            ${campo('rc-hora-real', 'Hora real de entrada', { tipo: 'time' })}
+            ${campo('rc-lugar-entrada', 'Lugar de entrada')}
+            ${campo('rc-km-entrada', 'Kilometraje de entrada', { tipo: 'number', paso: '1', minimo: '0' })}
+            ${campo('rc-combustible', 'Combustible (monto a cobrar)', { tipo: 'number', paso: '0.01', minimo: '0' })}
+            ${campo('rc-danos', 'Daños', { tipo: 'number', paso: '0.01', minimo: '0' })}
+            ${campo('rc-danos-detalle', 'Daños — detalle')}
+            ${campo('rc-varios', 'Varios', { tipo: 'number', paso: '0.01', minimo: '0' })}
+            ${campo('rc-varios-detalle', 'Varios — detalle')}
+            ${campo('rc-descuento', 'Descuento', { tipo: 'number', paso: '0.01', minimo: '0' })}
+          </div>
+          <p class="sc-nota">
+            El combustible se escribe a mano, como un monto a cobrar: el sistema no lo calcula por nivel de tanque.
+          </p>
+        </section>`;
 
   // novalidate: igual que en sacarCarro.js, la validación nativa del
   // navegador sale en su propio idioma; problemasDelCierre (en rojo, arriba
@@ -156,31 +210,13 @@ function plantilla(contrato) {
             Kilometraje de salida: ${esc(textoDosDecimales(contrato.kmSalida))}<br>
             Ya pagó al salir: ${esc(dinero(pagadoSalida))}
           </div>
+          ${soloCobro ? '<p class="sc-nota">El cierre de este contrato ya está hecho: aquí solo se registra el abono.</p>' : ''}
         </section>
-
-        <section class="sc-bloque">
-          <h2>Al recibir el carro</h2>
-          <div class="sc-campos">
-            ${campo('rc-fecha-real', 'Fecha real de entrada', { tipo: 'date', valor: hoyISO() })}
-            ${campo('rc-hora-real', 'Hora real de entrada', { tipo: 'time' })}
-            ${campo('rc-lugar-entrada', 'Lugar de entrada')}
-            ${campo('rc-km-entrada', 'Kilometraje de entrada', { tipo: 'number', paso: '1', minimo: '0' })}
-            ${campo('rc-combustible', 'Combustible (monto a cobrar)', { tipo: 'number', paso: '0.01', minimo: '0' })}
-            ${campo('rc-danos', 'Daños', { tipo: 'number', paso: '0.01', minimo: '0' })}
-            ${campo('rc-danos-detalle', 'Daños — detalle')}
-            ${campo('rc-varios', 'Varios', { tipo: 'number', paso: '0.01', minimo: '0' })}
-            ${campo('rc-varios-detalle', 'Varios — detalle')}
-            ${campo('rc-descuento', 'Descuento', { tipo: 'number', paso: '0.01', minimo: '0' })}
-          </div>
-          <p class="sc-nota">
-            El combustible se escribe a mano, como un monto a cobrar: el sistema no lo calcula por nivel de tanque.
-          </p>
-        </section>
-
+${bloqueCierre}
       </div>
 
       <aside class="sc-resumen">
-        <h2>Detalle del cierre</h2>
+        <h2>${soloCobro ? 'Cobro' : 'Detalle del cierre'}</h2>
         <ul id="rc-lineas" class="sc-lineas"><li class="sc-vacio">Todavía no hay nada que cobrar.</li></ul>
 
         <div class="sc-garantia-linea">
@@ -214,7 +250,7 @@ function plantilla(contrato) {
 
         <ul id="rc-problemas" class="sc-avisos-lista"></ul>
 
-        <button type="submit" id="rc-guardar" class="btn btn-primario">Recibir y cobrar</button>
+        <button type="submit" id="rc-guardar" class="btn btn-primario">${soloCobro ? 'Cobrar' : 'Recibir y cobrar'}</button>
       </aside>
     </form>`;
 }
@@ -227,10 +263,11 @@ function filaLinea(l) {
 const PREFIJO_RUTA = '#/recibir/';
 let ultimoToken = 0;
 
-/** Dibuja "Recibir carro" dentro de `contenedor`, para el contrato `contratoId`. */
-export async function pintarRecibirCarro(contenedor, contratoId) {
+/** Dibuja "Recibir carro" dentro de `contenedor`, para el contrato `contratoId` (o `id?cobro=1`). */
+export async function pintarRecibirCarro(contenedor, parametroRuta) {
   const miToken = ++ultimoToken;
   const sigoVigente = () => location.hash.startsWith(PREFIJO_RUTA) && miToken === ultimoToken;
+  const { contratoId, soloCobro } = leerParametroRuta(parametroRuta);
 
   contenedor.innerHTML = '<p class="pendiente">Cargando…</p>';
 
@@ -264,7 +301,7 @@ export async function pintarRecibirCarro(contenedor, contratoId) {
   let montoPagoTocado = false;
   let guardando = false;
 
-  contenedor.innerHTML = plantilla(contrato);
+  contenedor.innerHTML = plantilla(contrato, soloCobro);
 
   const el = (id) => document.getElementById(id);
   const val = (id) => el(id)?.value ?? '';
@@ -291,14 +328,19 @@ export async function pintarRecibirCarro(contenedor, contratoId) {
   }
 
   function recalcular() {
-    const campos = leerCampos();
+    // Modo de solo cobro: nunca se pasa por construirCierre — no hay campos
+    // de cierre en pantalla que leer, y el contrato se usa tal cual está
+    // guardado (con su cierre, si ya lo tiene, o sin él si el carro sigue
+    // afuera). Es lo que impide que este modo reabra o reedite un cierre ya
+    // hecho (Tarea 5, punto 4).
+    const campos = soloCobro ? null : leerCampos();
     const pagadoSalida = resumen(contrato).pagado;
-    const contratoConCierre = construirCierre(contrato, campos);
+    const contratoActual = soloCobro ? contrato : construirCierre(contrato, campos);
 
     // Cada figura de dinero en esta pantalla sale de lineasDevolucion,
     // resumen o agregarPago (nucleo/contrato.js y datos.js) — nunca de una
     // cuenta hecha aquí mismo con los campos del formulario.
-    const lineas = lineasDevolucion(contratoConCierre);
+    const lineas = lineasDevolucion(contratoActual);
     el('rc-lineas').innerHTML = [
       `<li><span>Ya pagó al salir</span><strong>${dinero(pagadoSalida)}</strong></li>`,
       ...lineas.map(filaLinea),
@@ -306,7 +348,7 @@ export async function pintarRecibirCarro(contenedor, contratoId) {
 
     // "Saldo" es lo que se debe ANTES de este pago (lo que dice la hoja
     // CIERRE); nunca se toca con lo que se está por cobrar ahora mismo.
-    const { saldo } = resumen(contratoConCierre);
+    const { saldo } = resumen(contratoActual);
     const { etiqueta, monto: montoSaldo } = textoSaldo(saldo);
     el('rc-saldo-etiqueta').textContent = etiqueta;
     el('rc-saldo').textContent = dinero(montoSaldo);
@@ -328,11 +370,11 @@ export async function pintarRecibirCarro(contenedor, contratoId) {
     // los Q730 completos (Q87.60) en vez del recargo real de Q500 (Q60.00):
     // el dueño hubiera cobrado de más en su propia terminal. Ver
     // totalDeEstaCobranza() más arriba para el porqué del cálculo.
-    const { total: totalEstaCobranza, recargo: recargoEstaCobranza } = totalDeEstaCobranza(contratoConCierre, {
+    const { total: totalEstaCobranza, recargo: recargoEstaCobranza } = totalDeEstaCobranza(contratoActual, {
       monto: montoField,
       forma: formaPago,
       porcentajeTarjeta: formaPago === 'tarjeta' ? pctTarjeta : 0,
-      fecha: campos.fechaReal,
+      fecha: soloCobro ? hoyISO() : campos.fechaReal,
     });
 
     const hayCobroAhora = montoField > 0;
@@ -340,6 +382,17 @@ export async function pintarRecibirCarro(contenedor, contratoId) {
     el('rc-recargo-linea').hidden = !esTarjeta;
     if (esTarjeta) el('rc-recargo').textContent = dinero(recargoEstaCobranza);
     el('rc-total').textContent = dinero(hayCobroAhora ? totalEstaCobranza : 0);
+
+    if (soloCobro) {
+      // Sin cierre que validar, lo único que puede impedir el cobro es que
+      // ya no quede saldo (por ejemplo, otro cobro desde otra pestaña justo
+      // antes de que este formulario se guardara).
+      el('rc-guardar').textContent = 'Cobrar';
+      const problemas = saldo <= 0 ? ['Este contrato ya no tiene saldo pendiente.'] : [];
+      el('rc-problemas').innerHTML = problemas.map((m) => `<li class="nivel-alto">${esc(m)}</li>`).join('');
+      el('rc-guardar').disabled = problemas.length > 0 || guardando || !(montoField > 0);
+      return;
+    }
 
     el('rc-guardar').textContent = textoBotonPago(saldo, montoField);
 
@@ -350,9 +403,46 @@ export async function pintarRecibirCarro(contenedor, contratoId) {
     el('rc-guardar').disabled = problemas.length > 0 || guardando;
   }
 
+  /**
+   * El guardado del modo de solo cobro: agrega el abono directo sobre
+   * `contrato` (nunca sobre un `construirCierre` nuevo) y guarda — el cierre
+   * que ya traía el contrato queda intacto, tal como llegó de la nube.
+   */
+  async function guardarSoloCobro() {
+    const montoField = num('rc-pago-monto');
+    if (!(montoField > 0)) return; // el botón ya debería estar deshabilitado
+
+    guardando = true;
+    recalcular();
+    try {
+      const formaPago = texto('rc-pago-forma') || 'efectivo';
+      const pctTarjeta = num('rc-pago-porcentaje');
+      const contratoConPago = agregarPago(contrato, {
+        monto: montoField,
+        forma: formaPago,
+        porcentajeTarjeta: formaPago === 'tarjeta' ? pctTarjeta : 0,
+        fecha: hoyISO(),
+      });
+      const guardado = await guardarContrato(contratoConPago);
+      const saldoRestante = resumen(guardado).saldo;
+      aviso(textoAvisoCobro(guardado.numero, saldoRestante), saldoRestante > 0 ? 'info' : 'exito');
+      location.hash = '#/flota';
+    } catch {
+      aviso('No se pudo registrar el abono. Intenta de nuevo.', 'error');
+    } finally {
+      guardando = false;
+      recalcular();
+    }
+  }
+
   async function guardar(ev) {
     ev.preventDefault();
     if (guardando) return;
+
+    if (soloCobro) {
+      await guardarSoloCobro();
+      return;
+    }
 
     const campos = leerCampos();
     if (problemasDelCierre(contrato, campos).length) {

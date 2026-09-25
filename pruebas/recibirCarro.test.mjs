@@ -9,6 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   conKmSalidaNormalizado, textoBotonPago, textoAvisoRecibido, textoSaldo, totalDeEstaCobranza,
+  leerParametroRuta, textoAvisoCobro,
 } from '../js/pantallas/recibirCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { agregarPago } from '../js/datos.js';
@@ -111,4 +112,36 @@ test('totalDeEstaCobranza: sin monto (o en cero), no hay nada que cobrar', () =>
 test('el abono de Q500 con tarjeta deja Q230.00 pendientes (no se toca el saldo por el recargo)', () => {
   const conAbono = agregarPago(contratoConCierre(), { monto: 500, forma: 'tarjeta', porcentajeTarjeta: 12, fecha: '2026-08-25' });
   assert.equal(resumen(conAbono).saldo, 230);
+});
+
+// Tarea 5: el "Cobrar" de flota.js abre esta pantalla en modo de solo cobro
+// pegando "?cobro=1" al id, porque el enrutador (router.js) no sabe nada de
+// parámetros de consulta — leerParametroRuta es quien separa las dos cosas.
+test('leerParametroRuta: un id normal (modo completo) no trae "cobro"', () => {
+  assert.deepEqual(leerParametroRuta('c1'), { contratoId: 'c1', soloCobro: false });
+});
+
+test('leerParametroRuta: "id?cobro=1" separa el id real y marca el modo de solo cobro', () => {
+  assert.deepEqual(leerParametroRuta('c1?cobro=1'), { contratoId: 'c1', soloCobro: true });
+});
+
+test('leerParametroRuta: cualquier otro valor de "cobro" no activa el modo de solo cobro', () => {
+  assert.deepEqual(leerParametroRuta('c1?cobro=0'), { contratoId: 'c1', soloCobro: false });
+  assert.deepEqual(leerParametroRuta('c1?otro=1'), { contratoId: 'c1', soloCobro: false });
+});
+
+test('leerParametroRuta: sin nada, no revienta', () => {
+  assert.deepEqual(leerParametroRuta(undefined), { contratoId: '', soloCobro: false });
+});
+
+test('textoAvisoCobro: con saldo pendiente, dice cuánto falta (nunca dice "recibido")', () => {
+  assert.equal(textoAvisoCobro(14, 230), 'Abono registrado en el contrato 14. Falta cobrar Q230.00.');
+});
+
+test('textoAvisoCobro: saldo en cero, dice que se cobró por completo', () => {
+  assert.equal(textoAvisoCobro(14, 0), 'Contrato 14 cobrado por completo.');
+});
+
+test('textoAvisoCobro: saldo a favor del cliente, tampoco falta cobrar', () => {
+  assert.equal(textoAvisoCobro(14, -50), 'Contrato 14 cobrado por completo.');
 });
