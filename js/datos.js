@@ -304,39 +304,63 @@ export async function guardarContrato(contrato) {
  * puede dejar parte de lo que debe al traer el carro y terminar de pagar
  * después, en más de una visita.
  *
- * Un pago sin monto no cambia nada: así una pantalla puede llamar a esto con
- * lo que haya en el formulario sin tener que comprobar antes si el mostrador
- * de verdad escribió una cifra.
+ * Un pago que no suma nada no cambia el contrato: ni sin monto (0, vacío, no
+ * numérico) ni con un monto negativo. Lo segundo importa tanto como lo
+ * primero — un "abono" negativo no libera la garantía antes de tiempo (el
+ * saldo solo subiría), pero sí ensuciaría `pagos`, que es lo que después leen
+ * los reportes de caja. Así una pantalla puede llamar a esto con lo que haya
+ * en el formulario sin tener que comprobar antes si el mostrador de verdad
+ * escribió una cifra válida.
  */
 export function agregarPago(contrato, {
   monto, forma, porcentajeTarjeta, fecha = hoyISO(),
 } = {}) {
-  if (!q(monto)) return contrato;
+  const montoValido = q(monto);
+  if (!(montoValido > 0)) return contrato;
   const pago = {
-    monto: q(monto), forma, porcentajeTarjeta: q(porcentajeTarjeta), fecha,
+    monto: montoValido, forma, porcentajeTarjeta: q(porcentajeTarjeta), fecha,
   };
   const pagos = Array.isArray(contrato?.pagos) ? contrato.pagos : [];
   return { ...contrato, pagos: [...pagos, pago] };
 }
 
-/** Registra un abono nuevo y guarda el contrato con `guardarContrato`. */
+/**
+ * Registra un abono nuevo y guarda el contrato con `guardarContrato`. Si el
+ * pago no aportó nada (`agregarPago` lo ignoró — ver arriba), `agregarPago`
+ * devuelve el mismísimo objeto `contrato` que recibió, así que compararlos
+ * por referencia basta para saber que no hay nada que guardar: no tiene
+ * sentido gastar una escritura en Firestore por un pago vacío.
+ */
 export async function registrarPago(contrato, pago) {
-  return guardarContrato(agregarPago(contrato, pago));
+  const actualizado = agregarPago(contrato, pago);
+  if (actualizado === contrato) return contrato;
+  return guardarContrato(actualizado);
 }
 
 /**
- * Libera la garantía de la tarjeta: "no libero hasta que me pague" (regla del
- * dueño, tal cual) — es la única palanca que le queda una vez que el carro ya
- * volvió, para que el cliente termine de pagar. Por eso rechaza si todavía
- * queda saldo (medido sin recargo de tarjeta, igual que en todo el sistema —
- * ver resumen() en nucleo/contrato.js): dejarla ir con saldo pendiente sería
+ * La razón por la que la garantía todavía no se puede liberar, o `null` si ya
+ * se puede. Función **pura** — es el candado de "no libero hasta que me
+ * pague" (regla del dueño, tal cual: es la única palanca que le queda una vez
+ * que el carro ya volvió) separado de `liberarGarantia` a propósito, para que
+ * la regla más importante de este sistema se pueda probar sin necesitar
+ * Firestore ni ningún mock.
+ *
+ * El saldo se mide sin recargo de tarjeta, igual que en todo el sistema (ver
+ * resumen() en nucleo/contrato.js): dejarla ir con saldo pendiente sería
  * dinero que el dueño ya no vuelve a ver.
  */
-export async function liberarGarantia(contrato) {
+export function puedeLiberarse(contrato) {
   const { saldo } = resumen(contrato);
   if (saldo > 0) {
-    throw new Error(`Todavía debe Q${textoDosDecimales(saldo)}: no se puede liberar la garantía hasta que pague.`);
+    return `Todavía debe Q${textoDosDecimales(saldo)}. La garantía se libera cuando termine de pagar.`;
   }
+  return null;
+}
+
+/** Libera la garantía de la tarjeta. Rechaza mientras `puedeLiberarse` diga que hay motivo. */
+export async function liberarGarantia(contrato) {
+  const motivo = puedeLiberarse(contrato);
+  if (motivo) throw new Error(motivo);
   return guardarContrato({ ...contrato, garantiaLiberada: true, garantiaLiberadaEn: hoyISO() });
 }
 

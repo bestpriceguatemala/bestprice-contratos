@@ -5,7 +5,7 @@
 // palanca que le queda para que le terminen de pagar.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { agregarPago } from '../js/datos.js';
+import { agregarPago, liberarGarantia, puedeLiberarse } from '../js/datos.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { puedeCerrar, pendientesDe } from '../js/nucleo/estados.js';
 
@@ -49,4 +49,27 @@ test('el pago queda con su fecha y su forma, para saber después cómo pagó', (
 test('un pago sin monto no se agrega', () => {
   const c = agregarPago(conSaldo(), { monto: 0, forma: 'efectivo' });
   assert.equal(c.pagos.length, 1, 'sigue teniendo solo el pago de la salida');
+});
+
+test('un abono negativo no se guarda', () => {
+  const c = agregarPago(conSaldo(), { monto: -500, forma: 'efectivo' });
+  assert.equal(c.pagos.length, 1, 'sigue teniendo solo el pago de la salida');
+});
+
+// La regla más importante de esta tarea: "no libero hasta que me pague" (el
+// dueño, tal cual). Es la única palanca que le queda una vez que el carro ya
+// regresó — si este candado se rompe en un refactor futuro, aquí se nota.
+test('la garantía no se libera mientras deba algo', async () => {
+  // El candado (puedeLiberarse) corre antes de cualquier llamada a
+  // Firestore, así que liberarGarantia rechaza sin tocar la red.
+  await assert.rejects(() => liberarGarantia(conSaldo()), /730/);
+});
+
+test('con la deuda en cero, el candado deja pasar', () => {
+  // liberarGarantia, en este caso, sí llegaría a guardarContrato (que
+  // necesita Firestore) — por eso aquí se prueba directo el candado puro que
+  // usa por dentro, sin depender de la red.
+  const c = agregarPago(conSaldo(), { monto: 730, forma: 'efectivo', porcentajeTarjeta: 0 });
+  assert.equal(resumen(c).saldo, 0);
+  assert.equal(puedeLiberarse(c), null, 'sin saldo pendiente, el candado ya no debe rechazar');
 });
