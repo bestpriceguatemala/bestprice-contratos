@@ -28,9 +28,16 @@ export function coincide(textoBuscable, consulta) {
   return palabras.every((p) => texto.includes(p) || sinEspacios.includes(p));
 }
 
-/** Todo lo buscable de un cliente, en un solo texto. */
+/**
+ * Todo lo buscable de un cliente, en un solo texto.
+ *
+ * `nombres` y `apellidos` (nucleo/cliente.js, Tarea 1) van cada uno en un solo
+ * campo, no en los viejos `nombre1`/`nombre2`/`apellido1`/`apellido2` de
+ * cuatro campos — esta función tenía que alinearse con eso, si no la pantalla
+ * de clientes (Tarea 6) no encontraría a nadie que ella misma diera de alta.
+ */
 export function textoDeCliente(c) {
-  return [c?.apellido1, c?.apellido2, c?.nombre1, c?.nombre2,
+  return [c?.nombres, c?.apellidos,
     c?.documento, c?.licencia, c?.telefono, c?.telefonoAdicional, c?.correo].filter(Boolean).join(' ');
 }
 

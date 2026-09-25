@@ -128,6 +128,18 @@ export async function cargarFlota(alLlegar) {
 }
 
 /**
+ * Todos los clientes, como `{ datos, fallo }` (ver `resultadoLectura`).
+ * `alLlegar` avisa si la sincronía trae cambios o si falló. Mismo patrón que
+ * `cargarFlota`: copia local primero, nube por detrás — la pantalla de
+ * clientes (Tarea 6) necesita la lista completa para su buscador y para
+ * marcar licencias vencidas y saldos pendientes, así que no le sirve la
+ * sesión compartida de `buscarClientes` (pensada solo para "Sacar carro").
+ */
+export async function cargarClientes(alLlegar) {
+  return cargarConSincronia('clientes', alLlegar);
+}
+
+/**
  * Los contratos que todavía piden algo: el carro anda fuera, falta cobrar un
  * saldo o falta soltar la garantía de la tarjeta. Los cerrados no se traen al
  * abrir: se buscan cuando alguien los busca.
