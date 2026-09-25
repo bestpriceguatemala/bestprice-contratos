@@ -53,6 +53,18 @@ test('no se puede recibir un carro antes de haberlo entregado', () => {
   assert.match(p[0], /antes/i);
 });
 
+// Minor de la revisión final: el mensaje mostraba las fechas crudas
+// ('2026-08-19') en vez del formato que lee el dueño, y rotulaba la fecha
+// que el mostrador acaba de teclear como "Devolución" — que en el resto del
+// sistema significa la fecha PREVISTA, un campo distinto.
+test('el mensaje de fecha anterior usa el formato legible y rotula "Entrada", no "Devolución"', () => {
+  const p = problemasDelCierre(contrato(), { ...campos, fechaReal: '2026-08-19' });
+  assert.match(p[0], /20 ago 2026/, 'la fecha de salida, formateada');
+  assert.match(p[0], /19 ago 2026/, 'la fecha tecleada, formateada');
+  assert.match(p[0], /Entrada:/);
+  assert.doesNotMatch(p[0], /Devolución:/, 'esa palabra ya significa otra cosa en el resto del sistema');
+});
+
 test('sin fecha real no se puede cerrar', () => {
   assert.match(problemasDelCierre(contrato(), { ...campos, fechaReal: '' }).join(' '), /fecha/i);
 });
@@ -60,6 +72,14 @@ test('sin fecha real no se puede cerrar', () => {
 test('un descuento mayor que todo lo cobrado se avisa', () => {
   const p = problemasDelCierre(contrato(), { ...campos, descuento: 99999 });
   assert.match(p.join(' '), /descuento/i);
+});
+
+// Minor de la revisión final: un subtotal negativo se mostraba como
+// "(Q-95,819.00)" — el signo pegado adentro de la Q en vez de adelante.
+test('el subtotal negativo del aviso de descuento lleva el signo antes de la Q', () => {
+  const p = problemasDelCierre(contrato(), { ...campos, descuento: 99999 });
+  assert.match(p.join(' '), /-Q95,819\.00/);
+  assert.doesNotMatch(p.join(' '), /Q-/, 'nunca el signo pegado adentro de la Q');
 });
 
 test('un cierre normal no tiene problemas', () => {
@@ -73,10 +93,18 @@ test('devolver antes de tiempo no da crédito ni problema', () => {
   assert.deepEqual(problemasDelCierre(contrato(), { ...campos, fechaReal: '2026-08-22' }), []);
 });
 
-test('el detalle de los varios llega al cierre', () => {
+test('el detalle de los varios llega al cierre y de verdad se cobra (CRÍTICO: mueve el saldo)', () => {
   const c = construirCierre(contrato(), { ...campos, varios: 150, variosDetalle: 'Silla de bebé no devuelta' });
   assert.equal(c.cierre.varios, 150);
   assert.equal(c.cierre.variosDetalle, 'Silla de bebé no devuelta');
+
+  // No basta con que el campo se guarde: dos rondas de revisión dejaron
+  // pasar que lineasDevolucion nunca emitía la línea, así que el saldo se
+  // quedaba igual aunque "Varios" trajera un monto. Comparar el saldo con y
+  // sin varios es la prueba que faltaba.
+  const sinVarios = resumen(construirCierre(contrato(), { ...campos, varios: 0 })).saldo;
+  const conVarios = resumen(c).saldo;
+  assert.equal(conVarios, sinVarios + 150, 'los Q150 de Varios tienen que subir el saldo por cobrar');
 });
 
 test('corregir un cierre ya guardado se queda con lo nuevo', () => {

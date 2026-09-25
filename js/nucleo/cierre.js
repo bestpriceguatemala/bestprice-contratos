@@ -8,8 +8,8 @@
 // Nunca ajustar una cifra para que cuadre. Si el descuento es mayor que lo que
 // hay que cobrar, se lo decimos tal como es.
 
-import { q, textoDosDecimales } from './dinero.js';
-import { diasEntre } from './fechas.js';
+import { q, textoDosDecimales, textoConQ } from './dinero.js';
+import { diasEntre, textoFecha } from './fechas.js';
 import { resumen } from './contrato.js';
 
 /**
@@ -54,10 +54,16 @@ export function problemasDelCierre(contrato, cierre) {
   }
 
   // La fecha real es anterior a la de salida
+  //
+  // Revisión final: este mensaje mostraba las fechas crudas ('2026-08-19' en
+  // vez de '19 ago 2026') y rotulaba la fecha que el mostrador acaba de
+  // teclear como "Devolución" — que en el resto del sistema significa la
+  // fecha PREVISTA (devolucionPrevista), un campo distinto. Aquí se corrige
+  // a "Entrada", que es lo que de verdad se está intentando registrar.
   if (diasEntre(contrato.fechaSalida, cierre.fechaReal) < 0) {
     problemas.push(
       `No se puede recibir el carro antes de haberlo entregado. ` +
-      `Salida: ${contrato.fechaSalida}. Devolución: ${cierre.fechaReal}.`,
+      `Salida: ${textoFecha(contrato.fechaSalida)}. Entrada: ${textoFecha(cierre.fechaReal)}.`,
     );
   }
 
@@ -77,9 +83,12 @@ export function problemasDelCierre(contrato, cierre) {
   const cierreTemp = construirCierre(contrato, cierre);
   const r = resumen(cierreTemp);
   if (r.subtotal < 0) {
+    // textoConQ, no `Q${textoDosDecimales(...)}`: r.subtotal aquí siempre es
+    // negativo, y textoDosDecimales de un negativo interpolado así dejaba
+    // "(Q-95,819.00)" — el signo pegado adentro de la Q en vez de adelante.
     problemas.push(
       `El descuento de Q${textoDosDecimales(cierre.descuento)} es demasiado grande: ` +
-      `dejaría el cobro en negativo (Q${textoDosDecimales(r.subtotal)}).`,
+      `dejaría el cobro en negativo (${textoConQ(r.subtotal)}).`,
     );
   }
 
