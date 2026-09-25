@@ -3,7 +3,7 @@
 // minutos y también cuando el navegador vuelve a la pestaña después de estar
 // en otra ventana.
 
-const VERSION = '2026-09-23.1';
+const VERSION = '2026-09-25.1';
 
 /** Recarga los archivos CSS y JS sin usar caché, luego recarga la página. */
 async function recargarConVersionNueva() {
