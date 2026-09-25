@@ -79,7 +79,7 @@ const descripcionCarroAjeno = (c) => [c?.marca, c?.modelo].filter(Boolean).join(
 export function construirContrato(datos) {
   const {
     id, numero, cliente, ajeno, carro, carroAjeno,
-    fechaSalida, horaSalida, lugar, dias, precioDia, kilometrajeSalida, combustibleSalida, horaTardia,
+    fechaSalida, horaSalida, lugar, dias, precioDia, kmSalida, combustibleSalida, horaTardia,
     seguroDia, seguroTercerosDia, seguroMenoresDia, seguroPaiDia, deducible, deducibleBajo,
     cartaPoderDestino, cartaPoderPrecio, variosDescripcion, variosPrecio,
     tarjetas = [], formaPago, porcentajeTarjeta, montoPago,
@@ -128,7 +128,7 @@ export function construirContrato(datos) {
     lugar: lugar || '',
     dias: diasNum,
     precioDia: precioDiaNum,
-    kilometrajeSalida: q(kilometrajeSalida),
+    kmSalida: q(kmSalida),
     combustibleSalida: combustibleSalida || '',
     horaTardia: Boolean(horaTardia),
     devolucionPrevista: devolucionPrevista(fechaSalidaVal, diasNum),
@@ -452,7 +452,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
       lugar: texto('sc-lugar'),
       dias: num('sc-dias'),
       precioDia: num('sc-precio-dia'),
-      kilometrajeSalida: num('sc-km-salida'),
+      kmSalida: num('sc-km-salida'),
       combustibleSalida: texto('sc-combustible-salida'),
       horaTardia: marcado('sc-hora-tardia'),
       seguroDia: num('sc-seguro-dia'),

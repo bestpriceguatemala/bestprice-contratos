@@ -14,7 +14,7 @@
 // (datos.js, Tarea 5), que se niega mientras haya saldo. Esta pantalla nunca
 // escribe garantiaLiberada.
 import { construirCierre, problemasDelCierre } from '../nucleo/cierre.js';
-import { lineasDevolucion, resumen, saldoConTarjeta } from '../nucleo/contrato.js';
+import { lineasDevolucion, resumen } from '../nucleo/contrato.js';
 import { q, textoDosDecimales } from '../nucleo/dinero.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
@@ -42,16 +42,16 @@ function esc(texto) {
 }
 
 /**
- * "Sacar carro" (Tarea 11) guarda el kilometraje de salida bajo el nombre
- * `kilometrajeSalida`, pero el cierre (nucleo/cierre.js, y su prueba en
- * pruebas/cierre.test.mjs) valida el retroceso del kilometraje contra
- * `contrato.kmSalida` — así se llamó ese campo en el diseño original de
- * este cierre. Sin este puente, ningún contrato real dispararía jamás el
- * aviso de "el kilometraje retrocede": `kmSalida` llegaría vacío y
- * problemasDelCierre se saltaría la validación en silencio, exactamente el
- * mismo tipo de trampa que "un default que nunca llega". No se pisa un
- * `kmSalida` que ya viniera puesto (por ejemplo, si algún día "Sacar carro"
- * se corrige para guardarlo con ese nombre).
+ * "Sacar carro" ya guarda el kilometraje de salida como `kmSalida` (ronda de
+ * corrección 1 de esta tarea: antes lo guardaba como `kilometrajeSalida`,
+ * un nombre distinto al que valida `problemasDelCierre` en nucleo/cierre.js,
+ * y ningún contrato real disparaba el aviso de "el kilometraje retrocede").
+ *
+ * Este puente NO es el camino normal — es compatibilidad hacia atrás, solo
+ * para los contratos que ya quedaron guardados con el nombre viejo antes de
+ * ese cambio. Un contrato nuevo, guardado por la versión actual de "Sacar
+ * carro", ya trae `kmSalida` puesto y esta función lo devuelve tal cual. No
+ * se pisa un `kmSalida` que ya viniera puesto.
  */
 export function conKmSalidaNormalizado(contrato) {
   if (!contrato) return contrato;
@@ -91,6 +91,36 @@ export function textoSaldo(saldo) {
     : { etiqueta: 'Saldo', monto: saldo };
 }
 
+/**
+ * Cuánto hay que cobrar AHORA MISMO por un pago de `monto` — con su recargo
+ * de tarjeta si aplica — sobre un contrato que puede traer pagos previos
+ * (el de la salida, por ejemplo). Ronda de corrección 1 (hallazgo crítico):
+ * antes esta pantalla leía el recargo/total de `saldoConTarjeta`, que
+ * siempre calcula sobre TODO el saldo pendiente — así que un abono parcial
+ * pagado con tarjeta mostraba el costo de saldar TODO hoy, no el costo real
+ * de ese abono. Un abono de Q500 al 12 % sobre un saldo de Q730 mostraba
+ * Q817.60 (el total de los Q730 completos) en vez de los Q560.00 que de
+ * verdad cuesta cobrar Q500 con tarjeta.
+ *
+ * La cuenta correcta no tiene una función propia en el núcleo (saldoConTarjeta
+ * no sirve para un monto parcial), así que se arma un borrador con
+ * `agregarPago` (pura, la misma que usa guardar()) y se lee cuánto sumó ese
+ * pago a `pagado` (resumen) — la diferencia entre el acumulado antes y
+ * después de agregarlo. Es el mismo truco de restar dos lecturas del núcleo
+ * que ya usa sacarCarro.js para separar el recargo del monto sin recargo;
+ * nunca se calcula el recargo a mano con conTarjeta()/recargoTarjeta() aquí.
+ */
+export function totalDeEstaCobranza(contratoConCierre, { monto, forma, porcentajeTarjeta, fecha }) {
+  const montoNum = q(monto);
+  if (!(montoNum > 0)) return { total: 0, recargo: 0 };
+  const antes = resumen(contratoConCierre).pagado;
+  const borrador = agregarPago(contratoConCierre, {
+    monto: montoNum, forma, porcentajeTarjeta, fecha,
+  });
+  const total = q(resumen(borrador).pagado - antes);
+  return { total, recargo: q(total - montoNum) };
+}
+
 // ---------- La plantilla (se arma una sola vez, con el contrato ya cargado) ----------
 
 function campo(id, etiqueta, opciones = {}) {
@@ -123,7 +153,7 @@ function plantilla(contrato) {
             ${esc(encabezado || 'Sin datos del carro')}<br>
             Fecha de salida: ${esc(fecha(contrato.fechaSalida) || '—')}<br>
             Devolución prevista: ${esc(fecha(contrato.devolucionPrevista) || '—')}<br>
-            Kilometraje de salida: ${esc(textoDosDecimales(contrato.kilometrajeSalida))}<br>
+            Kilometraje de salida: ${esc(textoDosDecimales(contrato.kmSalida))}<br>
             Ya pagó al salir: ${esc(dinero(pagadoSalida))}
           </div>
         </section>
@@ -167,7 +197,7 @@ function plantilla(contrato) {
         </div>
 
         <div class="sc-campos">
-          <label class="sc-campo">Monto a cobrar
+          <label class="sc-campo">Monto sin recargo de tarjeta
             <input type="number" id="rc-pago-monto" step="0.01" min="0">
           </label>
           <label class="sc-campo">Forma de pago
@@ -266,38 +296,51 @@ export async function pintarRecibirCarro(contenedor, contratoId) {
     const contratoConCierre = construirCierre(contrato, campos);
 
     // Cada figura de dinero en esta pantalla sale de lineasDevolucion,
-    // resumen o saldoConTarjeta (nucleo/contrato.js) — nunca de una cuenta
-    // hecha aquí mismo con los campos del formulario.
+    // resumen o agregarPago (nucleo/contrato.js y datos.js) — nunca de una
+    // cuenta hecha aquí mismo con los campos del formulario.
     const lineas = lineasDevolucion(contratoConCierre);
     el('rc-lineas').innerHTML = [
       `<li><span>Ya pagó al salir</span><strong>${dinero(pagadoSalida)}</strong></li>`,
       ...lineas.map(filaLinea),
     ].join('');
 
-    const formaPago = texto('rc-pago-forma') || 'efectivo';
-    const pctTarjeta = num('rc-pago-porcentaje');
-    const { saldo, recargo, total } = saldoConTarjeta(contratoConCierre, pctTarjeta);
-
+    // "Saldo" es lo que se debe ANTES de este pago (lo que dice la hoja
+    // CIERRE); nunca se toca con lo que se está por cobrar ahora mismo.
+    const { saldo } = resumen(contratoConCierre);
     const { etiqueta, monto: montoSaldo } = textoSaldo(saldo);
     el('rc-saldo-etiqueta').textContent = etiqueta;
     el('rc-saldo').textContent = dinero(montoSaldo);
-
-    // El recargo y el total con tarjeta solo tienen sentido cuando de
-    // verdad hay algo que cobrar (saldo positivo): con saldo en cero o a
-    // favor del cliente, "cuánto costaría con tarjeta" no significa nada.
-    const hayQueCobrar = saldo > 0;
-    const esTarjeta = hayQueCobrar && formaPago === 'tarjeta';
-    el('rc-recargo-linea').hidden = !esTarjeta;
-    if (esTarjeta) el('rc-recargo').textContent = dinero(recargo);
-    el('rc-total').textContent = dinero(hayQueCobrar ? (esTarjeta ? total : saldo) : 0);
 
     // El monto a cobrar arranca en el saldo completo (o en 0 si no hay nada
     // que cobrar) y sigue ese valor mientras el mostrador no lo haya tocado
     // a mano — el mismo mecanismo de "montoPagoTocado" que sacarCarro.js,
     // para que un abono a medio escribir nunca se pise con el recálculo.
-    if (!montoPagoTocado) el('rc-pago-monto').value = hayQueCobrar ? saldo : 0;
+    if (!montoPagoTocado) el('rc-pago-monto').value = saldo > 0 ? saldo : 0;
 
+    const formaPago = texto('rc-pago-forma') || 'efectivo';
+    const pctTarjeta = num('rc-pago-porcentaje');
     const montoField = num('rc-pago-monto');
+
+    // Ronda de corrección 1 (hallazgo crítico): el recargo y el total de
+    // ESTA cobranza ya NO salen de saldoConTarjeta(contratoConCierre, ...) —
+    // esa función siempre calcula el recargo sobre TODO el saldo pendiente,
+    // así que un abono de Q500 con tarjeta mostraba el recargo de saldar
+    // los Q730 completos (Q87.60) en vez del recargo real de Q500 (Q60.00):
+    // el dueño hubiera cobrado de más en su propia terminal. Ver
+    // totalDeEstaCobranza() más arriba para el porqué del cálculo.
+    const { total: totalEstaCobranza, recargo: recargoEstaCobranza } = totalDeEstaCobranza(contratoConCierre, {
+      monto: montoField,
+      forma: formaPago,
+      porcentajeTarjeta: formaPago === 'tarjeta' ? pctTarjeta : 0,
+      fecha: campos.fechaReal,
+    });
+
+    const hayCobroAhora = montoField > 0;
+    const esTarjeta = hayCobroAhora && formaPago === 'tarjeta';
+    el('rc-recargo-linea').hidden = !esTarjeta;
+    if (esTarjeta) el('rc-recargo').textContent = dinero(recargoEstaCobranza);
+    el('rc-total').textContent = dinero(hayCobroAhora ? totalEstaCobranza : 0);
+
     el('rc-guardar').textContent = textoBotonPago(saldo, montoField);
 
     // Los problemas de problemasDelCierre (nucleo/cierre.js) van en rojo,
@@ -351,7 +394,11 @@ export async function pintarRecibirCarro(contenedor, contratoId) {
 
       const guardado = await guardarContrato(contratoConPago);
       const saldoRestante = resumen(guardado).saldo;
-      aviso(textoAvisoRecibido(guardado.numero, saldoRestante), 'exito');
+      // "Recibido y cobrado" sí es una buena noticia completa ('exito'),
+      // pero "recibido, falta cobrar Qxxx" no lo es del todo — el carro ya
+      // volvió, pero todavía queda una deuda abierta. Un nivel más plano
+      // ('info') evita que un pendiente se vea celebrado en verde.
+      aviso(textoAvisoRecibido(guardado.numero, saldoRestante), saldoRestante > 0 ? 'info' : 'exito');
       location.hash = '#/flota';
     } catch {
       aviso('No se pudo guardar el cierre. Intenta de nuevo.', 'error');
