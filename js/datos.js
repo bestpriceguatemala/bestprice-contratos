@@ -420,6 +420,35 @@ export function agregarPago(contrato, {
 }
 
 /**
+ * Anula un pago mal registrado, sin borrarlo de `contrato.pagos`. Función
+ * **pura** (sin Firestore) — quien llama guarda el resultado con
+ * `guardarContrato()`, igual que con `agregarPago`.
+ *
+ * Por qué anular y no editar el monto (decisión del dueño, tal cual): un
+ * pago que se anula deja rastro — puede tener que explicárselo a un cliente
+ * — y el dinero nunca debe parecer que cambió solo. Por eso esto no quita
+ * el pago del arreglo ni le toca el monto: le agrega `anulado: true` y
+ * `anuladoEn` (la fecha de la anulación, no la del pago original) y lo deja
+ * ahí, visible, tachado en pantalla (contratos.js). `resumen()`
+ * (nucleo/contrato.js) ya sabe ignorar un pago anulado — ese es el único
+ * lugar donde la aritmética cambia; aquí solo se marca.
+ *
+ * `indice` es la posición del pago dentro de `contrato.pagos` (los pagos no
+ * traen id propio, y como nunca se reordenan ni se borran, la posición
+ * alcanza para identificarlos). Un índice que no exista, o un pago que ya
+ * estuviera anulado, no cambia nada — así un doble clic sobre "Anular" no
+ * pisa la fecha de la primera anulación con la de un segundo clic.
+ */
+export function anularPago(contrato, indice, { fecha = hoyISO() } = {}) {
+  const pagos = Array.isArray(contrato?.pagos) ? contrato.pagos : [];
+  if (!pagos[indice] || pagos[indice].anulado) return contrato;
+  const pagosActualizados = pagos.map((p, i) => (
+    i === indice ? { ...p, anulado: true, anuladoEn: fecha } : p
+  ));
+  return { ...contrato, pagos: pagosActualizados };
+}
+
+/**
  * La razón por la que la garantía todavía no se puede liberar, o `null` si ya
  * se puede. Función **pura** — es el candado de "no libero hasta que me
  * pague" (regla del dueño, tal cual: es la única palanca que le queda una vez

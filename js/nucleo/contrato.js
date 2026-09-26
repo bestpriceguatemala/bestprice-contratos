@@ -82,7 +82,15 @@ export function resumen(c) {
   const totalDevolucion = sumarLineas(lineasDevolucion(c));
   const subtotal = suma(totalSalida, totalDevolucion);
 
-  const pagos = Array.isArray(c?.pagos) ? c.pagos : [];
+  // Un pago anulado (Anular, en el detalle del contrato — datos.js:
+  // anularPago) no se borra del arreglo, pero deja de contar: se marcó
+  // `anulado` justo porque se registró mal, y "nunca ajustar una cifra para
+  // que cuadre" corre en las dos direcciones — el número correcto es el que
+  // resulta de ignorarlo, no uno pisado a mano después. Se filtra aquí, en
+  // el único lugar que arma pagado/cubierto/saldo, para que estadoContrato()
+  // (nucleo/estados.js) y guardarContrato() (datos.js) se corrijan solos en
+  // cuanto se anula un pago, sin tener que enterarse cada uno por su cuenta.
+  const pagos = (Array.isArray(c?.pagos) ? c.pagos : []).filter((p) => !p?.anulado);
   const pagado = suma(...pagos.map((p) => conTarjeta(p.monto, p.porcentajeTarjeta)));
   const cubierto = suma(...pagos.map((p) => q(p.monto)));
 

@@ -22,8 +22,10 @@ import { estadoContrato, pendientesDe } from '../nucleo/estados.js';
 import { filtrar, textoDeContrato } from '../nucleo/busqueda.js';
 import { textoDosDecimales, textoEntero } from '../nucleo/dinero.js';
 import { hoyISO } from '../nucleo/fechas.js';
-import { cargarContratos, cargarContrato } from '../datos.js';
-import { dinero, fecha } from '../ui.js';
+import {
+  cargarContratos, cargarContrato, anularPago, guardarContrato,
+} from '../datos.js';
+import { dinero, fecha, aviso } from '../ui.js';
 // El puente entre kmSalida y kilometrajeSalida (contratos antiguos que
 // guardaron el kilometraje de salida con el nombre viejo) vive en
 // recibirCarro.js: conKmSalidaNormalizado(). Esta pantalla lo reutiliza tal
@@ -151,6 +153,20 @@ const FORMA_PAGO = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'T
 function formaDePago(p) {
   const clave = p?.forma || p?.formaPago;
   return FORMA_PAGO[clave] || clave || '—';
+}
+
+/**
+ * El mensaje del confirm() antes de anular un pago (Tarea "cobro-claro"):
+ * nombra el monto y la fecha del pago, igual que textoConfirmarLiberar
+ * (flota.js) nombra el monto y el cliente antes de soltar una garantía. Un
+ * pago anulado deja rastro (anularPago, datos.js, nunca lo borra) porque el
+ * dueño puede tener que explicarle a un cliente por qué se cobró y luego se
+ * revirtió — el confirm es el último paso antes de que eso quede escrito.
+ * Función pura para poder probarla sin DOM ni `confirm()`.
+ */
+export function textoConfirmarAnular(pago) {
+  return `¿Anular el pago de ${dinero(pago?.monto)} del ${fecha(pago?.fecha)}? `
+    + 'Va a quedar marcado como anulado, no desaparece de la lista.';
 }
 
 const pluralDias = (n) => `${n} día${n === 1 ? '' : 's'}`;
@@ -394,23 +410,44 @@ function seccionResumenCobro(r) {
     </section>`;
 }
 
+/**
+ * Una fila de la tabla de pagos. Un pago anulado (anularPago, datos.js)
+ * nunca desaparece: se ve tachado (.fila-anulada), con su propia etiqueta
+ * "Anulado" y la fecha en que se anuló — y sin botón, porque ya no hay nada
+ * más que anular ahí. Uno sin anular sí lleva el botón, con `data-indice`
+ * para que el manejador de clics (dibujarDetalleEntrada) sepa cuál de
+ * `contrato.pagos` anular (los pagos no traen id propio; su posición en el
+ * arreglo alcanza, igual que en anularPago).
+ */
+function filaPago(p, indice) {
+  const anulado = Boolean(p?.anulado);
+  const etiquetaAnulado = anulado
+    ? `<span class="etiqueta-anulado">Anulado${p?.anuladoEn ? ` el ${esc(fecha(p.anuladoEn))}` : ''}</span>`
+    : '';
+  const boton = anulado
+    ? ''
+    : `<button type="button" class="btn" data-accion="anular" data-indice="${indice}">Anular</button>`;
+  return `
+    <tr${anulado ? ' class="fila-anulada"' : ''}>
+      <td>${esc(fecha(p?.fecha))}</td>
+      <td>${esc(formaDePago(p))}</td>
+      <td>${dinero(p?.monto)}${etiquetaAnulado}</td>
+      <td>${p?.porcentajeTarjeta ? `${textoDosDecimales(p.porcentajeTarjeta)}%` : '—'}</td>
+      <td>${boton}</td>
+    </tr>`;
+}
+
 function seccionPagos(c) {
   const pagos = Array.isArray(c?.pagos) ? c.pagos : [];
   const filas = pagos.length
-    ? pagos.map((p) => `
-        <tr>
-          <td>${esc(fecha(p?.fecha))}</td>
-          <td>${esc(formaDePago(p))}</td>
-          <td>${dinero(p?.monto)}</td>
-          <td>${p?.porcentajeTarjeta ? `${textoDosDecimales(p.porcentajeTarjeta)}%` : '—'}</td>
-        </tr>`).join('')
-    : '<tr><td colspan="4" class="pendiente">Todavía no hay pagos registrados.</td></tr>';
+    ? pagos.map(filaPago).join('')
+    : '<tr><td colspan="5" class="pendiente">Todavía no hay pagos registrados.</td></tr>';
 
   return `
     <section class="carro-seccion">
       <h2>Pagos</h2>
       <table class="tabla-carros">
-        <thead><tr><th>Fecha</th><th>Forma</th><th>Monto</th><th>% de tarjeta</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Forma</th><th>Monto</th><th>% de tarjeta</th><th></th></tr></thead>
         <tbody>${filas}</tbody>
       </table>
     </section>`;
@@ -506,8 +543,47 @@ async function dibujarDetalleEntrada(contenedor, contratoId, sigoVigente) {
   // lugar donde se puede consultar el kilometraje de una renta pasada.
   contrato = conKmSalidaNormalizado(contrato);
 
-  contenedor.innerHTML = plantillaDetalle(contrato);
-  el('ct-volver')?.addEventListener('click', () => { location.hash = '#/contratos'; });
+  // Repinta esta misma ficha con el contrato que haya en la variable de
+  // arriba — se llama de nuevo después de anular un pago, para que los
+  // totales (Resumen del cobro, Cuenta) se corrijan solos sin recargar la
+  // pantalla ni perder el resto del detalle.
+  function pintar() {
+    if (!sigoVigente()) return;
+    contenedor.innerHTML = plantillaDetalle(contrato);
+    cablear();
+  }
+
+  /**
+   * Anula un pago desde su fila en la tabla de "Pagos" (Tarea "cobro-claro"):
+   * confirma nombrando el monto y la fecha (textoConfirmarAnular, arriba),
+   * marca el pago con anularPago (datos.js, nunca lo borra) y guarda. El
+   * candado real es guardarContrato/estadoContrato: si anular este pago deja
+   * el contrato debiendo de nuevo, el estado se recalcula solo ahí, no aquí.
+   */
+  async function anularDesdeLaFicha(indice, boton) {
+    const pago = contrato?.pagos?.[indice];
+    if (!pago || pago.anulado) return; // ya se anuló, o el índice no calza
+    if (!window.confirm(textoConfirmarAnular(pago))) return;
+
+    boton.disabled = true;
+    try {
+      contrato = await guardarContrato(anularPago(contrato, indice));
+      aviso('Pago anulado.', 'exito');
+      pintar();
+    } catch {
+      aviso('No se pudo anular el pago. Intenta de nuevo.', 'error');
+      boton.disabled = false;
+    }
+  }
+
+  function cablear() {
+    el('ct-volver')?.addEventListener('click', () => { location.hash = '#/contratos'; });
+    contenedor.querySelectorAll('[data-accion="anular"]').forEach((boton) => {
+      boton.addEventListener('click', () => anularDesdeLaFicha(Number(boton.dataset.indice), boton));
+    });
+  }
+
+  pintar();
 }
 
 // ---------- Punto de entrada principal ----------

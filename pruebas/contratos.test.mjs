@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { textoDeContrato } from '../js/nucleo/busqueda.js';
 import {
   primerDiaMes, ultimoDiaMes, filtrarPorEstado, contratosVisibles,
-  claseFilaContrato, textoCuenta, numeroEnmascarado,
+  claseFilaContrato, textoCuenta, numeroEnmascarado, textoConfirmarAnular,
 } from '../js/pantallas/contratos.js';
 
 /** El contrato del ejemplo de la §5 del diseño (igual que pruebas/contrato.test.mjs). */
@@ -223,6 +223,18 @@ test('numeroEnmascarado: solo los últimos 4 dígitos, como pide ADR-001', () =>
 });
 
 // ---------- El ejemplo del diseño, tal como lo vería esta pantalla ----------
+
+// ---------- textoConfirmarAnular ----------
+//
+// Tarea "cobro-claro": el confirm() antes de anular un pago, mismo patrón
+// que textoConfirmarLiberar (flota.js) — nombra el monto y la fecha del pago
+// para que el mostrador sepa exactamente qué está a punto de marcar como
+// anulado antes de tocar nada.
+test('textoConfirmarAnular: nombra el monto y la fecha del pago', () => {
+  const texto = textoConfirmarAnular({ monto: 4800, fecha: '2026-08-25' });
+  assert.match(texto, /Q4,800\.00/);
+  assert.match(texto, /25 ago 2026/);
+});
 
 test('el ejemplo del diseño: subtotal Q3,880.00 y total cobrado Q4,345.60, exactamente como en el diseño', () => {
   // Esta prueba no repite la aritmética (eso ya lo cubre

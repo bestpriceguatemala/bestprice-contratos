@@ -876,6 +876,26 @@ body {
   color: var(--gris);
 }
 
+/*
+ * Un pago anulado (Tarea "cobro-claro", contratos.js: anularPago en
+ * datos.js) nunca se borra de la tabla — se ve tachado, para que quede claro
+ * que ese dinero se cobró y luego se revirtió, algo que el dueño puede tener
+ * que explicarle a un cliente. La etiqueta "Anulado" necesita
+ * text-decoration: none para no tacharse a sí misma junto con el resto de
+ * la fila.
+ */
+.fila-anulada td {
+  text-decoration: line-through;
+  color: var(--gris);
+}
+
+.etiqueta-anulado {
+  display: block;
+  text-decoration: none;
+  font-size: 11px;
+  color: var(--gris);
+}
+
 /* Formulario de carros */
 
 .carro-forma {

@@ -5,7 +5,9 @@
 // palanca que le queda para que le terminen de pagar.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { agregarPago, liberarGarantia, puedeLiberarse } from '../js/datos.js';
+import {
+  agregarPago, liberarGarantia, puedeLiberarse, anularPago,
+} from '../js/datos.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { puedeCerrar, pendientesDe } from '../js/nucleo/estados.js';
 
@@ -72,4 +74,59 @@ test('con la deuda en cero, el candado deja pasar', () => {
   const c = agregarPago(conSaldo(), { monto: 730, forma: 'efectivo', porcentajeTarjeta: 0 });
   assert.equal(resumen(c).saldo, 0);
   assert.equal(puedeLiberarse(c), null, 'sin saldo pendiente, el candado ya no debe rechazar');
+});
+
+// ---------- anularPago ----------
+//
+// El incidente que motivó esto: un carro volvió con el contrato ya pagado
+// por completo, la pantalla igual mostró el bloque de cobro, y el dueño
+// terminó tecleando un monto que dejó Q4,800 de crédito a favor del
+// cliente. anularPago() es la forma de deshacerlo — nunca borrando el pago,
+// solo marcándolo, porque el dinero recibido y luego revertido es algo que
+// puede tener que explicarle a un cliente.
+test('anularPago marca el pago con anulado:true y anuladoEn, sin quitarlo del arreglo', () => {
+  const c = agregarPago(conSaldo(), { monto: 4800, forma: 'efectivo', porcentajeTarjeta: 0, fecha: '2026-08-25' });
+  const anulado = anularPago(c, 1, { fecha: '2026-09-25' });
+  assert.equal(anulado.pagos.length, 2, 'el pago sigue ahí, no se borra');
+  assert.equal(anulado.pagos[1].anulado, true);
+  assert.equal(anulado.pagos[1].anuladoEn, '2026-09-25');
+  assert.equal(anulado.pagos[1].monto, 4800, 'el monto original no se toca');
+  assert.equal(anulado.pagos[0].anulado, undefined, 'el otro pago no se ve afectado');
+});
+
+test('anularPago usa hoy por defecto si no se le da una fecha', () => {
+  const c = agregarPago(conSaldo(), { monto: 500, forma: 'efectivo' });
+  const anulado = anularPago(c, 1);
+  assert.ok(anulado.pagos[1].anuladoEn, 'trae alguna fecha, aunque no se le haya pasado una');
+});
+
+test('anularPago sobre un pago que ya estaba anulado no le pisa la fecha (doble clic no hace nada)', () => {
+  const c = agregarPago(conSaldo(), { monto: 4800, forma: 'efectivo' });
+  const primeraVez = anularPago(c, 1, { fecha: '2026-09-25' });
+  const segundaVez = anularPago(primeraVez, 1, { fecha: '2026-09-26' });
+  assert.equal(segundaVez.pagos[1].anuladoEn, '2026-09-25', 'se queda con la fecha de la primera anulación');
+});
+
+test('anularPago con un índice que no existe no cambia el contrato', () => {
+  const c = conSaldo();
+  assert.deepEqual(anularPago(c, 5), c);
+  assert.deepEqual(anularPago(c, -1), c);
+});
+
+test('el pago anulado deja de contar para el saldo — resumen() lo confirma', () => {
+  // El escenario completo del incidente: se cobra de más por error y se
+  // anula; el saldo tiene que volver a lo que de verdad se debía.
+  const conElError = agregarPago(conSaldo(), { monto: 4800, forma: 'efectivo', porcentajeTarjeta: 0, fecha: '2026-08-25' });
+  assert.equal(resumen(conElError).saldo, -4070, 'Q730 que debía menos Q4,800 cobrados de más');
+
+  const corregido = anularPago(conElError, 1, { fecha: '2026-09-25' });
+  assert.equal(resumen(corregido).saldo, 730, 'anulado el error, vuelve a deber exactamente lo mismo que antes');
+});
+
+test('anular un pago puede volver a dejar la garantía sin liberar (puedeLiberarse se recalcula solo)', () => {
+  const pagado = agregarPago(conSaldo(), { monto: 730, forma: 'efectivo', porcentajeTarjeta: 0 });
+  assert.equal(puedeLiberarse(pagado), null, 'antes de anular, ya no debía nada');
+
+  const anulado = anularPago(pagado, 1, { fecha: '2026-09-25' });
+  assert.match(puedeLiberarse(anulado), /730/, 'anulado el pago que saldaba la cuenta, vuelve a deber Q730');
 });

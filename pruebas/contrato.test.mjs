@@ -151,3 +151,82 @@ test('un carro propio no tiene costo de subarriendo', () => {
   assert.equal(r.costoSubarriendo, 0);
   assert.equal(r.utilidad, 4345.6);
 });
+
+// Anular un pago mal registrado (Tarea "cobro-claro"): el dueño tecleó un
+// cobro sobre un contrato que ya estaba pagado y quedó con Q4,800 de crédito
+// a favor del cliente. anularPago() (datos.js) marca el pago, nunca lo
+// borra; resumen() es el único lugar donde la aritmética tiene que cambiar.
+test('CRÍTICO: resumen() ignora un pago anulado — ni pagado ni saldo lo cuentan', () => {
+  const c = {
+    ...ejemplo(),
+    cierre: null, // sin devolución: solo importa el pago de más, aislado
+    pagos: [
+      { monto: 3150, porcentajeTarjeta: 12 }, // el pago real de la salida
+      { monto: 4800, porcentajeTarjeta: 0, anulado: true, anuladoEn: '2026-09-25' }, // el error, ya anulado
+    ],
+  };
+  const r = resumen(c);
+  assert.equal(r.pagado, 3528, 'solo el pago real, con su 12%; el anulado no suma');
+  assert.equal(r.totalCobrado, 3528);
+  assert.equal(r.saldo, 0, 'lo pagado de verdad (3150, sin recargo) cuadra justo con el subtotal (3150)');
+});
+
+// El escenario exacto del incidente: sin anular, el pago de más deja Q4,800
+// a favor del cliente (lo que el dueño vio sin entender); con anularPago()
+// (datos.js) marcando ESE pago, resumen() lo ignora y el saldo vuelve a lo
+// que de verdad se debía.
+test('CRÍTICO: sin anular el pago de más se ve el sobrepago; anulado, resumen() lo corrige', () => {
+  const conElError = {
+    ...ejemplo(),
+    cierre: null,
+    pagos: [
+      { monto: 3150, porcentajeTarjeta: 12 }, // el pago real
+      { monto: 4800, porcentajeTarjeta: 0 },  // el error: tecleado sobre un contrato ya pagado
+    ],
+  };
+  assert.equal(resumen(conElError).saldo, -4800, 'el error tal cual lo vivió el dueño: Q4,800 a favor del cliente');
+
+  const anulado = {
+    ...conElError,
+    pagos: [
+      conElError.pagos[0],
+      { ...conElError.pagos[1], anulado: true, anuladoEn: '2026-09-25' },
+    ],
+  };
+  assert.equal(resumen(anulado).saldo, 0, 'anulado el pago equivocado, el contrato vuelve a estar en cero');
+});
+
+test('un pago SIN anular sigue contando igual que siempre (anularPago no afecta lo demás)', () => {
+  const c = {
+    ...ejemplo(),
+    cierre: null,
+    pagos: [
+      { monto: 3150, porcentajeTarjeta: 12 },
+      { monto: 4800, porcentajeTarjeta: 0, anulado: false },
+    ],
+  };
+  const r = resumen(c);
+  assert.equal(r.pagado, 8328, 'sin anular, los Q4,800 sí cuentan (3528 + 4800)');
+});
+
+test('anular el pago equivocado deja el contrato otra vez con saldo — el estado se recalcula solo', () => {
+  // Mismo caso que arriba pero visto desde estadoContrato/puedeCerrar
+  // (nucleo/estados.js): un contrato que se había "cerrado" de más al
+  // cobrar Q4,800 sobrantes vuelve a "devuelto" en cuanto se anula ese pago,
+  // sin que nadie tenga que tocar el campo `estado` a mano.
+  const cerradoDeMas = {
+    dias: 4,
+    precioDia: 700,
+    devolucionPrevista: '2026-08-24',
+    cierre: { fechaReal: '2026-08-24' }, // sin atraso, sin daños: debía Q2,800
+    pagos: [{ monto: 7600, porcentajeTarjeta: 0 }], // cobró de más por error
+    garantiaLiberada: false,
+  };
+  assert.equal(resumen(cerradoDeMas).saldo, -4800, 'Q4,800 de crédito a favor del cliente, el error del incidente');
+
+  const corregido = {
+    ...cerradoDeMas,
+    pagos: [{ ...cerradoDeMas.pagos[0], anulado: true, anuladoEn: '2026-09-25' }],
+  };
+  assert.equal(resumen(corregido).saldo, 2800, 'anulado el pago, vuelve a deber la renta completa');
+});
