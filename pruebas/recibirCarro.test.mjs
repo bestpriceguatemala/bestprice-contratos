@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import {
   conKmSalidaNormalizado, textoBotonPago, textoAvisoRecibido, textoSaldo, totalDeEstaCobranza,
   leerParametroRuta, textoAvisoCobro, valoresIniciales, textoCorreccion,
+  textoEstadoPago, textoAvisoSobrecobro,
 } from '../js/pantallas/recibirCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { agregarPago } from '../js/datos.js';
@@ -34,10 +35,13 @@ test('conKmSalidaNormalizado: con contrato nulo, no revienta', () => {
   assert.equal(conKmSalidaNormalizado(null), null);
 });
 
-test('textoBotonPago: sin nada que cobrar, dice "Recibir sin cobrar"', () => {
-  assert.equal(textoBotonPago(0, 0), 'Recibir sin cobrar');
-  assert.equal(textoBotonPago(-300, 0), 'Recibir sin cobrar', 'saldo a favor del cliente tampoco cobra');
-  assert.equal(textoBotonPago(730, 0), 'Recibir sin cobrar', 'monto en cero, aunque haya saldo');
+// Tarea "cobro-claro": "Recibir sin cobrar" era justo la frase que confundió
+// al dueño en el incidente (contrato ya pagado por completo, y el botón
+// sonaba a que algo faltaba). Ahora dice llanamente "Recibir carro".
+test('textoBotonPago: sin nada que cobrar, dice "Recibir carro"', () => {
+  assert.equal(textoBotonPago(0, 0), 'Recibir carro');
+  assert.equal(textoBotonPago(-300, 0), 'Recibir carro', 'saldo a favor del cliente tampoco cobra');
+  assert.equal(textoBotonPago(730, 0), 'Recibir carro', 'monto en cero, aunque haya saldo');
 });
 
 test('textoBotonPago: un abono menor que el saldo dice "Recibir y abonar"', () => {
@@ -180,4 +184,41 @@ test('textoCorreccion: null cuando el contrato todavía no tiene cierre', () => 
 test('textoCorreccion: nombra la fecha real, formateada, cuando ya se recibió', () => {
   const contrato = { id: 'c1', cierre: { fechaReal: '2026-08-25' } };
   assert.equal(textoCorreccion(contrato), 'Este contrato ya se recibió el 25 ago 2026 — estás corrigiendo el cierre.');
+});
+
+// ---------- textoEstadoPago ----------
+//
+// El texto que reemplaza al "Saldo"/"A favor del cliente" ambiguo cuando no
+// hay nada que cobrar: en cero dice que ya está pagado completo; negativo lo
+// dice tal cual, en positivo y a favor del cliente (nunca escondido detrás
+// de un "pagado completo" que no sería cierto).
+test('textoEstadoPago: en cero, dice que el contrato ya está pagado completo', () => {
+  assert.equal(textoEstadoPago(0), 'Este contrato ya está pagado completo.');
+});
+
+test('textoEstadoPago: negativo, dice el monto a favor del cliente en positivo', () => {
+  assert.equal(textoEstadoPago(-300), 'Este contrato quedó con Q300.00 a favor del cliente.');
+});
+
+// ---------- textoAvisoSobrecobro ----------
+//
+// El aviso del incidente que motivó toda esta tarea: cobrar más de lo que un
+// contrato debe. `null` cuando no aplica; nunca bloquea, solo avisa antes de
+// guardar (el mostrador puede seguir adelante si de verdad quiere cobrar de
+// más, por ejemplo a cuenta de la próxima renta).
+test('textoAvisoSobrecobro: cobrar más del saldo avisa cuánto va a quedar a favor del cliente', () => {
+  assert.equal(
+    textoAvisoSobrecobro(730, 4800),
+    'Estás cobrando Q4,800.00 y solo te debe Q730.00. Van a quedar Q4,070.00 a favor del cliente.',
+  );
+});
+
+test('textoAvisoSobrecobro: un monto menor o igual al saldo no avisa nada', () => {
+  assert.equal(textoAvisoSobrecobro(730, 500), null, 'un abono parcial no es sobrecobro');
+  assert.equal(textoAvisoSobrecobro(730, 730), null, 'cobrar justo el saldo tampoco es sobrecobro');
+});
+
+test('textoAvisoSobrecobro: sin saldo pendiente (en cero o a favor del cliente), no aplica', () => {
+  assert.equal(textoAvisoSobrecobro(0, 100), null);
+  assert.equal(textoAvisoSobrecobro(-50, 100), null);
 });

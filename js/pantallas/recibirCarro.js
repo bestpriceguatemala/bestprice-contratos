@@ -109,13 +109,50 @@ export function textoCorreccion(contrato) {
 /**
  * Qué dice el botón de guardar, según cuánto se está por cobrar contra el
  * saldo. Sin nada que cobrar (el saldo ya está en cero o a favor del
- * cliente, o el monto quedó en cero) dice "Recibir sin cobrar": el carro
- * vuelve igual, el contrato se queda pendiente de saldo.
+ * cliente, o el monto quedó en cero) dice "Recibir carro": el carro vuelve,
+ * y punto — nunca "Recibir sin cobrar".
+ *
+ * "Recibir sin cobrar" era justo la frase que confundió al dueño en el
+ * incidente que motivó este cambio: sobre un contrato ya pagado por
+ * completo, leía como "falta algo por cobrar" cuando en realidad no había
+ * nada pendiente. Que el bloque de pago esté oculto en ese caso (ver
+ * plantilla() más abajo) ya lo deja claro, pero el botón no puede seguir
+ * diciendo lo contrario.
  */
 export function textoBotonPago(saldo, monto) {
   const m = q(monto);
-  if (saldo <= 0 || m <= 0) return 'Recibir sin cobrar';
+  if (saldo <= 0 || m <= 0) return 'Recibir carro';
   return m < saldo ? 'Recibir y abonar' : 'Recibir y cobrar';
+}
+
+/**
+ * El texto plano de "no hay nada que cobrar", para cuando `saldo <= 0`: en
+ * cero, dice que el contrato ya está pagado completo; negativo (un
+ * sobrepago real, ver el comentario de saldo en resumen(), nucleo/contrato.js)
+ * lo dice tal cual, en positivo y a favor del cliente — "nunca ajustar una
+ * cifra para que cuadre" incluye no esconder ese número detrás de un
+ * "pagado completo" que no sería cierto.
+ */
+export function textoEstadoPago(saldo) {
+  const s = q(saldo);
+  if (s < 0) return `Este contrato quedó con ${dinero(-s)} a favor del cliente.`;
+  return 'Este contrato ya está pagado completo.';
+}
+
+/**
+ * El aviso de que se está cobrando más de lo que el contrato debe — la
+ * misma clase de error que dejó al dueño con Q4,800 de crédito a favor de un
+ * cliente sin darse cuenta (el incidente que motivó esta pantalla). `null`
+ * cuando no aplica (sin saldo pendiente, o el monto no pasa del saldo): es
+ * un aviso, no un candado — se le deja escribir un monto mayor al saldo
+ * (puede ser un abono grande a cuenta de la próxima renta, por ejemplo),
+ * pero se le avisa antes de que pase sin darse cuenta.
+ */
+export function textoAvisoSobrecobro(saldo, monto) {
+  const s = q(saldo);
+  const m = q(monto);
+  if (!(s > 0) || !(m > s)) return null;
+  return `Estás cobrando ${dinero(m)} y solo te debe ${dinero(s)}. Van a quedar ${dinero(q(m - s))} a favor del cliente.`;
 }
 
 /** El aviso final, con el número de contrato y lo que haya quedado pendiente. */
@@ -265,33 +302,47 @@ ${bloqueCierre}
         <h2>${soloCobro ? 'Cobro' : 'Detalle del cierre'}</h2>
         <ul id="rc-lineas" class="sc-lineas"><li class="sc-vacio">Todavía no hay nada que cobrar.</li></ul>
 
-        <div class="sc-garantia-linea">
-          <span id="rc-saldo-etiqueta">Saldo</span>
-          <strong id="rc-saldo">Q0.00</strong>
-        </div>
-        <div class="sc-garantia-linea" id="rc-recargo-linea" hidden>
-          <span>Recargo de tarjeta</span>
-          <strong id="rc-recargo">Q0.00</strong>
-        </div>
+        <!--
+          Tarea "cobro-claro": lo que el dueño pidió fue "decime cuánto ya
+          pagó el cliente Y TIRAME ALERTA SOLO SI ME DEBE ALGO MÁS". "Ya
+          pagó" se ve siempre, prominente; "Falta cobrar" (rojo) es la ÚNICA
+          alerta de dinero de toda esta pantalla y solo existe si de verdad
+          queda saldo; sin saldo, se dice tal cual (textoEstadoPago, arriba)
+          y el bloque de cobro entero desaparece — nada que cobrar, nada que
+          mostrar sobre cobrar.
+        -->
         <div class="sc-total-linea">
-          <strong>Total a cobrar</strong>
-          <span id="rc-total">Q0.00</span>
+          <strong>Ya pagó</strong>
+          <span id="rc-ya-pago">${dinero(pagadoSalida)}</span>
         </div>
+        <p class="carro-atraso" id="rc-falta-cobrar" hidden></p>
+        <p class="sc-nota" id="rc-estado-pago" hidden></p>
 
-        <div class="sc-campos">
-          <label class="sc-campo">Monto sin recargo de tarjeta
-            <input type="number" id="rc-pago-monto" step="0.01" min="0">
-          </label>
-          <label class="sc-campo">Forma de pago
-            <select id="rc-pago-forma">
-              <option value="efectivo">Efectivo</option>
-              <option value="tarjeta">Tarjeta</option>
-              <option value="transferencia">Transferencia</option>
-            </select>
-          </label>
-          <label class="sc-campo" id="rc-pago-porcentaje-campo" hidden>% de tarjeta
-            <input type="number" id="rc-pago-porcentaje" step="0.01" min="0" value="${PORCENTAJE_TARJETA_DEFECTO}">
-          </label>
+        <div id="rc-bloque-cobro">
+          <div class="sc-garantia-linea" id="rc-recargo-linea" hidden>
+            <span>Recargo de tarjeta</span>
+            <strong id="rc-recargo">Q0.00</strong>
+          </div>
+          <div class="sc-total-linea">
+            <strong>Total a cobrar</strong>
+            <span id="rc-total">Q0.00</span>
+          </div>
+
+          <div class="sc-campos">
+            <label class="sc-campo">Monto sin recargo de tarjeta
+              <input type="number" id="rc-pago-monto" step="0.01" min="0">
+            </label>
+            <label class="sc-campo">Forma de pago
+              <select id="rc-pago-forma">
+                <option value="efectivo">Efectivo</option>
+                <option value="tarjeta">Tarjeta</option>
+                <option value="transferencia">Transferencia</option>
+              </select>
+            </label>
+            <label class="sc-campo" id="rc-pago-porcentaje-campo" hidden>% de tarjeta
+              <input type="number" id="rc-pago-porcentaje" step="0.01" min="0" value="${PORCENTAJE_TARJETA_DEFECTO}">
+            </label>
+          </div>
         </div>
 
         <ul id="rc-problemas" class="sc-avisos-lista"></ul>
@@ -400,9 +451,21 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
     // "Saldo" es lo que se debe ANTES de este pago (lo que dice la hoja
     // CIERRE); nunca se toca con lo que se está por cobrar ahora mismo.
     const { saldo } = resumen(contratoActual);
-    const { etiqueta, monto: montoSaldo } = textoSaldo(saldo);
-    el('rc-saldo-etiqueta').textContent = etiqueta;
-    el('rc-saldo').textContent = dinero(montoSaldo);
+
+    // El incidente que motivó esta pantalla: "Ya pagó" siempre se ve, sin
+    // ambigüedad; "Falta cobrar" (rojo) es la ÚNICA alerta de dinero de toda
+    // la pantalla y solo aparece si de verdad queda saldo. Sin saldo
+    // pendiente no hay nada que cobrar: se dice tal cual con
+    // textoEstadoPago() (pagado completo, o a favor del cliente si quedó
+    // negativo) y el bloque de cobro entero —monto, forma de pago, % de
+    // tarjeta, recargo, total— se oculta completo, no solo se deshabilita.
+    el('rc-ya-pago').textContent = dinero(pagadoSalida);
+    const hayAlgoQueCobrar = saldo > 0;
+    el('rc-falta-cobrar').hidden = !hayAlgoQueCobrar;
+    if (hayAlgoQueCobrar) el('rc-falta-cobrar').textContent = `Falta cobrar: ${dinero(saldo)}`;
+    el('rc-estado-pago').hidden = hayAlgoQueCobrar;
+    if (!hayAlgoQueCobrar) el('rc-estado-pago').textContent = textoEstadoPago(saldo);
+    el('rc-bloque-cobro').hidden = !hayAlgoQueCobrar;
 
     // El monto a cobrar arranca en el saldo completo (o en 0 si no hay nada
     // que cobrar) y sigue ese valor mientras el mostrador no lo haya tocado
@@ -434,13 +497,25 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
     if (esTarjeta) el('rc-recargo').textContent = dinero(recargoEstaCobranza);
     el('rc-total').textContent = dinero(hayCobroAhora ? totalEstaCobranza : 0);
 
+    // El aviso de cobrar de más (textoAvisoSobrecobro, más arriba): el mismo
+    // error que dejó al dueño con Q4,800 de crédito a favor de un cliente sin
+    // darse cuenta. Se ve en rojo, junto a los demás problemas, pero NUNCA
+    // cuenta para deshabilitar el botón — es un aviso, no un candado: el
+    // mostrador puede de verdad querer cobrar de más (a cuenta de la próxima
+    // renta, por ejemplo) y decide él, con el número ya puesto enfrente.
+    const avisoSobrecobro = textoAvisoSobrecobro(saldo, montoField);
+    const avisoSobrecobroHTML = avisoSobrecobro ? [`<li class="nivel-alto">${esc(avisoSobrecobro)}</li>`] : [];
+
     if (soloCobro) {
       // Sin cierre que validar, lo único que puede impedir el cobro es que
       // ya no quede saldo (por ejemplo, otro cobro desde otra pestaña justo
       // antes de que este formulario se guardara).
       el('rc-guardar').textContent = 'Cobrar';
       const problemas = saldo <= 0 ? ['Este contrato ya no tiene saldo pendiente.'] : [];
-      el('rc-problemas').innerHTML = problemas.map((m) => `<li class="nivel-alto">${esc(m)}</li>`).join('');
+      el('rc-problemas').innerHTML = [
+        ...problemas.map((m) => `<li class="nivel-alto">${esc(m)}</li>`),
+        ...avisoSobrecobroHTML,
+      ].join('');
       el('rc-guardar').disabled = problemas.length > 0 || guardando || !(montoField > 0);
       return;
     }
@@ -451,9 +526,13 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
     el('rc-guardar').textContent = enCorreccion ? 'Guardar correcciones' : textoBotonPago(saldo, montoField);
 
     // Los problemas de problemasDelCierre (nucleo/cierre.js) van en rojo,
-    // justo arriba del botón, y mientras haya alguno el botón no guarda.
+    // justo arriba del botón, y mientras haya alguno el botón no guarda. El
+    // aviso de sobrecobro se ve en el mismo lugar pero nunca se suma a ellos.
     const problemas = problemasDelCierre(contrato, campos);
-    el('rc-problemas').innerHTML = problemas.map((m) => `<li class="nivel-alto">${esc(m)}</li>`).join('');
+    el('rc-problemas').innerHTML = [
+      ...problemas.map((m) => `<li class="nivel-alto">${esc(m)}</li>`),
+      ...avisoSobrecobroHTML,
+    ].join('');
     el('rc-guardar').disabled = problemas.length > 0 || guardando;
   }
 
