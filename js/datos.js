@@ -7,7 +7,7 @@
 // contrato que se quedara solo en esta computadora sería un dato que el resto
 // del negocio nunca ve, así que ahí sí se deja subir el error si la nube falla.
 import { iniciarFirebase } from './firebase-config.js';
-import { mezclar, guardarLocal, leerLocal } from './cache.js';
+import { mezclar, guardarLocal, leerLocal, idsQueSobran, borrarLocales } from './cache.js';
 import { filtrar, textoDeCliente } from './nucleo/busqueda.js';
 import { estadoContrato } from './nucleo/estados.js';
 import { resumen } from './nucleo/contrato.js';
@@ -89,8 +89,15 @@ export function resultadoLectura(locales, remoto) {
 async function cargarConSincronia(coleccion, alLlegar) {
   const locales = await leerLocal(coleccion);
   const sincronizar = leerRemoto(coleccion).then(async (remotos) => {
-    const mezclados = mezclar(locales, remotos);
+    // Esta lectura trae la colección ENTERA, así que lo que esté en la copia
+    // local y no venga aquí está borrado de verdad y se quita. Solo llega a
+    // esta línea si la lectura salió bien: si la nube falla, se va por el
+    // `catch` y no se borra nada — confundir "no pude leer" con "no hay nada"
+    // fue un error grave del primer plan y no puede volver por esta puerta.
+    const sobran = new Set(idsQueSobran(locales, remotos));
+    const mezclados = mezclar(locales, remotos).filter((doc) => !sobran.has(doc.id));
     await guardarLocal(coleccion, mezclados);
+    await borrarLocales(coleccion, [...sobran]);
     return mezclados;
   });
 
@@ -207,8 +214,14 @@ export async function cargarContratos({ desde, hasta } = {}, alLlegar) {
   }
 
   const sincronizar = leerRemotoDelRango().then(async (remotos) => {
-    const mezclados = mezclar(locales, remotos);
+    // `locales` ya viene filtrado por el mismo rango que se le pidió a la
+    // nube, así que se comparan dos listas del mismo alcance: lo que falte
+    // está borrado. Un contrato de otro mes ni siquiera entró en `locales`,
+    // de modo que leer marzo no puede tocar lo de agosto.
+    const sobran = new Set(idsQueSobran(locales, remotos));
+    const mezclados = mezclar(locales, remotos).filter((doc) => !sobran.has(doc.id));
     await guardarLocal('contratos', mezclados);
+    await borrarLocales('contratos', [...sobran]);
     return mezclados;
   });
 

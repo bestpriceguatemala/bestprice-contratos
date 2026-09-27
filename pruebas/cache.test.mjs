@@ -5,7 +5,7 @@
 // encima de uno nuevo — o peor, se le borra algo que sí existía.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mezclar } from '../js/cache.js';
+import { mezclar, idsQueSobran } from '../js/cache.js';
 
 const local = [
   { id: 'a', placas: 'P-1', actualizado: 100 },
@@ -37,4 +37,31 @@ test('lo que solo está local se conserva', () => {
 test('lo borrado en la nube desaparece', () => {
   const r = mezclar(local, [{ id: 'a', borrado: true, actualizado: 300 }]);
   assert.deepEqual(r.map((x) => x.id), ['b']);
+});
+
+// ---------- Lo que se borró de verdad ----------
+//
+// El dueño vació sus colecciones desde la consola de Firebase y el sistema
+// siguió mostrando sus contratos de prueba: `mezclar` solo suma y actualiza,
+// nunca quita. Estas pruebas fijan la regla que faltaba.
+
+test('lo que la nube ya no devuelve, sobra en la copia local', () => {
+  const locales = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  assert.deepEqual(idsQueSobran(locales, [{ id: 'b' }]), ['a', 'c']);
+});
+
+test('si la nube devolvió todo, no sobra nada', () => {
+  const locales = [{ id: 'a' }, { id: 'b' }];
+  assert.deepEqual(idsQueSobran(locales, [{ id: 'b' }, { id: 'a' }]), []);
+});
+
+test('una copia local vacía no borra nada aunque la nube traiga cosas', () => {
+  assert.deepEqual(idsQueSobran([], [{ id: 'a' }]), []);
+});
+
+test('si la nube contesta vacío de verdad, se van todos', () => {
+  // Es el caso del dueño: borró las cuatro colecciones en la consola.
+  // Solo se llega aquí cuando la LECTURA SALIÓ BIEN; una lectura fallida ni
+  // siquiera pasa por esta función (ver resultadoLectura en datos.js).
+  assert.deepEqual(idsQueSobran([{ id: 'a' }, { id: 'b' }], []), ['a', 'b']);
 });

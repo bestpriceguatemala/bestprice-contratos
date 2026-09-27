@@ -17,6 +17,24 @@ export function mezclar(locales = [], remotos = []) {
   return [...porId.values()];
 }
 
+/**
+ * Los ids que están en la copia local pero que la nube ya no devolvió.
+ *
+ * `mezclar` solo suma y actualiza: nunca quita. Eso es correcto cuando la
+ * respuesta puede venir incompleta, pero deja fantasmas cuando alguien borra
+ * de verdad — el dueño vació sus colecciones desde la consola de Firebase y
+ * el sistema siguió mostrando sus contratos de prueba.
+ *
+ * Quien llama tiene que pasar dos listas del MISMO alcance: la colección
+ * entera contra la colección entera, o un rango de fechas contra ese mismo
+ * rango. Comparar una lista completa contra una respuesta parcial borraría
+ * cosas que sí existen.
+ */
+export function idsQueSobran(locales = [], remotos = []) {
+  const vivos = new Set(remotos.map((r) => r?.id));
+  return locales.filter((l) => l?.id && !vivos.has(l.id)).map((l) => l.id);
+}
+
 const BD = 'bestprice-contratos';
 const VERSION_BD = 1;
 const TIENDAS = ['clientes', 'vehiculos', 'contratos', 'ajustes'];
@@ -40,6 +58,18 @@ export async function guardarLocal(coleccion, items) {
   await new Promise((ok, mal) => {
     const tx = bd.transaction(coleccion, 'readwrite');
     for (const item of items) tx.objectStore(coleccion).put(item);
+    tx.oncomplete = ok;
+    tx.onerror = () => mal(tx.error);
+  });
+}
+
+/** Quita de la copia local los documentos que ya no existen en la nube. */
+export async function borrarLocales(coleccion, ids = []) {
+  if (!ids.length) return;
+  const bd = await abrir();
+  await new Promise((ok, mal) => {
+    const tx = bd.transaction(coleccion, 'readwrite');
+    for (const id of ids) tx.objectStore(coleccion).delete(id);
     tx.oncomplete = ok;
     tx.onerror = () => mal(tx.error);
   });
