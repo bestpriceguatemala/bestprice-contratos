@@ -164,9 +164,19 @@ function formaDePago(p) {
  * revirtió — el confirm es el último paso antes de que eso quede escrito.
  * Función pura para poder probarla sin DOM ni `confirm()`.
  */
-export function textoConfirmarAnular(pago) {
-  return `¿Anular el pago de ${dinero(pago?.monto)} del ${fecha(pago?.fecha)}? `
+export function textoConfirmarAnular(pago, contrato) {
+  let texto = `¿Anular el pago de ${dinero(pago?.monto)} del ${fecha(pago?.fecha)}? `
     + 'Va a quedar marcado como anulado, no desaparece de la lista.';
+
+  // Si la garantía de este contrato ya se soltó, hay que decírselo ANTES: al
+  // anular el pago el cliente vuelve a deberle, pero la tarjeta ya no está
+  // bloqueada y eso no se puede deshacer desde aquí. Es exactamente el momento
+  // en que necesita saber que se queda sin respaldo para cobrar.
+  if (contrato?.garantiaLiberada) {
+    texto += ' OJO: la garantía de este contrato ya se liberó, así que si queda'
+      + ' saldo, ya no tienes la tarjeta bloqueada para cobrarlo.';
+  }
+  return texto;
 }
 
 const pluralDias = (n) => `${n} día${n === 1 ? '' : 's'}`;
@@ -563,7 +573,7 @@ async function dibujarDetalleEntrada(contenedor, contratoId, sigoVigente) {
   async function anularDesdeLaFicha(indice, boton) {
     const pago = contrato?.pagos?.[indice];
     if (!pago || pago.anulado) return; // ya se anuló, o el índice no calza
-    if (!window.confirm(textoConfirmarAnular(pago))) return;
+    if (!window.confirm(textoConfirmarAnular(pago, contrato))) return;
 
     boton.disabled = true;
     try {

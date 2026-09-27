@@ -230,6 +230,20 @@ test('numeroEnmascarado: solo los últimos 4 dígitos, como pide ADR-001', () =>
 // que textoConfirmarLiberar (flota.js) — nombra el monto y la fecha del pago
 // para que el mostrador sepa exactamente qué está a punto de marcar como
 // anulado antes de tocar nada.
+test('textoConfirmarAnular: avisa si la garantía ya se liberó', () => {
+  // El caso que cuesta plata: el contrato se cerró, se soltó la tarjeta, y
+  // después se anula el pago. El cliente vuelve a deber y ya no hay garantía
+  // que ejecutar. Tiene que enterarse ANTES de anular, no después.
+  const pago = { monto: 3150, fecha: '2026-09-22' };
+  const conGarantiaSuelta = textoConfirmarAnular(pago, { garantiaLiberada: true });
+  assert.match(conGarantiaSuelta, /ya se liberó/i);
+  assert.match(conGarantiaSuelta, /no tienes la tarjeta bloqueada/i);
+
+  const conGarantiaBloqueada = textoConfirmarAnular(pago, { garantiaLiberada: false });
+  assert.doesNotMatch(conGarantiaBloqueada, /ya se liberó/i);
+  assert.doesNotMatch(textoConfirmarAnular(pago), /ya se liberó/i, 'sin contrato, no inventa el aviso');
+});
+
 test('textoConfirmarAnular: nombra el monto y la fecha del pago', () => {
   const texto = textoConfirmarAnular({ monto: 4800, fecha: '2026-08-25' });
   assert.match(texto, /Q4,800\.00/);
