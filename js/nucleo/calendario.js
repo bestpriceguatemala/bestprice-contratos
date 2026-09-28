@@ -60,24 +60,30 @@ export function cuadriculaDelMes(mes) {
 }
 
 /**
- * ¿Ya volvió el carro de este contrato? Con `fechaDevolucion` puesta o con
- * el contrato `cerrado` (que solo pasa después de que el carro volvió), ya
- * no hay nada pendiente de regreso. Una sola función para las dos preguntas
- * que la comparten (atrasados y el corte regresan/yaRegresaron de abajo) —
- * para que "qué cuenta como ya vuelto" sea una sola regla, no dos que se
- * puedan desviar.
+ * ¿Ya volvió el carro de este contrato? La única marca de que el carro
+ * regresó es `cierre.fechaReal` (§7b del diseño: "Del cierre: fechaReal...").
+ * "Cerrado" NO es un campo guardado — es un estado que se DERIVA
+ * (`estadoContrato` en estados.js: sin `cierre.fechaReal` el contrato sigue
+ * `'rentado'`; con ella, `'cerrado'` o `'devuelto'` según `puedeCerrar`), así
+ * que nunca hay que leer un `c.cerrado` que no existe. Y no hace falta
+ * replicar esa derivación completa aquí: un contrato no puede estar cerrado
+ * sin que el carro ya haya vuelto, así que preguntar solo por
+ * `cierre.fechaReal` ya cubre ese caso. Una sola función para las dos
+ * preguntas que la comparten (atrasados y el corte regresan/yaRegresaron de
+ * abajo) — para que "qué cuenta como ya vuelto" sea una sola regla, no dos
+ * que se puedan desviar.
  */
 function yaVolvio(c) {
-  return Boolean(c?.cerrado) || Boolean(c?.fechaDevolucion);
+  return Boolean(c?.cierre?.fechaReal);
 }
 
 /**
  * ¿Ya pasó la devolución prevista de este contrato, sin que el carro haya
- * vuelto? Un contrato cerrado nunca cuenta, sin importar las fechas: ya se
- * saldó y ya no es un pendiente del dueño. El atraso se mide contra `fecha`
- * (el día que se está mirando en el calendario), no contra un reloj real,
- * para que un día pasado del calendario muestre lo que de verdad estaba
- * atrasado ESE día.
+ * vuelto? Un contrato con el carro de vuelta nunca cuenta, sin importar las
+ * fechas: ya no es un pendiente de regreso, sin importar si todavía debe
+ * cobro o garantía. El atraso se mide contra `fecha` (el día que se está
+ * mirando en el calendario), no contra un reloj real, para que un día
+ * pasado del calendario muestre lo que de verdad estaba atrasado ESE día.
  */
 function estaAtrasado(c, fecha) {
   if (yaVolvio(c)) return false;
