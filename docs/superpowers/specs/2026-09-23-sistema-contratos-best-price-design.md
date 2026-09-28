@@ -342,6 +342,28 @@ los nombres que el sistema entero usa.
 Estos puentes no van a desaparecer nunca: son la forma de que los datos de
 hace un año sigan mostrándose bien cuando se abre el sistema hoy.
 
+**La cuarta vez (28 de septiembre), y de dónde vino.** El calendario se escribió
+contra `contrato.fechaDevolucion` y `contrato.cerrado`. Ninguno de los dos existe:
+el regreso del carro se marca con `cierre.fechaReal`, y "cerrado" no se guarda —
+lo deriva `estadoContrato()`. Contra datos reales, todo carro devuelto se quedaba
+en "regresa hoy" para siempre y no salía nunca de la lista de atrasados.
+
+Lo nuevo de esta ocasión no es el error, es por dónde entró: los dos nombres
+inventados venían **del encargo escrito**, no del código. Quien implementó los
+copió de ahí, con razón. Y las 259 pruebas pasaron en verde porque los datos de
+prueba también se habían construido con la forma inventada — la suite estaba
+comprobando sus propios datos de prueba, no el sistema.
+
+De ahí salen las dos reglas que cierran esta clase de error:
+
+1. **Los nombres de los campos se copian de esta lista, nunca de la memoria de
+   nadie ni de un encargo escrito.** Un encargo puede traer un nombre equivocado;
+   esta sección es la que manda.
+2. **Cada dato de prueba tiene que tener la forma real de un contrato guardado.**
+   Una prueba escrita sobre un contrato inventado pasa en verde sin decir nada
+   sobre el sistema. Si un campo no aparece en esta lista, no debería aparecer en
+   una prueba.
+
 ## 8. Impresión
 
 **Contrato sobre el formulario preimpreso.** El sistema imprime únicamente los
