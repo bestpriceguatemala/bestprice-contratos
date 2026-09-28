@@ -326,9 +326,10 @@ la cuarta ocurrencia de más abajo):
 `anticipo`, `anticipoPagado`, `nota`, `cancelada`, `contratoId`, `estado`,
 `actualizado`.
 
-Tres de estos no se escriben a mano nunca: `devolucionPrevista` la calcula
-`construirReserva` a partir de `fechaSalida` y `dias`, y `estado` lo sella
-`reservaParaGuardar` con `estadoReserva()`. Una reservación tiene `carroId`
+Cuatro de estos no se escriben a mano nunca: `devolucionPrevista` la calcula
+`construirReserva` a partir de `fechaSalida` y `dias`, y `estado`, `id` y
+`actualizado` los sella `reservaParaGuardar` al guardar — `estado` con
+`estadoReserva()`. Una reservación tiene `carroId`
 (una unidad apartada con placa) **o** `tipoVehiculo` (cualquier carro de ese
 tipo), y el sistema descuenta capacidad del tipo en ambos casos.
 
