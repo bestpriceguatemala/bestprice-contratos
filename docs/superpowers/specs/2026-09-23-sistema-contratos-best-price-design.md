@@ -318,6 +318,20 @@ los nombres que el sistema entero usa.
 `fechaReal`, `horaReal`, `lugarEntrada`, `kmEntrada`, `combustible`, `danos`,
 `danosDetalle`, `varios`, `variosDetalle`, `descuento`.
 
+**De la reservación** (agregado el 28 de septiembre, al notar que §12b describía
+las reservaciones sin dejar sus campos en esta lista — el hueco por donde entró
+la cuarta ocurrencia de más abajo):
+`clienteId`, `clienteNombre`, `telefono`, `fechaSalida`, `dias`,
+`devolucionPrevista`, `carroId`, `carroPlacas`, `tipoVehiculo`, `precioDia`,
+`anticipo`, `anticipoPagado`, `nota`, `cancelada`, `contratoId`, `estado`,
+`actualizado`.
+
+Tres de estos no se escriben a mano nunca: `devolucionPrevista` la calcula
+`construirReserva` a partir de `fechaSalida` y `dias`, y `estado` lo sella
+`reservaParaGuardar` con `estadoReserva()`. Una reservación tiene `carroId`
+(una unidad apartada con placa) **o** `tipoVehiculo` (cualquier carro de ese
+tipo), y el sistema descuenta capacidad del tipo en ambos casos.
+
 **Del cliente:**
 `nombres`, `apellidos`, y el resto de las claves en `CAMPOS_CLIENTE`
 (`js/nucleo/cliente.js`), que es la lista viva.
