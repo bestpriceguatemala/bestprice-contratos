@@ -60,6 +60,18 @@ export function cuadriculaDelMes(mes) {
 }
 
 /**
+ * ¿Ya volvió el carro de este contrato? Con `fechaDevolucion` puesta o con
+ * el contrato `cerrado` (que solo pasa después de que el carro volvió), ya
+ * no hay nada pendiente de regreso. Una sola función para las dos preguntas
+ * que la comparten (atrasados y el corte regresan/yaRegresaron de abajo) —
+ * para que "qué cuenta como ya vuelto" sea una sola regla, no dos que se
+ * puedan desviar.
+ */
+function yaVolvio(c) {
+  return Boolean(c?.cerrado) || Boolean(c?.fechaDevolucion);
+}
+
+/**
  * ¿Ya pasó la devolución prevista de este contrato, sin que el carro haya
  * vuelto? Un contrato cerrado nunca cuenta, sin importar las fechas: ya se
  * saldó y ya no es un pendiente del dueño. El atraso se mide contra `fecha`
@@ -68,16 +80,24 @@ export function cuadriculaDelMes(mes) {
  * atrasado ESE día.
  */
 function estaAtrasado(c, fecha) {
-  if (c?.cerrado) return false;
-  if (c?.fechaDevolucion) return false;
+  if (yaVolvio(c)) return false;
   return diasEntre(c?.devolucionPrevista, fecha) > 0;
 }
 
 /**
- * Lo que pasa en un día: quién sale, quién regresa, quién ya está atrasado.
- * Listas, no números — la pantalla del calendario las necesita completas
- * para poder mostrar nombres, no solo cuántos, y así no tiene que volver a
- * filtrar reservas y contratos por su cuenta.
+ * Lo que pasa en un día: quién sale, quién todavía debe regresar, quién ya
+ * regresó, quién ya está atrasado. Listas, no números — la pantalla del
+ * calendario las necesita completas para poder mostrar nombres, no solo
+ * cuántos, y así no tiene que volver a filtrar reservas y contratos por su
+ * cuenta (el brief es explícito: la pantalla no vuelve a filtrar).
+ *
+ * `regresan` y `yaRegresaron` parten los contratos citados ese día en dos,
+ * en vez de un solo `regresan` con todos: las cuatro cifras del encabezado
+ * (resumenDeHoy) son una lista de pendientes de HOY, no un historial — si
+ * dos carros se esperaban hoy y los dos ya están en el patio a las 5pm, el
+ * encabezado no puede seguir diciendo "regresan 2" solo porque la cita caía
+ * hoy. La vista de mes sí quiere el día completo, por eso ambas listas
+ * existen y ninguna se descarta aquí.
  */
 export function movimientosDelDia(fecha, { reservas = [], contratos = [] } = {}) {
   // Cancelada o ya entregada no sale: se pregunta con estadoReserva(), no con
@@ -91,11 +111,14 @@ export function movimientosDelDia(fecha, { reservas = [], contratos = [] } = {})
   const salen = reservas.filter((r) =>
     estadoReserva(r) === 'pendiente' && r?.fechaSalida && diasEntre(fecha, r.fechaSalida) === 0);
 
-  const regresan = contratos.filter((c) => c?.devolucionPrevista && diasEntre(fecha, c.devolucionPrevista) === 0);
+  const citadosHoy = contratos.filter((c) =>
+    c?.devolucionPrevista && diasEntre(fecha, c.devolucionPrevista) === 0);
+  const regresan = citadosHoy.filter((c) => !yaVolvio(c));
+  const yaRegresaron = citadosHoy.filter((c) => yaVolvio(c));
 
   const atrasados = contratos.filter((c) => estaAtrasado(c, fecha));
 
-  return { salen, regresan, atrasados };
+  return { salen, regresan, yaRegresaron, atrasados };
 }
 
 /**

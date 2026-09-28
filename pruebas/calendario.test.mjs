@@ -69,9 +69,30 @@ const reservaCancelada = { id: 'r3', clienteNombre: 'Caro', fechaSalida: '2026-0
 const contratos = [contratoDueHoy, contratoAtrasadoDesdeAyer, contratoCerradoAunqueVencido, contratoYaRegresado];
 const reservas = [reservaPendiente, reservaEntregada, reservaCancelada];
 
-test('un contrato aparece en regresan el día de su devolución prevista', () => {
-  const { regresan } = movimientosDelDia(hoy, { reservas, contratos });
+test('un contrato debido hoy y todavía afuera aparece en regresan, no en yaRegresaron', () => {
+  const { regresan, yaRegresaron } = movimientosDelDia(hoy, { reservas, contratos });
   assert.deepEqual(regresan.map((c) => c.id), ['k1']);
+  assert.deepEqual(yaRegresaron.map((c) => c.id), []);
+});
+
+// Ruling del coordinador: las cuatro cifras del encabezado son un
+// pendiente de HOY, no un historial. Si un carro esperado hoy ya está de
+// vuelta, "regresan" no debe seguir contándolo — por eso movimientosDelDia
+// parte los contratos citados ese día en dos listas, y la pantalla de mes
+// (que sí quiere ver el día completo) usa yaRegresaron para eso, sin volver
+// a filtrar.
+test('un contrato debido hoy que YA regresó (fechaDevolucion puesta) aparece en yaRegresaron, no en regresan', () => {
+  const c = { id: 'k6', carroId: 'v6', devolucionPrevista: hoy, fechaDevolucion: hoy, cerrado: false };
+  const { regresan, yaRegresaron } = movimientosDelDia(hoy, { reservas: [], contratos: [c] });
+  assert.deepEqual(regresan.map((x) => x.id), []);
+  assert.deepEqual(yaRegresaron.map((x) => x.id), ['k6']);
+});
+
+test('un contrato debido hoy y ya CERRADO también cuenta como ya vuelto (cerrado solo pasa después de que el carro regresó)', () => {
+  const c = { id: 'k7', carroId: 'v7', devolucionPrevista: hoy, fechaDevolucion: null, cerrado: true };
+  const { regresan, yaRegresaron } = movimientosDelDia(hoy, { reservas: [], contratos: [c] });
+  assert.deepEqual(regresan.map((x) => x.id), []);
+  assert.deepEqual(yaRegresaron.map((x) => x.id), ['k7']);
 });
 
 test('un contrato debido justo hoy todavía NO cuenta como atrasado', () => {
@@ -136,6 +157,15 @@ test('un contrato sin devolucionPrevista no aparece en regresan ningún día', (
 test('resumenDeHoy da los cuatro números, construidos sobre movimientosDelDia', () => {
   const resumen = resumenDeHoy(hoy, { reservas, contratos });
   assert.deepEqual(resumen, { salen: 1, regresan: 1, atrasados: 1, garantias: 0 });
+});
+
+// Ruling del coordinador: si dos carros se esperaban hoy y ya están en el
+// patio, el encabezado no puede seguir diciendo "regresan 2" a las 5pm solo
+// porque la cita caía hoy — es un pendiente de HOY, no un historial.
+test('resumenDeHoy.regresan no cuenta un contrato debido hoy que ya regresó', () => {
+  const yaVolvio = { id: 'k8', carroId: 'v8', devolucionPrevista: hoy, fechaDevolucion: hoy, cerrado: false };
+  const resumen = resumenDeHoy(hoy, { reservas: [], contratos: [yaVolvio] });
+  assert.equal(resumen.regresan, 0);
 });
 
 test('resumenDeHoy cuenta las garantías por liberar con la misma regla de pendientesDe', () => {
