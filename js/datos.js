@@ -10,6 +10,7 @@ import { iniciarFirebase } from './firebase-config.js';
 import { mezclar, guardarLocal, leerLocal, idsQueSobran, borrarLocales } from './cache.js';
 import { filtrar, textoDeCliente } from './nucleo/busqueda.js';
 import { estadoContrato } from './nucleo/estados.js';
+import { estadoReserva } from './nucleo/reserva.js';
 import { resumen } from './nucleo/contrato.js';
 import { q, textoDosDecimales } from './nucleo/dinero.js';
 import { hoyISO } from './nucleo/fechas.js';
@@ -144,6 +145,16 @@ export async function cargarFlota(alLlegar) {
  */
 export async function cargarClientes(alLlegar) {
   return cargarConSincronia('clientes', alLlegar);
+}
+
+/**
+ * Todas las reservaciones, como `{ datos, fallo }` (ver `resultadoLectura`).
+ * Mismo patrón que `cargarClientes`: copia local primero, nube por detrás,
+ * `idsQueSobran` propagando los borrados — sin reinventar nada de eso aquí,
+ * `cargarConSincronia` ya hace toda la sincronía.
+ */
+export async function cargarReservas(alLlegar) {
+  return cargarConSincronia('reservas', alLlegar);
 }
 
 /**
@@ -539,4 +550,49 @@ export async function guardarVehiculo(vehiculo) {
   await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
   await guardarLocal('vehiculos', [guardado]);
   return guardado;
+}
+
+/**
+ * Arma el documento que de verdad se guarda para una reservación, a partir de
+ * lo que pide guardar la pantalla más el id ya decidido. Función **pura** —
+ * sin Firestore — mismo patrón que `contratoParaGuardar`: el campo `estado`
+ * no se confía a lo que traiga `reserva`, se sella con `estadoReserva()`
+ * (nucleo/reserva.js). Es la resolución de la Tarea 1: el estado de una
+ * reservación se deriva, nunca se autoriza a mano, para que el campo guardado
+ * nunca pueda desacordarse de `contratoId`/`cancelada`, que son los datos que
+ * de verdad lo determinan.
+ */
+export function reservaParaGuardar(reserva, { id, ahora = Date.now() } = {}) {
+  return {
+    ...reserva, id, actualizado: ahora, estado: estadoReserva(reserva),
+  };
+}
+
+/**
+ * Guarda una reservación en la nube y refresca la copia local. Mismo patrón
+ * que `guardarCliente`: si `reserva.id` ya existe se edita ese documento, si
+ * no se mintea uno nuevo con `fsMod.collection(...)`; el documento que en
+ * verdad se escribe sale de `reservaParaGuardar`, igual que `guardarContrato`
+ * se apoya en `contratoParaGuardar`.
+ */
+export async function guardarReserva(reserva) {
+  const { db, fsMod } = await iniciarFirebase();
+  const ref = reserva?.id ? fsMod.doc(db, 'reservas', reserva.id) : fsMod.doc(fsMod.collection(db, 'reservas'));
+  const guardado = reservaParaGuardar(reserva, { id: ref.id });
+  await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
+  await guardarLocal('reservas', [guardado]);
+  return guardado;
+}
+
+/**
+ * Da de baja una reservación sin borrarla del historial: la marca
+ * `cancelada: true` y la guarda por el mismo camino que `guardarReserva`,
+ * para que `estadoReserva` recalcule el campo `estado` al vuelo en vez de
+ * escribirlo aquí a mano. Si la reservación ya tiene `contratoId` (ya se
+ * entregó), `estadoReserva` la deja en 'entregada' de todos modos — una
+ * cancelación tardía o un clic equivocado no puede borrar un contrato que ya
+ * existe, y esta función no pone ningún candado que pelee contra esa regla.
+ */
+export async function cancelarReserva(reserva) {
+  return guardarReserva({ ...reserva, cancelada: true });
 }

@@ -6,6 +6,7 @@ service cloud.firestore {
 
     match /clientes/{id}   { allow read, write: if haySesion(); }
     match /vehiculos/{id}  { allow read, write: if haySesion(); }
+    match /reservas/{id}   { allow read, write: if haySesion(); }
     match /empleados/{id}  { allow read: if haySesion(); allow write: if esDinero(); }
     match /ajustes/{id}    { allow read: if haySesion(); allow write: if haySesion(); }
     match /contadores/{id} { allow read, write: if haySesion(); }

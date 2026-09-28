@@ -7,6 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { construirReserva, estadoReserva, seCruzan, faltaAlgoEnReserva, textoAnticipo, choquesDeReserva } from '../js/nucleo/reserva.js';
+import { reservaParaGuardar } from '../js/datos.js';
 
 const campos = {
   clienteNombre: 'JONATÁN URIZAR', telefono: '3078-4155',
@@ -152,4 +153,43 @@ test('un carro fuera de servicio no cuenta como disponible', () => {
   const reservas = [{ id: 'r1', carroId: 'v2', tipoVehiculo: 'MICROBÚS', fechaSalida: '2026-10-11', devolucionPrevista: '2026-10-15' }];
   const r = choquesDeReserva({ reserva: { ...del10al14, tipoVehiculo: 'MICROBÚS' }, flota: flotaConTaller, reservas, contratos: [] });
   assert.equal(r.length, 1, 'el del taller no salva la capacidad');
+});
+
+// reservaParaGuardar (Tarea 4, datos.js): la parte pura de guardarReserva.
+// Mismo patrón que contratoParaGuardar (pruebas/datos.test.mjs) — el campo
+// `estado` no se confía a lo que traiga la reservación, se sella con
+// estadoReserva() para que nunca pueda desacordarse de contratoId/cancelada,
+// que son los datos que de verdad lo determinan (la resolución de la Tarea 1).
+test('reservaParaGuardar sella id y actualizado en una reservación nueva', () => {
+  const nueva = construirReserva({}, campos);
+  const guardado = reservaParaGuardar(nueva, { id: 'r1', ahora: 1000 });
+  assert.equal(guardado.id, 'r1');
+  assert.equal(guardado.actualizado, 1000);
+});
+
+test('reservaParaGuardar conserva el id de una reservación existente', () => {
+  const existente = { ...construirReserva({}, campos), id: 'r1' };
+  const guardado = reservaParaGuardar(existente, { id: 'r1', ahora: 2000 });
+  assert.equal(guardado.id, 'r1');
+});
+
+test('reservaParaGuardar calcula el estado con estadoReserva(), no confía en el que ya traía', () => {
+  const reserva = { ...construirReserva({}, campos), estado: 'entregada' }; // mentira a propósito
+  const guardado = reservaParaGuardar(reserva, { id: 'r1' });
+  assert.equal(guardado.estado, 'pendiente', 'el campo guardado se corrige, no se copia el que traía');
+});
+
+test('reservaParaGuardar sella "cancelada" cuando la reservación se dio de baja', () => {
+  const reserva = { ...construirReserva({}, campos), cancelada: true };
+  const guardado = reservaParaGuardar(reserva, { id: 'r1' });
+  assert.equal(guardado.estado, 'cancelada');
+});
+
+test('reservaParaGuardar sella "entregada" aunque también venga cancelada: true, si ya tiene contrato', () => {
+  // La asimetría de estadoReserva (Tarea 1): una reservación que ya se
+  // cumplió con un contrato no se borra con una cancelación tardía ni con un
+  // clic equivocado.
+  const reserva = { ...construirReserva({}, campos), contratoId: 'c9', cancelada: true };
+  const guardado = reservaParaGuardar(reserva, { id: 'r1' });
+  assert.equal(guardado.estado, 'entregada');
 });

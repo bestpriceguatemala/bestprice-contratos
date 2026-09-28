@@ -36,8 +36,13 @@ export function idsQueSobran(locales = [], remotos = []) {
 }
 
 const BD = 'bestprice-contratos';
-const VERSION_BD = 1;
-const TIENDAS = ['clientes', 'vehiculos', 'contratos', 'ajustes'];
+// Subida a 2 (Tarea 4, reservaciones): una computadora que ya tenía la base
+// de datos en la versión 1 solo se entera de una tienda nueva si el número de
+// versión sube — si no, `onupgradeneeded` nunca se vuelve a correr, y
+// `guardarLocal('reservas', ...)` fallaría con la tienda inexistente aunque
+// 'reservas' ya esté en el arreglo de abajo.
+const VERSION_BD = 2;
+const TIENDAS = ['clientes', 'vehiculos', 'contratos', 'ajustes', 'reservas'];
 
 function abrir() {
   return new Promise((ok, mal) => {
