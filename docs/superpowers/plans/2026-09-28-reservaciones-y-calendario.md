@@ -274,7 +274,7 @@ git commit -m "Choques de reserva: por carro exacto y por capacidad del tipo"
 - Produces:
   - `diasDelMes(mes) -> ['2026-10-01', ...]` con `mes` `'YYYY-MM'`.
   - `cuadriculaDelMes(mes) -> [[fecha|null × 7], ...]` — semanas de lunes a domingo, con huecos al principio y al final.
-  - `movimientosDelDia(fecha, {reservas, contratos}) -> {salen, regresan, atrasados}` — cada uno una lista, no solo un número, para que la pantalla no tenga que volver a filtrar.
+  - `movimientosDelDia(fecha, {reservas, contratos}) -> {salen, regresan, yaRegresaron, atrasados}` — cada uno una lista, no solo un número, para que la pantalla no tenga que volver a filtrar. `regresan` es lo que vencía ese día y **todavía no vuelve**; `yaRegresaron` es lo que vencía ese día y ya entró (o el contrato está cerrado). Se parten porque el encabezado es una lista de pendientes — un carro que ya está parqueado no puede seguir contando como "regresa hoy" — mientras que el mes sí quiere ver el día completo.
   - `resumenDeHoy(hoy, {reservas, contratos}) -> {salen, regresan, atrasados, garantias}` — los cuatro números del encabezado.
 
 - [ ] **Step 1: Escribir la prueba que falla**
