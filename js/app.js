@@ -9,6 +9,7 @@ import { pintarRecibirCarro } from './pantallas/recibirCarro.js';
 import { pintarCarros } from './pantallas/carros.js';
 import { pintarClientes } from './pantallas/clientes.js';
 import { pintarContratos } from './pantallas/contratos.js';
+import { pintarReservas } from './pantallas/reservas.js';
 import { vigilarVersion } from './version.js';
 
 registrarPantalla('#/flota', pintarFlota);
@@ -27,6 +28,11 @@ registrarPantalla('#/clientes', pintarClientes);
 registrarPantalla('#/clientes/:clienteId', pintarClientes);
 registrarPantalla('#/contratos', pintarContratos);
 registrarPantalla('#/contratos/:contratoId', pintarContratos);
+// '#/reservas/nueva' y '#/reservas/:id' comparten el mismo patrón con
+// parámetro, mismo motivo que clientes.js arriba: pintarReservas(contenedor,
+// 'nueva') necesita ese 'nueva' capturado para saber que es alta y no edición.
+registrarPantalla('#/reservas', pintarReservas);
+registrarPantalla('#/reservas/:reservaId', pintarReservas);
 
 const pantallaEntrada = document.getElementById('entrada');
 const pantallaApp = document.getElementById('app');
