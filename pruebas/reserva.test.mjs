@@ -105,6 +105,34 @@ test('por tipo: sin carros libres, avisa y dice cuántos hay', () => {
   assert.match(r[0].mensaje, /2 MICROBÚS|dos/i, 'dice cuántos tiene');
 });
 
+// Las tres formas del aviso por tipo, con el texto exacto fijado: cero,
+// uno y varios concuerdan distinto en español, y sin una prueba por forma
+// la redacción se puede corromper sin que ninguna prueba se dé cuenta.
+test('por tipo: cero carros de ese tipo es un problema distinto a "ya no queda"', () => {
+  // Ningún LIMOSINA en la flota: el problema no es capacidad agotada, es que
+  // nunca hubo ninguno. "0 de 0 comprometidos" confundiría al dueño.
+  const r = choquesDeReserva({ reserva: { ...del10al14, tipoVehiculo: 'LIMOSINA' }, flota, reservas: [], contratos: [] });
+  assert.equal(r[0].nivel, 'alto');
+  assert.equal(r[0].mensaje, 'No tienes ningún LIMOSINA en la flota.');
+});
+
+test('por tipo: con un solo carro del tipo, el aviso concuerda en singular', () => {
+  const reservas = [{ id: 'r1', carroId: 'v3', tipoVehiculo: 'SEDÁN', fechaSalida: '2026-10-11', devolucionPrevista: '2026-10-15' }];
+  const r = choquesDeReserva({ reserva: { ...del10al14, tipoVehiculo: 'SEDÁN' }, flota, reservas, contratos: [] });
+  assert.equal(r[0].nivel, 'alto');
+  assert.equal(r[0].mensaje, 'Solo tienes 1 SEDÁN y ya está comprometido en esas fechas.');
+});
+
+test('por tipo: con varios carros del tipo, el aviso concuerda en plural y dice cuántos', () => {
+  const reservas = [
+    { id: 'r1', carroId: 'v1', tipoVehiculo: 'MICROBÚS', fechaSalida: '2026-10-11', devolucionPrevista: '2026-10-15' },
+    { id: 'r2', tipoVehiculo: 'MICROBÚS', fechaSalida: '2026-10-09', devolucionPrevista: '2026-10-13' },
+  ];
+  const r = choquesDeReserva({ reserva: { ...del10al14, tipoVehiculo: 'MICROBÚS' }, flota, reservas, contratos: [] });
+  assert.equal(r[0].nivel, 'alto');
+  assert.equal(r[0].mensaje, 'Tienes 2 MICROBÚS y los 2 ya están comprometidos en esas fechas.');
+});
+
 test('una reservación cancelada o ya entregada no estorba', () => {
   const reservas = [
     { id: 'r1', carroId: 'v1', fechaSalida: '2026-10-12', devolucionPrevista: '2026-10-16', cancelada: true },

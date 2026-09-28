@@ -142,12 +142,26 @@ export function choquesDeReserva({ reserva, flota = [], reservas = [], contratos
   if (!tipo) return [];
 
   const capacidad = flota.filter((c) => c.tipo === tipo && !c?.fueraDeServicio).length;
+
+  // Cero es un problema distinto al de "ya no queda": no es que se hayan
+  // acabado, es que nunca hubo. Avisar "0 comprometidos de 0" confunde al
+  // dueño sobre cuál es el problema de verdad.
+  if (capacidad === 0) {
+    return [alto(`No tienes ningún ${tipo} en la flota.`)];
+  }
+
   const comprometidos =
     reservasVivas.filter((r) => tipoComprometido(r, flota) === tipo).length +
     contratosVivos.filter((c) => tipoComprometido(c, flota) === tipo).length;
 
   if (comprometidos >= capacidad) {
-    return [alto(`Hay ${capacidad} ${tipo} y los ${comprometidos} ya están comprometidos esas fechas.`)];
+    // Concordancia en singular/plural, igual que hace avisosDeSalida con
+    // "vez"/"veces" — con un solo carro del tipo, "los 1 ya están
+    // comprometidos" suena a error de dedo, no a un aviso serio.
+    if (capacidad === 1) {
+      return [alto(`Solo tienes 1 ${tipo} y ya está comprometido en esas fechas.`)];
+    }
+    return [alto(`Tienes ${capacidad} ${tipo} y los ${comprometidos} ya están comprometidos en esas fechas.`)];
   }
   return [];
 }
