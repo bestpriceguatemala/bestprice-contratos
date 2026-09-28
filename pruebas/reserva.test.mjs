@@ -6,7 +6,7 @@
 // planes cambian a última hora.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { construirReserva, estadoReserva, seCruzan, faltaAlgoEnReserva, textoAnticipo } from '../js/nucleo/reserva.js';
+import { construirReserva, estadoReserva, seCruzan, faltaAlgoEnReserva, textoAnticipo, choquesDeReserva } from '../js/nucleo/reserva.js';
 
 const campos = {
   clienteNombre: 'JONATÁN URIZAR', telefono: '3078-4155',
@@ -62,4 +62,66 @@ test('el anticipo se dice en una línea', () => {
   assert.equal(textoAnticipo(construirReserva({}, campos)), 'Anticipo Q500.00 pagado');
   assert.equal(textoAnticipo(construirReserva({}, { ...campos, anticipoPagado: false })), 'Anticipo Q500.00 pendiente');
   assert.equal(textoAnticipo(construirReserva({}, { ...campos, anticipo: 0 })), 'Sin anticipo');
+});
+
+// choquesDeReserva: los choques que de verdad protegen el negocio. Dos casos
+// distintos — carro exacto (choca contra ESE carro) y por tipo (choca contra
+// la capacidad de la flota) — porque no hay un solo carro contra el cual
+// comparar una reservación que todavía no eligió unidad.
+const flota = [
+  { id: 'v1', placas: 'P-111AAA', tipo: 'MICROBÚS' },
+  { id: 'v2', placas: 'P-222BBB', tipo: 'MICROBÚS' },
+  { id: 'v3', placas: 'P-333CCC', tipo: 'SEDÁN' },
+];
+const del10al14 = { fechaSalida: '2026-10-10', dias: 4, devolucionPrevista: '2026-10-14' };
+
+test('un carro exacto ya apartado esas fechas avisa', () => {
+  const reservas = [{ id: 'r1', carroId: 'v1', fechaSalida: '2026-10-12', devolucionPrevista: '2026-10-16' }];
+  const r = choquesDeReserva({ reserva: { ...del10al14, carroId: 'v1' }, flota, reservas, contratos: [] });
+  assert.equal(r[0].nivel, 'alto');
+  assert.match(r[0].mensaje, /apartad/i);
+});
+
+test('un carro exacto que ya salió rentado esas fechas avisa', () => {
+  const contratos = [{ id: 'c1', carroId: 'v1', fechaSalida: '2026-10-09', devolucionPrevista: '2026-10-12', estado: 'rentado' }];
+  const r = choquesDeReserva({ reserva: { ...del10al14, carroId: 'v1' }, flota, reservas: [], contratos });
+  assert.equal(r[0].nivel, 'alto');
+  assert.match(r[0].mensaje, /rentado|contrato/i);
+});
+
+test('por tipo: mientras haya un carro libre, no se avisa', () => {
+  // Dos microbuses, uno comprometido: todavía queda uno.
+  const reservas = [{ id: 'r1', carroId: 'v1', tipoVehiculo: 'MICROBÚS', fechaSalida: '2026-10-11', devolucionPrevista: '2026-10-15' }];
+  assert.deepEqual(choquesDeReserva({ reserva: { ...del10al14, tipoVehiculo: 'MICROBÚS' }, flota, reservas, contratos: [] }), []);
+});
+
+test('por tipo: sin carros libres, avisa y dice cuántos hay', () => {
+  const reservas = [
+    { id: 'r1', carroId: 'v1', tipoVehiculo: 'MICROBÚS', fechaSalida: '2026-10-11', devolucionPrevista: '2026-10-15' },
+    { id: 'r2', tipoVehiculo: 'MICROBÚS', fechaSalida: '2026-10-09', devolucionPrevista: '2026-10-13' },
+  ];
+  const r = choquesDeReserva({ reserva: { ...del10al14, tipoVehiculo: 'MICROBÚS' }, flota, reservas, contratos: [] });
+  assert.equal(r[0].nivel, 'alto');
+  assert.match(r[0].mensaje, /2 MICROBÚS|dos/i, 'dice cuántos tiene');
+});
+
+test('una reservación cancelada o ya entregada no estorba', () => {
+  const reservas = [
+    { id: 'r1', carroId: 'v1', fechaSalida: '2026-10-12', devolucionPrevista: '2026-10-16', cancelada: true },
+    { id: 'r2', carroId: 'v1', fechaSalida: '2026-10-11', devolucionPrevista: '2026-10-15', contratoId: 'c5' },
+  ];
+  assert.deepEqual(choquesDeReserva({ reserva: { ...del10al14, carroId: 'v1' }, flota, reservas, contratos: [] }), []);
+});
+
+test('una reservación no choca consigo misma al editarla', () => {
+  const reservas = [{ id: 'r1', carroId: 'v1', fechaSalida: '2026-10-10', devolucionPrevista: '2026-10-14' }];
+  const misma = { id: 'r1', ...del10al14, carroId: 'v1' };
+  assert.deepEqual(choquesDeReserva({ reserva: misma, flota, reservas, contratos: [] }), []);
+});
+
+test('un carro fuera de servicio no cuenta como disponible', () => {
+  const flotaConTaller = [{ ...flota[0], fueraDeServicio: true }, flota[1], flota[2]];
+  const reservas = [{ id: 'r1', carroId: 'v2', tipoVehiculo: 'MICROBÚS', fechaSalida: '2026-10-11', devolucionPrevista: '2026-10-15' }];
+  const r = choquesDeReserva({ reserva: { ...del10al14, tipoVehiculo: 'MICROBÚS' }, flota: flotaConTaller, reservas, contratos: [] });
+  assert.equal(r.length, 1, 'el del taller no salva la capacidad');
 });

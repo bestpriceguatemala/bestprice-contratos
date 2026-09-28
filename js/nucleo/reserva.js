@@ -6,8 +6,9 @@
 // planes cambian a última hora — "me gustaría poder cambiar la unidad en dado
 // caso cambie el plan" — así que cambiar de carro tiene que ser un campo más
 // que se sobrescribe, nunca una reservación nueva.
-import { devolucionPrevista as calcularDevolucionPrevista, diasEntre } from './fechas.js';
+import { devolucionPrevista as calcularDevolucionPrevista, diasEntre, textoFecha } from './fechas.js';
 import { q, textoDosDecimales } from './dinero.js';
+import { estadoContrato } from './estados.js';
 
 /**
  * Construye el objeto reservación para guardar, preservando campos que no
@@ -85,4 +86,68 @@ export function textoAnticipo(r) {
   const anticipo = q(r?.anticipo);
   if (anticipo <= 0) return 'Sin anticipo';
   return `Anticipo Q${textoDosDecimales(anticipo)} ${r?.anticipoPagado ? 'pagado' : 'pendiente'}`;
+}
+
+const alto = (mensaje) => ({ nivel: 'alto', mensaje });
+
+/**
+ * El tipo que una reservación o un contrato ya comprometen, para poder
+ * restarlo de la capacidad de ese tipo. Si trae carro exacto asignado
+ * (carroId), su tipo cuenta aunque nadie haya pedido "un microbús" — un carro
+ * apartado por placa deja de estar libre para cualquier otro cliente que pida
+ * ese tipo, se haya pedido por nombre o no.
+ */
+function tipoComprometido(item, flota) {
+  if (item?.tipoVehiculo) return item.tipoVehiculo;
+  return flota.find((c) => c.id === item?.carroId)?.tipo;
+}
+
+/**
+ * Los choques de una reservación contra lo que ya está comprometido: otras
+ * reservaciones y contratos vivos.
+ *
+ * Dos casos, porque son preguntas distintas:
+ * - Carro exacto ("el Montero blanco"): choca contra ESE carro, si otra
+ *   reservación o un contrato lo tienen encima de esas fechas.
+ * - Por tipo ("un microbús"): no hay un carro contra el cual comparar. Lo que
+ *   importa es la capacidad — cuántos carros de ese tipo hay (sin contar los
+ *   del taller) contra cuántos ya están comprometidos esos días.
+ *
+ * Solo cuentan los compromisos vivos: una reservación cancelada o ya
+ * entregada no aparta nada (estadoReserva), y un contrato cerrado tampoco
+ * (estadoContrato) — el carro ya volvió y ya se saldó. Se compara por id para
+ * que editar una reservación no choque contra sí misma.
+ */
+export function choquesDeReserva({ reserva, flota = [], reservas = [], contratos = [] }) {
+  if (!reserva) return [];
+
+  const reservasVivas = reservas.filter((r) =>
+    r?.id !== reserva.id && estadoReserva(r) === 'pendiente' && seCruzan(reserva, r));
+  const contratosVivos = contratos.filter((c) =>
+    estadoContrato(c) !== 'cerrado' && seCruzan(reserva, c));
+
+  if (reserva.carroId) {
+    const otraReserva = reservasVivas.find((r) => r.carroId === reserva.carroId);
+    if (otraReserva) {
+      return [alto(`Este carro ya está apartado del ${textoFecha(otraReserva.fechaSalida)} al ${textoFecha(otraReserva.devolucionPrevista)}.`)];
+    }
+    const otroContrato = contratosVivos.find((c) => c.carroId === reserva.carroId);
+    if (otroContrato) {
+      return [alto(`Este carro tiene un contrato del ${textoFecha(otroContrato.fechaSalida)} al ${textoFecha(otroContrato.devolucionPrevista)}.`)];
+    }
+    return [];
+  }
+
+  const tipo = reserva.tipoVehiculo;
+  if (!tipo) return [];
+
+  const capacidad = flota.filter((c) => c.tipo === tipo && !c?.fueraDeServicio).length;
+  const comprometidos =
+    reservasVivas.filter((r) => tipoComprometido(r, flota) === tipo).length +
+    contratosVivos.filter((c) => tipoComprometido(c, flota) === tipo).length;
+
+  if (comprometidos >= capacidad) {
+    return [alto(`Hay ${capacidad} ${tipo} y los ${comprometidos} ya están comprometidos esas fechas.`)];
+  }
+  return [];
 }
