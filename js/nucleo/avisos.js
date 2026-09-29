@@ -48,7 +48,7 @@ export function avisosDeSalida({
   const encimado = contratosDelCarro.find((otro) =>
     otro.id !== contrato?.id && seCruzan(contrato, otro));
   if (encimado) {
-    avisos.push(alto(`Este carro tiene otro contrato del ${encimado.fechaSalida} al ${encimado.devolucionPrevista}.`));
+    avisos.push(alto(`Este carro tiene otro contrato del ${textoFecha(encimado.fechaSalida)} al ${textoFecha(encimado.devolucionPrevista)}.`));
   }
 
   // El carro que está por salir puede estar apartado para otro cliente
@@ -68,7 +68,11 @@ export function avisosDeSalida({
       if (diasEntre(primera.fechaSalida, r.fechaSalida) < 0) primera = r;
     });
     const extra = cruzadas.length - 1;
-    const demas = extra > 0 ? ` (y ${extra} reservación${extra === 1 ? '' : 'es'} más)` : '';
+    // Igual que vez/veces más arriba: el plural de "reservación" no se arma
+    // pegando una "s" o una "es" — la tilde se cae ("reservaciones"), así que
+    // se escriben las dos formas completas en vez de concatenar un sufijo.
+    const plural = extra === 1 ? 'reservación' : 'reservaciones';
+    const demas = extra > 0 ? ` (y ${extra} ${plural} más)` : '';
     avisos.push(alto(`Este carro está apartado para ${primera.clienteNombre} desde el ${textoFecha(primera.fechaSalida)}${demas}.`));
   }
 

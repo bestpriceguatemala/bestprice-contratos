@@ -137,7 +137,12 @@ test('un día de traslape sí es un choque', () => {
   };
   const r = avisosDeSalida(encimado);
   assert.equal(r[0].nivel, 'alto');
-  assert.match(r[0].mensaje, /2026-08-21/);
+  // Revisión de la tarea 8: mostraba la fecha ISO cruda ('2026-08-21') en vez
+  // del formato que lee el dueño — mismo arreglo que ya tenían licencia y
+  // documento vencidos, aplicado aquí para que las dos fechas de este aviso
+  // se lean igual que el resto de la pantalla.
+  assert.match(r[0].mensaje, /21 ago 2026/);
+  assert.doesNotMatch(r[0].mensaje, /2026-08-21/);
 });
 
 // ---------- El carro comprometido por una reservación ----------
@@ -210,4 +215,20 @@ test('con varias reservaciones cruzadas, avisa de la que sale primero y cuántas
   assert.match(r[0].mensaje, /Carlos Ruiz/, 'la que sale primero, no la que viene después');
   assert.match(r[0].mensaje, /21 ago 2026/);
   assert.match(r[0].mensaje, /1 reservación más/);
+});
+
+// Revisión de la tarea 8: la única prueba de varias reservaciones usaba
+// exactamente dos, que cae en la rama singular ("1 reservación más") y nunca
+// ejercita el plural — así se coló "reservaciónes" (con tilde, mal) en vez de
+// "reservaciones". Con tres se entra a la rama que sí importaba probar.
+test('con tres reservaciones cruzadas, el plural dice "reservaciones" (sin tilde)', () => {
+  const masTarde = { ...reservaBase, id: 'r1', clienteNombre: 'Ana López', fechaSalida: '2026-08-23' };
+  const primero = { ...reservaBase, id: 'r2', clienteNombre: 'Carlos Ruiz', fechaSalida: '2026-08-21', devolucionPrevista: '2026-08-24' };
+  const otraMas = { ...reservaBase, id: 'r3', clienteNombre: 'Diana Pérez', fechaSalida: '2026-08-22' };
+  const r = avisosDeSalida({ ...base, reservasDelCarro: [masTarde, primero, otraMas] });
+  assert.equal(r.length, 1, 'una sola línea, no una pared de rojo');
+  assert.match(r[0].mensaje, /Carlos Ruiz/, 'la que sale primero');
+  assert.match(r[0].mensaje, /21 ago 2026/);
+  assert.match(r[0].mensaje, /2 reservaciones más/);
+  assert.doesNotMatch(r[0].mensaje, /reservaciónes/, 'la tilde se cae en el plural: "reservaciones", no "reservaciónes"');
 });
