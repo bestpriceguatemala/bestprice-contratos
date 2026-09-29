@@ -220,9 +220,20 @@ Esta es la tarea que paga la deuda que el diseño general anotó en §7.
 
 `guardarContrato` escribe `costoDia` en `contratos/{id}/privado/dinero`, no en el documento del contrato. Las reglas ya permiten `create, update` con sesión y `read` solo con la credencial de dinero.
 
-- [ ] **Step 2: El puente de lectura**
+- [ ] **Step 2: El puente de lectura — y dónde NO va**
 
-`costoDelSubarriendo` (Tarea 1) tiene que leer el costo de donde esté: si el contrato trae `subarriendo.costoDia` (los viejos), se usa; si no, del documento privado. **El puente se queda para siempre**, como los otros de §7b — un contrato de hace un año tiene que seguir mostrando bien su costo.
+**Corrección al plan original, a partir de un hallazgo de la Tarea 1.** El plan decía poner el puente en `costoDelSubarriendo` (`liquidacion.js`). Eso está mal: esa función no calcula nada, le pregunta a `resumen()` (`js/nucleo/contrato.js:112`), que es donde de verdad vive la fórmula y de donde sale **también la utilidad**. Un puente solo en `liquidacion.js` haría que la deuda al dueño y la utilidad usaran costos distintos sobre el mismo contrato, y nada lo avisaría.
+
+Poner el puente dentro de `contrato.js` tampoco sirve: el núcleo es puro y no sabe leer de Firestore.
+
+**El puente va en `js/datos.js`, al cargar.** Cuando el área de dinero lee un contrato ajeno, trae también su `privado/dinero` y **mezcla el costo dentro del contrato** antes de devolverlo, de modo que `c.subarriendo.costoDia` quede poblado venga de donde venga. Así:
+- El núcleo no cambia ni una línea y sigue sin saber de almacenamiento.
+- **Sigue habiendo un solo lugar** que calcula el costo: `resumen()`.
+- Los contratos viejos, que ya traen el valor en el documento, funcionan sin tocarlos.
+
+Si el documento privado no se puede leer (sin credencial de dinero), el costo queda en 0 y **la pantalla lo dice** — nunca muestra Q0.00 como si fuera un costo real.
+
+**El puente se queda para siempre**, como los otros de §7b.
 
 - [ ] **Step 3: La migración**
 
@@ -365,6 +376,8 @@ git commit -m "Reglas de duenos y pagos a duenos"
 **Del dueño:** `nombre`, `telefono`, `nit`, `nota`, `actualizado`.
 **Del pago a un dueño:** `duenoId`, `fecha`, `forma`, `monto`, `contratos[]`, `numero`, `actualizado`.
 **Del contrato:** `duenoId`.
+
+**Además, campos que el contrato SÍ guarda y que §7b nunca listó** (hallazgo de la Tarea 1 — el glosario tenía un hueco justo en la parte que este plan usa más): `ajeno`, `carroAjeno{placas, tipo, marca, color, modelo, dueno, costoDia}`, `subarriendo{costoDia}`, `tarjetas[]`. Dejar anotado que **«es de carro ajeno» se decide con `Boolean(c.ajeno)`**, un solo criterio, para que nadie lo deduzca mirando si hay `carroAjeno`.
 
 - [ ] **Step 2: Anotar el puente de lectura nuevo** — `costoDia` en el contrato contra `privado/dinero` — en la lista de puentes que el sistema arrastra.
 
