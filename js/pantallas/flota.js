@@ -10,7 +10,7 @@
 // pendientes de abajo son la única excepción que permite el diseño, porque ahí
 // el monto es lo que falta para poder cerrar el contrato, no una cifra de
 // negocio.
-import { estadoCarro, pendientesDe, puedeCerrar } from '../nucleo/estados.js';
+import { estadoCarro, garantiaPorLiberar, puedeCerrar } from '../nucleo/estados.js';
 import { resumen } from '../nucleo/contrato.js';
 import { resumenDeHoy } from '../nucleo/calendario.js';
 import { diasEntre, hoyISO } from '../nucleo/fechas.js';
@@ -297,15 +297,14 @@ function dibujar(contenedor, flota, contratos, reservas, hoy, {
     .map((carro) => tarjetaCarro(carro, estadoCarro(carro, contratos, hoy)))
     .join('');
 
-  // Garantías por liberar: solo contratos que ya regresaron (tienen cierre) y
-  // cuya garantía sigue bloqueada — mientras el carro sigue afuera, la
-  // garantía está bien retenida, eso no es algo "por liberar" todavía.
-  //
-  // pendientesDe(c).garantia (no `garantiaLiberada === false`): un contrato
-  // guardado sin ese campo cuenta como pendiente, igual que en el resto del
-  // sistema — olvidar una garantía bloqueada es peor que mostrarla de más.
+  // Garantías por liberar: la regla vive en núcleo/estados.js
+  // (garantiaPorLiberar), no aquí — es la misma función que usa
+  // resumenDeHoy() para la cifra del bloque de arriba, para que esa cifra y
+  // esta lista, en la misma pantalla, no puedan volver a decir números
+  // distintos (bug real que encontró Tarea 7: la cifra contaba también las
+  // garantías de carros todavía afuera).
   const filasGarantia = contratos
-    .filter((c) => c?.cierre?.fechaReal && pendientesDe(c).garantia)
+    .filter(garantiaPorLiberar)
     .map((c) => filaGarantia(
       c,
       dinero(c?.garantiaMonto),

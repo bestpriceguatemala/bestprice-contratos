@@ -164,13 +164,40 @@ test('resumenDeHoy.regresan no cuenta un contrato debido hoy que ya regresó (ci
   assert.equal(resumen.regresan, 0);
 });
 
-test('resumenDeHoy cuenta las garantías por liberar con la misma regla de pendientesDe', () => {
-  const conGarantiaPendiente = { id: 'g1', devolucionPrevista: '2026-01-01', garantiaMonto: 500, garantiaLiberada: false };
-  const conGarantiaYaLiberada = { id: 'g2', devolucionPrevista: '2026-01-01', garantiaMonto: 500, garantiaLiberada: true };
+test('resumenDeHoy cuenta las garantías por liberar con la misma regla de garantiaPorLiberar (estados.js)', () => {
+  const conGarantiaPendiente = {
+    id: 'g1', devolucionPrevista: '2026-01-01', cierre: { fechaReal: '2026-01-02' }, garantiaMonto: 500, garantiaLiberada: false,
+  };
+  const conGarantiaYaLiberada = {
+    id: 'g2', devolucionPrevista: '2026-01-01', cierre: { fechaReal: '2026-01-02' }, garantiaMonto: 500, garantiaLiberada: true,
+  };
   // IMPORTANTE: garantiaMonto en 0 (pagó en efectivo) NO debe contar, aunque
   // garantiaLiberada siga en false — no hay nada que liberar.
-  const enEfectivoSinGarantia = { id: 'g3', devolucionPrevista: '2026-01-01', garantiaMonto: 0, garantiaLiberada: false };
+  const enEfectivoSinGarantia = {
+    id: 'g3', devolucionPrevista: '2026-01-01', cierre: { fechaReal: '2026-01-02' }, garantiaMonto: 0, garantiaLiberada: false,
+  };
 
   const resumen = resumenDeHoy('2026-01-05', { reservas: [], contratos: [conGarantiaPendiente, conGarantiaYaLiberada, enEfectivoSinGarantia] });
+  assert.equal(resumen.garantias, 1);
+});
+
+// El defecto real que motivó esta tarea (Task 7 lo encontró en pantalla): la
+// cifra "Garantías por liberar" del encabezado y la lista de la pantalla de
+// flota decían números distintos al mismo tiempo. La causa era que la cifra
+// contaba `pendientesDe(c).garantia` sola, que también es `true` en un
+// contrato con el carro TODAVÍA AFUERA (la tarjeta sigue retenida, pero eso
+// es lo normal de una renta activa, no un pendiente). Estas dos pruebas fijan
+// el caso exacto.
+test('resumenDeHoy.garantias NO cuenta una garantía bloqueada mientras el carro sigue afuera', () => {
+  const carroTodaviaAfuera = { id: 'g4', devolucionPrevista: '2026-01-01', garantiaMonto: 500, garantiaLiberada: false };
+  const resumen = resumenDeHoy('2026-01-05', { reservas: [], contratos: [carroTodaviaAfuera] });
+  assert.equal(resumen.garantias, 0);
+});
+
+test('resumenDeHoy.garantias SÍ cuenta una garantía bloqueada una vez que el carro ya volvió', () => {
+  const carroYaDeVuelta = {
+    id: 'g5', devolucionPrevista: '2026-01-01', cierre: { fechaReal: '2026-01-02' }, garantiaMonto: 500, garantiaLiberada: false,
+  };
+  const resumen = resumenDeHoy('2026-01-05', { reservas: [], contratos: [carroYaDeVuelta] });
   assert.equal(resumen.garantias, 1);
 });

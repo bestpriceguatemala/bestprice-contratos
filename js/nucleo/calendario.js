@@ -6,7 +6,7 @@
 // los números; las pantallas deciden cómo pintarlos.
 import { diasEntre } from './fechas.js';
 import { estadoReserva } from './reserva.js';
-import { pendientesDe } from './estados.js';
+import { garantiaPorLiberar } from './estados.js';
 
 /**
  * Todas las fechas de un mes, en orden. `mes` es 'YYYY-MM'.
@@ -133,13 +133,17 @@ export function movimientosDelDia(fecha, { reservas = [], contratos = [] } = {})
  * Sale, regresa y atrasados se apoyan en `movimientosDelDia` — no se vuelve
  * a escribir esa regla aquí, solo se cuentan sus listas. Garantías por
  * liberar es distinto: no depende de la fecha, es un pendiente que se
- * arrastra hasta que alguien lo suelta, y usa la misma regla que
- * `pendientesDe` (estados.js) para no duplicarla — un contrato pagado en
- * efectivo (`garantiaMonto` 0) no tiene nada que liberar y no debe contar.
+ * arrastra hasta que alguien lo suelta, y usa `garantiaPorLiberar`
+ * (estados.js) para no duplicarla — la misma función que usa la lista de
+ * "Garantías por liberar" en la pantalla de flota, para que la cifra de
+ * aquí y esa lista nunca puedan decir números distintos. Un contrato con el
+ * carro todavía afuera NO cuenta (la garantía retenida ahí es lo normal de
+ * una renta activa), y uno pagado en efectivo (`garantiaMonto` 0) tampoco
+ * tiene nada que liberar.
  */
 export function resumenDeHoy(hoy, { reservas = [], contratos = [] } = {}) {
   const { salen, regresan, atrasados } = movimientosDelDia(hoy, { reservas, contratos });
-  const garantias = contratos.filter((c) => pendientesDe(c).garantia).length;
+  const garantias = contratos.filter(garantiaPorLiberar).length;
 
   return {
     salen: salen.length,

@@ -26,6 +26,31 @@ export function pendientesDe(c) {
 }
 
 /**
+ * ¿Hay una garantía bloqueada que YA se puede soltar? Dos condiciones, las
+ * dos necesarias, no una:
+ *
+ * 1. El carro ya volvió (`cierre.fechaReal` puesta — la única marca real de
+ *    un regreso, §7b del diseño). Mientras el carro sigue en la calle, la
+ *    tarjeta retenida es lo normal de una renta activa, no un pendiente del
+ *    dueño: nadie suelta la garantía de un carro que todavía no ha podido
+ *    revisar.
+ * 2. `pendientesDe(c).garantia` — sigue habiendo monto bloqueado sin soltar
+ *    (ya descarta el caso `garantiaMonto` 0, pagado en efectivo).
+ *
+ * `pendientesDe(c).garantia` sola no alcanza: es `true` también en un
+ * contrato con el carro todavía afuera (la tarjeta sí está retenida), así
+ * que usarla sin la primera condición cuenta rentas en curso como si
+ * fueran trabajo pendiente. Esa fue justo la falla real: la cifra
+ * "Garantías por liberar" del resumen (`resumenDeHoy`, núcleo/calendario.js)
+ * y la lista de abajo en la pantalla de flota decidían esto cada una por su
+ * cuenta y daban números distintos en la misma pantalla, al mismo momento.
+ * Ahora las dos preguntan aquí.
+ */
+export function garantiaPorLiberar(c) {
+  return Boolean(c?.cierre?.fechaReal) && pendientesDe(c).garantia;
+}
+
+/**
  * Un contrato se cierra cuando no debe nada y la garantía ya se liberó.
  *
  * `saldo <= 0`, no `saldo === 0` (hallazgo importante de la revisión final):

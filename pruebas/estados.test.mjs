@@ -6,7 +6,9 @@
 // ese carro tiene que poder volver a salir rentado.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { estadoContrato, puedeCerrar, pendientesDe, estadoCarro } from '../js/nucleo/estados.js';
+import {
+  estadoContrato, puedeCerrar, pendientesDe, garantiaPorLiberar, estadoCarro,
+} from '../js/nucleo/estados.js';
 
 const rentado = {
   id: 'c1', carroId: 'v1', dias: 4, precioDia: 700,
@@ -89,6 +91,41 @@ test('una renta en efectivo (garantiaMonto 0) cierra solo con el saldo, sin pedi
   };
   assert.deepEqual(pendientesDe(enEfectivo), { saldo: 0, garantia: false });
   assert.equal(puedeCerrar(enEfectivo), true);
+});
+
+// El bug real que hizo falta esta función (Task 7 lo vio en pantalla): la
+// cifra "Garantías por liberar" del encabezado y la lista de la pantalla de
+// flota decían números distintos, al mismo tiempo, en la misma pantalla —
+// porque cada una decidía "¿esto es un pendiente?" por su cuenta. La causa
+// era `pendientesDe(c).garantia` sola, que también es `true` en un contrato
+// con el carro todavía afuera (la tarjeta sí sigue retenida, pero eso es lo
+// normal de una renta activa, no trabajo pendiente del dueño).
+test('garantiaPorLiberar: una garantía bloqueada con el carro TODAVÍA AFUERA no cuenta (renta en curso, no un pendiente)', () => {
+  // `rentado` no tiene `cierre` — el carro sigue en la calle — aunque
+  // pendientesDe() ya lo marca con garantía bloqueada.
+  assert.equal(pendientesDe(rentado).garantia, true, 'la tarjeta sí está retenida...');
+  assert.equal(garantiaPorLiberar(rentado), false, '...pero eso no es "por liberar" mientras el carro no ha vuelto');
+});
+
+test('garantiaPorLiberar: con el carro ya de vuelta (cierre.fechaReal) y la garantía todavía bloqueada, sí cuenta', () => {
+  // `devuelto` ya trae cierre.fechaReal y garantiaLiberada: false.
+  assert.equal(garantiaPorLiberar(devuelto), true);
+});
+
+test('garantiaPorLiberar: con la garantía ya liberada, no cuenta aunque el carro ya haya vuelto', () => {
+  assert.equal(garantiaPorLiberar(cerrado), false);
+});
+
+test('garantiaPorLiberar: una renta en efectivo (garantiaMonto 0) no cuenta aunque el carro ya haya vuelto', () => {
+  const enEfectivoYaDevuelto = {
+    id: 'c3', carroId: 'v1', dias: 2, precioDia: 300,
+    devolucionPrevista: '2026-08-10',
+    cierre: { fechaReal: '2026-08-10' },
+    pagos: [{ monto: 600, porcentajeTarjeta: 0 }],
+    garantiaMonto: 0,
+    garantiaLiberada: false,
+  };
+  assert.equal(garantiaPorLiberar(enEfectivoYaDevuelto), false);
 });
 
 test('el carro queda disponible al recibirlo, aunque el contrato siga abierto', () => {
