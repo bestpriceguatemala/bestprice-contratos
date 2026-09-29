@@ -116,15 +116,22 @@ const descripcionVehiculoContrato = (c) => [c?.carroPlacas, c?.carroDescripcion]
 
 // ---------- El botón "Sacar carro" de un renglón de "Salen" ----------
 //
-// Con carro exacto apartado se manda directo a ese carro (#/sacar/:carroId,
-// igual que siempre). Apartado solo por tipo, no hay un carro específico al
-// cual mandar: antes (Tarea 6) se mandaba a Flota como remiendo, un enlace
-// que perdía a la reservación de camino. Ahora que sacarCarro.js ya sabe
-// partir de una reservación (Tarea 9), se manda a la ficha de la
-// reservación (#/reservas/:id), que es de donde sí se puede elegir el carro
-// exacto y de ahí "Sacar el carro" con la reservación en la mano.
+// Los dos caminos llevan la reservación consigo, y eso es el punto.
+//
+// Con carro exacto se va directo a ese carro, pero CON `?reserva=` pegado: sin
+// eso el formulario se abría en blanco y el anticipo ya pagado no se
+// descontaba, así que el botón del calendario — el que de verdad se usa, al
+// abrir el día — no habría servido para nada y el dueño habría vuelto a
+// cobrar lo que el cliente ya depositó.
+//
+// Apartado solo por tipo no hay carro al cual mandar: se va a la ficha de la
+// reservación (#/reservas/:id), que es donde se elige el carro exacto y de
+// ahí se sale con la reservación en la mano. Antes (Tarea 6) esto mandaba a
+// Flota como remiendo, un enlace que perdía la reservación de camino.
 function botonSacarCarro(reserva) {
-  const ruta = reserva?.carroId ? `#/sacar/${esc(reserva.carroId)}` : `#/reservas/${esc(reserva.id)}`;
+  const ruta = reserva?.carroId
+    ? `#/sacar/${esc(reserva.carroId)}?reserva=${esc(reserva.id)}`
+    : `#/reservas/${esc(reserva.id)}`;
   return `<a class="btn" href="${ruta}">Sacar carro</a>`;
 }
 
