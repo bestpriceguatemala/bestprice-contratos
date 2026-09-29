@@ -12,9 +12,10 @@
 // negocio.
 import { estadoCarro, pendientesDe, puedeCerrar } from '../nucleo/estados.js';
 import { resumen } from '../nucleo/contrato.js';
+import { resumenDeHoy } from '../nucleo/calendario.js';
 import { diasEntre, hoyISO } from '../nucleo/fechas.js';
 import {
-  cargarFlota, cargarContratosAbiertos, liberarGarantia, puedeLiberarse,
+  cargarFlota, cargarContratosAbiertos, cargarReservas, liberarGarantia, puedeLiberarse,
 } from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
 
@@ -38,6 +39,97 @@ const pluralDias = (n) => `${n} día${n === 1 ? '' : 's'}`;
 
 function botonAccion(texto, ruta, primario = true) {
   return `<a class="btn ${primario ? 'btn-primario' : ''}" href="${ruta}">${esc(texto)}</a>`;
+}
+
+// ---------- El resumen del día (§12b del diseño, "Al entrar al sistema") ----------
+//
+// "Cuatro números y nada más [...] Es para saber de un vistazo si el día
+// viene tranquilo, no para leerlo." Por eso nada de esto cuenta ni filtra
+// nada: las cuatro cifras salen ya calculadas de resumenDeHoy() (núcleo/
+// calendario.js) — aquí solo se deciden colores, texto y hacia dónde apunta
+// cada una.
+
+/**
+ * Cómo se pinta una cifra del resumen: 'apagado' en cero (para que un día
+ * tranquilo SE VEA tranquilo), 'alerta' solo para atrasados y solo cuando
+ * los hay, 'normal' en cualquier otro caso. El rojo no se reparte a las
+ * otras tres aunque salgan en positivo — "hoy salen 3" no es un problema,
+ * es el día de trabajo normal; un aviso que el dueño no necesitaba le
+ * enseña a ignorar los que sí importan. Función pura para poder probarla
+ * sin DOM.
+ */
+export function estiloCifraResumen(valor, esAtrasados = false) {
+  if (valor === 0) return 'apagado';
+  return esAtrasados ? 'alerta' : 'normal';
+}
+
+const COLOR_CIFRA = { apagado: 'var(--gris)', alerta: 'var(--rojo)', normal: 'var(--navy)' };
+
+/**
+ * Una de las cuatro cifras: el número, su etiqueta y el enlace a su detalle
+ * ("cada número lleva a su detalle", brief Paso 2). `incompleto` cambia el
+ * número por "—" en vez de una cifra que podría estar mintiendo — una
+ * lectura fallida nunca se dibuja como si el día estuviera tranquilo
+ * (hallazgo ya conocido de esta pantalla, ver barraFallo). El enlace sigue
+ * ahí aunque el número no se pueda confiar: el destino no depende de si la
+ * cifra cuadra.
+ */
+function cifraResumen({
+  etiqueta, valor, href, dataAccion, esAtrasados = false, incompleto = false,
+}) {
+  const estilo = incompleto ? 'apagado' : estiloCifraResumen(valor, esAtrasados);
+  const texto = incompleto ? '—' : String(valor);
+  const pesoLetra = estilo === 'alerta' ? '700' : '600';
+  const atributoAccion = dataAccion ? ` data-accion="${esc(dataAccion)}"` : '';
+  return `
+    <a class="resumen-cifra"${atributoAccion} href="${esc(href)}"
+      style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 18px;min-width:120px;text-decoration:none;">
+      <strong style="font-size:1.9em;line-height:1;font-weight:${pesoLetra};color:${COLOR_CIFRA[estilo]};">${texto}</strong>
+      <span style="font-size:0.82em;color:var(--gris);text-align:center;">${esc(etiqueta)}</span>
+    </a>`;
+}
+
+/**
+ * El bloque completo, arriba de la flota (brief: "un preview con la
+ * información necesaria pero no detallada"). Salen y regresan van al día de
+ * hoy en el calendario (`#/calendario/:fecha`, la ruta que registra esa
+ * pantalla); atrasados y garantías apuntan a lo que ya existe más abajo en
+ * esta misma pantalla — el grupo de tarjetas y la lista de "Garantías por
+ * liberar" — así que viajan con un data-accion que el manejador de clics de
+ * pintarFlota resuelve haciendo scroll, en vez de inventar una ruta nueva.
+ *
+ * "regresan" se rotula "Regresan hoy", no "Hoy regresan": son citas de HOY
+ * que TODAVÍA no volvieron (movimientosDelDia ya saca del conteo el carro
+ * que ya está en el patio) — es una lista de pendientes, no el total del
+ * día, y el rótulo tiene que decirlo así para no sugerir lo contrario.
+ */
+function seccionResumen(numeros, hoy, { falloReservas = false, falloContratos = false } = {}) {
+  const rutaCalendario = `#/calendario/${hoy}`;
+  const cifras = [
+    cifraResumen({
+      etiqueta: 'Salen hoy', valor: numeros.salen, href: rutaCalendario, incompleto: falloReservas,
+    }),
+    cifraResumen({
+      etiqueta: 'Regresan hoy', valor: numeros.regresan, href: rutaCalendario, incompleto: falloContratos,
+    }),
+    cifraResumen({
+      etiqueta: 'Atrasados',
+      valor: numeros.atrasados,
+      href: '#/flota',
+      dataAccion: 'ver-atrasados',
+      esAtrasados: true,
+      incompleto: falloContratos,
+    }),
+    cifraResumen({
+      etiqueta: 'Garantías por liberar',
+      valor: numeros.garantias,
+      href: '#/flota',
+      dataAccion: 'ver-garantias',
+      incompleto: falloContratos,
+    }),
+  ].join('');
+  return `<section class="resumen-dia" aria-label="Resumen del día"
+    style="display:flex;flex-wrap:wrap;justify-content:center;gap:4px;margin-bottom:24px;">${cifras}</section>`;
 }
 
 /** El cuadro de un carro: placas, marca y línea, y su estado. */
@@ -138,10 +230,16 @@ function filaCobro(contrato, montoTexto, diasTexto) {
   </li>`;
 }
 
-/** Solo aparece si hay algo que mostrar (§6: las listas son la excepción, no la regla). */
-function seccionPendientes(titulo, filas) {
+/**
+ * Solo aparece si hay algo que mostrar (§6: las listas son la excepción, no
+ * la regla). `id`, cuando se da, es el destino al que apunta la cifra
+ * "Garantías por liberar" del resumen de arriba (seccionResumen) — sin
+ * inventar una ruta nueva, solo hace scroll hasta aquí.
+ */
+function seccionPendientes(titulo, filas, id) {
   if (!filas.length) return '';
-  return `<section class="pendientes"><h2>${esc(titulo)}</h2><ul class="lista-pendientes">${filas.join('')}</ul></section>`;
+  const atributoId = id ? ` id="${esc(id)}"` : '';
+  return `<section class="pendientes"${atributoId}><h2>${esc(titulo)}</h2><ul class="lista-pendientes">${filas.join('')}</ul></section>`;
 }
 
 /**
@@ -150,7 +248,7 @@ function seccionPendientes(titulo, filas) {
  * fallo: en vez de eso se avisa, arriba de lo que sí se pudo mostrar, que lo
  * que se ve puede estar mal o incompleto.
  */
-function barraFallo(falloFlota, falloContratos) {
+function barraFallo(falloFlota, falloContratos, falloReservas) {
   const mensajes = [];
   if (falloFlota) {
     mensajes.push('No se pudo leer la flota. Puede que falten carros o que la lista esté incompleta.');
@@ -158,12 +256,30 @@ function barraFallo(falloFlota, falloContratos) {
   if (falloContratos) {
     mensajes.push('No se pudieron leer los contratos. Los estados que ves pueden estar equivocados.');
   }
+  if (falloReservas) {
+    mensajes.push('No se pudieron leer las reservaciones. Lo que sale hoy puede estar incompleto.');
+  }
   if (!mensajes.length) return '';
   return `<div class="barra-lectura-fallida">${mensajes.map((m) => `<p>${esc(m)}</p>`).join('')}</div>`;
 }
 
-function dibujar(contenedor, flota, contratos, hoy, { falloFlota = false, falloContratos = false } = {}) {
-  const barra = barraFallo(falloFlota, falloContratos);
+function dibujar(contenedor, flota, contratos, reservas, hoy, {
+  falloFlota = false, falloContratos = false, falloReservas = false,
+} = {}) {
+  const barra = barraFallo(falloFlota, falloContratos, falloReservas);
+  // El resumen va arriba de todo (brief: "arriba de la flota"), incluso
+  // cuando la flota misma no se pudo leer o está vacía — sus cuatro números
+  // no dependen de la lista de carros, solo de reservas y contratos.
+  //
+  // Se llama `bloqueResumen`, no `resumen`: esta función ya importa
+  // `resumen` de nucleo/contrato.js (el saldo de un contrato, usado más
+  // abajo en filasGarantia/filasCobro) — un nombre igual aquí lo taparía
+  // silenciosamente y `resumen(c).saldo` reventaría más abajo.
+  const bloqueResumen = seccionResumen(
+    resumenDeHoy(hoy, { reservas, contratos }),
+    hoy,
+    { falloReservas, falloContratos },
+  );
 
   if (!flota.length) {
     // Una flota vacía por un fallo de lectura no es lo mismo que una flota
@@ -171,8 +287,8 @@ function dibujar(contenedor, flota, contratos, hoy, { falloFlota = false, falloC
     // sabe si hay carros o no, así que no se invita a "agregar el primero"
     // como si el negocio estuviera arrancando de cero.
     contenedor.innerHTML = falloFlota
-      ? `${barra}<p class="pendiente">No se pudo leer la flota. Intenta de nuevo o revisa la conexión.</p>`
-      : `${barra}<p class="pendiente">Todavía no hay carros en la flota.<br>
+      ? `${barra}${bloqueResumen}<p class="pendiente">No se pudo leer la flota. Intenta de nuevo o revisa la conexión.</p>`
+      : `${barra}${bloqueResumen}<p class="pendiente">Todavía no hay carros en la flota.<br>
         <a href="#/carros/nuevo" class="btn btn-primario">Agregar el primer carro</a></p>`;
     return;
   }
@@ -208,8 +324,9 @@ function dibujar(contenedor, flota, contratos, hoy, { falloFlota = false, falloC
 
   contenedor.innerHTML = `
     ${barra}
-    <div class="flota-cuadros">${tarjetas}</div>
-    ${seccionPendientes('Garantías por liberar', filasGarantia)}
+    ${bloqueResumen}
+    <div class="flota-cuadros" id="flota-cuadros">${tarjetas}</div>
+    ${seccionPendientes('Garantías por liberar', filasGarantia, 'pendientes-garantia')}
     ${seccionPendientes('Pendientes de cobro', filasCobro)}
   `;
 }
@@ -229,8 +346,10 @@ export async function pintarFlota(contenedor) {
   const hoy = hoyISO();
   let flota = [];
   let contratos = [];
+  let reservas = [];
   let falloFlota = false;
   let falloContratos = false;
+  let falloReservas = false;
   let flotaLista = false;
 
   // Redibuja en el mismo cuadro de carros cuando la nube trae algo distinto
@@ -246,17 +365,28 @@ export async function pintarFlota(contenedor) {
     // confiable que dibujar: se avisa que se está cargando en vez de dejar
     // la pantalla en blanco (hallazgo importante de la revisión final).
     if (!flotaLista) { contenedor.innerHTML = '<p class="pendiente">Cargando…</p>'; return; }
-    dibujar(contenedor, flota, contratos, hoy, { falloFlota, falloContratos });
+    dibujar(contenedor, flota, contratos, reservas, hoy, { falloFlota, falloContratos, falloReservas });
   };
 
   // Único manejador de clics para los botones que viven dentro de las listas
   // de pendientes (por ahora solo "Liberar garantía": "Cobrar" es un enlace
-  // normal, el enrutador ya lo resuelve solo). Se asigna con `onclick`, no
-  // `addEventListener`: el router reutiliza siempre el mismo <main
-  // id="pantalla">, así que un `addEventListener` aquí se iría acumulando
-  // cada vez que se vuelve a entrar a esta pantalla en la misma sesión, y
-  // un solo clic terminaría llamando a `liberarGarantia` varias veces.
+  // normal, el enrutador ya lo resuelve solo) y para las dos cifras del
+  // resumen que no van al calendario ("Atrasados" y "Garantías por liberar"):
+  // esas apuntan a algo que ya existe más abajo en esta misma pantalla
+  // (brief, Paso 2), así que el clic no navega — solo hace scroll hasta ahí.
+  // Se asigna con `onclick`, no `addEventListener`: el router reutiliza
+  // siempre el mismo <main id="pantalla">, así que un `addEventListener` aquí
+  // se iría acumulando cada vez que se vuelve a entrar a esta pantalla en la
+  // misma sesión, y un solo clic terminaría llamando a `liberarGarantia`
+  // varias veces (o repitiendo el scroll varias veces).
   contenedor.onclick = (ev) => {
+    const salto = ev.target.closest('[data-accion="ver-atrasados"], [data-accion="ver-garantias"]');
+    if (salto) {
+      ev.preventDefault();
+      const destino = salto.dataset.accion === 'ver-atrasados' ? 'flota-cuadros' : 'pendientes-garantia';
+      document.getElementById(destino)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     const boton = ev.target.closest('[data-accion="liberar"]');
     if (!boton) return;
     const contrato = contratos.find((c) => c?.id === boton.dataset.id);
@@ -308,6 +438,12 @@ export async function pintarFlota(contenedor) {
   // de los carros, que la mayoría de las veces sí tenían copia local lista.
   cargarContratosAbiertos((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); })
     .then((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); });
+
+  // Las reservaciones, mismo patrón: solo alimentan el resumen de arriba
+  // ("salen hoy"), no el resto de la pantalla, así que tampoco vale la pena
+  // esperarlas antes de dibujar algo.
+  cargarReservas((r) => { reservas = r.datos; falloReservas = r.fallo; repintar(); })
+    .then((r) => { reservas = r.datos; falloReservas = r.fallo; repintar(); });
 
   // La flota sí se espera: es lo mínimo que hace falta para dibujar algo con
   // sentido (el diseño promete la pantalla principal en menos de un segundo,

@@ -4,9 +4,14 @@
 // texto del confirm() antes de soltar una garantía (nombra al cliente y el
 // monto porque "no se deshace desde el sistema") y el aviso de éxito al
 // soltarla (que se apoya en puedeCerrar, no en una suposición propia).
+//
+// Tarea 7 (el resumen del día) agrega estiloCifraResumen: la regla de "un
+// cero se ve apagado, el rojo es solo para atrasados y solo cuando los hay".
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { textoConfirmarLiberar, textoAvisoGarantiaLiberada } from '../js/pantallas/flota.js';
+import {
+  textoConfirmarLiberar, textoAvisoGarantiaLiberada, estiloCifraResumen,
+} from '../js/pantallas/flota.js';
 
 test('textoConfirmarLiberar: nombra al cliente y el monto, y avisa que no se deshace', () => {
   const contrato = { clienteNombre: 'Juan Pérez', garantiaMonto: 1500 };
@@ -38,4 +43,18 @@ test('textoAvisoGarantiaLiberada: si por algo el contrato no puede cerrar todav�
     cierre: { fechaReal: '2026-08-25', danos: 0, descuento: 0 },
   };
   assert.equal(textoAvisoGarantiaLiberada(contrato), 'Garantía liberada.');
+});
+
+test('estiloCifraResumen: en cero se ve apagado, sea o no la cifra de atrasados', () => {
+  assert.equal(estiloCifraResumen(0, false), 'apagado');
+  assert.equal(estiloCifraResumen(0, true), 'apagado');
+});
+
+test('estiloCifraResumen: atrasados en positivo es alerta (rojo)', () => {
+  assert.equal(estiloCifraResumen(3, true), 'alerta');
+});
+
+test('estiloCifraResumen: cualquier otra cifra en positivo es normal, nunca alerta', () => {
+  assert.equal(estiloCifraResumen(3, false), 'normal');
+  assert.equal(estiloCifraResumen(1, false), 'normal');
 });
