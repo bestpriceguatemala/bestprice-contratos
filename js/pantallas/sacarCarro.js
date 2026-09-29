@@ -833,7 +833,6 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     const encontrada = reservas.find((r) => r.id === reservaId);
     if (!encontrada) return;
     reservaAplicada = true;
-    reservaOrigen = encontrada;
     // Una reservación que ya se entregó (o se canceló) no vuelve a llenar el
     // formulario. Las dos entradas vivas —el calendario y la ficha— esconden
     // su botón en cuanto deja de estar pendiente, así que aquí solo se llega
@@ -841,11 +840,25 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     // haría un SEGUNDO contrato de la misma reservación, y deshacer eso
     // después es caro y confuso. Se avisa y no se bloquea: el mostrador
     // puede seguir armando una salida normal para ese carro.
+    //
+    // OJO — el `return` va ANTES de tocar `reservaOrigen`, y ese orden es el
+    // arreglo (crítico de la revisión final): `reservaOrigen` no es solo para
+    // pintar. De él salen tres cosas que mueven dinero — el descuento de
+    // montoSalidaConAnticipo, el pago que agrega conAnticipoComoPago, y el
+    // contratoId con que guardar() reapunta la reservación. Cuando se
+    // asignaba arriba, el guardia tapaba el formulario pero dejaba pasar las
+    // tres: con el botón "atrás" del navegador sobre una reservación ya
+    // entregada, la pantalla mostraba "Renta Q2,800.00" y "Total a cobrar
+    // Q2,300.00" con el bloque del anticipo ESCONDIDO —nada explicaba la
+    // diferencia— y al guardar registraba un pago fantasma de Q500 que nadie
+    // recibió, dejaba el saldo en cero y soltaba el candado de la garantía.
+    // Q500 de caja perdidos sin que un solo aviso se enterara.
     if (estadoReserva(encontrada) !== 'pendiente') {
       aviso('Esa reservación ya no está pendiente, así que no se usó para llenar el formulario.'
         + ' Puedes hacer la salida normal de este carro.', 'error');
       return;
     }
+    reservaOrigen = encontrada;
     aplicarReserva(encontrada);
     preseleccionarClienteDeReserva(encontrada);
     recalcular();
@@ -1065,7 +1078,12 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   ajustes = ajustesCargados;
   if (!sigoVigente()) return;
   intentarAplicarReserva();
-  if (reservaId && !reservaOrigen) {
+  // `!reservaAplicada` y no `!reservaOrigen`: una reservación que SÍ apareció
+  // pero ya no está pendiente deja `reservaOrigen` en null a propósito (ver
+  // intentarAplicarReserva), y ya avisó por su cuenta. Preguntando por
+  // `reservaOrigen` se le encimaba un segundo aviso diciendo que no se
+  // encontró, que además es mentira: sí se encontró.
+  if (reservaId && !reservaAplicada) {
     // La reservación que traía la URL no apareció ni en la copia local ni en
     // la nube (borrada, o un enlace viejo): se avisa en vez de quedarse
     // callado, pero no bloquea — el mostrador puede seguir armando la salida
