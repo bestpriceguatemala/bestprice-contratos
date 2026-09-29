@@ -379,6 +379,24 @@ De ahí salen las dos reglas que cierran esta clase de error:
    sobre el sistema. Si un campo no aparece en esta lista, no debería aparecer en
    una prueba.
 
+### Pendiente conocido: el carro atrasado no bloquea una reservación futura
+
+Hallado en la revisión final del plan de reservaciones (29 de septiembre) y
+**diferido a propósito**, no olvidado.
+
+`choquesDeReserva` mide el cruce contra la `devolucionPrevista` del contrato.
+Un contrato vivo pero **atrasado** ya pasó esa fecha, así que una reservación
+posterior no se cruza con él y no avisa — justo en el carro con menos
+probabilidad de estar libre, porque el cliente anterior todavía no lo trae.
+
+Arreglarlo bien pide que la regla sepa qué día es hoy (el fin efectivo de un
+contrato vivo es el mayor entre su `devolucionPrevista` y hoy), y eso cambia
+la firma de `choquesDeReserva` y de quienes la llaman. Es un cambio con
+alcance propio: no se mete al final de una rama, después de que la revisión
+final ya pasó, que es justo como se cuelan los errores que nadie vuelve a
+mirar. Va como primera tarea del siguiente plan.
+
+
 ## 8. Impresión
 
 **Contrato sobre el formulario preimpreso.** El sistema imprime únicamente los
