@@ -128,7 +128,7 @@ const descripcionVehiculoContrato = (c) => [c?.carroPlacas, c?.carroDescripcion]
 // reservación (#/reservas/:id), que es donde se elige el carro exacto y de
 // ahí se sale con la reservación en la mano. Antes (Tarea 6) esto mandaba a
 // Flota como remiendo, un enlace que perdía la reservación de camino.
-function botonSacarCarro(reserva) {
+export function botonSacarCarro(reserva) {
   const ruta = reserva?.carroId
     ? `#/sacar/${esc(reserva.carroId)}?reserva=${esc(reserva.id)}`
     : `#/reservas/${esc(reserva.id)}`;

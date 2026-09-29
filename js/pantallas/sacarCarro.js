@@ -17,6 +17,7 @@
 // este archivo.
 import { lineasSalida, resumen } from '../nucleo/contrato.js';
 import { avisosDeSalida } from '../nucleo/avisos.js';
+import { estadoReserva } from '../nucleo/reserva.js';
 import { devolucionPrevista, hoyISO } from '../nucleo/fechas.js';
 import { q, suma } from '../nucleo/dinero.js';
 import {
@@ -452,6 +453,7 @@ function plantilla() {
               <input type="number" id="sc-anticipo-porcentaje" step="0.01" min="0" value="${PORCENTAJE_TARJETA_DEFECTO}">
             </label>
           </div>
+          <p id="sc-anticipo-recargo" class="sc-nota" hidden></p>
         </div>
         <p id="sc-anticipo-pendiente-bloque" class="sc-nota" hidden>
           Esta salida viene de una reservación con un anticipo de
@@ -657,7 +659,34 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     caja.innerHTML = `<strong>${esc(encabezado || 'Sin datos')}</strong>${detalle ? esc(detalle) : ''}`;
   }
 
+  /**
+   * El recargo de tarjeta del anticipo, A LA VISTA antes de guardar.
+   *
+   * El recargo se calculaba bien al guardar, pero no se veía hasta entonces:
+   * el dueño elegía "Tarjeta", veía Q500 y solo después descubría que al
+   * cliente se le cobraron Q560. Toda la disciplina de dinero de este sistema
+   * es que él nunca tenga que sacar una cuenta de cabeza, y un número que
+   * aparece después de guardar es la forma exacta del error que ya le costó
+   * Q4,800 una vez. El cálculo no se repite aquí: es el mismo que hace
+   * agregarPago (datos.js) sobre este mismo pago.
+   */
+  function mostrarRecargoAnticipo() {
+    const linea = el('sc-anticipo-recargo');
+    if (!linea) return;
+    const anticipo = q(reservaOrigen?.anticipo);
+    const esTarjeta = texto('sc-anticipo-forma') === 'tarjeta';
+    if (!reservaOrigen?.anticipoPagado || !(anticipo > 0) || !esTarjeta) {
+      linea.hidden = true;
+      return;
+    }
+    const recargo = q(anticipo * (num('sc-anticipo-porcentaje') / 100));
+    linea.hidden = false;
+    linea.textContent = `Con el recargo de tarjeta, al cliente se le cobraron `
+      + `${dinero(q(anticipo + recargo))} (${dinero(anticipo)} + ${dinero(recargo)}).`;
+  }
+
   function recalcular() {
+    mostrarRecargoAnticipo();
     const ajeno = marcado('sc-ajeno');
     const datos = leerFormulario(null);
     const borrador = construirContrato(datos);
@@ -707,9 +736,17 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     // ESTE carro exacto (por placa), no las que piden "un microbús" sin
     // unidad asignada — avisosDeSalida (avisos.js) es sobre este carro, no
     // sobre la capacidad del tipo.
+    //
+    // Y se excluye la reservación de la que se está saliendo (`reservaId`),
+    // igual que avisosDeSalida excluye el contrato que se está escribiendo
+    // (`otro.id !== contrato?.id`). Sin esto, CADA renta empezada desde
+    // "Sacar el carro" pintaba un aviso rojo diciendo que el carro está
+    // apartado... para el mismo cliente que está enfrente. Un aviso que se
+    // equivoca siempre enseña a ignorar los que no se equivocan, y este
+    // sistema ya quitó los avisos de precio y días por esa misma razón.
     const reservasDelCarro = ajeno || !carroId
       ? []
-      : reservas.filter((r) => r.carroId === carroId);
+      : reservas.filter((r) => r.carroId === carroId && r.id !== reservaId);
 
     // avisosDeSalida (avisos.js) ya no avisa por precio ni por días mínimos
     // a propósito — pedido del dueño: "yo pongo el precio que yo quiera" —
@@ -797,6 +834,18 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     if (!encontrada) return;
     reservaAplicada = true;
     reservaOrigen = encontrada;
+    // Una reservación que ya se entregó (o se canceló) no vuelve a llenar el
+    // formulario. Las dos entradas vivas —el calendario y la ficha— esconden
+    // su botón en cuanto deja de estar pendiente, así que aquí solo se llega
+    // con un enlace viejo o guardado en favoritos; pero rellenar desde ella
+    // haría un SEGUNDO contrato de la misma reservación, y deshacer eso
+    // después es caro y confuso. Se avisa y no se bloquea: el mostrador
+    // puede seguir armando una salida normal para ese carro.
+    if (estadoReserva(encontrada) !== 'pendiente') {
+      aviso('Esa reservación ya no está pendiente, así que no se usó para llenar el formulario.'
+        + ' Puedes hacer la salida normal de este carro.', 'error');
+      return;
+    }
     aplicarReserva(encontrada);
     preseleccionarClienteDeReserva(encontrada);
     recalcular();

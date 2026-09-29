@@ -16,7 +16,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   esFechaValida, mesDeFecha, mesSiguiente, mesAnterior, tituloMes,
-  descripcionVehiculoReserva, textoSaldoContrato,
+  descripcionVehiculoReserva, textoSaldoContrato, botonSacarCarro,
 } from '../js/pantallas/calendario.js';
 
 // ---------- esFechaValida / mesDeFecha ----------
@@ -139,4 +139,23 @@ test('textoSaldoContrato: un pago anulado no cuenta (mismo criterio que resumen(
   };
   // El pago anulado no cubre nada: sigue debiendo los Q300 completos.
   assert.equal(textoSaldoContrato(contrato), 'Pendiente de pagar Q300.00');
+});
+
+// ---------- El botón "Sacar carro" ----------
+//
+// Esta función causó un error de dinero real: la rama de carro exacto iba a
+// #/sacar/:carroId SIN ?reserva=, así que el formulario abría en blanco y el
+// anticipo ya pagado no se descontaba — se le habría vuelto a cobrar al
+// cliente lo que ya depositó. Las dos ramas quedan fijadas aquí.
+
+test('botonSacarCarro: con carro exacto, la ruta lleva la reservación pegada', () => {
+  const html = botonSacarCarro({ id: 'r1', carroId: 'v9' });
+  assert.match(html, /href="#\/sacar\/v9\?reserva=r1"/);
+});
+
+test('botonSacarCarro: apartado solo por tipo, va a la ficha de la reservación', () => {
+  // Sin carroId no hay carro al cual mandar: la ficha es donde se elige.
+  const html = botonSacarCarro({ id: 'r2', tipoVehiculo: 'MICROBÚS' });
+  assert.match(html, /href="#\/reservas\/r2"/);
+  assert.doesNotMatch(html, /#\/flota/, 'el remiendo viejo perdía la reservación de camino');
 });
