@@ -73,3 +73,13 @@ test('textoDeDueno maneja campos faltantes sin romper', () => {
   assert.ok(textoDeDueno({ nombre: 'PEDRO' }) === 'PEDRO');
   assert.ok(textoDeDueno({ nombre: 'PEDRO', telefono: '5555-5555' }).includes('PEDRO'));
 });
+
+test('textoDeDueno encuentra a un dueño por el teléfono o el NIT solos', () => {
+  // El dueño busca por teléfono tan seguido como por nombre — muchas veces
+  // tiene el número en el chat y no recuerda cómo escribió el nombre. La
+  // implementación ya lo hacía bien; lo que faltaba era fijarlo, para que
+  // nadie pueda "simplificar" textoDeDueno a solo el nombre sin que una
+  // prueba lo detenga.
+  assert.ok(textoDeDueno({ telefono: '7777-7777' }).includes('7777-7777'));
+  assert.ok(textoDeDueno({ nit: '1234567-8' }).includes('1234567-8'));
+});
