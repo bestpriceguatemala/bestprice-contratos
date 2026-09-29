@@ -59,9 +59,15 @@ test('sin fechas o sin cliente no se puede guardar', () => {
   assert.deepEqual(faltaAlgoEnReserva(construirReserva({}, { ...campos, dias: 0 })), ['Días']);
 });
 
-test('el anticipo se dice en una línea', () => {
-  assert.equal(textoAnticipo(construirReserva({}, campos)), 'Anticipo Q500.00 pagado');
-  assert.equal(textoAnticipo(construirReserva({}, { ...campos, anticipoPagado: false })), 'Anticipo Q500.00 pendiente');
+test('el anticipo dice quién tiene que hacer qué, no solo "pagado"', () => {
+  // El dueño leyó "Anticipo Q500.00 pendiente" y preguntó: "¿de qué me sirve
+  // poner el anticipo? ¿o es el que le pedí y aún falta que yo lo cobre?".
+  // Las dos frases tienen que contestar eso solas, sin que las interprete.
+  assert.equal(textoAnticipo(construirReserva({}, campos)), 'Anticipo Q500.00 — ya me lo pagó');
+  assert.equal(
+    textoAnticipo(construirReserva({}, { ...campos, anticipoPagado: false })),
+    'Anticipo Q500.00 — falta que me lo pague',
+  );
   assert.equal(textoAnticipo(construirReserva({}, { ...campos, anticipo: 0 })), 'Sin anticipo');
 });
 

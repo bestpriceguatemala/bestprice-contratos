@@ -85,7 +85,15 @@ export function faltaAlgoEnReserva(r) {
 export function textoAnticipo(r) {
   const anticipo = q(r?.anticipo);
   if (anticipo <= 0) return 'Sin anticipo';
-  return `Anticipo Q${textoDosDecimales(anticipo)} ${r?.anticipoPagado ? 'pagado' : 'pendiente'}`;
+  // "pagado"/"pendiente" a secas no decía QUIÉN debe hacer qué, y el dueño lo
+  // preguntó con estas palabras: "¿es el anticipo que le pedí y aún falta que
+  // yo lo cobre?". Las dos frases de abajo contestan eso sin que tenga que
+  // adivinar: una dice que el dinero ya entró (y por eso se le descuenta al
+  // sacar el carro), la otra que todavía no (y por eso sigue incluido en lo
+  // que va a cobrar).
+  return r?.anticipoPagado
+    ? `Anticipo Q${textoDosDecimales(anticipo)} — ya me lo pagó`
+    : `Anticipo Q${textoDosDecimales(anticipo)} — falta que me lo pague`;
 }
 
 const alto = (mensaje) => ({ nivel: 'alto', mensaje });

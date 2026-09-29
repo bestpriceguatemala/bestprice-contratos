@@ -161,6 +161,14 @@ function barraFallo(falloReservas, falloContratos, falloFlota) {
  *
  * ↓ cuenta `regresan` (vencía hoy y todavía no ha vuelto), no `yaRegresaron`:
  * un carro que ya está en el patio no debe leerse como trabajo pendiente.
+ *
+ * Verde el que sale, rojo el que entra: es como lo lee el dueño de un
+ * vistazo, sin traducir nada. Eso deja los atrasados compartiendo el rojo
+ * con los regresos, así que dejan de distinguirse por color y pasan a
+ * distinguirse por FORMA — una pastilla roja rellena con el texto en
+ * blanco. Un aviso tiene que seguir saltando aunque su color ya no sea
+ * exclusivo; si se quedara como un número rojo más, se perdería entre los
+ * regresos del mismo día, que es justo cuando más importa verlo.
  */
 function celdaDia(fecha, hoy, diaSeleccionado, movs) {
   if (!fecha) return '<div class="cal-vacio" style="min-height:76px;background:var(--fondo);border-radius:6px;"></div>';
@@ -179,11 +187,11 @@ function celdaDia(fecha, hoy, diaSeleccionado, movs) {
     <div class="cal-dia" data-fecha="${esc(fecha)}"
       style="${borde}${fondo}border-radius:6px;padding:8px;min-height:76px;cursor:pointer;">
       <div style="font-weight:600;${esHoy ? 'color:var(--azul);' : ''}">${dia}</div>
-      <div style="display:flex;gap:10px;font-size:0.85em;color:var(--gris);margin-top:4px;">
-        ${salen ? `<span>↑ ${salen}</span>` : ''}
-        ${regresan ? `<span>↓ ${regresan}</span>` : ''}
+      <div style="display:flex;gap:10px;font-size:0.9em;font-weight:600;margin-top:4px;">
+        ${salen ? `<span style="color:var(--verde);">↑ ${salen}</span>` : ''}
+        ${regresan ? `<span style="color:var(--rojo);">↓ ${regresan}</span>` : ''}
       </div>
-      ${atrasados ? `<div style="color:var(--rojo);font-weight:700;font-size:0.85em;margin-top:2px;">⚠ ${atrasados}</div>` : ''}
+      ${atrasados ? `<div style="display:inline-block;background:var(--rojo);color:var(--blanco);font-weight:700;font-size:0.8em;border-radius:10px;padding:1px 7px;margin-top:3px;">⚠ ${atrasados}</div>` : ''}
     </div>`;
 }
 
