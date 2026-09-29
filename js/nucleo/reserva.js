@@ -147,7 +147,7 @@ export function choquesDeReserva({ reserva, flota = [], reservas = [], contratos
   // acabado, es que nunca hubo. Avisar "0 comprometidos de 0" confunde al
   // dueño sobre cuál es el problema de verdad.
   if (capacidad === 0) {
-    return [alto(`No tienes ningún ${tipo} en la flota.`)];
+    return [alto(`No tienes ninguna unidad ${tipo} en la flota.`)];
   }
 
   const comprometidos =

@@ -19,7 +19,7 @@ import { lineasSalida, resumen } from '../nucleo/contrato.js';
 import { avisosDeSalida } from '../nucleo/avisos.js';
 import { estadoReserva } from '../nucleo/reserva.js';
 import { devolucionPrevista, hoyISO } from '../nucleo/fechas.js';
-import { q, suma } from '../nucleo/dinero.js';
+import { q, suma, recargoTarjeta } from '../nucleo/dinero.js';
 import {
   cargarFlota, cargarContratosAbiertos, cargarReservas, cargarAjustes, buscarClientes, cargarClientes,
   guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato, agregarPago, guardarReserva,
@@ -679,7 +679,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       linea.hidden = true;
       return;
     }
-    const recargo = q(anticipo * (num('sc-anticipo-porcentaje') / 100));
+    const recargo = recargoTarjeta(anticipo, num('sc-anticipo-porcentaje'));
     linea.hidden = false;
     linea.textContent = `Con el recargo de tarjeta, al cliente se le cobraron `
       + `${dinero(q(anticipo + recargo))} (${dinero(anticipo)} + ${dinero(recargo)}).`;

@@ -114,7 +114,7 @@ test('por tipo: cero carros de ese tipo es un problema distinto a "ya no queda"'
   // nunca hubo ninguno. "0 de 0 comprometidos" confundiría al dueño.
   const r = choquesDeReserva({ reserva: { ...del10al14, tipoVehiculo: 'LIMOSINA' }, flota, reservas: [], contratos: [] });
   assert.equal(r[0].nivel, 'alto');
-  assert.equal(r[0].mensaje, 'No tienes ningún LIMOSINA en la flota.');
+  assert.equal(r[0].mensaje, 'No tienes ninguna unidad LIMOSINA en la flota.');
 });
 
 test('por tipo: con un solo carro del tipo, el aviso concuerda en singular', () => {
