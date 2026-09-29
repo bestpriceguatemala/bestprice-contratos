@@ -230,7 +230,7 @@ function dibujarLista(contenedor, reservas, flota, { falloReservas = false, fall
         ${falloReservas
     ? '<p class="pendiente">No se pudieron leer las reservaciones. Intenta de nuevo o revisa la conexión.</p>'
     : '<p class="pendiente">Todavía no hay reservaciones.<br>'
-      + '<a href="#/reservas/nueva" class="btn btn-primario">Apartar la primera</a></p>'}
+      + '<a href="#/reservas/nueva" class="btn btn-primario">Nueva reservación</a></p>'}
       </div>`;
     return;
   }
