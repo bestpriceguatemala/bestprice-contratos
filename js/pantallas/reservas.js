@@ -117,6 +117,42 @@ export function opcionesCarro(flota, carroIdSeleccionado) {
   return `<option value="">Solo el tipo, sin carro exacto</option>${opciones}`;
 }
 
+// El valor del <select> de tipo que dispara el campo de texto "Otro…" (Tarea
+// 5, hallazgo Importante de la revisión): un tipo se ELIGE de la flota, nunca
+// se deletrea — un texto libre recalculando en cada tecla comparaba "M", "MI",
+// "MIC"... contra la flota y parpadeaba un choque falso por cada letra.
+export const SENTINEL_OTRO_TIPO = '__otro__';
+
+/** Los tipos distintos de la flota, sin vacíos y ordenados. */
+export function tiposDeFlota(flota) {
+  const vistos = new Set();
+  (flota || []).forEach((c) => { if (c?.tipo) vistos.add(c.tipo); });
+  return [...vistos].sort((a, b) => String(a).localeCompare(String(b), 'es'));
+}
+
+/**
+ * Las <option> del selector de tipo: vacío ("Sin tipo"), los tipos de la
+ * flota, y "Otro…" al final para un tipo que todavía no se maneja.
+ *
+ * Un tipo guardado que ya no existe en la flota actual (un carro que se
+ * vendió, un tipo que ya no se maneja) no se pierde ni cae en "Otro…" en
+ * silencio: se agrega como su propia opción, ya elegida — es el único caso en
+ * que "No tienes ningún X en la flota" (choquesDeReserva) es cierto y vale la
+ * pena decirlo, y guardar de nuevo la reservación no debe perder ese dato.
+ */
+export function opcionesTipo(flota, tipoActual) {
+  const tipos = tiposDeFlota(flota);
+  const valor = String(tipoActual || '').trim();
+  const lista = (valor && !tipos.includes(valor))
+    ? [...tipos, valor].sort((a, b) => String(a).localeCompare(String(b), 'es'))
+    : tipos;
+  const opciones = lista.map((t) => {
+    const selected = t === valor ? ' selected' : '';
+    return `<option value="${esc(t)}"${selected}>${esc(t)}</option>`;
+  }).join('');
+  return `<option value="">Sin tipo</option>${opciones}<option value="${SENTINEL_OTRO_TIPO}">Otro…</option>`;
+}
+
 // Los choques rojos primero (brief, Paso 2): hoy choquesDeReserva solo
 // produce nivel 'alto', pero se ordena de todos modos por si el núcleo agrega
 // otro nivel más adelante — la misma idea que ya separa nivel-alto/nivel-medio
@@ -288,11 +324,15 @@ function plantillaFicha(reserva, esNueva, estado, flota) {
             <h2>Vehículo</h2>
             <p class="sc-nota">
               Un tipo sin carro exacto ("un microbús") es una reservación completa. Cambiar la unidad más
-              adelante es solo volver a elegir aquí — el aviso de abajo se recalcula al instante.
+              adelante es solo volver a elegir aquí — el aviso de abajo se recalcula al instante. Si el tipo
+              todavía no está en la flota, elige "Otro…" y escríbelo.
             </p>
             <div class="sc-campos">
               <label class="sc-campo">Tipo de vehículo
-                <input type="text" id="rs-tipo" value="${esc(reserva?.tipoVehiculo || '')}" placeholder="Ej. MICROBÚS">
+                <select id="rs-tipo">${opcionesTipo(flota, reserva?.tipoVehiculo)}</select>
+              </label>
+              <label class="sc-campo" id="rs-tipo-otro-campo" hidden>Tipo nuevo (todavía no está en la flota)
+                <input type="text" id="rs-tipo-otro" placeholder="Ej. LIMUSINA">
               </label>
               <label class="sc-campo">Carro exacto (opcional)
                 <select id="rs-carro">${opcionesCarro(flota, reserva?.carroId)}</select>
@@ -356,6 +396,7 @@ async function dibujarFicha(contenedor, reservaId, { reservas, flota, contratos 
   function leerFormulario() {
     const carroId = val('rs-carro') || null;
     const carro = carroId ? flota.find((c) => c.id === carroId) : null;
+    // Ver tipoElegido(): el centinela del <select> nunca se guarda.
     return {
       clienteId: clienteIdElegido,
       clienteNombre: texto('rs-cliente-nombre'),
@@ -364,7 +405,7 @@ async function dibujarFicha(contenedor, reservaId, { reservas, flota, contratos 
       dias: val('rs-dias'),
       carroId,
       carroPlacas: carro?.placas || '',
-      tipoVehiculo: texto('rs-tipo'),
+      tipoVehiculo: tipoElegido(),
       precioDia: val('rs-precio-dia'),
       anticipo: val('rs-anticipo'),
       anticipoPagado: Boolean(el('rs-anticipo-pagado')?.checked),
@@ -378,6 +419,25 @@ async function dibujarFicha(contenedor, reservaId, { reservas, flota, contratos 
    * otro campo, recalcula sin esperar a guardar). Devuelve el borrador para
    * que guardar() reutilice exactamente lo mismo que ya se le mostró al dueño.
    */
+  /**
+   * El tipo que de verdad se guarda.
+   *
+   * Cuando el <select> está en "Otro…", su valor es un centinela interno que
+   * NUNCA debe llegar a la ficha: lo que vale es lo que el dueño escribió en
+   * el campo de al lado. Sin esto, una reservación de un tipo nuevo se
+   * guardaría con el centinela y la ficha mostraría basura la próxima vez.
+   */
+  function tipoElegido() {
+    const elegido = texto('rs-tipo');
+    return elegido === SENTINEL_OTRO_TIPO ? texto('rs-tipo-otro') : elegido;
+  }
+
+  /** Muestra el campo de texto solo cuando el <select> está en "Otro…". */
+  function mostrarCampoOtro() {
+    const campo = el('rs-tipo-otro-campo');
+    if (campo) campo.hidden = texto('rs-tipo') !== SENTINEL_OTRO_TIPO;
+  }
+
   function recalcular() {
     const borrador = construirReserva(reserva || {}, leerFormulario());
     el('rs-devolucion-prevista').textContent = borrador.devolucionPrevista ? fecha(borrador.devolucionPrevista) : '—';
@@ -459,8 +519,20 @@ async function dibujarFicha(contenedor, reservaId, { reservas, flota, contratos 
     }
   }
 
-  el('rs-form').addEventListener('input', () => recalcular());
-  el('rs-form').addEventListener('change', () => recalcular());
+  // El campo "Otro…" es la ÚNICA excepción al recálculo por tecla: su texto
+  // se compara contra los tipos de la flota, así que escribir "LIMUSINA"
+  // letra por letra tiraría un aviso rojo falso por cada tecla ("No tienes
+  // ningún L…", "ningún LI…"). Ahí se espera al `change`, que llega cuando
+  // termina de escribir. Los demás campos no tienen ese problema: un número a
+  // medio teclear no se compara contra una lista de nombres.
+  el('rs-form').addEventListener('input', (ev) => {
+    if (ev.target?.id === 'rs-tipo-otro') return;
+    recalcular();
+  });
+  el('rs-form').addEventListener('change', () => {
+    mostrarCampoOtro();
+    recalcular();
+  });
   el('rs-form').addEventListener('submit', guardar);
   el('rs-cliente-buscar').addEventListener('input', (ev) => buscarYMostrarClientes(ev.target.value));
   el('rs-cliente-resultados').addEventListener('click', (ev) => {
@@ -477,6 +549,7 @@ async function dibujarFicha(contenedor, reservaId, { reservas, flota, contratos 
   el('rs-cancelar')?.addEventListener('click', cancelarDesdeFicha);
 
   if (!esNueva && clienteIdElegido) el('rs-cliente-vinculo').hidden = false;
+  mostrarCampoOtro();
   recalcular();
 }
 

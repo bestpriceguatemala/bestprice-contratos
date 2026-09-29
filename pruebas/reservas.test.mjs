@@ -8,6 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   queSeAparto, reservasVisibles, textoConfirmarCancelar, opcionesCarro, ETIQUETAS_ESTADO_RESERVA,
+  tiposDeFlota, opcionesTipo, SENTINEL_OTRO_TIPO,
 } from '../js/pantallas/reservas.js';
 
 const flota = [
@@ -117,4 +118,37 @@ test('ETIQUETAS_ESTADO_RESERVA: las tres que existen', () => {
   assert.deepEqual(ETIQUETAS_ESTADO_RESERVA, {
     pendiente: 'Pendiente', entregada: 'Entregada', cancelada: 'Cancelada',
   });
+});
+
+// ---------- El selector de tipo ----------
+//
+// El tipo se ELIGE de la flota, nunca se deletrea: cuando era texto libre, el
+// recálculo por tecla comparaba "M", "MI", "MIC"... contra la flota y tiraba
+// un aviso rojo falso por cada letra, además de fallar con minúsculas.
+
+test('tiposDeFlota: los tipos distintos, ordenados, sin vacíos', () => {
+  const mezclada = [...flota, { id: 'v3', tipo: 'SUV' }, { id: 'v4', tipo: '' }, { id: 'v5' }];
+  assert.deepEqual(tiposDeFlota(mezclada), ['MICROBÚS', 'SUV']);
+});
+
+test('opcionesTipo: un tipo guardado que ya no está en la flota no se pierde', () => {
+  // El carro se vendió, o ya no se maneja ese tipo. La reservación vieja sigue
+  // apuntando ahí: tiene que seguir elegida (guardar de nuevo no debe borrarle
+  // el tipo) y es el único caso en que "No tienes ningún X en la flota" es
+  // cierto y vale decirlo.
+  const html = opcionesTipo(flota, 'LIMUSINA');
+  assert.match(html, /value="LIMUSINA" selected/);
+  assert.match(html, /value="SUV"(?! selected)/);
+});
+
+test('opcionesTipo: un tipo de la flota queda elegido sin duplicarse', () => {
+  const html = opcionesTipo(flota, 'SUV');
+  assert.match(html, /value="SUV" selected/);
+  assert.equal(html.match(/value="SUV"/g).length, 1);
+});
+
+test('opcionesTipo: siempre ofrece "Sin tipo" y "Otro…"', () => {
+  const html = opcionesTipo(flota, '');
+  assert.match(html, /<option value="">Sin tipo<\/option>/);
+  assert.match(html, new RegExp(`value="${SENTINEL_OTRO_TIPO}"`));
 });
