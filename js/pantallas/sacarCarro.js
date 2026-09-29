@@ -20,8 +20,8 @@ import { avisosDeSalida } from '../nucleo/avisos.js';
 import { devolucionPrevista, hoyISO } from '../nucleo/fechas.js';
 import { q, suma } from '../nucleo/dinero.js';
 import {
-  cargarFlota, cargarContratosAbiertos, cargarReservas, cargarAjustes, buscarClientes,
-  guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato,
+  cargarFlota, cargarContratosAbiertos, cargarReservas, cargarAjustes, buscarClientes, cargarClientes,
+  guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato, agregarPago, guardarReserva,
 } from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
 // El alta rápida de aquí y la ficha de clientes.js tienen que pedir
@@ -63,6 +63,20 @@ function esc(texto) {
 /** Solo los últimos 4 dígitos de un número de tarjeta (ADR-001: es lo único que se guarda). */
 export function ultimos4Digitos(numero) {
   return String(numero ?? '').replace(/\D/g, '').slice(-4);
+}
+
+/**
+ * Tarea 9 ("Sacar el carro desde una reservación"): la ruta es
+ * '#/sacar/:carroId?reserva=:reservaId'. El enrutador (router.js) empareja
+ * por pedazos separados con "/" y no sabe nada de "?", así que aquí se
+ * separa el id del carro del id de la reservación — mismo patrón que
+ * recibirCarro.js:leerParametroRuta() con "?cobro=1". Función pura, sin
+ * `location` ni DOM, para poder probarla sola.
+ */
+export function leerParametroRuta(parametroRuta) {
+  const [carroId, consulta] = String(parametroRuta || '').split('?');
+  const reservaId = new URLSearchParams(consulta || '').get('reserva') || null;
+  return { carroId, reservaId };
 }
 
 const descripcionCarroPropio = (c) => [c?.marca, c?.linea].filter(Boolean).join(' ');
@@ -190,6 +204,54 @@ export function construirContrato(datos) {
 
     estado: 'rentado',
   };
+}
+
+/**
+ * Tarea 9, Reglas 1 y 3 del dueño sobre el anticipo de una reservación:
+ *
+ * - Pagado: ya no hace falta cobrarlo otra vez a la salida, así que el monto
+ *   que se sugiere cobrar HOY se reduce por exactamente ese anticipo — el
+ *   mismo error que ya le costó una vuelta cara al dueño (§ arriba: "recibir
+ *   sin cobrar" con el cliente ya pagado) fue justo no hacer esta resta por
+ *   él. El anticipo en sí se registra aparte (ver conAnticipoComoPago), así
+ *   que lo cobrado en total sigue siendo el total de la salida, ni un
+ *   centavo de más ni de menos.
+ * - Pendiente: no se resta nada. Sigue siendo parte de lo que se cobra
+ *   ahora, tal cual lo pide la Regla 3 ("do not subtract it from anything").
+ *
+ * Función pura: recibe el totalSalida ya calculado (lineasSalida/resumen) y
+ * la reservación, nunca toca el DOM, para poder probarla con los montos
+ * exactos del ejemplo.
+ */
+export function montoSalidaConAnticipo(totalSalida, reserva) {
+  const total = q(totalSalida);
+  if (!reserva?.anticipoPagado) return total;
+  const anticipo = q(reserva.anticipo);
+  if (!(anticipo > 0)) return total;
+  return Math.max(0, q(total - anticipo));
+}
+
+/**
+ * Tarea 9, Regla 1: un anticipo ya pagado se agrega al contrato como un pago
+ * de verdad, con la fecha de la reservación (no la de hoy) — nunca a mano,
+ * siempre por `agregarPago` (datos.js), que es el único lugar que calcula el
+ * recargo de tarjeta y reconstruye `pagos[]` sin pisar lo que ya había. Un
+ * anticipo pendiente (Regla 3) no agrega nada: nunca existió como pago.
+ *
+ * `forma` por defecto es 'efectivo' (Regla 2: una reservación no sabe cómo
+ * se pagó el anticipo, y adivinar 'tarjeta' le sumaría un 12% que nadie pidió).
+ */
+export function conAnticipoComoPago(contrato, reserva, { forma, porcentajeTarjeta } = {}) {
+  if (!reserva?.anticipoPagado) return contrato;
+  const anticipo = q(reserva.anticipo);
+  if (!(anticipo > 0)) return contrato;
+  const formaAnticipo = forma || 'efectivo';
+  return agregarPago(contrato, {
+    monto: anticipo,
+    forma: formaAnticipo,
+    porcentajeTarjeta: formaAnticipo === 'tarjeta' ? q(porcentajeTarjeta) : 0,
+    fecha: reserva.fechaSalida,
+  });
 }
 
 // ---------- La plantilla estática (se pinta una sola vez) ----------
@@ -371,6 +433,32 @@ function plantilla() {
         <h2>Detalle de la salida</h2>
         <ul id="sc-lineas" class="sc-lineas"><li class="sc-vacio">Todavía no hay nada que cobrar.</li></ul>
 
+        <div id="sc-anticipo-pagado-bloque" hidden>
+          <p class="sc-nota">
+            Esta salida viene de una reservación con un anticipo <strong>ya pagado</strong>:
+            <strong id="sc-anticipo-monto">Q0.00</strong> el <strong id="sc-anticipo-fecha">—</strong>.
+            Se registra como un pago aparte, con esa fecha — no hace falta cobrarlo de nuevo, por eso ya
+            está descontado del monto de abajo.
+          </p>
+          <div class="sc-campos">
+            <label class="sc-campo">Forma en que se pagó el anticipo
+              <select id="sc-anticipo-forma">
+                <option value="efectivo">Efectivo</option>
+                <option value="tarjeta">Tarjeta</option>
+                <option value="transferencia">Transferencia</option>
+              </select>
+            </label>
+            <label class="sc-campo" id="sc-anticipo-porcentaje-campo" hidden>% de tarjeta del anticipo
+              <input type="number" id="sc-anticipo-porcentaje" step="0.01" min="0" value="${PORCENTAJE_TARJETA_DEFECTO}">
+            </label>
+          </div>
+        </div>
+        <p id="sc-anticipo-pendiente-bloque" class="sc-nota" hidden>
+          Esta salida viene de una reservación con un anticipo de
+          <strong id="sc-anticipo-pendiente-monto">Q0.00</strong> todavía <strong>pendiente</strong> — sigue
+          incluido en el monto de abajo, no se ha cobrado todavía.
+        </p>
+
         <div class="sc-campos">
           <label class="sc-campo">Forma de pago
             <select id="sc-pago-forma">
@@ -429,8 +517,14 @@ function filaCliente(c) {
 const PREFIJO_RUTA = '#/sacar/';
 let ultimoToken = 0;
 
-/** Dibuja "Sacar carro" dentro de `contenedor`, para el carro `carroId`. */
-export async function pintarSacarCarro(contenedor, carroId) {
+/**
+ * Dibuja "Sacar carro" dentro de `contenedor`, para el carro y, si viene de
+ * una reservación (Tarea 9), la reservación de origen — los dos vienen
+ * juntos en `parametroRuta` ('carroId' o 'carroId?reserva=reservaId'), ver
+ * leerParametroRuta() arriba.
+ */
+export async function pintarSacarCarro(contenedor, parametroRuta) {
+  const { carroId, reservaId } = leerParametroRuta(parametroRuta);
   const miToken = ++ultimoToken;
   const sigoVigente = () => location.hash.startsWith(PREFIJO_RUTA) && miToken === ultimoToken;
 
@@ -443,7 +537,16 @@ export async function pintarSacarCarro(contenedor, carroId) {
   let montoPagoTocado = false;
   let comisionTocada = false;
   let tarjetaTocada = false;
+  let anticipoTarjetaTocada = false;
   let guardando = false;
+  // La reservación de origen (Tarea 9), una vez encontrada entre `reservas`
+  // — puede tardar (copia local vacía, primera sincronía) así que se
+  // reintenta en cada sincronía de reservas hasta encontrarla o hasta que ya
+  // no haya más sincronías (ver intentarAplicarReserva() más abajo).
+  // `reservaAplicada` evita volver a pisar el formulario si el mostrador ya
+  // empezó a escribir: la reservación se aplica UNA sola vez.
+  let reservaOrigen = null;
+  let reservaAplicada = false;
   // El id y el número de este alquiler se deciden una sola vez, la primera
   // vez que se intenta guardar (ver guardar() más abajo), y se quedan fijos
   // para cualquier reintento: si el internet se pone lento y hay que
@@ -568,8 +671,14 @@ export async function pintarSacarCarro(contenedor, carroId) {
 
     // El monto que se recibe sigue el total mientras el mostrador no lo haya
     // tocado a mano — lo normal es cobrar todo lo de la salida de una vez.
+    // Si esta salida viene de una reservación con anticipo YA PAGADO (Tarea
+    // 9, Regla 1), ese anticipo ya no hace falta cobrarlo de nuevo: el monto
+    // sugerido sale de montoSalidaConAnticipo(), que lo resta. Un anticipo
+    // PENDIENTE (Regla 3) no cambia nada aquí — sigue siendo parte de lo que
+    // se cobra ahora, tal cual.
     const totalSalida = resumen(borrador).totalSalida;
-    if (!montoPagoTocado) el('sc-pago-monto').value = totalSalida || '';
+    const montoSugerido = reservaOrigen ? montoSalidaConAnticipo(totalSalida, reservaOrigen) : totalSalida;
+    if (!montoPagoTocado) el('sc-pago-monto').value = montoSugerido || '';
 
     // Se vuelve a leer el formulario a propósito: el paso de arriba puede
     // haber cambiado el campo del monto, y "Total a cobrar" tiene que
@@ -615,6 +724,82 @@ export async function pintarSacarCarro(contenedor, carroId) {
       hoy: hoyISO(),
     });
     el('sc-avisos').innerHTML = avisos.map(lineaAviso).join('');
+  }
+
+  // ---------- Tarea 9: entrar con una reservación ----------
+
+  /**
+   * Llena el formulario con lo que la reservación sabe (Paso 1 del brief):
+   * cliente, fechas, días y precio por día. El carro NUNCA sale de aquí —
+   * lo decide la URL (carroId), igual que en cualquier otra salida; por eso
+   * una reservación por tipo (sin carroId) prefil la igual, el carro ya se
+   * eligió antes de llegar a esta pantalla (reservas.js).
+   *
+   * También muestra, bien visible, si el anticipo ya se pagó o sigue
+   * pendiente — "money that is already paid must be visible as paid, and
+   * money still owed must be visible as owed" — para que el mostrador nunca
+   * tenga que hacer esa cuenta en la cabeza.
+   */
+  function aplicarReserva(reserva) {
+    if (reserva.fechaSalida) el('sc-fecha-salida').value = reserva.fechaSalida;
+    if (reserva.dias) el('sc-dias').value = reserva.dias;
+    if (reserva.precioDia !== undefined && reserva.precioDia !== null && reserva.precioDia !== '') {
+      el('sc-precio-dia').value = reserva.precioDia;
+    }
+    if (reserva.clienteNombre) {
+      el('sc-cliente-buscar').value = reserva.clienteNombre;
+      buscarYMostrarClientes(reserva.clienteNombre);
+    }
+
+    const anticipo = q(reserva.anticipo);
+    if (anticipo > 0 && reserva.anticipoPagado) {
+      el('sc-anticipo-pagado-bloque').hidden = false;
+      el('sc-anticipo-monto').textContent = dinero(anticipo);
+      el('sc-anticipo-fecha').textContent = fecha(reserva.fechaSalida);
+    } else if (anticipo > 0) {
+      el('sc-anticipo-pendiente-bloque').hidden = false;
+      el('sc-anticipo-pendiente-monto').textContent = dinero(anticipo);
+    }
+  }
+
+  /**
+   * Si la reservación trae un cliente ya vinculado (clienteId), lo
+   * preselecciona de verdad — no solo el nombre suelto en el buscador — para
+   * que el contrato salga con el mismo clienteId que la reservación, sin que
+   * el mostrador tenga que volver a buscarlo. `cargarClientes` (datos.js) es
+   * la misma lectura que usa la pantalla de Clientes: se pide solo aquí,
+   * cuando de verdad hace falta, para no cargarla en cada "Sacar carro" que
+   * no viene de una reservación.
+   */
+  async function preseleccionarClienteDeReserva(reserva) {
+    if (!reserva?.clienteId) return;
+    try {
+      const { datos: clientes } = await cargarClientes();
+      if (!sigoVigente()) return;
+      const cliente = clientes.find((c) => c.id === reserva.clienteId);
+      if (cliente) elegirCliente(cliente);
+    } catch {
+      // Sin el cliente vinculado disponible: el mostrador lo busca a mano o
+      // da de alta uno nuevo, como en cualquier otra salida.
+    }
+  }
+
+  /**
+   * Busca la reservación de origen entre `reservas` y, en cuanto aparece
+   * (puede tardar: copia local vacía, primera sincronía todavía en curso),
+   * la aplica UNA sola vez. Se llama en cada sincronía de reservas hasta
+   * encontrarla — sin esto, abrir esta pantalla justo cuando la copia local
+   * de reservas está vacía dejaría el formulario en blanco para siempre.
+   */
+  function intentarAplicarReserva() {
+    if (reservaAplicada || !reservaId) return;
+    const encontrada = reservas.find((r) => r.id === reservaId);
+    if (!encontrada) return;
+    reservaAplicada = true;
+    reservaOrigen = encontrada;
+    aplicarReserva(encontrada);
+    preseleccionarClienteDeReserva(encontrada);
+    recalcular();
   }
 
   // ---------- Cliente: buscar, elegir, alta rápida ----------
@@ -717,9 +902,38 @@ export async function pintarSacarCarro(contenedor, carroId) {
       // caer en el mismo documento y no gastar un número nuevo.
       if (!contratoId) contratoId = await nuevoIdContrato();
       if (!numeroContrato) numeroContrato = await siguienteNumeroContrato();
-      const contrato = construirContrato(leerFormulario(numeroContrato));
+      const base = construirContrato(leerFormulario(numeroContrato));
+      // Tarea 9, Regla 1: el anticipo YA PAGADO de la reservación de origen
+      // se agrega como un pago de verdad, por agregarPago (datos.js) — nunca
+      // a mano — con la forma que el mostrador confirmó arriba (por defecto
+      // efectivo, Regla 2) y la fecha de la reservación, no la de hoy. Un
+      // anticipo pendiente no cambia nada aquí (Regla 3).
+      const contrato = reservaOrigen
+        ? conAnticipoComoPago(base, reservaOrigen, {
+          forma: texto('sc-anticipo-forma') || 'efectivo',
+          porcentajeTarjeta: num('sc-anticipo-porcentaje'),
+        })
+        : base;
       const guardado = await guardarContrato(contrato);
-      aviso(`Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro.`, 'exito');
+
+      // Tarea 9, Regla 4: el contrato ya quedó guardado a partir de aquí,
+      // pase lo que pase con la reservación — nunca se deshace. Si viene de
+      // una reservación, se marca aparte con contratoId (guardarReserva
+      // sella el estado con estadoReserva(), nunca se escribe a mano) para
+      // que estadoReserva() la deje 'entregada' y deje de estorbar en los
+      // choques y en "salen" del calendario. Un fallo AQUÍ se cuenta tal
+      // cual, en español llano, para que el dueño lo arregle a mano en vez
+      // de descubrir después que la reservación sigue bloqueando fechas.
+      if (reservaOrigen) {
+        try {
+          await guardarReserva({ ...reservaOrigen, contratoId: guardado.id });
+          aviso(`Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro. La reservación quedó entregada.`, 'exito');
+        } catch {
+          aviso(`Contrato N° ${guardado.numero} guardado y ${guardado.clienteNombre} se lleva el carro, pero la reservación NO se pudo marcar como entregada. Entra a Reservaciones y revísala a mano — puede seguir bloqueando esas fechas.`, 'error');
+        }
+      } else {
+        aviso(`Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro.`, 'exito');
+      }
       location.hash = '#/flota';
     } catch {
       aviso('No se pudo guardar el contrato. Intenta de nuevo.', 'error');
@@ -735,6 +949,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
     if (ev.target.id === 'sc-pago-monto') montoPagoTocado = true;
     if (ev.target.id === 'sc-porcentaje-comision') comisionTocada = true;
     if (ev.target.id === 'sc-pago-porcentaje') tarjetaTocada = true;
+    if (ev.target.id === 'sc-anticipo-porcentaje') anticipoTarjetaTocada = true;
     recalcular();
   });
   el('sc-form').addEventListener('change', (ev) => {
@@ -742,6 +957,12 @@ export async function pintarSacarCarro(contenedor, carroId) {
     if (ev.target.id === 'sc-t2-agregar') el('sc-t2-campos').hidden = !marcado('sc-t2-agregar');
     if (ev.target.id === 'sc-nc-mas-datos') el('sc-nc-mas-datos-campos').hidden = !marcado('sc-nc-mas-datos');
     if (ev.target.id === 'sc-pago-forma') el('sc-pago-porcentaje-campo').hidden = texto('sc-pago-forma') !== 'tarjeta';
+    // Regla 2 del dueño: la forma en que se pagó el anticipo se elige aquí,
+    // nunca se adivina — mostrar el % de tarjeta solo cuando de verdad se
+    // eligió "Tarjeta" evita que alguien lo confunda con un campo obligatorio.
+    if (ev.target.id === 'sc-anticipo-forma') {
+      el('sc-anticipo-porcentaje-campo').hidden = texto('sc-anticipo-forma') !== 'tarjeta';
+    }
     recalcular();
   });
   el('sc-form').addEventListener('submit', guardar);
@@ -777,7 +998,16 @@ export async function pintarSacarCarro(contenedor, carroId) {
   const [rFlota, rContratos, rReservas, ajustesCargados] = await Promise.all([
     cargarFlota((r) => { flota = r.datos; if (sigoVigente()) refrescarCarro(); }),
     cargarContratosAbiertos((r) => { contratosAbiertos = r.datos; if (sigoVigente()) recalcular(); }),
-    cargarReservas((r) => { reservas = r.datos; if (sigoVigente()) recalcular(); }),
+    // Tarea 9: cada sincronía de reservas es también una oportunidad de
+    // encontrar la reservación de origen (`reservaId`) si la primera lectura
+    // (copia local, abajo) todavía no la tenía — intentarAplicarReserva() ya
+    // se cuida de aplicarla una sola vez.
+    cargarReservas((r) => {
+      reservas = r.datos;
+      if (!sigoVigente()) return;
+      intentarAplicarReserva();
+      recalcular();
+    }),
     cargarAjustes(),
   ]);
   flota = rFlota.datos;
@@ -785,6 +1015,14 @@ export async function pintarSacarCarro(contenedor, carroId) {
   reservas = rReservas.datos;
   ajustes = ajustesCargados;
   if (!sigoVigente()) return;
+  intentarAplicarReserva();
+  if (reservaId && !reservaOrigen) {
+    // La reservación que traía la URL no apareció ni en la copia local ni en
+    // la nube (borrada, o un enlace viejo): se avisa en vez de quedarse
+    // callado, pero no bloquea — el mostrador puede seguir armando la salida
+    // a mano, como cualquier otra.
+    aviso('No se encontró la reservación de origen. Puedes seguir llenando el formulario a mano.', 'error');
+  }
   // El % de comisión del formulario arranca en el default fijo de esta
   // pantalla (por si la nube tarda); en cuanto llegan los ajustes reales se
   // actualiza al de verdad, salvo que el mostrador ya lo haya cambiado a mano.
@@ -799,6 +1037,12 @@ export async function pintarSacarCarro(contenedor, carroId) {
   // tarde.
   if (!tarjetaTocada && ajustes.porcentajeTarjeta !== undefined) {
     el('sc-pago-porcentaje').value = ajustes.porcentajeTarjeta;
+  }
+  // Mismo mecanismo para el % de tarjeta del anticipo (Regla 2): arranca en
+  // PORCENTAJE_TARJETA_DEFECTO por si la nube tarda, y se actualiza al valor
+  // real en cuanto llega, salvo que el mostrador ya lo haya tocado.
+  if (!anticipoTarjetaTocada && ajustes.porcentajeTarjeta !== undefined) {
+    el('sc-anticipo-porcentaje').value = ajustes.porcentajeTarjeta;
   }
   refrescarCarro();
   recalcular();

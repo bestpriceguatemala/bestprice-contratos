@@ -5,7 +5,9 @@
 // quien llama ya le pasa solo los últimos 4 dígitos.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { construirContrato, ultimos4Digitos } from '../js/pantallas/sacarCarro.js';
+import {
+  construirContrato, ultimos4Digitos, leerParametroRuta, montoSalidaConAnticipo, conAnticipoComoPago,
+} from '../js/pantallas/sacarCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
 
 test('ultimos4Digitos se queda solo con los últimos 4 dígitos', () => {
@@ -165,4 +167,141 @@ test('el mismo id y número, llamados dos veces (como en un reintento), dan el m
   const segundoIntento = construirContrato(datosDelIntento);
   assert.equal(primerIntento.id, segundoIntento.id);
   assert.equal(primerIntento.numero, segundoIntento.numero);
+});
+
+// ---------- Tarea 9: sacar el carro desde una reservación ----------
+//
+// leerParametroRuta separa el carroId del '?reserva=' que le pega la ruta
+// '#/sacar/:carroId?reserva=:reservaId' — el enrutador (router.js) no sabe
+// nada de "?", mismo patrón que recibirCarro.js con "?cobro=1".
+
+test('leerParametroRuta: separa el carroId del "?reserva="', () => {
+  assert.deepEqual(leerParametroRuta('v1?reserva=r1'), { carroId: 'v1', reservaId: 'r1' });
+});
+
+test('leerParametroRuta: sin "?reserva=", el carroId queda igual y reservaId es null', () => {
+  assert.deepEqual(leerParametroRuta('v1'), { carroId: 'v1', reservaId: null });
+});
+
+test('leerParametroRuta: vacío o undefined no revienta', () => {
+  assert.deepEqual(leerParametroRuta(''), { carroId: '', reservaId: null });
+  assert.deepEqual(leerParametroRuta(undefined), { carroId: '', reservaId: null });
+});
+
+// Los dos casos que pide el brief como "el corazón de esta tarea": un
+// anticipo YA PAGADO se resta de lo que se cobra hoy y se registra como su
+// propio pago (Regla 1 y 2 del dueño); un anticipo PENDIENTE no se resta de
+// nada y no se pre-registra (Regla 3). Los campos de la reservación son los
+// de §7b del diseño ('anticipo', 'anticipoPagado', 'fechaSalida'...), nunca
+// inventados.
+
+const reservaConAnticipoPagado = () => ({
+  id: 'res1',
+  clienteId: 'k1',
+  clienteNombre: 'Juan Pérez',
+  fechaSalida: '2026-09-10',
+  dias: 4,
+  devolucionPrevista: '2026-09-14',
+  carroId: 'v1',
+  carroPlacas: 'P-999TST',
+  precioDia: 700,
+  anticipo: 500,
+  anticipoPagado: true,
+});
+
+const reservaConAnticipoPendiente = () => ({ ...reservaConAnticipoPagado(), anticipoPagado: false });
+
+test('montoSalidaConAnticipo: un anticipo PAGADO se resta de lo que se cobra hoy', () => {
+  // 4 días × Q700 = Q2,800 de renta (§5 del diseño) — Q500 de anticipo ya
+  // pagado dejan Q2,300 por cobrar hoy en el mostrador.
+  assert.equal(montoSalidaConAnticipo(2800, reservaConAnticipoPagado()), 2300);
+});
+
+test('montoSalidaConAnticipo: un anticipo PENDIENTE no resta nada (Regla 3: "do not subtract it from anything")', () => {
+  assert.equal(montoSalidaConAnticipo(2800, reservaConAnticipoPendiente()), 2800);
+});
+
+test('montoSalidaConAnticipo: sin reservación de origen, el total no cambia', () => {
+  assert.equal(montoSalidaConAnticipo(2800, null), 2800);
+});
+
+test('montoSalidaConAnticipo: un anticipo pagado más grande que el total nunca deja un monto negativo', () => {
+  const reserva = { ...reservaConAnticipoPagado(), anticipo: 5000 };
+  assert.equal(montoSalidaConAnticipo(2800, reserva), 0);
+});
+
+test('conAnticipoComoPago: un anticipo PAGADO se agrega como un pago de verdad, con la fecha de la reservación', () => {
+  const base = construirContrato({
+    ...datosBase(),
+    cliente: { id: 'k1', nombres: 'Juan', apellidos: 'Pérez' },
+    fechaSalida: '2026-09-11', // el mostrador movió la salida un día — sigue editable
+    cartaPoderPrecio: 0,
+    cartaPoderDestino: '',
+    dias: 4,
+    precioDia: 700,
+    forma: 'efectivo',
+    porcentajeTarjeta: 0,
+    montoPago: 2300, // ya descontado por montoSalidaConAnticipo() arriba
+  });
+  assert.equal(base.pagos.length, 1, 'antes de agregar el anticipo, solo el pago de la salida');
+
+  const conAnticipo = conAnticipoComoPago(base, reservaConAnticipoPagado(), { forma: 'efectivo' });
+
+  assert.equal(conAnticipo.pagos.length, 2, 'un pago existe: el del anticipo, aparte del de la salida');
+  const pagoAnticipo = conAnticipo.pagos[1];
+  assert.equal(pagoAnticipo.monto, 500);
+  assert.equal(pagoAnticipo.forma, 'efectivo', 'Regla 2: nunca se adivina, y el default es efectivo');
+  assert.equal(pagoAnticipo.porcentajeTarjeta, 0);
+  assert.equal(
+    pagoAnticipo.fecha,
+    reservaConAnticipoPagado().fechaSalida,
+    'la fecha de la reservación, no la de hoy ni la del contrato (que aquí es un día después)',
+  );
+  assert.notEqual(pagoAnticipo.fecha, conAnticipo.fechaSalida, 'confirma que de verdad son fechas distintas en este caso');
+
+  // "la balanza se reduce por exactamente ese monto, y el total a cobrar lo
+  // refleja": los 2,800 de renta quedan cubiertos exactamente por el
+  // anticipo (500) más lo cobrado hoy ya descontado (2,300) — ni un
+  // centavo de más ni de menos, saldo en 0.
+  const r = resumen(conAnticipo);
+  assert.equal(r.pagado, 2800, 'anticipo + lo cobrado hoy suman el total de la renta, no más');
+  assert.equal(r.saldo, 0);
+});
+
+test('conAnticipoComoPago: el anticipo pagado con tarjeta sí lleva su recargo, solo si se elige a mano', () => {
+  const base = construirContrato({
+    ...datosBase(), cartaPoderPrecio: 0, cartaPoderDestino: '', dias: 4, precioDia: 700, montoPago: 2300, forma: 'efectivo', porcentajeTarjeta: 0,
+  });
+  const conAnticipo = conAnticipoComoPago(base, reservaConAnticipoPagado(), { forma: 'tarjeta', porcentajeTarjeta: 12 });
+  assert.equal(conAnticipo.pagos[1].forma, 'tarjeta');
+  assert.equal(conAnticipo.pagos[1].porcentajeTarjeta, 12);
+  // Q500 + 12% = Q560 de recargo sobre ese pago, aparte del de la salida.
+  assert.equal(resumen(conAnticipo).pagado, 2300 + 560);
+});
+
+test('conAnticipoComoPago: un anticipo PENDIENTE no agrega ningún pago (Regla 3: "a pending anticipo is not a payment")', () => {
+  const base = construirContrato({
+    ...datosBase(), cartaPoderPrecio: 0, cartaPoderDestino: '', dias: 4, precioDia: 700, montoPago: 2800, forma: 'efectivo', porcentajeTarjeta: 0,
+  });
+  const conAnticipo = conAnticipoComoPago(base, reservaConAnticipoPendiente(), { forma: 'efectivo' });
+  assert.equal(conAnticipo, base, 'ni siquiera arma un contrato nuevo: lo devuelve tal cual');
+  assert.equal(conAnticipo.pagos.length, 1);
+
+  // El total a cobrar hoy sigue siendo la renta completa: nada se
+  // pre-registró ni se restó de nada.
+  const r = resumen(conAnticipo);
+  assert.equal(r.pagado, 2800);
+  assert.equal(r.saldo, 0);
+});
+
+test('conAnticipoComoPago: sin anticipo en la reservación (0 o vacío), tampoco agrega nada', () => {
+  const base = construirContrato({ ...datosBase(), montoPago: 2800 });
+  const sinAnticipo = conAnticipoComoPago(base, { ...reservaConAnticipoPagado(), anticipo: 0 }, {});
+  assert.equal(sinAnticipo, base);
+  assert.equal(sinAnticipo.pagos.length, 1);
+});
+
+test('conAnticipoComoPago: sin reservación de origen, el contrato no cambia', () => {
+  const base = construirContrato({ ...datosBase(), montoPago: 2800 });
+  assert.equal(conAnticipoComoPago(base, null, {}), base);
 });

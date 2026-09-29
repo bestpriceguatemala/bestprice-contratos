@@ -116,13 +116,15 @@ const descripcionVehiculoContrato = (c) => [c?.carroPlacas, c?.carroDescripcion]
 
 // ---------- El botón "Sacar carro" de un renglón de "Salen" ----------
 //
-// sacarCarro.js todavía no sabe partir de una reservación (eso es de otro
-// plan): con carro exacto apartado se manda directo a ese carro
-// (#/sacar/:carroId, la única ruta que existe hoy); apartado solo por tipo,
-// no hay un carro específico al cual mandar, así que se manda a Flota, donde
-// sí hay un carro disponible de ese tipo con su propio botón "Sacar carro".
+// Con carro exacto apartado se manda directo a ese carro (#/sacar/:carroId,
+// igual que siempre). Apartado solo por tipo, no hay un carro específico al
+// cual mandar: antes (Tarea 6) se mandaba a Flota como remiendo, un enlace
+// que perdía a la reservación de camino. Ahora que sacarCarro.js ya sabe
+// partir de una reservación (Tarea 9), se manda a la ficha de la
+// reservación (#/reservas/:id), que es de donde sí se puede elegir el carro
+// exacto y de ahí "Sacar el carro" con la reservación en la mano.
 function botonSacarCarro(reserva) {
-  const ruta = reserva?.carroId ? `#/sacar/${esc(reserva.carroId)}` : '#/flota';
+  const ruta = reserva?.carroId ? `#/sacar/${esc(reserva.carroId)}` : `#/reservas/${esc(reserva.id)}`;
   return `<a class="btn" href="${ruta}">Sacar carro</a>`;
 }
 

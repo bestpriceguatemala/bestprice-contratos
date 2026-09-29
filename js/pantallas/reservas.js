@@ -368,6 +368,7 @@ function plantillaFicha(reserva, esNueva, estado, flota) {
           <div class="carro-botones">
             <button type="button" id="rs-volver" class="btn">Cancelar</button>
             ${!esNueva && estado === 'pendiente' ? '<button type="button" id="rs-cancelar" class="btn">Cancelar reservación</button>' : ''}
+            ${!esNueva && estado === 'pendiente' ? '<button type="button" id="rs-sacar-carro" class="btn btn-primario">Sacar el carro</button>' : ''}
             <button type="submit" id="rs-guardar" class="btn btn-primario">Guardar reservación</button>
           </div>
         </form>
@@ -519,6 +520,27 @@ async function dibujarFicha(contenedor, reservaId, { reservas, flota, contratos 
     }
   }
 
+  /**
+   * Tarea 9 ("Sacar el carro desde una reservación"): el punto de entrada de
+   * verdad es abrir la reservación y, desde aquí, mandar a sacarCarro.js con
+   * '?reserva=' pegado — así el formulario llega ya lleno y el anticipo se
+   * cuenta contra lo que se cobra (js/pantallas/sacarCarro.js).
+   *
+   * El carro que se usa es el que esté elegido AHORA MISMO en "Carro exacto"
+   * (rs-carro), no necesariamente el que ya traía guardado la reservación:
+   * así una reservación por tipo ("un microbús", sin carroId) deja elegir la
+   * unidad aquí mismo, en el mismo select que ya existe para cambiar de
+   * unidad — sin inventar una pantalla nueva para "escoger el carro".
+   */
+  function sacarCarroDesdeFicha() {
+    const carroId = val('rs-carro');
+    if (!carroId) {
+      aviso('Elige un carro exacto (arriba, en "Vehículo") antes de sacar el carro.', 'error');
+      return;
+    }
+    location.hash = `#/sacar/${carroId}?reserva=${reserva.id}`;
+  }
+
   // El campo "Otro…" es la ÚNICA excepción al recálculo por tecla: su texto
   // se compara contra los tipos de la flota, así que escribir "LIMUSINA"
   // letra por letra tiraría un aviso rojo falso por cada tecla ("No tienes
@@ -547,6 +569,7 @@ async function dibujarFicha(contenedor, reservaId, { reservas, flota, contratos 
   });
   el('rs-volver').addEventListener('click', () => { location.hash = '#/reservas'; });
   el('rs-cancelar')?.addEventListener('click', cancelarDesdeFicha);
+  el('rs-sacar-carro')?.addEventListener('click', sacarCarroDesdeFicha);
 
   if (!esNueva && clienteIdElegido) el('rs-cliente-vinculo').hidden = false;
   mostrarCampoOtro();
