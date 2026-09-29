@@ -18,7 +18,7 @@
 // lineasDevolucion y resumen (nucleo/contrato.js) — esta pantalla solo
 // pregunta y formatea, nunca suma ni resta por su cuenta.
 import { lineasSalida, lineasDevolucion, resumen } from '../nucleo/contrato.js';
-import { estadoContrato, pendientesDe } from '../nucleo/estados.js';
+import { estadoContrato, pendientesDe, garantiaPorLiberar } from '../nucleo/estados.js';
 import { filtrar, textoDeContrato } from '../nucleo/busqueda.js';
 import { textoDosDecimales, textoEntero } from '../nucleo/dinero.js';
 import { hoyISO } from '../nucleo/fechas.js';
@@ -82,9 +82,12 @@ const CRITERIOS_ESTADO = {
   devueltos: (c) => estadoContrato(c) === 'devuelto',
   cerrados: (c) => estadoContrato(c) === 'cerrado',
   pendientesCobro: (c) => resumen(c).saldo > 0,
-  // Igual que filasGarantia en flota.js: mientras el carro sigue afuera la
-  // garantía está bien retenida, eso no es "por liberar" todavía.
-  garantiasSinLiberar: (c) => Boolean(c?.cierre?.fechaReal) && pendientesDe(c).garantia,
+  // garantiaPorLiberar (nucleo/estados.js) — la misma función que usa
+  // resumenDeHoy (calendario.js) y la lista de flota.js, para que estos tres
+  // lugares nunca puedan volver a desacordarse sobre qué cuenta como
+  // "por liberar" (mientras el carro sigue afuera, la garantía está bien
+  // retenida, eso no es "por liberar" todavía).
+  garantiasSinLiberar: garantiaPorLiberar,
 };
 
 /** Filtra por uno de los cinco estados de arriba; sin filtro (o 'todos') no filtra nada. */

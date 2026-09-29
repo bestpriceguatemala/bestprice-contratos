@@ -98,10 +98,12 @@ function cifraResumen({
  * liberar" — así que viajan con un data-accion que el manejador de clics de
  * pintarFlota resuelve haciendo scroll, en vez de inventar una ruta nueva.
  *
- * "regresan" se rotula "Regresan hoy", no "Hoy regresan": son citas de HOY
- * que TODAVÍA no volvieron (movimientosDelDia ya saca del conteo el carro
- * que ya está en el patio) — es una lista de pendientes, no el total del
- * día, y el rótulo tiene que decirlo así para no sugerir lo contrario.
+ * "regresan" se rotula "Por regresar hoy", no "Regresan hoy": son citas de
+ * HOY que TODAVÍA no volvieron (movimientosDelDia ya saca del conteo el
+ * carro que ya está en el patio) — es una lista de pendientes, no el total
+ * del día, y el rótulo tiene que leerse como trabajo pendiente, no como un
+ * total, para no sugerir lo contrario (hallazgo de la revisión: "Regresan
+ * hoy" no decía que ya excluía los que habían vuelto).
  */
 function seccionResumen(numeros, hoy, { falloReservas = false, falloContratos = false } = {}) {
   const rutaCalendario = `#/calendario/${hoy}`;
@@ -110,7 +112,7 @@ function seccionResumen(numeros, hoy, { falloReservas = false, falloContratos = 
       etiqueta: 'Salen hoy', valor: numeros.salen, href: rutaCalendario, incompleto: falloReservas,
     }),
     cifraResumen({
-      etiqueta: 'Regresan hoy', valor: numeros.regresan, href: rutaCalendario, incompleto: falloContratos,
+      etiqueta: 'Por regresar hoy', valor: numeros.regresan, href: rutaCalendario, incompleto: falloContratos,
     }),
     cifraResumen({
       etiqueta: 'Atrasados',

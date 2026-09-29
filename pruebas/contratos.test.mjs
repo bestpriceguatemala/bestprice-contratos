@@ -9,6 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { textoDeContrato } from '../js/nucleo/busqueda.js';
+import { garantiaPorLiberar } from '../js/nucleo/estados.js';
 import {
   primerDiaMes, ultimoDiaMes, filtrarPorEstado, contratosVisibles,
   claseFilaContrato, textoCuenta, numeroEnmascarado, textoConfirmarAnular,
@@ -140,6 +141,36 @@ test('filtrarPorEstado: garantiasSinLiberar no cuenta una renta en efectivo (gar
     dias: 1, precioDia: 100, devolucionPrevista: '2026-08-01', cierre: { fechaReal: '2026-08-01' }, pagos: [{ monto: 100, porcentajeTarjeta: 0 }], garantiaMonto: 0, garantiaLiberada: false,
   };
   assert.deepEqual(filtrarPorEstado([enEfectivoSinTocar], 'garantiasSinLiberar'), []);
+});
+
+// Hallazgo de la revisión: este mismo criterio ("¿el carro ya volvió Y la
+// garantía sigue bloqueada?") vivía escrito a mano aquí Y en flota.js
+// (filasGarantia) Y en calendario.js (resumenDeHoy) — tres copias que hoy
+// coinciden pero que nada obligaba a seguir coincidiendo el día que alguien
+// afinara la regla en un solo lugar. Ahora las tres llaman a
+// garantiaPorLiberar (nucleo/estados.js); esta prueba fija que el criterio
+// de ESTA pantalla (garantiasSinLiberar) de verdad es esa misma función, en
+// las dos direcciones que importan, no una que hoy da la misma respuesta por
+// casualidad.
+test('filtrarPorEstado: garantiasSinLiberar concuerda con garantiaPorLiberar (nucleo/estados.js) en las dos direcciones', () => {
+  // Carro TODAVÍA AFUERA con garantía bloqueada: las dos dicen que NO cuenta.
+  const carroAfuera = {
+    dias: 2, precioDia: 100, pagos: [], garantiaMonto: 500, garantiaLiberada: false,
+  };
+  // Carro YA DE VUELTA con garantía bloqueada: las dos dicen que SÍ cuenta.
+  const carroDeVuelta = {
+    dias: 1, precioDia: 100, devolucionPrevista: '2026-08-01', cierre: { fechaReal: '2026-08-01' }, pagos: [{ monto: 100, porcentajeTarjeta: 0 }], garantiaMonto: 500, garantiaLiberada: false,
+  };
+
+  assert.equal(garantiaPorLiberar(carroAfuera), false);
+  assert.equal(garantiaPorLiberar(carroDeVuelta), true);
+
+  const contratos = [carroAfuera, carroDeVuelta];
+  assert.deepEqual(
+    filtrarPorEstado(contratos, 'garantiasSinLiberar'),
+    contratos.filter(garantiaPorLiberar),
+    'el filtro de esta pantalla tiene que devolver EXACTAMENTE lo mismo que garantiaPorLiberar',
+  );
 });
 
 test('contratosVisibles: aplica el estado y luego el buscador encima', () => {
