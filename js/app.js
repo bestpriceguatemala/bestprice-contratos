@@ -10,6 +10,7 @@ import { pintarCarros } from './pantallas/carros.js';
 import { pintarClientes } from './pantallas/clientes.js';
 import { pintarContratos } from './pantallas/contratos.js';
 import { pintarReservas } from './pantallas/reservas.js';
+import { pintarCalendario } from './pantallas/calendario.js';
 import { vigilarVersion } from './version.js';
 
 registrarPantalla('#/flota', pintarFlota);
@@ -33,6 +34,12 @@ registrarPantalla('#/contratos/:contratoId', pintarContratos);
 // 'nueva') necesita ese 'nueva' capturado para saber que es alta y no edición.
 registrarPantalla('#/reservas', pintarReservas);
 registrarPantalla('#/reservas/:reservaId', pintarReservas);
+// '#/calendario/:fecha' abre el mes que contiene esa fecha con el día ya
+// seleccionado (por ejemplo, un enlace futuro desde otra pantalla); navegar
+// de mes o elegir otro día después es estado en memoria de la propia
+// pantalla, no vuelve a pasar por aquí.
+registrarPantalla('#/calendario', pintarCalendario);
+registrarPantalla('#/calendario/:fecha', pintarCalendario);
 
 const pantallaEntrada = document.getElementById('entrada');
 const pantallaApp = document.getElementById('app');
