@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import {
   conKmSalidaNormalizado, textoBotonPago, textoAvisoRecibido, textoSaldo, totalDeEstaCobranza,
   leerParametroRuta, textoAvisoCobro, valoresIniciales, textoCorreccion,
-  textoEstadoPago, textoAvisoSobrecobro,
+  textoEstadoPago, textoAvisoSobrecobro, montoInicialPago,
 } from '../js/pantallas/recibirCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { agregarPago } from '../js/datos.js';
@@ -221,4 +221,34 @@ test('textoAvisoSobrecobro: un monto menor o igual al saldo no avisa nada', () =
 test('textoAvisoSobrecobro: sin saldo pendiente (en cero o a favor del cliente), no aplica', () => {
   assert.equal(textoAvisoSobrecobro(0, 100), null);
   assert.equal(textoAvisoSobrecobro(-50, 100), null);
+});
+
+// ---------- montoInicialPago ----------
+//
+// IMPORTANTE 3 de la revisión final: reabrir un cierre YA guardado para
+// corregir un dato (kilometraje, nota...) prellenaba el campo de pago con
+// el saldo completo, así que "Guardar correcciones" registraba un pago que
+// nadie hizo — el reproducido en vivo del hallazgo era exactamente un
+// contrato que debía Q380, reabierto para corregir, con 380 ya escrito en
+// el campo. Estas pruebas fijan que una corrección arranca en 0 y que las
+// otras dos situaciones (recibir por primera vez, y el modo de solo cobro)
+// siguen prellenando el saldo como siempre.
+test('montoInicialPago: recibir carro por primera vez, prellena el saldo completo', () => {
+  assert.equal(montoInicialPago(380, { enCorreccion: false, soloCobro: false }), 380);
+});
+
+test('montoInicialPago: en modo de corrección (no solo cobro), arranca en 0 aunque haya saldo', () => {
+  assert.equal(montoInicialPago(380, { enCorreccion: true, soloCobro: false }), 0);
+});
+
+test('montoInicialPago: el modo de solo cobro SÍ prellena el saldo, aunque el contrato ya tenga cierre (enCorreccion true)', () => {
+  // "Pendientes de cobro" (flota.js) abre esta pantalla justo para cobrar:
+  // ahí el prellenado es la acción que el mostrador vino a hacer, no un
+  // efecto colateral de guardar una corrección.
+  assert.equal(montoInicialPago(380, { enCorreccion: true, soloCobro: true }), 380);
+});
+
+test('montoInicialPago: sin saldo pendiente, siempre da 0 sin importar el modo', () => {
+  assert.equal(montoInicialPago(0, { enCorreccion: false, soloCobro: false }), 0);
+  assert.equal(montoInicialPago(-50, { enCorreccion: false, soloCobro: true }), 0);
 });

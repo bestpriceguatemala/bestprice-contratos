@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   queSeAparto, reservasVisibles, textoConfirmarCancelar, opcionesCarro, ETIQUETAS_ESTADO_RESERVA,
-  tiposDeFlota, opcionesTipo, SENTINEL_OTRO_TIPO,
+  tiposDeFlota, opcionesTipo, SENTINEL_OTRO_TIPO, textoReservaNoEncontrada,
 } from '../js/pantallas/reservas.js';
 
 const flota = [
@@ -151,4 +151,21 @@ test('opcionesTipo: siempre ofrece "Sin tipo" y "Otro…"', () => {
   const html = opcionesTipo(flota, '');
   assert.match(html, /<option value="">Sin tipo<\/option>/);
   assert.match(html, new RegExp(`value="${SENTINEL_OTRO_TIPO}"`));
+});
+
+// ---------- textoReservaNoEncontrada ----------
+//
+// IMPORTANTE 2 de la revisión final, segunda cara: si la lectura de
+// reservaciones falló, no encontrar la reservación en lo ya cargado no
+// prueba que no exista — puede estar perfectamente en la nube. "No se
+// encontró" es una afirmación categórica que solo vale cuando la lectura sí
+// funcionó.
+test('textoReservaNoEncontrada: lectura exitosa y no está en la lista, sí se afirma que no existe', () => {
+  assert.equal(textoReservaNoEncontrada(false), 'No se encontró esta reservación.');
+});
+
+test('textoReservaNoEncontrada: con la lectura fallida, nunca se afirma que no existe', () => {
+  const texto = textoReservaNoEncontrada(true);
+  assert.doesNotMatch(texto, /no se encontró/i);
+  assert.match(texto, /no se pudo leer/i);
 });

@@ -107,6 +107,34 @@ export function textoCorreccion(contrato) {
 }
 
 /**
+ * Con qué monto arranca el campo de pago, antes de que el mostrador lo
+ * toque a mano: el saldo completo, salvo en modo de corrección puro.
+ *
+ * IMPORTANTE 3 de la revisión final: reabrir un cierre YA guardado (el
+ * botón "atrás", o la ficha) para arreglar un dato — un kilometraje, una
+ * nota — prellenaba este campo con el saldo completo igual que un "recibir
+ * carro" nuevo. El botón dice "Guardar correcciones", así que guardar
+ * corregía kilometraje/notas Y, sin que nadie lo pidiera, registraba un
+ * pago del saldo entero — el dinero nunca entró a la caja pero el sistema
+ * lo daba por cobrado y soltaba la garantía. Corregir un dato no es decidir
+ * cobrar: en corrección, el campo arranca en 0, así que guardar() (más
+ * abajo) no agrega ningún pago salvo que el mostrador escriba un monto él
+ * mismo — eso enciende `montoPagoTocado` y este prellenado ya no lo pisa,
+ * así que SÍ se puede seguir cobrando a propósito mientras se corrige.
+ *
+ * El modo de solo cobro es la excepción a esa excepción: ahí se abre la
+ * pantalla justo para cobrar un saldo pendiente (el enlace "Pendientes de
+ * cobro" de flota.js), aunque el contrato ya tenga cierre — por eso también
+ * cuenta como "corrección" para `textoCorreccion`. Ahí SÍ se prellena con
+ * el saldo completo: cobrar es la acción que el mostrador vino a hacer, no
+ * un efecto colateral de guardar otra cosa.
+ */
+export function montoInicialPago(saldo, { enCorreccion, soloCobro }) {
+  const sePrellena = soloCobro || !enCorreccion;
+  return sePrellena && saldo > 0 ? q(saldo) : 0;
+}
+
+/**
  * Qué dice el botón de guardar, según cuánto se está por cobrar contra el
  * saldo. Sin nada que cobrar (el saldo ya está en cero o a favor del
  * cliente, o el monto quedó en cero) dice "Recibir carro": el carro vuelve,
@@ -468,10 +496,11 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
     el('rc-bloque-cobro').hidden = !hayAlgoQueCobrar;
 
     // El monto a cobrar arranca en el saldo completo (o en 0 si no hay nada
-    // que cobrar) y sigue ese valor mientras el mostrador no lo haya tocado
-    // a mano — el mismo mecanismo de "montoPagoTocado" que sacarCarro.js,
-    // para que un abono a medio escribir nunca se pise con el recálculo.
-    if (!montoPagoTocado) el('rc-pago-monto').value = saldo > 0 ? saldo : 0;
+    // que cobrar, o si esto es una corrección — ver montoInicialPago más
+    // arriba) y sigue ese valor mientras el mostrador no lo haya tocado a
+    // mano — el mismo mecanismo de "montoPagoTocado" que sacarCarro.js, para
+    // que un abono a medio escribir nunca se pise con el recálculo.
+    if (!montoPagoTocado) el('rc-pago-monto').value = montoInicialPago(saldo, { enCorreccion, soloCobro });
 
     const formaPago = texto('rc-pago-forma') || 'efectivo';
     const pctTarjeta = num('rc-pago-porcentaje');

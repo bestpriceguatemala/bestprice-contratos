@@ -103,6 +103,23 @@ export function textoConfirmarCancelar(reserva) {
     + 'Va a quedar marcada como cancelada, no desaparece de la lista.';
 }
 
+/**
+ * Qué decir cuando la ficha busca una reservación y no la encuentra en lo
+ * que ya se cargó: puede que de verdad no exista, o que la lectura de
+ * reservaciones haya fallado (nube caída, sin copia local) y por eso no
+ * está en la lista que se está buscando — dos cosas completamente
+ * distintas. "No se encontró esta reservación" es una afirmación categórica
+ * que solo es cierta en el primer caso; con la lectura fallida, esta misma
+ * reservación puede existir perfectamente en la nube (IMPORTANTE 2, segunda
+ * cara, de la revisión final — el mismo cuidado que cargarContrato(),
+ * datos.js, ya tiene para contratos).
+ */
+export function textoReservaNoEncontrada(falloReservas) {
+  return falloReservas
+    ? 'No se pudo leer esta reservación. Revisa tu conexión e intenta de nuevo.'
+    : 'No se encontró esta reservación.';
+}
+
 /** Las <option> del selector de carro exacto: vacío primero ("solo el tipo"), luego la flota ordenada por placas. */
 export function opcionesCarro(flota, carroIdSeleccionado) {
   const ordenada = [...(flota || [])].sort(
@@ -270,11 +287,21 @@ function filaClienteResultado(c) {
   return `<li data-id="${esc(c.id)}"><strong>${esc(nombre)}</strong>${detalle ? `<span>${esc(detalle)}</span>` : ''}</li>`;
 }
 
-function plantillaFicha(reserva, esNueva, estado, flota) {
+function plantillaFicha(reserva, esNueva, estado, flota, fallos = {}) {
   const titulo = esNueva ? 'Nueva reservación' : (reserva?.clienteNombre || 'Reservación');
+  // IMPORTANTE 2 de la revisión final: dibujarLista ya tiene esta barra
+  // (barraFallo, arriba) pero la ficha —justo donde se ven los choques con
+  // otros contratos y otras reservaciones— nunca la recibía. Con la nube
+  // caída, choquesDeReserva se queda sin datos y contesta [] igual que "no
+  // hay ningún choque": el mismo carro, mismas fechas, se veía "libre" en
+  // vez de avisar que la lectura falló. Mismo patrón que la lista: nunca se
+  // pinta un fallo como un mundo tranquilo.
+  const { falloReservas = false, falloFlota = false, falloContratos = false } = fallos;
+  const barra = barraFallo(falloReservas, falloFlota, falloContratos);
   return `
     <div class="carros-contenido">
       <div class="carro-formulario">
+        ${barra}
         <div class="carros-encabezado">
           <h1>${esc(titulo)}</h1>
           ${!esNueva ? `<span class="etiqueta-estado">${esc(ETIQUETAS_ESTADO_RESERVA[estado] || estado)}</span>` : ''}
@@ -376,14 +403,25 @@ function plantillaFicha(reserva, esNueva, estado, flota) {
     </div>`;
 }
 
-async function dibujarFicha(contenedor, reservaId, { reservas, flota, contratos }, sigoVigente) {
+async function dibujarFicha(
+  contenedor,
+  reservaId,
+  {
+    reservas, flota, contratos, falloReservas = false, falloFlota = false, falloContratos = false,
+  },
+  sigoVigente,
+) {
   const esNueva = reservaId === 'nueva';
   let reserva = null;
 
   if (!esNueva) {
     reserva = reservas.find((r) => r.id === reservaId);
     if (!reserva) {
-      contenedor.innerHTML = '<p class="pendiente">No se encontró esta reservación.</p>';
+      // Segunda cara del IMPORTANTE 2: si la lectura de reservaciones falló,
+      // esta reservación puede existir perfectamente en la nube y no
+      // aparecer aquí no prueba lo contrario — ver textoReservaNoEncontrada.
+      contenedor.innerHTML = `${barraFallo(falloReservas, falloFlota, falloContratos)}`
+        + `<p class="pendiente">${esc(textoReservaNoEncontrada(falloReservas))}</p>`;
       return;
     }
   }
@@ -392,7 +430,7 @@ async function dibujarFicha(contenedor, reservaId, { reservas, flota, contratos 
   let clienteIdElegido = reserva?.clienteId || null;
   let ultimosResultados = [];
 
-  contenedor.innerHTML = plantillaFicha(reserva, esNueva, estado, flota);
+  contenedor.innerHTML = plantillaFicha(reserva, esNueva, estado, flota, { falloReservas, falloFlota, falloContratos });
 
   function leerFormulario() {
     const carroId = val('rs-carro') || null;
@@ -624,6 +662,13 @@ export async function pintarReservas(contenedor, reservaId) {
   if (hash === '#/reservas') {
     dibujarLista(contenedor, reservas, flota, { falloReservas, falloFlota, falloContratos });
   } else if (reservaId) {
-    await dibujarFicha(contenedor, reservaId, { reservas, flota, contratos }, sigoVigente);
+    await dibujarFicha(
+      contenedor,
+      reservaId,
+      {
+        reservas, flota, contratos, falloReservas, falloFlota, falloContratos,
+      },
+      sigoVigente,
+    );
   }
 }
