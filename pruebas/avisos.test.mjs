@@ -139,3 +139,75 @@ test('un día de traslape sí es un choque', () => {
   assert.equal(r[0].nivel, 'alto');
   assert.match(r[0].mensaje, /2026-08-21/);
 });
+
+// ---------- El carro comprometido por una reservación ----------
+//
+// Las reservaciones se leen con la forma real de un documento guardado
+// (§7b del diseño): todos los campos de la lista canónica, no solo los que
+// usa avisosDeSalida — para que estas pruebas comprueben el sistema y no una
+// forma inventada a modo.
+const reservaBase = {
+  id: 'r1',
+  clienteId: 'k2',
+  clienteNombre: 'Ana López',
+  telefono: '5555-1234',
+  fechaSalida: '2026-08-22',
+  dias: 3,
+  devolucionPrevista: '2026-08-25',
+  carroId: 'v1',
+  carroPlacas: 'P-234IFN',
+  tipoVehiculo: '',
+  precioDia: 250,
+  anticipo: 0,
+  anticipoPagado: false,
+  nota: '',
+  cancelada: false,
+  contratoId: null,
+  estado: 'pendiente',
+  actualizado: '2026-08-15T10:00:00.000Z',
+};
+
+test('avisa si el carro está apartado para otro cliente en esas fechas', () => {
+  // El contrato base sale el 20 y regresa el 24; la reservación sale el 22:
+  // se cruzan.
+  const r = avisosDeSalida({ ...base, reservasDelCarro: [reservaBase] });
+  assert.equal(r[0].nivel, 'alto');
+  assert.match(r[0].mensaje, /Ana López/, 'dice para quién está apartado');
+  assert.match(r[0].mensaje, /22 ago 2026/, 'dice desde cuándo, con textoFecha');
+});
+
+test('no avisa si las fechas de la reservación no se cruzan con el contrato', () => {
+  const despues = { ...reservaBase, fechaSalida: '2026-08-26', devolucionPrevista: '2026-08-29' };
+  assert.deepEqual(avisosDeSalida({ ...base, reservasDelCarro: [despues] }), []);
+});
+
+test('una reservación cancelada no avisa', () => {
+  const cancelada = { ...reservaBase, cancelada: true, estado: 'cancelada' };
+  assert.deepEqual(avisosDeSalida({ ...base, reservasDelCarro: [cancelada] }), []);
+});
+
+test('una reservación ya entregada no avisa, aunque también esté marcada cancelada', () => {
+  // estadoReserva() (reserva.js) deja que contratoId mande sobre cancelada:
+  // una cancelación tardía no debe borrar el aviso de un contrato que ya
+  // existe... y tampoco debe inventar un choque contra sí misma.
+  const entregada = { ...reservaBase, contratoId: 'c50', cancelada: true, estado: 'entregada' };
+  assert.deepEqual(avisosDeSalida({ ...base, reservasDelCarro: [entregada] }), []);
+});
+
+test('una reserva seguida el mismo día no es un choque (tocarse no es cruzarse)', () => {
+  // Mismo caso que la prueba de contratos, pero contra una reservación: el
+  // carro sale el 20 (el contrato de este renglón) y la reservación previa
+  // devuelve el 20 — no hay traslape real.
+  const previa = { ...reservaBase, fechaSalida: '2026-08-16', devolucionPrevista: '2026-08-20' };
+  assert.deepEqual(avisosDeSalida({ ...base, reservasDelCarro: [previa] }), []);
+});
+
+test('con varias reservaciones cruzadas, avisa de la que sale primero y cuántas más hay', () => {
+  const masTarde = { ...reservaBase, id: 'r1', clienteNombre: 'Ana López', fechaSalida: '2026-08-23' };
+  const primero = { ...reservaBase, id: 'r2', clienteNombre: 'Carlos Ruiz', fechaSalida: '2026-08-21', devolucionPrevista: '2026-08-24' };
+  const r = avisosDeSalida({ ...base, reservasDelCarro: [masTarde, primero] });
+  assert.equal(r.length, 1, 'una sola línea, no una pared de rojo');
+  assert.match(r[0].mensaje, /Carlos Ruiz/, 'la que sale primero, no la que viene después');
+  assert.match(r[0].mensaje, /21 ago 2026/);
+  assert.match(r[0].mensaje, /1 reservación más/);
+});

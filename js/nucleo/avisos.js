@@ -6,26 +6,22 @@
 import { diasEntre, textoFecha } from './fechas.js';
 import { resumen } from './contrato.js';
 import { textoDosDecimales } from './dinero.js';
+// seCruzan es la misma regla que antes vivía aquí duplicada como seEnciman:
+// tocarse no es cruzarse (un carro que regresa el 20 puede volver a salir el
+// 20, y eso pasa a diario), así que la comparación es estricta. Dos copias de
+// la misma regla es como se arregla un error en un lado y se queda vivo en el
+// otro — por eso esta pantalla usa la de reserva.js en vez de mantener la suya.
+import { seCruzan, estadoReserva } from './reserva.js';
 
 const alto = (mensaje) => ({ nivel: 'alto', mensaje });
 const medio = (mensaje) => ({ nivel: 'medio', mensaje });
 
-/**
- * ¿Se encima [a1, a2] con [b1, b2]?
- *
- * Tocarse no es encimarse: un carro que regresa el 20 puede volver a salir el
- * 20, y eso pasa a diario. Solo hay choque cuando de verdad se traslapan días,
- * por eso la comparación es estricta.
- */
-function seEnciman(a1, a2, b1, b2) {
-  if (!a1 || !a2 || !b1 || !b2) return false;
-  return diasEntre(a1, b2) > 0 && diasEntre(b1, a2) > 0;
-}
-
 // El precio y los días NO se avisan: el dueño pone el precio que quiera en cada
 // renta y el sistema no opina. Un aviso que él no quiere lo entrena a ignorar
 // los que sí importan.
-export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente = [], contratosDelCarro = [], hoy }) {
+export function avisosDeSalida({
+  cliente, carro, contrato, contratosDelCliente = [], contratosDelCarro = [], reservasDelCarro = [], hoy,
+}) {
   const avisos = [];
 
   if (cliente?.licenciaExpira && diasEntre(cliente.licenciaExpira, hoy) > 0) {
@@ -50,10 +46,30 @@ export function avisosDeSalida({ cliente, carro, contrato, contratosDelCliente =
   }
 
   const encimado = contratosDelCarro.find((otro) =>
-    otro.id !== contrato?.id &&
-    seEnciman(contrato?.fechaSalida, contrato?.devolucionPrevista, otro.fechaSalida, otro.devolucionPrevista));
+    otro.id !== contrato?.id && seCruzan(contrato, otro));
   if (encimado) {
     avisos.push(alto(`Este carro tiene otro contrato del ${encimado.fechaSalida} al ${encimado.devolucionPrevista}.`));
+  }
+
+  // El carro que está por salir puede estar apartado para otro cliente
+  // pasado mañana — eso es lo que hoy se pierde: nadie se lo dice al
+  // mostrador y se entera por un cliente enojado. Una reservación cancelada
+  // o ya entregada no cuenta (estadoReserva) — esa función deja que
+  // contratoId mande sobre cancelada a propósito, para que una cancelación
+  // tardía no borre un contrato que ya existe.
+  const cruzadas = reservasDelCarro.filter((r) => estadoReserva(r) === 'pendiente' && seCruzan(contrato, r));
+  if (cruzadas.length) {
+    // Con varias reservaciones cruzadas no se apila una pared de rojo: se
+    // avisa solo de la que sale primero (la que de verdad urge decidir) y,
+    // si hay más, se dice cuántas — un renglón por cada una sería ruido, no
+    // ayuda.
+    let primera = cruzadas[0];
+    cruzadas.forEach((r) => {
+      if (diasEntre(primera.fechaSalida, r.fechaSalida) < 0) primera = r;
+    });
+    const extra = cruzadas.length - 1;
+    const demas = extra > 0 ? ` (y ${extra} reservación${extra === 1 ? '' : 'es'} más)` : '';
+    avisos.push(alto(`Este carro está apartado para ${primera.clienteNombre} desde el ${textoFecha(primera.fechaSalida)}${demas}.`));
   }
 
   return [...avisos.filter((a) => a.nivel === 'alto'), ...avisos.filter((a) => a.nivel === 'medio')];

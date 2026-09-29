@@ -20,7 +20,7 @@ import { avisosDeSalida } from '../nucleo/avisos.js';
 import { devolucionPrevista, hoyISO } from '../nucleo/fechas.js';
 import { q, suma } from '../nucleo/dinero.js';
 import {
-  cargarFlota, cargarContratosAbiertos, cargarAjustes, buscarClientes,
+  cargarFlota, cargarContratosAbiertos, cargarReservas, cargarAjustes, buscarClientes,
   guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato,
 } from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
@@ -436,6 +436,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
 
   let flota = [];
   let contratosAbiertos = [];
+  let reservas = [];
   let ajustes = {};
   let clienteSeleccionado = null;
   let ultimosResultados = [];
@@ -593,6 +594,13 @@ export async function pintarSacarCarro(contenedor, carroId) {
     const contratosDelCarro = ajeno || !carroId
       ? []
       : contratosAbiertos.filter((c) => c.carroId === carroId);
+    // Mismo filtro que contratosDelCarro arriba: solo las reservaciones de
+    // ESTE carro exacto (por placa), no las que piden "un microbús" sin
+    // unidad asignada — avisosDeSalida (avisos.js) es sobre este carro, no
+    // sobre la capacidad del tipo.
+    const reservasDelCarro = ajeno || !carroId
+      ? []
+      : reservas.filter((r) => r.carroId === carroId);
 
     // avisosDeSalida (avisos.js) ya no avisa por precio ni por días mínimos
     // a propósito — pedido del dueño: "yo pongo el precio que yo quiera" —
@@ -603,6 +611,7 @@ export async function pintarSacarCarro(contenedor, carroId) {
       contrato: borrador,
       contratosDelCliente,
       contratosDelCarro,
+      reservasDelCarro,
       hoy: hoyISO(),
     });
     el('sc-avisos').innerHTML = avisos.map(lineaAviso).join('');
@@ -755,21 +764,25 @@ export async function pintarSacarCarro(contenedor, carroId) {
   refrescarCarro();
   recalcular();
 
-  // cargarFlota/cargarContratosAbiertos sirven la copia local al instante y
-  // nunca rechazan (T9), igual que en flota.js; ahora entregan { datos, fallo
-  // } (CRÍTICO 2 de la revisión final) — esta pantalla todavía no tiene dónde
-  // mostrar ese fallo (no hay una barra como la de flota.js), así que por
-  // ahora solo toma `datos`, que nunca inventa un arreglo vacío: cae a la
-  // copia local si la nube falló. cargarAjustes() tampoco rechaza (se queda
-  // con los valores del dueño si la nube falla o el documento no existe
-  // todavía), así que tampoco hace falta un try/catch.
-  const [rFlota, rContratos, ajustesCargados] = await Promise.all([
+  // cargarFlota/cargarContratosAbiertos/cargarReservas sirven la copia local
+  // al instante y nunca rechazan (T9), igual que en flota.js; entregan
+  // { datos, fallo } (CRÍTICO 2 de la revisión final) — esta pantalla
+  // todavía no tiene dónde mostrar ese fallo (no hay una barra como la de
+  // flota.js), así que por ahora solo toma `datos`, que nunca inventa un
+  // arreglo vacío: cae a la copia local si la nube falló, así que un fallo
+  // de red nunca se ve aquí como "no hay reservaciones" cuando sí las hay.
+  // cargarAjustes() tampoco rechaza (se queda con los valores del dueño si
+  // la nube falla o el documento no existe todavía), así que tampoco hace
+  // falta un try/catch.
+  const [rFlota, rContratos, rReservas, ajustesCargados] = await Promise.all([
     cargarFlota((r) => { flota = r.datos; if (sigoVigente()) refrescarCarro(); }),
     cargarContratosAbiertos((r) => { contratosAbiertos = r.datos; if (sigoVigente()) recalcular(); }),
+    cargarReservas((r) => { reservas = r.datos; if (sigoVigente()) recalcular(); }),
     cargarAjustes(),
   ]);
   flota = rFlota.datos;
   contratosAbiertos = rContratos.datos;
+  reservas = rReservas.datos;
   ajustes = ajustesCargados;
   if (!sigoVigente()) return;
   // El % de comisión del formulario arranca en el default fijo de esta
