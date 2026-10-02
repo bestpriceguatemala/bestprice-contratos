@@ -14,10 +14,19 @@ const MENSAJES = {
   'auth/network-request-failed': 'No se pudo conectar. Revisa tu conexión a internet.',
 };
 
-// "o vuelve a cargar la página": ya no hace falta para que el siguiente
-// intento funcione (firebase-config.js reintenta solo desde el hallazgo
-// importante de la revisión final), pero se deja como salida de emergencia
-// visible para el dueño si la conexión sigue fallando.
+// "o vuelve a cargar la página" NO es decorativo, y este comentario decía lo
+// contrario hasta que la revisión del área de dinero lo desmintió.
+//
+// firebase-config.js vuelve a poner `listo` en null tras un fallo, así que un
+// fallo de RED mientras se escribe la contraseña sí se recupera solo. Pero si
+// lo que falló fue la DESCARGA del SDK, no: una vez que un `import()` dinámico
+// de una URL falla, el navegador recuerda ese fallo y el siguiente `import()`
+// de la misma URL falla al instante, sin siquiera pedir red. Eso no lo puede
+// arreglar nuestro código — la caché de módulos del navegador no se limpia
+// desde JavaScript.
+//
+// Por eso la frase se queda: en ese caso recargar es lo ÚNICO que funciona, y
+// él no tiene cómo saberlo si no se lo decimos.
 const MENSAJE_GENERICO = 'No se pudo conectar con el sistema. Intenta de nuevo en unos minutos, o vuelve a cargar la página.';
 
 /** Convierte un error de Firebase (o de conexión) en un mensaje en español simple. */
