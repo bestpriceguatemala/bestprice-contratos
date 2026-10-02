@@ -1,20 +1,28 @@
 // Pruebas de la segunda credencial del área de dinero (§11 del diseño).
 //
 // No hay Firebase en el entorno de pruebas, así que aquí se prueba lo que sí se
-// puede probar sin red: la frase que lee el dueño cuando algo sale mal, la regla
-// de "un fallo de conexión no deja el área cerrada para siempre", y que la
+// puede probar sin red: la frase que lee el dueño cuando algo sale mal, que un
+// fallo de conexión al teclear la contraseña no deja el área cerrada, y que la
 // instancia se arma con el nombre 'dinero' — que es lo que la aísla del
 // mostrador. Lo que necesita a Firebase de verdad (que entrar aquí no cierre la
 // sesión del mostrador) se verificó aparte, en el navegador, y queda dicho en
 // el reporte de la tarea.
+//
+// Una cosa que estas pruebas NO pueden afirmar, y que una versión anterior sí
+// afirmaba por error: que después de que Firebase no se descargue, el siguiente
+// intento lo baje. El navegador recuerda que un import() falló y lo vuelve a
+// fallar al instante; lo único que lo limpia es recargar la página. Por eso esa
+// falla se prueba como lo que realmente hace: pedir que recarguen.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as modulo from 'node:module';
 import { readFile } from 'node:fs/promises';
 import {
   NOMBRE_APP,
   SDK_VERSION,
   MENSAJE_CLAVE_INCORRECTA,
   MENSAJE_SIN_CONEXION,
+  MENSAJE_RECARGAR,
   MENSAJE_GENERICO,
   mensajeDeErrorDeDinero,
   unaVezConReintento,
@@ -26,7 +34,7 @@ import {
   sesionDeDinero,
   dbDeDinero,
 } from '../js/dinero-sesion.js';
-import { CONFIG } from '../js/firebase-config.js';
+import { CONFIG, SDK } from '../js/firebase-config.js';
 
 // ---------------------------------------------------------------------------
 // Lo que lee el dueño
@@ -50,12 +58,22 @@ test('sin conexión dice otra cosa que "contraseña incorrecta": son dos accione
   assert.equal(MENSAJE_SIN_CONEXION, 'No se pudo conectar. Revisa tu internet e intenta de nuevo.');
   assert.equal(mensajeDeErrorDeDinero('auth/network-request-failed'), MENSAJE_SIN_CONEXION);
   assert.equal(mensajeDeErrorDeDinero('auth/timeout'), MENSAJE_SIN_CONEXION);
-  // El código propio con el que se marca que Firebase ni siquiera se pudo
-  // descargar (sin internet al abrir la página).
-  assert.equal(mensajeDeErrorDeDinero('dinero/sin-conexion'), MENSAJE_SIN_CONEXION);
   // Decirle "contraseña incorrecta" cuando el problema es el wifi lo haría
   // escribir cien veces una contraseña que estaba bien.
   assert.notEqual(MENSAJE_SIN_CONEXION, MENSAJE_CLAVE_INCORRECTA);
+});
+
+test('que Firebase no se descargue pide recargar la página: "intenta de nuevo" no sirve ahí', () => {
+  // El código propio con el que se marca que Firebase ni siquiera se pudo
+  // descargar. A diferencia de una red caída al teclear la contraseña, aquí
+  // volver a intentar no recupera nada: el navegador recuerda que ese import()
+  // falló y lo vuelve a fallar al instante, con o sin internet. Lo único que
+  // funciona es recargar, y la frase tiene que decirle eso.
+  assert.equal(mensajeDeErrorDeDinero('dinero/sin-conexion'), MENSAJE_RECARGAR);
+  assert.match(MENSAJE_RECARGAR, /Recarga la página/);
+  assert.notEqual(MENSAJE_RECARGAR, MENSAJE_SIN_CONEXION);
+  assert.notEqual(MENSAJE_RECARGAR, MENSAJE_CLAVE_INCORRECTA);
+  assert.notEqual(MENSAJE_RECARGAR, MENSAJE_GENERICO);
 });
 
 test('demasiados intentos, cuenta deshabilitada y contraseña vacía tienen su propia frase', () => {
@@ -71,7 +89,11 @@ test('demasiados intentos, cuenta deshabilitada y contraseña vacía tienen su p
     mensajeDeErrorDeDinero('auth/missing-password'),
     'Escribe la contraseña del área de dinero.',
   );
-  assert.equal(mensajeDeErrorDeDinero('auth/invalid-email'), 'Ese correo no es válido.');
+});
+
+test('un correo inválido cae en la frase de respaldo: el correo es una constante, él solo teclea la contraseña', () => {
+  // "Ese correo no es válido" lo mandaría a buscar un campo que no ve.
+  assert.equal(mensajeDeErrorDeDinero('auth/invalid-email'), MENSAJE_GENERICO);
 });
 
 test('un código que no conocemos cae en una frase sensata, nunca en el código', () => {
@@ -235,15 +257,16 @@ test('la sesión de dinero vive solo en memoria: recargar la página vuelve a ce
   assert.equal(auth[2].persistence, f.persistencia);
 });
 
-test('Firebase se baja de la misma versión que usa el mostrador, para compartir los módulos', async () => {
-  // dinero-sesion.js no puede importar SDK de firebase-config.js (no lo exporta
-  // y ese archivo no se toca), así que la versión se repite aquí. Esta prueba
-  // es la que avisa si alguien sube una y olvida la otra: dos versiones a la
-  // vez bajarían Firebase dos veces y las dos instancias no compartirían nada.
-  const texto = await readFile(new URL('../js/firebase-config.js', import.meta.url), 'utf8');
-  const version = texto.match(/const SDK = '([^']+)'/)?.[1];
-  assert.ok(version, 'no se encontró la versión en firebase-config.js');
-  assert.equal(SDK_VERSION, version);
+test('la versión de Firebase es una sola, la del mostrador', () => {
+  // Qué protege esto: el área de dinero solo se abre con la sesión del mostrador
+  // ya iniciada, que ya descargó estos mismos URL. El navegador los tiene en su
+  // caché de módulos, así que el import() de dinero-sesion.js no depende del
+  // internet. Con otra versión tendría que descargar por su cuenta, y una
+  // descarga fallida no se recupera sin recargar (ver la prueba de arriba).
+  // No es que una versión distinta rompa algo por sí sola; es que dejaría
+  // alcanzable un fallo que hoy no lo es. Por eso la versión sale de
+  // firebase-config.js y no se repite: el acoplamiento es real, no un texto.
+  assert.equal(SDK_VERSION, SDK);
 });
 
 test('cargarFirebaseDeDinero baja los tres módulos de la versión correcta y arma la instancia', async () => {
@@ -259,22 +282,29 @@ test('cargarFirebaseDeDinero baja los tres módulos de la versión correcta y ar
   const instancia = await cargarFirebaseDeDinero(importar);
   assert.equal(pedidos.length, 3);
   for (const url of pedidos) {
-    assert.ok(url.startsWith(`https://www.gstatic.com/firebasejs/${SDK_VERSION}/`), url);
+    // SDK, la que exporta firebase-config.js, y no SDK_VERSION: lo que importa es
+    // que el URL pedido sea el que ya descargó el mostrador.
+    assert.ok(url.startsWith(`https://www.gstatic.com/firebasejs/${SDK}/`), url);
   }
+  assert.deepEqual(
+    pedidos.map((url) => url.split('/').pop()).sort(),
+    ['firebase-app.js', 'firebase-auth.js', 'firebase-firestore.js'],
+  );
   assert.equal(instancia.app, f.app);
   assert.equal(instancia.authMod, f.authMod);
   assert.equal(instancia.fsMod, f.fsMod);
   assert.equal(instancia.appMod, f.appMod);
 });
 
-test('si Firebase no se puede descargar, el error dice "sin conexión" y no el de un TypeError', async () => {
-  // Un import() que falla (sin internet al abrir la página) lanza un TypeError
-  // sin código. Sin marcarlo, caería en la frase de respaldo y el dueño no
-  // sabría que es su internet.
-  const importar = async () => { throw new TypeError('Failed to fetch dynamically imported module'); };
+test('si Firebase no se puede descargar, el error trae el código propio y la frase de recargar, no la de un TypeError', async () => {
+  // Un import() que falla lanza un TypeError sin código. Sin marcarlo, caería
+  // en la frase de respaldo y el dueño no sabría que lo que sirve es recargar.
+  const falla = new TypeError('Failed to fetch dynamically imported module');
+  const importar = async () => { throw falla; };
   const error = await cargarFirebaseDeDinero(importar).catch((e) => e);
   assert.equal(error.code, 'dinero/sin-conexion');
-  assert.equal(mensajeDeErrorDeDinero(error.code), MENSAJE_SIN_CONEXION);
+  assert.equal(mensajeDeErrorDeDinero(error.code), MENSAJE_RECARGAR);
+  assert.equal(error.cause, falla, 'el fallo original queda a mano para depurar');
 });
 
 // ---------------------------------------------------------------------------
@@ -365,35 +395,43 @@ test('con la contraseña equivocada lanza la frase en español y la sesión sigu
   assert.equal(s.dbDeDinero(), null, 'sin credencial no se entrega la base de datos');
 });
 
-test('sin internet al abrir: dice "sin conexión", y en cuanto vuelve, el siguiente intento entra', async () => {
-  // La prueba de que este módulo no reintroduce el error de firebase-config.js:
-  // el intento fallido no puede dejar el área cerrada hasta recargar.
-  const inst = instanciaFalsa();
+test('sin internet al abrir: dice que recargue, y seguir intentando sin recargar no entra ni miente', async () => {
+  // Lo que pasa en el navegador: tras un import() fallido, pedir el mismo URL de
+  // nuevo falla al instante. Esta prueba lo representa con una carga que SIEMPRE
+  // falla, y no afirma que el siguiente intento vaya a entrar, porque con Chrome
+  // no entra. Lo que sí tiene que cumplir el módulo: decir cada vez lo único que
+  // funciona (recargar), no dejar la sesión abierta, y no quedarse con el fallo
+  // guardado en sus propias variables (la lección de firebase-config.js): cada
+  // intento vuelve a pedir la carga, así que en un navegador que sí reintente
+  // funcionaría, y en uno que no, falla igual de claro.
   let intentos = 0;
   const s = crearSesionDeDinero(async () => {
     intentos++;
-    if (intentos === 1) {
-      throw Object.assign(new Error('no se descargó'), { code: 'dinero/sin-conexion' });
-    }
-    return inst;
+    throw Object.assign(new Error('no se descargó'), { code: 'dinero/sin-conexion' });
   });
-  const primero = await s.entrarADinero('dinero@ejemplo.com', 'la-buena').catch((e) => e);
-  assert.equal(primero.message, MENSAJE_SIN_CONEXION);
-  assert.equal(s.sesionDeDinero(), null);
-
-  const uid = await s.entrarADinero('dinero@ejemplo.com', 'la-buena');
-  assert.equal(uid, 'uid-de-dinero');
-  assert.equal(intentos, 2);
+  for (let i = 0; i < 3; i++) {
+    const error = await s.entrarADinero('dinero@ejemplo.com', 'la-buena').catch((e) => e);
+    assert.equal(error.message, MENSAJE_RECARGAR);
+    assert.equal(s.sesionDeDinero(), null);
+    assert.equal(s.dbDeDinero(), null);
+  }
+  assert.equal(intentos, 3);
 });
 
-test('el internet se cae varias veces seguidas y aun así el intento siguiente vuelve a probar', async () => {
+test('la red se cae varias veces seguidas al teclear la contraseña y aun así el intento siguiente vuelve a probar', async () => {
+  // Esta sí se recupera: cada intento de entrar es una petición nueva, no un
+  // import() que el navegador recuerde (se comprobó con el SDK real).
   const inst = instanciaFalsa();
-  let intentos = 0;
-  const s = crearSesionDeDinero(async () => {
-    intentos++;
-    if (intentos <= 4) throw Object.assign(new Error('x'), { code: 'dinero/sin-conexion' });
-    return inst;
-  });
+  const original = inst.authMod.signInWithEmailAndPassword;
+  let caidas = 0;
+  inst.authMod.signInWithEmailAndPassword = async (...args) => {
+    if (caidas < 4) {
+      caidas++;
+      throw Object.assign(new Error('Firebase: Error (auth/network-request-failed).'), { code: 'auth/network-request-failed' });
+    }
+    return original(...args);
+  };
+  const s = crearSesionDeDinero(async () => inst);
   for (let i = 0; i < 4; i++) {
     const e = await s.entrarADinero('dinero@ejemplo.com', 'la-buena').catch((err) => err);
     assert.equal(e.message, MENSAJE_SIN_CONEXION);
@@ -515,15 +553,15 @@ test('la instancia crea el Auth de memoria ANTES que Firestore', () => {
 test('el archivo no toca la app del mostrador: ni iniciarFirebase ni getAuth', async () => {
   // Las pruebas con Firebase de mentira ven cómo se arma la instancia, no si
   // otra ruta del archivo va por la app por defecto. Esta mira el código (sin
-  // comentarios, que sí explican por qué): lo único que se toma de
-  // firebase-config.js es CONFIG. iniciarFirebase() levantaría la app del
+  // comentarios, que sí explican por qué): de firebase-config.js solo se toman
+  // datos (CONFIG y SDK), nunca iniciarFirebase(), que levantaría la app del
   // mostrador, y su Auth no es el de dinero.
   const texto = await readFile(new URL('../js/dinero-sesion.js', import.meta.url), 'utf8');
   const codigo = texto.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   assert.ok(!/iniciarFirebase/.test(codigo), 'usa iniciarFirebase');
   assert.ok(!/getAuth\s*\(/.test(codigo), 'usa getAuth');
   const imports = [...codigo.matchAll(/^import .*$/gm)].map((m) => m[0]);
-  assert.deepEqual(imports, ["import { CONFIG } from './firebase-config.js';"]);
+  assert.deepEqual(imports, ["import { CONFIG, SDK } from './firebase-config.js';"]);
 });
 
 test('con la contraseña equivocada el mensaje es en español pero el error de Firebase queda en `cause` para depurar', async () => {
@@ -598,4 +636,102 @@ test('un salir que falló no deja trabada la cola: reintentar cuando ya funciona
   await s.salirDeDinero();
   assert.equal(s.sesionDeDinero(), null);
   assert.equal(s.dbDeDinero(), null);
+});
+
+// ---------------------------------------------------------------------------
+// La línea que conecta lo anterior con el Firebase de verdad
+// ---------------------------------------------------------------------------
+//
+// Todo lo de arriba prueba crearSesionDeDinero con una carga inyectada. Lo único
+// que no veía ninguna prueba es la línea del final de dinero-sesion.js que arma
+// la sesión REAL y exporta sus funciones: sin los paréntesis,
+// `() => cargarFirebaseDeDinero` entrega la función en vez de la instancia, no
+// entra nadie, el área queda cerrada y nada lo notaba (falla cerrado, justo por
+// eso nadie se enteraría). Se prueba sin red porque Node no importa por https.
+
+// Si algún día Node importara por https por su cuenta, estas pruebas saldrían a
+// internet de verdad: mejor saltarlas que ir a Firebase con credenciales falsas.
+const NODE_IMPORTA_POR_HTTPS = [...process.execArgv, process.env.NODE_OPTIONS ?? '']
+  .join(' ').includes('network-imports');
+
+test('las funciones que exporta el módulo van conectadas a la carga real de Firebase', {
+  skip: NODE_IMPORTA_POR_HTTPS && 'este Node importa por https: la prueba saldría a la red',
+}, async () => {
+  // Aquí no hay Firebase, y el import() real de Node falla en el acto
+  // (ERR_UNSUPPORTED_ESM_URL_SCHEME). Si la línea está bien conectada, ese fallo
+  // llega hasta el dueño como la frase de recargar. Si está mal conectada, llega
+  // otra cosa (un TypeError que cae en la frase de respaldo).
+  for (let intento = 1; intento <= 2; intento++) {
+    const error = await entrarADinero('prueba@ejemplo.invalid', 'no-es-una-clave').catch((e) => e);
+    assert.equal(error.message, MENSAJE_RECARGAR, `intento ${intento}`);
+    assert.equal(error.cause.code, 'dinero/sin-conexion');
+    assert.equal(sesionDeDinero(), null);
+    assert.equal(dbDeDinero(), null);
+  }
+  await salirDeDinero(); // sin haber entrado: no hace nada y no falla
+  const directo = await cargarFirebaseDeDinero().catch((e) => e);
+  assert.equal(directo.code, 'dinero/sin-conexion', 'el import() por defecto es el real');
+});
+
+test('de punta a punta con el Firebase de mentira servido por los URL reales: entrar, estar adentro y salir', {
+  skip: (NODE_IMPORTA_POR_HTTPS && 'este Node importa por https: la prueba saldría a la red')
+    || (typeof modulo.registerHooks !== 'function' && 'este Node no tiene module.registerHooks'),
+}, async () => {
+  // Se engancha la carga de módulos para que los tres URL de gstatic respondan
+  // con Firebase de mentira. Así corren de verdad el import() por defecto, los
+  // URL con la versión de SDK, la sesión única y las cuatro funciones exportadas:
+  // lo que ninguna prueba con carga inyectada puede ver. Las llamadas a Firebase
+  // se anotan en `f.llamadas`.
+  const f = modulosFalsos();
+  f.authMod.signInWithEmailAndPassword = async (a, correo, clave) => {
+    f.llamadas.push(['signIn', a, correo, clave]);
+    a.currentUser = { uid: 'uid-de-dinero' };
+    return { user: a.currentUser };
+  };
+  f.authMod.signOut = async (a) => { f.llamadas.push(['signOut', a]); a.currentUser = null; };
+  globalThis.__firebaseFalso = { ...f.appMod, ...f.authMod, ...f.fsMod, inMemoryPersistence: f.persistencia };
+
+  const delega = (nombres) => nombres.map((n) => `export const ${n} = (...a) => globalThis.__firebaseFalso.${n}(...a);`).join('\n');
+  const fuentes = {
+    'firebase-app.js': delega(['initializeApp', 'deleteApp']),
+    'firebase-auth.js': `${delega(['initializeAuth', 'signInWithEmailAndPassword', 'signOut'])}\nexport const inMemoryPersistence = globalThis.__firebaseFalso.inMemoryPersistence;`,
+    'firebase-firestore.js': delega(['getFirestore']),
+  };
+  const base = `https://www.gstatic.com/firebasejs/${SDK}/`;
+  const pedidos = [];
+  const enganche = modulo.registerHooks({
+    resolve: (especificador, contexto, siguiente) => (
+      especificador.startsWith(base) ? { url: especificador, shortCircuit: true } : siguiente(especificador, contexto)
+    ),
+    load: (url, contexto, siguiente) => {
+      if (!url.startsWith(base)) return siguiente(url, contexto);
+      pedidos.push(url.slice(base.length));
+      return { format: 'module', source: fuentes[url.slice(base.length)], shortCircuit: true };
+    },
+  });
+  try {
+    assert.equal(sesionDeDinero(), null);
+    const uid = await entrarADinero('dinero@ejemplo.com', 'la-buena');
+    assert.equal(uid, 'uid-de-dinero');
+    // Las cuatro funciones exportadas hablan de la misma sesión.
+    assert.equal(sesionDeDinero(), 'uid-de-dinero');
+    assert.equal(dbDeDinero(), f.db);
+    assert.deepEqual([...pedidos].sort(), ['firebase-app.js', 'firebase-auth.js', 'firebase-firestore.js']);
+    // La app es la 'dinero', con su Auth en memoria: nada de la app del mostrador.
+    const inicio = f.llamadas.find((l) => l[0] === 'initializeApp');
+    assert.equal(inicio[1], CONFIG);
+    assert.equal(inicio[2], 'dinero');
+    assert.equal(f.llamadas.find((l) => l[0] === 'initializeAuth')[2].persistence, f.persistencia);
+    assert.ok(!f.llamadas.some((l) => l[0] === 'getAuth'));
+
+    await salirDeDinero();
+    assert.equal(sesionDeDinero(), null);
+    assert.equal(dbDeDinero(), null);
+    assert.ok(f.llamadas.some((l) => l[0] === 'signOut'));
+    assert.ok(f.llamadas.some((l) => l[0] === 'deleteApp' && l[1] === f.app));
+  } finally {
+    await salirDeDinero().catch(() => {}); // que ninguna otra prueba herede una sesión
+    enganche.deregister();
+    delete globalThis.__firebaseFalso;
+  }
 });

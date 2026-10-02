@@ -1,6 +1,8 @@
 // Conexión a Firebase. Los datos de este archivo son públicos por diseño: lo que
 // protege la información son las reglas de Firestore, no esconder estas claves.
-const SDK = '12.0.0';
+// Se exporta porque dinero-sesion.js baja Firebase de estos mismos URL: ver ahí
+// por qué tienen que ser idénticos.
+export const SDK = '12.0.0';
 
 export const CONFIG = {
   apiKey: 'AIzaSyB0NCVqgMhiy_cTpUv7WyYVn8C4LryeGO4',

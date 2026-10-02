@@ -19,22 +19,36 @@
 //    cerrar el navegador y el área quedaría abierta para quien se siente después.
 //    En memoria, recargar la página la vuelve a cerrar.
 //
-// 3. Un fallo de conexión no se queda guardado. Es la lección de
+// 3. Un fallo no se queda guardado en NUESTRAS variables. Es la lección de
 //    firebase-config.js (hallazgo de la revisión final): si el primer intento
 //    fallaba y se guardaba la promesa rechazada, todos los intentos siguientes
 //    devolvían ese mismo fallo aunque el internet ya hubiera vuelto, y el dueño
 //    podía escribir bien su contraseña cien veces y ver el mismo error cien
 //    veces. Aquí lo resuelve `unaVezConReintento`.
-import { CONFIG } from './firebase-config.js';
+//
+//    Pero hay un límite que ningún código nuestro puede quitar: el navegador
+//    recuerda por su cuenta que un import() falló. Si Firebase no se pudo
+//    descargar, volver a pedir ese mismo URL falla al instante, sin salir a la
+//    red, aunque el internet ya haya vuelto (lo comprobó la revisión en Chrome).
+//    Lo único que lo limpia es recargar la página, así que esa falla tiene su
+//    propia frase (MENSAJE_RECARGAR) que le dice justo eso. En la práctica no
+//    debería ocurrir: ver SDK_VERSION. El fallo de conexión al TECLEAR la
+//    contraseña es otra cosa: ese sí se recupera con solo intentar de nuevo.
+import { CONFIG, SDK } from './firebase-config.js';
 
 /** El nombre que separa esta app de la del mostrador. Sin él, sería la misma. */
 export const NOMBRE_APP = 'dinero';
 
-// La misma versión que firebase-config.js, para que el navegador reutilice los
-// módulos ya descargados en vez de bajar Firebase dos veces. firebase-config.js
-// no la exporta y no se toca, así que se repite aquí; una prueba avisa si una
-// de las dos cambia y la otra no.
-export const SDK_VERSION = '12.0.0';
+// La versión sale de firebase-config.js y no se repite aquí. El área de dinero
+// solo se abre con la sesión del mostrador ya iniciada, y esa sesión ya descargó
+// estos mismos tres URL (iniciarFirebase), así que el navegador los tiene en su
+// caché de módulos y el import() de abajo no depende del internet. Eso es lo
+// que protege que el URL sea idéntico, y no que "se baje una sola vez": con otra
+// versión este import() tendría que descargar Firebase por su cuenta, y una
+// descarga fallida ya no se recupera sin recargar la página (ver
+// MENSAJE_RECARGAR). Con una sola constante para las dos, esa garantía no
+// depende de que alguien se acuerde de subir ambas.
+export const SDK_VERSION = SDK;
 
 // ---------------------------------------------------------------------------
 // Lo que lee el dueño
@@ -44,7 +58,15 @@ export const SDK_VERSION = '12.0.0';
 // escrito, o revisar el wifi. Confundirlas lo haría reescribir cien veces una
 // contraseña que estaba bien.
 export const MENSAJE_CLAVE_INCORRECTA = 'Esa contraseña no abre el área de dinero.';
+// Se cayó la red al comprobar la contraseña. Aquí "intenta de nuevo" es cierto:
+// cada intento es una petición nueva.
 export const MENSAJE_SIN_CONEXION = 'No se pudo conectar. Revisa tu internet e intenta de nuevo.';
+// Firebase no se pudo DESCARGAR. Distinta de la anterior a propósito: aquí
+// "intenta de nuevo" es falso, porque el navegador recuerda que ese import()
+// falló y lo vuelve a fallar al instante, aunque el internet ya haya vuelto. Lo
+// único que funciona es recargar la página, así que primero se le dice eso, y
+// después la pista del internet por si la recarga tampoco abre.
+export const MENSAJE_RECARGAR = 'No se pudo cargar el área de dinero. Recarga la página e intenta de nuevo; si falla otra vez, revisa tu internet.';
 // De respaldo: no sabemos si fue la contraseña o el internet, y acusar a uno
 // en falso lo mandaría por el camino equivocado.
 export const MENSAJE_GENERICO = 'No se pudo abrir el área de dinero. Intenta de nuevo; si sigue igual, recarga la página.';
@@ -65,13 +87,17 @@ const MENSAJES = new Map([
   ['auth/user-not-found', MENSAJE_CLAVE_INCORRECTA],
   ['auth/network-request-failed', MENSAJE_SIN_CONEXION],
   ['auth/timeout', MENSAJE_SIN_CONEXION],
-  // Código propio: Firebase ni siquiera se pudo descargar (sin internet al
-  // abrir la página). Ver cargarFirebaseDeDinero.
-  ['dinero/sin-conexion', MENSAJE_SIN_CONEXION],
+  // Código propio: Firebase ni siquiera se pudo descargar. Pide recargar, no
+  // "intentar de nuevo". Ver MENSAJE_RECARGAR y cargarFirebaseDeDinero.
+  ['dinero/sin-conexion', MENSAJE_RECARGAR],
   ['auth/too-many-requests', 'Demasiados intentos seguidos. Espera unos minutos e intenta de nuevo.'],
   ['auth/user-disabled', 'La cuenta del área de dinero está deshabilitada.'],
   ['auth/missing-password', 'Escribe la contraseña del área de dinero.'],
-  ['auth/invalid-email', 'Ese correo no es válido.'],
+  // El correo de esta cuenta es una constante del sistema: él solo teclea la
+  // contraseña. Si este código llegara sería un error de configuración que él
+  // no puede arreglar, y "ese correo no es válido" lo mandaría a buscar un
+  // campo que no ve. Cae en la frase de respaldo, como cualquier otro.
+  ['auth/invalid-email', MENSAJE_GENERICO],
 ]);
 
 /**
@@ -94,6 +120,11 @@ export function mensajeDeErrorDeDinero(codigo) {
  *
  * `obtener.olvidar()` descarta también un intento que sí salió bien, para
  * obligar a cargar de nuevo (al cerrar el área).
+ *
+ * Esto limpia lo que guardamos NOSOTROS. No puede limpiar la caché de módulos
+ * del navegador: un import() fallido se vuelve a fallar al instante, así que
+ * para esa carga en particular reintentar no recupera nada hasta recargar la
+ * página (ver MENSAJE_RECARGAR).
  */
 export function unaVezConReintento(cargar) {
   let listo = null;
@@ -156,9 +187,10 @@ export async function cargarFirebaseDeDinero(importar = (url) => import(url)) {
     ]);
     modulos = { appMod, authMod, fsMod };
   } catch (causa) {
-    // Un import() que falla (sin internet al abrir la página) lanza un
-    // TypeError sin código. Se le pone el código propio para que el dueño lea
-    // "revisa tu internet" y no la frase de respaldo.
+    // Un import() que falla lanza un TypeError sin código. Se le pone el código
+    // propio para que el dueño lea la frase que le dice que recargue, y no la
+    // de respaldo. Reintentar el mismo import() no sirve: el navegador ya
+    // recordó el fallo (ver MENSAJE_RECARGAR).
     throw Object.assign(new Error('No se pudo descargar Firebase.', { cause: causa }), {
       code: 'dinero/sin-conexion',
     });
@@ -254,6 +286,10 @@ export function crearSesionDeDinero(cargar) {
 }
 
 // La sesión única del sistema: la que usan las pantallas del área de dinero.
+// Esta es la única línea que une todo lo de arriba con el Firebase de verdad, y
+// tiene que LLAMAR a la carga (con paréntesis): `() => cargarFirebaseDeDinero`
+// entregaría la función en vez de la instancia, no entraría nadie, y como falla
+// cerrado nadie lo notaría. La cubren las pruebas de "La línea que conecta...".
 const sesion = crearSesionDeDinero(() => cargarFirebaseDeDinero());
 
 export const { entrarADinero, salirDeDinero, sesionDeDinero, dbDeDinero } = sesion;
