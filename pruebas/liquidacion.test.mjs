@@ -380,6 +380,31 @@ test('cuentaDeDueno: si la lista de pagos no llegó, lanza en vez de suponer que
   assert.throws(() => cuentaDeDueno(), { name: 'TypeError', message: /pagos/ }, 'ni sin argumentos');
 });
 
+// La otra mitad de lo mismo, y la que más hay que cuidar. Si `contratos` no
+// llegó (la lectura de contratos falló) y se leyera como «no hay ninguno», la
+// pantalla diría «no le debes nada a nadie». Una deuda inflada hace que él se
+// detenga y revise, porque más o menos sabe cuánto debe; «estás a mano con
+// todos» es una buena noticia, y las buenas noticias nadie las audita. Cerraría
+// la pantalla tranquilo y un dueño se quedaría sin su pago un mes. Por eso
+// tampoco aquí se adivina: se lanza. Quien algún día quiera «arreglar» esto con
+// un `[]` amable estaría volviendo a poner el silencio donde más cuesta.
+test('cuentaDeDueno: si la lista de contratos no llegó, lanza en vez de decir que no se le debe nada', () => {
+  const contratos = [cerrado('c1'), cerradoConAtraso('c2')]; // Q1,200 + Q1,800
+
+  // Bien leído: se le deben Q3,000.
+  assert.equal(cuentaDeDueno({ contratos, pagos: [] }).totalPorPagar, 3000);
+
+  // Mal leído: antes decía Q0.00 con toda confianza.
+  for (const mala of [undefined, null, {}, 'c1', 42]) {
+    assert.throws(
+      () => cuentaDeDueno({ contratos: mala, pagos: [] }),
+      { name: 'TypeError', message: /«contratos» debe ser una lista/ },
+      `contratos = ${JSON.stringify(mala)} no es una lista`,
+    );
+  }
+  assert.throws(() => cuentaDeDueno({ pagos: [] }), { name: 'TypeError', message: /«contratos» debe ser una lista/ }, 'ni omitido');
+});
+
 test('cuentaDeDueno: un pago cuyo `contratos` no es una lista también lanza', () => {
   // Lo mismo un nivel más adentro: un pago al que le falta la lista de rentas
   // que cubre no dice «no cubre ninguna», dice que el dato está dañado.
@@ -740,9 +765,23 @@ test('agruparPorDueno: los contratos de carro propio no forman parte de ningún 
   assert.deepEqual(ids(grupos[0].cuenta.porPagar), ['c1']);
 });
 
-test('agruparPorDueno: sin contratos da una lista vacía', () => {
+test('agruparPorDueno: una lista de contratos vacía de verdad da una lista vacía', () => {
   assert.deepEqual(agruparPorDueno([], []), []);
-  assert.deepEqual(agruparPorDueno(undefined, []), []);
+});
+
+test('agruparPorDueno: si la lista de contratos no llegó, lanza en vez de decir que no se le debe a nadie', () => {
+  // Ver el comentario de cuentaDeDueno: «no le debes a nadie» es la respuesta
+  // que nadie revisa, y por eso la que no se puede dar por una lectura fallida.
+  const contratos = [enlazado(cerrado('c1'), 'd1'), enlazado(cerradoConAtraso('c2'), 'd1')];
+  assert.equal(agruparPorDueno(contratos, [])[0].cuenta.totalPorPagar, 3000, 'bien leído: Q3,000 a d1');
+
+  for (const mala of [undefined, null, {}, 'c1', 42]) {
+    assert.throws(
+      () => agruparPorDueno(mala, []),
+      { name: 'TypeError', message: /«contratos» debe ser una lista/ },
+      `contratos = ${JSON.stringify(mala)} no es una lista`,
+    );
+  }
 });
 
 test('agruparPorDueno: una lista de pagos que no llegó lanza, haya contratos o no', () => {

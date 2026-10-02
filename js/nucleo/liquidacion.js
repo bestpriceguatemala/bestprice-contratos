@@ -100,6 +100,31 @@ function idsCubiertos(pagos) {
 }
 
 /**
+ * La lista de contratos, o un error si no es una lista. Es la otra mitad de
+ * `idsCubiertos` y la que más importa no ablandar.
+ *
+ * Si `contratos` no llegó (la lectura falló) y aquí se leyera como «no hay
+ * ninguno», la pantalla diría «no le debes nada a nadie» con toda confianza. Un
+ * total inflado hace que el dueño del negocio se detenga y revise, porque más o
+ * menos sabe cuánto debe; «estás a mano con todos» es una buena noticia y las
+ * buenas noticias nadie las audita: cerraría la pantalla tranquilo y un dueño
+ * se quedaría sin su pago un mes. El silencio es la dirección peligrosa. Por
+ * eso no se devuelve `[]` por cortesía: que alguien lo «arregle» a un valor por
+ * defecto amable es volver a poner el error donde más cuesta.
+ *
+ * Una lista vacía de verdad sí es válida: no hay contratos de carro ajeno.
+ */
+function exigirContratos(contratos) {
+  if (!Array.isArray(contratos)) {
+    throw new TypeError(
+      `liquidacion: «contratos» debe ser una lista y llegó ${queLlego(contratos)}. Sin ella no se sabe qué se le debe `
+      + 'a nadie, y suponer que no hay ninguno diría «no le debes nada» cuando quizá sí.',
+    );
+  }
+  return contratos;
+}
+
+/**
  * La cuenta con un dueño: tres listas y el total, ya separadas para que la
  * pantalla solo las dibuje.
  *
@@ -118,8 +143,10 @@ function idsCubiertos(pagos) {
  *   decir «sin costo anotado» en vez de pasar por buena una cifra que nadie
  *   escribió. El contrato sigue en su lista y no cambia el total.
  *
- * `pagos` DEBE ser una lista (ver `idsCubiertos`): si no llegó, esto lanza en
- * vez de contar como «sin pagar» lo que quizá ya se pagó.
+ * `pagos` y `contratos` DEBEN ser listas (ver `idsCubiertos` y
+ * `exigirContratos`): si no llegaron, esto lanza. Pagos ausentes contarían como
+ * «sin pagar» lo que quizá ya se pagó; contratos ausentes dirían «no se le debe
+ * nada» a quien quizá sí se le debe.
  *
  * `contratos` ya vienen de un solo dueño. Un contrato de carro propio que se
  * colara no le debe nada a nadie, así que no aparece en ninguna lista.
@@ -131,7 +158,7 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
   const pagados = [];
   const sinCostoAnotado = [];
 
-  for (const c of Array.isArray(contratos) ? contratos : []) {
+  for (const c of exigirContratos(contratos)) {
     if (!esDeCarroAjeno(c)) continue;
     // Se pregunta por el costo ya calculado, no por `subarriendo.costoDia`:
     // así, cuando el costo se mueva a `privado/dinero` (ADR-002), esta marca
@@ -180,15 +207,16 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
  *
  * Los contratos de carro propio no forman parte de ningún dueño.
  *
- * `pagos` DEBE ser una lista, igual que en `cuentaDeDueno`, y se exige aquí
- * aunque no haya contratos: que lance no debe depender de que ese día haya o
- * no subarriendos.
+ * `pagos` y `contratos` DEBEN ser listas, igual que en `cuentaDeDueno`, y se
+ * exige aquí arriba aunque no haya contratos: que lance no debe depender de que
+ * ese día haya o no subarriendos. Una lista vacía de verdad da `[]`; una que no
+ * llegó lanza, porque `[]` aquí significaría «no le debes a nadie».
  */
 export function agruparPorDueno(contratos, pagos) {
   idsCubiertos(pagos);
   const grupos = new Map();
 
-  for (const c of Array.isArray(contratos) ? contratos : []) {
+  for (const c of exigirContratos(contratos)) {
     if (!esDeCarroAjeno(c)) continue;
     const duenoId = c.duenoId || null;
     const texto = String(c.carroAjeno?.dueno ?? '').trim();
