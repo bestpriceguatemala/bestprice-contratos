@@ -20,6 +20,9 @@ import { estadoContrato } from './estados.js';
 // de este archivo.
 const SIN_NOMBRE = 'Sin dueño anotado';
 
+/** Orden por código de caracteres: total y siempre igual, sin depender del idioma. */
+const porCodigo = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
 /**
  * ¿Es un contrato de carro ajeno? Se pregunta por `ajeno`, la marca que
  * escribe "Sacar carro" (construirContrato), y no por `subarriendo`: el costo
@@ -57,11 +60,39 @@ export function esPagableAlDueno(contrato) {
   return esDeCarroAjeno(contrato) && estadoContrato(contrato) === 'cerrado';
 }
 
-/** Los ids de contrato que algún pago a un dueño ya cubrió. */
+/** Cómo se llama lo que llegó, para el mensaje de error (`typeof null` es 'object'). */
+const queLlego = (valor) => (valor === null ? 'null' : typeof valor);
+
+/**
+ * Los ids de contrato que algún pago a un dueño ya cubrió.
+ *
+ * LANZA si `pagos` no es una lista, o si el `contratos` de algún pago no lo es.
+ * No devuelve un conjunto vacío «por si acaso»: vacío y fallido no son lo
+ * mismo. Si la lectura de `pagosDueno` falló y aquí se leyera como «nadie ha
+ * cobrado», cada contrato ya pagado reaparecería como deuda y el dueño del
+ * negocio le pagaría dos veces a quien ya le pagó. Una función del núcleo no
+ * puede saber si la lectura falló, así que no adivina: un error fuerte se ve
+ * y se arregla, una deuda inflada en silencio se paga. (La misma regla que
+ * evitó pintar una lectura fallida de la flota como «todos disponibles».)
+ *
+ * Una lista vacía sí es válida: significa que no se le ha pagado a nadie.
+ */
 function idsCubiertos(pagos) {
+  if (!Array.isArray(pagos)) {
+    throw new TypeError(
+      `liquidacion: «pagos» debe ser una lista y llegó ${queLlego(pagos)}. Sin ella no se sabe qué ya se pagó, `
+      + 'y suponer que nada está pagado inflaría lo que se le debe a cada dueño.',
+    );
+  }
   const cubiertos = new Set();
-  for (const pago of Array.isArray(pagos) ? pagos : []) {
-    for (const id of Array.isArray(pago?.contratos) ? pago.contratos : []) {
+  for (const pago of pagos) {
+    if (!Array.isArray(pago?.contratos)) {
+      throw new TypeError(
+        `liquidacion: el «contratos» de un pago a dueño debe ser una lista y llegó ${queLlego(pago?.contratos)}. `
+        + 'Un pago dañado no se lee como «no cubre nada».',
+      );
+    }
+    for (const id of pago.contratos) {
       if (id) cubiertos.add(id);
     }
   }
@@ -80,6 +111,15 @@ function idsCubiertos(pagos) {
  * - `pagados`: cubiertos por un pago (`pagos[].contratos` guarda sus ids).
  *   Se revisan primero: un contrato ya pagado sigue pagado aunque después
  *   cambie de estado, y nunca debe volver a sumar.
+ * - `sinCostoAnotado`: ids de los contratos (de cualquiera de las tres
+ *   listas, en el orden en que llegaron) cuyo costo por día del dueño es 0.
+ *   El campo de costo no es obligatorio: vacío queda en 0, y la fila diría
+ *   «Q0.00» igual que un costo de verdad en cero. Con esto la pantalla puede
+ *   decir «sin costo anotado» en vez de pasar por buena una cifra que nadie
+ *   escribió. El contrato sigue en su lista y no cambia el total.
+ *
+ * `pagos` DEBE ser una lista (ver `idsCubiertos`): si no llegó, esto lanza en
+ * vez de contar como «sin pagar» lo que quizá ya se pagó.
  *
  * `contratos` ya vienen de un solo dueño. Un contrato de carro propio que se
  * colara no le debe nada a nadie, así que no aparece en ninguna lista.
@@ -89,9 +129,14 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
   const porPagar = [];
   const aunNoCierra = [];
   const pagados = [];
+  const sinCostoAnotado = [];
 
   for (const c of Array.isArray(contratos) ? contratos : []) {
     if (!esDeCarroAjeno(c)) continue;
+    // Se pregunta por el costo ya calculado, no por `subarriendo.costoDia`:
+    // así, cuando el costo se mueva a `privado/dinero` (ADR-002), esta marca
+    // lo sigue sin que nadie la toque.
+    if (costoDelSubarriendo(c) === 0) sinCostoAnotado.push(c.id);
     if (cubiertos.has(c.id)) pagados.push(c);
     else if (esPagableAlDueno(c)) porPagar.push(c);
     else aunNoCierra.push(c);
@@ -102,6 +147,7 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
     aunNoCierra,
     pagados,
     totalPorPagar: suma(...porPagar.map(costoDelSubarriendo)),
+    sinCostoAnotado,
   };
 }
 
@@ -123,6 +169,9 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
  * - `nombre` es el que se escribió en el contrato ese día, tal cual pero sin
  *   espacios sobrantes. En un grupo enlazado es solo un respaldo: la pantalla
  *   muestra el nombre del registro del dueño, que es el que se puede corregir.
+ *   Si el mismo dueño tiene varios textos escritos, el respaldo es el menor de
+ *   ellos, no «el del primer contrato»: así no cambia con el orden en que
+ *   llegaron los contratos, y con él no cambia el lugar del dueño en la lista.
  *
  * No se adivina que dos textos distintos ('Don Mario', 'Mario López') son la
  * misma persona: quedan como dos grupos, visibles, hasta que el dueño los
@@ -130,8 +179,13 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
  * tiene; un grupo de más solo es un desorden que se ve.
  *
  * Los contratos de carro propio no forman parte de ningún dueño.
+ *
+ * `pagos` DEBE ser una lista, igual que en `cuentaDeDueno`, y se exige aquí
+ * aunque no haya contratos: que lance no debe depender de que ese día haya o
+ * no subarriendos.
  */
 export function agruparPorDueno(contratos, pagos) {
+  idsCubiertos(pagos);
   const grupos = new Map();
 
   for (const c of Array.isArray(contratos) ? contratos : []) {
@@ -144,29 +198,39 @@ export function agruparPorDueno(contratos, pagos) {
 
     let grupo = grupos.get(clave);
     if (!grupo) {
-      grupo = { duenoId, nombre: texto, contratos: [] };
+      grupo = { clave, duenoId, textos: new Set(), contratos: [] };
       grupos.set(clave, grupo);
     }
     // Un dueño enlazado puede tener contratos con el texto vacío y otros con
-    // él escrito: el primer nombre que aparezca es el respaldo.
-    if (!grupo.nombre && texto) grupo.nombre = texto;
+    // él escrito, o escrito de varias maneras: se juntan todos para escoger
+    // el respaldo sin depender de cuál contrato llegó primero.
+    if (texto) grupo.textos.add(texto);
     grupo.contratos.push(c);
   }
 
   return [...grupos.values()]
     .map((g) => ({
+      clave: g.clave,
       duenoId: g.duenoId,
-      nombre: g.nombre || SIN_NOMBRE,
+      nombre: [...g.textos].sort(porCodigo)[0] || SIN_NOMBRE,
       sinEnlazar: !g.duenoId,
       cuenta: cuentaDeDueno({ contratos: g.contratos, pagos }),
     }))
     // Si dos deben lo mismo, el orden no debe depender de cómo llegaron los
-    // contratos: primero por nombre, y a igual nombre el enlazado va antes.
+    // contratos. Primero el nombre; y a igual nombre, la clave del grupo, que
+    // es única y siempre distinta entre dos grupos: empieza con 'id:' (dueño
+    // enlazado, y trae su duenoId) o con 'texto:' (escrito a mano), así que a
+    // igual nombre el enlazado va antes. Sin esa última llave, dos dueños con
+    // el mismo nombre y el mismo total saltarían de lugar entre una pantalla
+    // y la siguiente. `porCodigo` y no `localeCompare`: este último da 0 para
+    // textos distintos que se ven igual (una «é» escrita de dos maneras), y
+    // un 0 es justo el empate que hay que romper.
     .sort((a, b) => (
       b.cuenta.totalPorPagar - a.cuenta.totalPorPagar
       || a.nombre.localeCompare(b.nombre, 'es')
-      || Number(a.sinEnlazar) - Number(b.sinEnlazar)
-    ));
+      || porCodigo(a.clave, b.clave)
+    ))
+    .map(({ clave, ...entrada }) => entrada);
 }
 
 /**
