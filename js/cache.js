@@ -50,17 +50,101 @@ const BD = 'bestprice-contratos';
 const VERSION_BD = 3;
 const TIENDAS = ['clientes', 'vehiculos', 'contratos', 'ajustes', 'reservas', 'duenos'];
 
-function abrir() {
+/** Lo que lee el dueño cuando otra pestaña con código viejo le impide a esta abrir la copia local. */
+export const MENSAJE_OTRA_PESTANA =
+  'Tienes el sistema abierto en otra pestaña con una versión anterior. Ciérrala o recárgala para continuar.';
+
+/**
+ * Abre la copia local. Recibe la fábrica de IndexedDB y los dos avisos para
+ * poder probar el cableado sin un navegador; `abrir()` de abajo le pasa los
+ * reales.
+ *
+ * Dos cosas que antes no estaban y que el dueño no podía descubrir solo:
+ *
+ * - `onversionchange`: cuando OTRA pestaña pide subir la versión de la base,
+ *   esta conexión se cierra en vez de aferrarse a ella. Sin esto una pestaña
+ *   que se quedó abierta desde la mañana bloquea para siempre a la pestaña
+ *   nueva. (Solo ayuda a las pestañas que ya traen este código: una pestaña
+ *   con código anterior no sabe cederla, y para ese caso está lo de abajo.)
+ * - `onblocked`: si la subida igual queda bloqueada, se le DICE al dueño qué
+ *   hacer. La promesa se queda esperando a propósito, no se rechaza: en cuanto
+ *   la otra pestaña se cierra, la subida sigue sola y todo lo pendiente
+ *   continúa sin recargar. Rechazar sería peor — `leerLocal` lo tomaría por
+ *   "no hay nada local" y `guardarLocal` fallaría DESPUÉS de que la nube ya
+ *   guardó el registro, así que el dueño volvería a guardarlo y quedaría
+ *   duplicado.
+ */
+export function abrirBase(fabrica, { alBloquear = () => {}, alLiberar = () => {} } = {}) {
   return new Promise((ok, mal) => {
-    const req = indexedDB.open(BD, VERSION_BD);
+    const req = fabrica.open(BD, VERSION_BD);
+    // Cada pedido avisa su bloqueo una sola vez y lo libera una sola vez, así
+    // quien lleva la cuenta (varias lecturas arrancan juntas) nunca se desfasa.
+    let bloqueado = false;
+    const liberar = () => {
+      if (!bloqueado) return;
+      bloqueado = false;
+      alLiberar();
+    };
     req.onupgradeneeded = () => {
       for (const t of TIENDAS) {
         if (!req.result.objectStoreNames.contains(t)) req.result.createObjectStore(t, { keyPath: 'id' });
       }
     };
-    req.onsuccess = () => ok(req.result);
-    req.onerror = () => mal(req.error);
+    req.onblocked = () => {
+      if (bloqueado) return;
+      bloqueado = true;
+      alBloquear();
+    };
+    req.onsuccess = () => {
+      liberar();
+      const bd = req.result;
+      bd.onversionchange = () => bd.close();
+      ok(bd);
+    };
+    req.onerror = () => {
+      liberar();
+      mal(req.error);
+    };
   });
+}
+
+// El aviso vive aquí y no en una pantalla porque el bloqueo ocurre al leer la
+// copia local, antes de que exista ninguna pantalla que pueda hablar.
+const ID_AVISO_OTRA_PESTANA = 'aviso-otra-pestana';
+let pedidosBloqueados = 0;
+
+function mostrarAvisoOtraPestana() {
+  if (typeof document === 'undefined' || document.getElementById(ID_AVISO_OTRA_PESTANA)) return;
+  const barra = document.createElement('div');
+  barra.id = ID_AVISO_OTRA_PESTANA;
+  barra.setAttribute('role', 'alert');
+  barra.textContent = MENSAJE_OTRA_PESTANA;
+  // Estilos aquí mismo: este archivo no depende de ninguna hoja de estilos
+  // para que el aviso se vea. Mismo rojo que las demás barras de error.
+  barra.style.cssText = 'background:#b3261e;color:#fff;padding:12px 16px;font-size:14px;'
+    + 'font-weight:600;text-align:center;font-family:inherit;';
+  document.body.insertBefore(barra, document.body.firstChild);
+}
+
+function quitarAvisoOtraPestana() {
+  if (typeof document === 'undefined') return;
+  document.getElementById(ID_AVISO_OTRA_PESTANA)?.remove();
+}
+
+function alBloquearse() {
+  pedidosBloqueados += 1;
+  mostrarAvisoOtraPestana();
+}
+
+function alLiberarse() {
+  pedidosBloqueados = Math.max(0, pedidosBloqueados - 1);
+  // Varias lecturas arrancan juntas y quedan bloqueadas juntas: el aviso se
+  // quita cuando ya no queda ninguna esperando, no con la primera que sale.
+  if (pedidosBloqueados === 0) quitarAvisoOtraPestana();
+}
+
+function abrir() {
+  return abrirBase(indexedDB, { alBloquear: alBloquearse, alLiberar: alLiberarse });
 }
 
 /** Guarda una colección completa en la copia local. */
