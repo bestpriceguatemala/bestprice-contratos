@@ -5,7 +5,8 @@
 // local y la nube se intenta aparte, sin que un fallo de red se note más que
 // en que los datos quedan un poco atrás. Guardar es distinto — un cliente o un
 // contrato que se quedara solo en esta computadora sería un dato que el resto
-// del negocio nunca ve, así que ahí sí se deja subir el error si la nube falla.
+// del negocio nunca ve, así que ahí sí se deja subir el error si la nube falla
+// — y solo si falla la nube: ver `guardarEnNubeYLocal`.
 import { iniciarFirebase } from './firebase-config.js';
 import { mezclar, guardarLocal, leerLocal, idsQueSobran, borrarLocales } from './cache.js';
 import { filtrar, textoDeCliente } from './nucleo/busqueda.js';
@@ -15,6 +16,7 @@ import { estadoReserva } from './nucleo/reserva.js';
 import { resumen } from './nucleo/contrato.js';
 import { q, textoDosDecimales } from './nucleo/dinero.js';
 import { hoyISO } from './nucleo/fechas.js';
+import { aviso } from './ui.js';
 
 // Comprobado a mano: con las claves de Firebase todavía sin pegar (o sin
 // internet), el SDK de Firestore no falla rápido — reintenta por su cuenta y
@@ -31,6 +33,54 @@ function conLimiteDeTiempo(promesa, ms = LIMITE_NUBE_MS) {
       (e) => { clearTimeout(vencido); mal(e); },
     );
   });
+}
+
+/** Lo que lee el dueño cuando algo ya quedó guardado en la nube pero la copia de esta computadora no se pudo actualizar. */
+export const MENSAJE_COPIA_LOCAL = 'Quedó guardado en la nube, pero puede que aquí tarde en verse. Si no lo ves, recarga la página.';
+
+function avisarCopiaLocal(coleccion, error) {
+  // El detalle técnico va a la consola para quien tenga que averiguarlo; al
+  // dueño solo se le dice lo que le importa: su dato está a salvo.
+  console.warn(`No se pudo actualizar la copia local de "${coleccion}":`, error);
+  if (typeof document !== 'undefined') aviso(MENSAJE_COPIA_LOCAL, 'info');
+}
+
+/**
+ * El único camino por el que un guardado llega a la nube y a la copia local.
+ * Todos los `guardar*` pasan por aquí, para que el ORDEN y la regla de abajo
+ * se decidan en un solo lugar.
+ *
+ * La regla: **cuando la escritura en la nube salió bien, el guardado salió
+ * bien**, pase lo que pase con la copia local. La nube es la verdad; la copia
+ * local es una comodidad para abrir rápido, y perderla cuesta una carga más
+ * lenta. Dejar que su fallo reviente el guardado costaba mucho más: el
+ * registro YA estaba en Firebase, el dueño veía "no se pudo guardar", volvía a
+ * guardar con un formulario que todavía no traía `id`, y quedaba un documento
+ * duplicado que alguien tenía que encontrar y borrar a mano. (La copia local
+ * puede fallar por una pestaña vieja que bloquea la base, por disco lleno o
+ * por una ventana privada.)
+ *
+ * Tampoco se traga en silencio: `avisar` le dice que lo guardado está a salvo
+ * pero puede no verse al instante aquí. Si falla la NUBE, ese error sí sale
+ * tal cual y la copia local ni se toca: no hay nada que mostrar que no esté
+ * guardado de verdad.
+ *
+ * `armar(id)` devuelve el documento a escribir, ya con el id decidido. Las
+ * dependencias se pueden inyectar solo para probar el orden sin red.
+ */
+export async function guardarEnNubeYLocal(coleccion, original, armar, {
+  iniciar = iniciarFirebase, guardarCopia = guardarLocal, avisar = avisarCopiaLocal,
+} = {}) {
+  const { db, fsMod } = await iniciar();
+  const ref = original?.id ? fsMod.doc(db, coleccion, original.id) : fsMod.doc(fsMod.collection(db, coleccion));
+  const guardado = armar(ref.id);
+  await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
+  try {
+    await guardarCopia(coleccion, [guardado]);
+  } catch (error) {
+    avisar(coleccion, error);
+  }
+  return guardado;
 }
 
 /** Trae una colección completa de Firestore, con el id de cada documento. */
@@ -350,11 +400,7 @@ export async function buscarClientes(consulta) {
 
 /** Guarda un cliente en la nube y refresca la copia local. */
 export async function guardarCliente(cliente) {
-  const { db, fsMod } = await iniciarFirebase();
-  const ref = cliente?.id ? fsMod.doc(db, 'clientes', cliente.id) : fsMod.doc(fsMod.collection(db, 'clientes'));
-  const guardado = { ...cliente, id: ref.id, actualizado: Date.now() };
-  await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
-  await guardarLocal('clientes', [guardado]);
+  const guardado = await guardarEnNubeYLocal('clientes', cliente, (id) => ({ ...cliente, id, actualizado: Date.now() }));
   // Si ya había una búsqueda de la sesión en curso, se le agrega de una vez:
   // el cliente que el mostrador acaba de dar de alta debe aparecer ya mismo.
   if (clientesListos) clientesListos = clientesListos.then((clientes) => mezclar(clientes, [guardado]));
@@ -390,6 +436,14 @@ export async function buscarDuenos(consulta) {
  * que uno copiado de la ficha vieja le haría perder contra la copia que ya
  * está en la nube. Todo lo demás de la ficha se arrastra tal cual, también los
  * campos que el formulario no conoce — así no se pierde ninguno al guardar.
+ *
+ * `id ?? dueno?.id` (y no `id` a secas) **difiere a propósito** de
+ * `contratoParaGuardar` y `reservaParaGuardar`, que escriben `id` tal cual: si
+ * a esas se les olvida pasar el id, dejan `id: undefined` pisando el del
+ * registro existente, y un guardado sin id es un documento NUEVO — un
+ * duplicado. Aquí un dueño que ya tiene id nunca lo pierde. No "unificar"
+ * quitando el `??`; si algún día se unifican, lo sano es llevar el `??` a las
+ * otras dos.
  */
 export function duenoParaGuardar(dueno, { id, ahora = Date.now() } = {}) {
   return { ...dueno, id: id ?? dueno?.id, actualizado: ahora };
@@ -397,11 +451,7 @@ export function duenoParaGuardar(dueno, { id, ahora = Date.now() } = {}) {
 
 /** Guarda un dueño en la nube y refresca la copia local. */
 export async function guardarDueno(dueno) {
-  const { db, fsMod } = await iniciarFirebase();
-  const ref = dueno?.id ? fsMod.doc(db, 'duenos', dueno.id) : fsMod.doc(fsMod.collection(db, 'duenos'));
-  const guardado = duenoParaGuardar(dueno, { id: ref.id });
-  await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
-  await guardarLocal('duenos', [guardado]);
+  const guardado = await guardarEnNubeYLocal('duenos', dueno, (id) => duenoParaGuardar(dueno, { id }));
   // Igual que con los clientes: si ya había una búsqueda de la sesión en
   // curso, el dueño recién dado de alta debe aparecer ya mismo.
   if (duenosListos) duenosListos = duenosListos.then((duenos) => mezclar(duenos, [guardado]));
@@ -467,12 +517,7 @@ export async function guardarContrato(contrato) {
     if (motivo) throw new Error(motivo);
   }
   const numero = contrato?.numero || (await siguienteNumeroContrato());
-  const { db, fsMod } = await iniciarFirebase();
-  const ref = contrato?.id ? fsMod.doc(db, 'contratos', contrato.id) : fsMod.doc(fsMod.collection(db, 'contratos'));
-  const guardado = contratoParaGuardar(contrato, { id: ref.id, numero });
-  await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
-  await guardarLocal('contratos', [guardado]);
-  return guardado;
+  return guardarEnNubeYLocal('contratos', contrato, (id) => contratoParaGuardar(contrato, { id, numero }));
 }
 
 /**
@@ -603,12 +648,7 @@ export async function siguienteCodigoCarro() {
  */
 export async function guardarVehiculo(vehiculo) {
   const codigo = vehiculo?.codigo || (await siguienteCodigoCarro());
-  const { db, fsMod } = await iniciarFirebase();
-  const ref = vehiculo?.id ? fsMod.doc(db, 'vehiculos', vehiculo.id) : fsMod.doc(fsMod.collection(db, 'vehiculos'));
-  const guardado = { ...vehiculo, id: ref.id, codigo, actualizado: Date.now() };
-  await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
-  await guardarLocal('vehiculos', [guardado]);
-  return guardado;
+  return guardarEnNubeYLocal('vehiculos', vehiculo, (id) => ({ ...vehiculo, id, codigo, actualizado: Date.now() }));
 }
 
 /**
@@ -635,12 +675,7 @@ export function reservaParaGuardar(reserva, { id, ahora = Date.now() } = {}) {
  * se apoya en `contratoParaGuardar`.
  */
 export async function guardarReserva(reserva) {
-  const { db, fsMod } = await iniciarFirebase();
-  const ref = reserva?.id ? fsMod.doc(db, 'reservas', reserva.id) : fsMod.doc(fsMod.collection(db, 'reservas'));
-  const guardado = reservaParaGuardar(reserva, { id: ref.id });
-  await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
-  await guardarLocal('reservas', [guardado]);
-  return guardado;
+  return guardarEnNubeYLocal('reservas', reserva, (id) => reservaParaGuardar(reserva, { id }));
 }
 
 /**

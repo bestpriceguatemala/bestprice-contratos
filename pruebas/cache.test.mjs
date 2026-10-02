@@ -101,9 +101,10 @@ function fabricaFalsa() {
 }
 
 function avisos() {
-  const a = { bloqueos: 0, liberaciones: 0 };
+  const a = { bloqueos: 0, liberaciones: 0, vieja: 0 };
   a.alBloquear = () => { a.bloqueos += 1; };
   a.alLiberar = () => { a.liberaciones += 1; };
+  a.alQuedarVieja = () => { a.vieja += 1; };
   return a;
 }
 
@@ -142,17 +143,44 @@ test('abrirBase: en una computadora nueva crea todas las tiendas', () => {
   );
 });
 
-test('abrirBase: la conexión abierta se cierra sola cuando otra pestaña pide subir la versión', async () => {
+test('abrirBase: la conexión abierta se cierra sola cuando otra pestaña pide subir la versión, y la pestaña lo dice', async () => {
+  const a = avisos();
   const bd = baseFalsa();
   const fabrica = fabricaFalsa();
-  const p = abrirBase(fabrica);
+  const p = abrirBase(fabrica, a);
   fabrica.pedidos[0].result = bd;
   fabrica.pedidos[0].onsuccess();
   assert.equal(await p, bd);
   assert.equal(bd.cerrada, false, 'abrir no la cierra');
+  assert.equal(a.vieja, 0, 'mientras nadie pida subir la versión, no hay nada que decir');
   assert.equal(typeof bd.onversionchange, 'function');
   bd.onversionchange();
   assert.equal(bd.cerrada, true, 'cede el paso en vez de bloquear a la pestaña nueva');
+  // Cerrada la conexión esta pestaña ya no tiene copia local: tiene que decirlo,
+  // no devolver listas vacías como si no hubiera nada.
+  assert.equal(a.vieja, 1);
+});
+
+test('abrirBase: si la base ya está en una versión más nueva que este código, la pestaña lo dice y rechaza', async () => {
+  const a = avisos();
+  const fabrica = fabricaFalsa();
+  const p = abrirBase(fabrica, a);
+  const pedido = fabrica.pedidos[0];
+  pedido.error = Object.assign(new Error('requested version is less than existing'), { name: 'VersionError' });
+  pedido.onerror();
+  await assert.rejects(p, { name: 'VersionError' });
+  assert.equal(a.vieja, 1);
+});
+
+test('abrirBase: otro error al abrir rechaza pero no dice que la pestaña quedó atrasada', async () => {
+  const a = avisos();
+  const fabrica = fabricaFalsa();
+  const p = abrirBase(fabrica, a);
+  const pedido = fabrica.pedidos[0];
+  pedido.error = Object.assign(new Error('disco lleno'), { name: 'QuotaExceededError' });
+  pedido.onerror();
+  await assert.rejects(p, { name: 'QuotaExceededError' });
+  assert.equal(a.vieja, 0, 'decir "recarga" por un error que recargar no arregla sería mentirle');
 });
 
 test('abrirBase: si la subida queda bloqueada avisa y se queda esperando; al liberarse sigue sola', async () => {

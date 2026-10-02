@@ -2,8 +2,9 @@
 // se le entrega a la pantalla, sin tocar Firestore ni IndexedDB.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
-  resultadoLectura, contratoParaGuardar, guardarContrato, duenoParaGuardar,
+  resultadoLectura, contratoParaGuardar, guardarContrato, duenoParaGuardar, guardarEnNubeYLocal,
 } from '../js/datos.js';
 import { CAMPOS_DUENO } from '../js/nucleo/dueno.js';
 
@@ -148,4 +149,105 @@ test('duenoParaGuardar: no modifica el dueño que recibe', () => {
   const existente = { ...dueno, id: 'd7', actualizado: 100 };
   duenoParaGuardar(existente, { id: 'd7', ahora: 9999 });
   assert.equal(existente.actualizado, 100);
+});
+
+// ---------- Guardar: lo que ya está en la nube no se pierde por la copia local ----------
+//
+// El hallazgo: cada guardado escribía en la nube y DESPUÉS en la copia local, y
+// un fallo de la local reventaba todo el guardado aunque el registro ya
+// estuviera en Firebase. El dueño veía "no se pudo guardar", volvía a guardar
+// con un formulario sin `id`, y quedaba un documento duplicado.
+//
+// QUÉ CUBREN: `guardarEnNubeYLocal` (el único camino de los guardados) con una
+// Firestore y una copia local FALSAS que el test controla. NO cubren a Firebase
+// ni a IndexedDB de verdad.
+
+/** Una Firestore falsa que anota en `llamadas` lo que se le hace, en orden. */
+function firestoreFalsa({ falla = false } = {}) {
+  const llamadas = [];
+  const fsMod = {
+    collection: (db, c) => ({ coleccion: c }),
+    // Sin id (alta) se "mintea" uno, como hace Firestore con collection().
+    doc: (db, c, id) => ({ id: id || 'id-nuevo', coleccion: c || 'x' }),
+    setDoc: async (ref, doc, opciones) => {
+      llamadas.push(['nube', ref.id, doc, opciones]);
+      if (falla) throw new Error('sin internet');
+    },
+  };
+  return { llamadas, iniciar: async () => ({ db: {}, fsMod }) };
+}
+
+const armarCliente = (original) => (id) => ({ ...original, id, actualizado: 7 });
+
+test('guardarEnNubeYLocal: si la copia local falla, el guardado sale bien y se le avisa', async () => {
+  const f = firestoreFalsa();
+  const avisados = [];
+  const error = new Error('VersionError');
+  const guardado = await guardarEnNubeYLocal('clientes', { nombres: 'ANA' }, armarCliente({ nombres: 'ANA' }), {
+    iniciar: f.iniciar,
+    guardarCopia: async () => { throw error; },
+    avisar: (coleccion, e) => avisados.push([coleccion, e]),
+  });
+  assert.deepEqual(guardado, { nombres: 'ANA', id: 'id-nuevo', actualizado: 7 }, 'devuelve lo que quedó en la nube');
+  assert.equal(f.llamadas.length, 1, 'la nube se escribió');
+  assert.deepEqual(avisados, [['clientes', error]], 'no se traga en silencio: se avisa, una vez');
+});
+
+test('guardarEnNubeYLocal: si la nube falla, el guardado falla y la copia local ni se toca', async () => {
+  const f = firestoreFalsa({ falla: true });
+  let copias = 0;
+  await assert.rejects(
+    guardarEnNubeYLocal('clientes', {}, armarCliente({}), {
+      iniciar: f.iniciar,
+      guardarCopia: async () => { copias += 1; },
+      avisar: () => assert.fail('un fallo de la nube no es un aviso de copia local'),
+    }),
+    /sin internet/,
+  );
+  assert.equal(copias, 0, 'lo que no está en la nube no se muestra como guardado');
+});
+
+test('guardarEnNubeYLocal: con todo bien escribe primero la nube y luego la copia local, sin avisar', async () => {
+  const f = firestoreFalsa();
+  const orden = [];
+  const fsMod = (await f.iniciar()).fsMod;
+  const guardado = await guardarEnNubeYLocal('duenos', { nombre: 'JUAN' }, (id) => ({ nombre: 'JUAN', id }), {
+    iniciar: async () => ({ db: {}, fsMod: { ...fsMod, setDoc: async (...a) => { orden.push('nube'); return fsMod.setDoc(...a); } } }),
+    guardarCopia: async (coleccion, docs) => { orden.push(['local', coleccion, docs]); },
+    avisar: () => assert.fail('no había nada que avisar'),
+  });
+  assert.deepEqual(orden, ['nube', ['local', 'duenos', [guardado]]]);
+  assert.deepEqual(f.llamadas[0][3], { merge: true });
+});
+
+test('guardarEnNubeYLocal: un registro con id se edita; uno sin id recibe uno nuevo', async () => {
+  const f = firestoreFalsa();
+  const copia = { guardarCopia: async () => {}, avisar: () => {} };
+  const editado = await guardarEnNubeYLocal('clientes', { id: 'c9' }, (id) => ({ id }), { iniciar: f.iniciar, ...copia });
+  assert.equal(editado.id, 'c9');
+  const nuevo = await guardarEnNubeYLocal('clientes', {}, (id) => ({ id }), { iniciar: f.iniciar, ...copia });
+  assert.equal(nuevo.id, 'id-nuevo');
+});
+
+// Esta NO es una prueba de comportamiento: lee el código fuente. Existe porque
+// el comportamiento de arriba solo protege a los guardados que pasan por
+// `guardarEnNubeYLocal`, y un guardado nuevo (o uno que alguien vuelva a
+// escribir a mano) que llame a `guardarLocal` suelto traería de vuelta el
+// duplicado sin que ninguna otra prueba lo note. Frágil a propósito: si
+// alguien renombra algo, falla y obliga a mirar.
+test('estructura: todo `guardar*` de datos.js pasa por guardarEnNubeYLocal y ninguno llama a guardarLocal suelto', () => {
+  const fuente = readFileSync(new URL('../js/datos.js', import.meta.url), 'utf8');
+  const guardados = [...fuente.matchAll(/^export async function (guardar\w+)\(/gm)]
+    .map((m) => m[1]).filter((n) => n !== 'guardarEnNubeYLocal');
+  assert.deepEqual(
+    guardados.sort(),
+    ['guardarCliente', 'guardarContrato', 'guardarDueno', 'guardarReserva', 'guardarVehiculo'],
+    'hay un guardado nuevo (o uno menos): decidir si debe pasar por guardarEnNubeYLocal y actualizar esta lista',
+  );
+  for (const nombre of guardados) {
+    const inicio = fuente.indexOf(`export async function ${nombre}(`);
+    const cuerpo = fuente.slice(inicio, fuente.indexOf('\n}\n', inicio));
+    assert.ok(cuerpo.includes('guardarEnNubeYLocal('), `${nombre} no pasa por guardarEnNubeYLocal`);
+    assert.ok(!/guardarLocal\(/.test(cuerpo), `${nombre} llama a guardarLocal directo: su fallo reventaría un guardado que ya salió bien en la nube`);
+  }
 });

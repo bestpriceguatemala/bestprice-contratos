@@ -52,33 +52,49 @@ const TIENDAS = ['clientes', 'vehiculos', 'contratos', 'ajustes', 'reservas', 'd
 
 /** Lo que lee el dueño cuando otra pestaña con código viejo le impide a esta abrir la copia local. */
 export const MENSAJE_OTRA_PESTANA =
-  'Tienes el sistema abierto en otra pestaña con una versión anterior. Ciérrala o recárgala para continuar.';
+  'Tienes el sistema abierto en otra pestaña con una versión anterior. '
+  + 'Guarda lo que estés haciendo en ella y luego ciérrala o recárgala para continuar.';
+
+/** Lo que lee el dueño en la pestaña que cedió la base: ya no puede usar su copia local hasta recargar. */
+export const MENSAJE_PESTANA_ATRASADA =
+  'Hay una versión nueva del sistema abierta en otra pestaña y esta quedó atrasada. '
+  + 'Guarda lo que estés haciendo y recarga esta página para seguir.';
 
 /**
- * Abre la copia local. Recibe la fábrica de IndexedDB y los dos avisos para
- * poder probar el cableado sin un navegador; `abrir()` de abajo le pasa los
- * reales.
+ * Abre la copia local. Recibe la fábrica de IndexedDB y los avisos para poder
+ * probar el cableado sin un navegador; `abrir()` de abajo le pasa los reales.
  *
- * Dos cosas que antes no estaban y que el dueño no podía descubrir solo:
+ * Tres cosas que antes no estaban y que el dueño no podía descubrir solo:
  *
  * - `onversionchange`: cuando OTRA pestaña pide subir la versión de la base,
  *   esta conexión se cierra en vez de aferrarse a ella. Sin esto una pestaña
  *   que se quedó abierta desde la mañana bloquea para siempre a la pestaña
  *   nueva. (Solo ayuda a las pestañas que ya traen este código: una pestaña
  *   con código anterior no sabe cederla, y para ese caso está lo de abajo.)
+ * - `alQuedarVieja`: cerrar la conexión deja a la pestaña que cede SIN copia
+ *   local — desde ahí `leerLocal` devuelve `[]` y `guardarLocal` falla — y una
+ *   lista vacía que en realidad es una conexión muerta es justo la confusión
+ *   "vacío contra fallido" que este sistema ya pagó dos veces. Por eso esa
+ *   pestaña lo DICE. Lo mismo si abrir falla con `VersionError`: la base ya
+ *   está en una versión más nueva que el código de esta pestaña (por ejemplo
+ *   porque otra pestaña la subió cuando esta ya no tenía conexión abierta).
  * - `onblocked`: si la subida igual queda bloqueada, se le DICE al dueño qué
  *   hacer. La promesa se queda esperando a propósito, no se rechaza: en cuanto
  *   la otra pestaña se cierra, la subida sigue sola y todo lo pendiente
- *   continúa sin recargar. Rechazar sería peor — `leerLocal` lo tomaría por
- *   "no hay nada local" y `guardarLocal` fallaría DESPUÉS de que la nube ya
- *   guardó el registro, así que el dueño volvería a guardarlo y quedaría
- *   duplicado.
+ *   continúa sin recargar. Rechazar sería peor: en Chromium, de varias
+ *   aperturas simultáneas solo la primera de la cola recibe `blocked` y las
+ *   demás esperan sin que nada les avise — rechazar en `onblocked` rechazaría
+ *   una y dejaría colgadas las otras, sin barra.
  */
-export function abrirBase(fabrica, { alBloquear = () => {}, alLiberar = () => {} } = {}) {
+export function abrirBase(fabrica, {
+  alBloquear = () => {}, alLiberar = () => {}, alQuedarVieja = () => {},
+} = {}) {
   return new Promise((ok, mal) => {
     const req = fabrica.open(BD, VERSION_BD);
     // Cada pedido avisa su bloqueo una sola vez y lo libera una sola vez, así
-    // quien lleva la cuenta (varias lecturas arrancan juntas) nunca se desfasa.
+    // quien lleva la cuenta nunca se desfasa. (En Chromium solo el primer
+    // pedido de la cola recibe `blocked`, así que la cuenta vale 0 o 1; se
+    // lleva por pedido porque otro navegador podría avisar a cada uno.)
     let bloqueado = false;
     const liberar = () => {
       if (!bloqueado) return;
@@ -98,53 +114,64 @@ export function abrirBase(fabrica, { alBloquear = () => {}, alLiberar = () => {}
     req.onsuccess = () => {
       liberar();
       const bd = req.result;
-      bd.onversionchange = () => bd.close();
+      bd.onversionchange = () => {
+        bd.close();
+        alQuedarVieja();
+      };
       ok(bd);
     };
     req.onerror = () => {
       liberar();
+      if (req.error?.name === 'VersionError') alQuedarVieja();
       mal(req.error);
     };
   });
 }
 
-// El aviso vive aquí y no en una pantalla porque el bloqueo ocurre al leer la
-// copia local, antes de que exista ninguna pantalla que pueda hablar.
+// Los avisos viven aquí y no en una pantalla porque ocurren al abrir la copia
+// local, antes de que exista ninguna pantalla que pueda hablar. Estilos en
+// línea: este archivo no depende de ninguna hoja de estilos para que se vean.
+// Mismo rojo que las demás barras de error.
 const ID_AVISO_OTRA_PESTANA = 'aviso-otra-pestana';
+const ID_AVISO_PESTANA_ATRASADA = 'aviso-pestana-atrasada';
 let pedidosBloqueados = 0;
 
-function mostrarAvisoOtraPestana() {
-  if (typeof document === 'undefined' || document.getElementById(ID_AVISO_OTRA_PESTANA)) return;
+function mostrarBarra(id, texto) {
+  if (typeof document === 'undefined' || document.getElementById(id)) return;
   const barra = document.createElement('div');
-  barra.id = ID_AVISO_OTRA_PESTANA;
+  barra.id = id;
   barra.setAttribute('role', 'alert');
-  barra.textContent = MENSAJE_OTRA_PESTANA;
-  // Estilos aquí mismo: este archivo no depende de ninguna hoja de estilos
-  // para que el aviso se vea. Mismo rojo que las demás barras de error.
+  barra.textContent = texto;
   barra.style.cssText = 'background:#b3261e;color:#fff;padding:12px 16px;font-size:14px;'
     + 'font-weight:600;text-align:center;font-family:inherit;';
   document.body.insertBefore(barra, document.body.firstChild);
 }
 
-function quitarAvisoOtraPestana() {
+function quitarBarra(id) {
   if (typeof document === 'undefined') return;
-  document.getElementById(ID_AVISO_OTRA_PESTANA)?.remove();
+  document.getElementById(id)?.remove();
 }
 
 function alBloquearse() {
   pedidosBloqueados += 1;
-  mostrarAvisoOtraPestana();
+  mostrarBarra(ID_AVISO_OTRA_PESTANA, MENSAJE_OTRA_PESTANA);
 }
 
 function alLiberarse() {
   pedidosBloqueados = Math.max(0, pedidosBloqueados - 1);
-  // Varias lecturas arrancan juntas y quedan bloqueadas juntas: el aviso se
-  // quita cuando ya no queda ninguna esperando, no con la primera que sale.
-  if (pedidosBloqueados === 0) quitarAvisoOtraPestana();
+  // El aviso se quita cuando ya no queda ningún pedido esperando, no con el
+  // primero que sale.
+  if (pedidosBloqueados === 0) quitarBarra(ID_AVISO_OTRA_PESTANA);
+}
+
+function alQuedarVieja() {
+  // Esta barra NO se quita sola: la pestaña no puede volver a abrir la copia
+  // local con su código; lo único que lo arregla es recargar.
+  mostrarBarra(ID_AVISO_PESTANA_ATRASADA, MENSAJE_PESTANA_ATRASADA);
 }
 
 function abrir() {
-  return abrirBase(indexedDB, { alBloquear: alBloquearse, alLiberar: alLiberarse });
+  return abrirBase(indexedDB, { alBloquear: alBloquearse, alLiberar: alLiberarse, alQuedarVieja });
 }
 
 /** Guarda una colección completa en la copia local. */
