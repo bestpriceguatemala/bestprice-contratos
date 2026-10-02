@@ -7,8 +7,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   construirContrato, ultimos4Digitos, leerParametroRuta, montoSalidaConAnticipo, conAnticipoComoPago,
+  resultadosDeDuenos, avisoDeListaDeDuenos, duenosConAltasDeHoy,
 } from '../js/pantallas/sacarCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
+import { estadoContrato } from '../js/nucleo/estados.js';
+import { agruparPorDueno } from '../js/nucleo/liquidacion.js';
+import { resultadoLectura, contratoParaGuardar } from '../js/datos.js';
 
 test('ultimos4Digitos se queda solo con los últimos 4 dígitos', () => {
   assert.equal(ultimos4Digitos('4111 1111 1111 3343'), '3343');
@@ -304,4 +308,201 @@ test('conAnticipoComoPago: sin anticipo en la reservación (0 o vacío), tampoco
 test('conAnticipoComoPago: sin reservación de origen, el contrato no cambia', () => {
   const base = construirContrato({ ...datosBase(), montoPago: 2800 });
   assert.equal(conAnticipoComoPago(base, null, {}), base);
+});
+
+
+// ---------- El dueño del carro ajeno se escoge de la lista ----------
+//
+// Los contratos de prueba salen de construirContrato, o sea con la forma que
+// de verdad se guarda: `ajeno`, `carroAjeno{placas, tipo, marca, color,
+// modelo, dueno, costoDia}` y `subarriendo{costoDia}`. `duenoId` es campo del
+// contrato; `carroAjeno.dueno` sigue siendo el nombre tal como se vio ese día.
+// Los dueños llevan los campos de CAMPOS_DUENO (nucleo/dueno.js) más el `id` y
+// el `actualizado` que les pone duenoParaGuardar.
+
+const carroAjenoDeMario = () => ({
+  placas: 'P-1AJN', tipo: 'Pickup', marca: 'Ford', color: 'Rojo', modelo: '2019', dueno: 'Mario López', costoDia: 400,
+});
+
+const datosDeCarroAjeno = (extra = {}) => ({
+  ...datosBase(), ajeno: true, carro: null, carroAjeno: carroAjenoDeMario(), ...extra,
+});
+
+const duenoMario = () => ({
+  id: 'd1', nombre: 'Mario López', telefono: '5555-1234', nit: '1234567-8', nota: '', actualizado: 1790000000000,
+});
+const duenaLucia = () => ({
+  id: 'd2', nombre: 'Lucía Pérez', telefono: '4444-9876', nit: '', nota: 'Solo fines de semana', actualizado: 1790000000001,
+});
+
+test('un carro ajeno con dueño escogido guarda duenoId Y el nombre que se vio ese día', () => {
+  const contrato = construirContrato(datosDeCarroAjeno({ duenoId: 'd1' }));
+  assert.equal(contrato.duenoId, 'd1');
+  // El nombre es también un dato del contrato, no solo un puntero: si el
+  // registro del dueño se corrige o se renombra después, este contrato sigue
+  // diciendo a quién se le rentó el carro ese día.
+  assert.equal(contrato.carroAjeno.dueno, 'Mario López');
+});
+
+test('un carro ajeno sin dueño escogido deja duenoId en null (nunca undefined ni "")', () => {
+  for (const sinDueno of [undefined, null, '']) {
+    const contrato = construirContrato(datosDeCarroAjeno({ duenoId: sinDueno }));
+    assert.equal(contrato.duenoId, null, `duenoId: ${JSON.stringify(sinDueno)}`);
+  }
+  // Y si quien llama ni siquiera conoce el campo (como todo lo escrito antes de hoy):
+  const contrato = construirContrato(datosDeCarroAjeno());
+  assert.equal(contrato.duenoId, null);
+  assert.equal(contrato.carroAjeno.dueno, 'Mario López', 'el resto del carro ajeno no cambia');
+});
+
+test('un carro propio nunca lleva duenoId, aunque la pantalla se haya quedado con uno escogido', () => {
+  // La pantalla recuerda el dueño escogido si se desmarca "carro ajeno" y se
+  // vuelve a marcar; mientras tanto el contrato es de un carro de la flota.
+  const contrato = construirContrato({ ...datosBase(), duenoId: 'd1' });
+  assert.equal(contrato.ajeno, false);
+  assert.equal(contrato.duenoId, null);
+});
+
+test('duenoId es el que lee la liquidación: dos contratos del mismo dueño caen en una sola cuenta', () => {
+  // De punta a punta: lo que construirContrato arma, pasado por lo que de
+  // verdad se guarda, entra a agruparPorDueno con el nombre del campo que ella lee.
+  const guardado = (id, numero) => contratoParaGuardar(
+    construirContrato(datosDeCarroAjeno({ duenoId: 'd1', id, numero })), { id, numero, ahora: 1790000000100 },
+  );
+  assert.equal(guardado('c1', 1).duenoId, 'd1', 'sobrevive a lo que se guarda');
+  const cuentas = agruparPorDueno([guardado('c1', 1), guardado('c2', 2)], []);
+  assert.equal(cuentas.length, 1);
+  assert.equal(cuentas[0].duenoId, 'd1');
+  assert.equal(cuentas[0].sinEnlazar, false);
+});
+
+// Todo contrato escrito antes de hoy NO tiene la llave `duenoId`: no es null,
+// no existe. Nada de lo que se agregó puede negarse a leer, pintar o guardar uno.
+const contratoViejoSinDuenoId = () => {
+  const contrato = construirContrato(datosDeCarroAjeno({ id: 'viejo', numero: 7 }));
+  delete contrato.duenoId;
+  return contrato;
+};
+
+test('un contrato de antes (sin la llave duenoId) sigue siendo válido: se lee, se calcula y se guarda', () => {
+  const viejo = contratoViejoSinDuenoId();
+  assert.equal('duenoId' in viejo, false, 'la forma de un contrato escrito antes de hoy');
+
+  assert.doesNotThrow(() => resumen(viejo));
+  assert.equal(resumen(viejo).totalSalida, 2800 + 350, '4 días × Q700 más la carta poder, igual que antes');
+  assert.equal(estadoContrato(viejo), 'rentado');
+
+  const guardado = contratoParaGuardar(viejo, { id: 'viejo', numero: 7, ahora: 1790000000200 });
+  assert.equal(guardado.carroAjeno.dueno, 'Mario López');
+  assert.equal(guardado.estado, 'rentado');
+  assert.equal('duenoId' in guardado, false, 'guardarlo no le inventa un duenoId');
+});
+
+test('un contrato de antes aparece en la liquidación bajo el nombre que se escribió, marcado como sin enlazar', () => {
+  const cuentas = agruparPorDueno([contratoViejoSinDuenoId()], []);
+  assert.equal(cuentas.length, 1, 'no desaparece de la vista');
+  assert.equal(cuentas[0].nombre, 'Mario López');
+  assert.equal(cuentas[0].duenoId, null);
+  assert.equal(cuentas[0].sinEnlazar, true);
+});
+
+// ---------- El buscador de dueños: qué se dibuja ----------
+//
+// La regla de esta parte es la más vieja del sistema: una lectura que FALLÓ
+// no se dibuja como "no hay nada". Aquí cuesta un dueño duplicado — el mostrador
+// ve "Sin resultados. Puedes darlo de alta abajo", da de alta a quien ya
+// existía, y la cuenta de esa persona se parte en dos.
+
+const duenosLeidos = (duenos = []) => ({ ...resultadoLectura(duenos, { ok: true, valor: duenos }), leida: true });
+
+test('resultadosDeDuenos: sin nada escrito no se dibuja nada', () => {
+  const r = resultadosDeDuenos({ ...duenosLeidos([duenoMario()]), duenos: [duenoMario()], consulta: '   ' });
+  assert.deepEqual(r, { filas: [], mensaje: '' });
+});
+
+test('resultadosDeDuenos: encuentra por nombre sin acentos, por teléfono y por NIT', () => {
+  const duenos = [duenoMario(), duenaLucia()];
+  const buscar = (consulta) => resultadosDeDuenos({ duenos, fallo: false, leida: true, consulta }).filas.map((d) => d.id);
+  assert.deepEqual(buscar('lopez'), ['d1']);
+  assert.deepEqual(buscar('lucia perez'), ['d2']);
+  assert.deepEqual(buscar('4444'), ['d2'], 'el teléfono');
+  assert.deepEqual(buscar('1234567'), ['d1'], 'el NIT');
+});
+
+test('resultadosDeDuenos: una lista leída de verdad y sin coincidencias sí invita a dar de alta', () => {
+  const r = resultadosDeDuenos({ duenos: [duenoMario()], fallo: false, leida: true, consulta: 'zzz' });
+  assert.deepEqual(r.filas, []);
+  assert.match(r.mensaje, /Sin resultados/);
+});
+
+test('resultadosDeDuenos: una lista leída de verdad y vacía (todavía no hay dueños) también', () => {
+  const r = resultadosDeDuenos({ duenos: [], fallo: false, leida: true, consulta: 'mario' });
+  assert.match(r.mensaje, /Sin resultados/);
+});
+
+test('resultadosDeDuenos: una lectura que FALLÓ y quedó vacía no se dibuja como "no hay dueños"', () => {
+  const lectura = resultadoLectura([], { ok: false });
+  const r = resultadosDeDuenos({ duenos: lectura.datos, fallo: lectura.fallo, leida: true, consulta: 'mario' });
+  assert.deepEqual(r.filas, []);
+  assert.match(r.mensaje, /No se pudo leer/);
+  assert.doesNotMatch(r.mensaje, /Sin resultados/);
+  assert.doesNotMatch(r.mensaje, /alta/i, 'no lo empuja a dar de alta a alguien que puede existir');
+});
+
+test('resultadosDeDuenos: con copia local pero la nube caída, no encontrar no es "no existe"', () => {
+  const lectura = resultadoLectura([duenoMario()], { ok: false });
+  const r = resultadosDeDuenos({ duenos: lectura.datos, fallo: lectura.fallo, leida: true, consulta: 'lucia' });
+  assert.deepEqual(r.filas, []);
+  assert.match(r.mensaje, /desactualizada/);
+  assert.doesNotMatch(r.mensaje, /Sin resultados/);
+  // Y lo que sí hay en la copia se sigue mostrando: la lectura caída no esconde nada.
+  const conCoincidencia = resultadosDeDuenos({ duenos: lectura.datos, fallo: lectura.fallo, leida: true, consulta: 'mario' });
+  assert.deepEqual(conCoincidencia.filas.map((d) => d.id), ['d1']);
+  assert.equal(conCoincidencia.mensaje, '');
+});
+
+test('resultadosDeDuenos: mientras la lista todavía no llega, no se dice "sin resultados"', () => {
+  const r = resultadosDeDuenos({ duenos: [], fallo: false, leida: false, consulta: 'mario' });
+  assert.deepEqual(r.filas, []);
+  assert.match(r.mensaje, /Leyendo/);
+  assert.doesNotMatch(r.mensaje, /Sin resultados/);
+});
+
+test('resultadosDeDuenos: muestra a lo más 8, como el buscador de clientes', () => {
+  const muchos = Array.from({ length: 12 }, (_, i) => ({ ...duenoMario(), id: `d${i}`, nombre: `Mario ${i}` }));
+  const r = resultadosDeDuenos({ duenos: muchos, fallo: false, leida: true, consulta: 'mario' });
+  assert.equal(r.filas.length, 8);
+});
+
+test('avisoDeListaDeDuenos: callado cuando la lista llegó bien o todavía no se sabe', () => {
+  assert.equal(avisoDeListaDeDuenos({ leida: false, fallo: false, cantidad: 0 }), '');
+  assert.equal(avisoDeListaDeDuenos({ leida: true, fallo: false, cantidad: 0 }), '');
+  assert.equal(avisoDeListaDeDuenos({ leida: true, fallo: false, cantidad: 5 }), '');
+});
+
+test('avisoDeListaDeDuenos: una lectura fallida sin copia dice que no se sabe si ya está registrado', () => {
+  const texto = avisoDeListaDeDuenos({ leida: true, fallo: true, cantidad: 0 });
+  assert.match(texto, /No se pudo leer/);
+  assert.match(texto, /ya está registrado/);
+});
+
+test('avisoDeListaDeDuenos: una lectura fallida con copia dice que la lista puede estar desactualizada', () => {
+  const texto = avisoDeListaDeDuenos({ leida: true, fallo: true, cantidad: 3 });
+  assert.match(texto, /desactualizada/);
+});
+
+test('duenosConAltasDeHoy: un dueño dado de alta aquí no se pierde si la sincronía llega después sin él', () => {
+  // La sincronía de atrás trae la lista tal como estaba cuando se pidió: si el
+  // mostrador dio de alta a Lucía mientras tanto, ella no viene en esa lista, y
+  // sin esto el buscador "no la encontraría" y la daría de alta otra vez.
+  const delaNube = [duenoMario()];
+  const conAlta = duenosConAltasDeHoy(delaNube, [duenaLucia()]);
+  assert.deepEqual(conAlta.map((d) => d.id), ['d1', 'd2']);
+});
+
+test('duenosConAltasDeHoy: si la nube ya la trae, manda la versión de la nube y no se duplica', () => {
+  const nubeConLucia = { ...duenaLucia(), telefono: '4444-0000', actualizado: 1790000009999 };
+  const conAlta = duenosConAltasDeHoy([duenoMario(), nubeConLucia], [duenaLucia()]);
+  assert.equal(conAlta.length, 2);
+  assert.equal(conAlta.find((d) => d.id === 'd2').telefono, '4444-0000');
 });

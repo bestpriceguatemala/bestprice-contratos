@@ -555,7 +555,10 @@ test('agruparPorDueno: el mismo dueño enlazado con textos distintos sigue siend
 });
 
 test('agruparPorDueno: un contrato viejo sin duenoId no desaparece: cae bajo su texto, marcado como no enlazado', () => {
-  const viejo = cerrado('c1', { dueno: 'Don Mario' });
+  // Desde que "Sacar carro" escoge al dueño de una lista, construirContrato
+  // escribe `duenoId: null` cuando no se escogió ninguno. Los contratos de ANTES
+  // de eso ni siquiera traen la llave, así que para ser uno de ellos se le quita.
+  const { duenoId: _sinLlave, ...viejo } = cerrado('c1', { dueno: 'Don Mario' });
   assert.equal('duenoId' in viejo, false, 'así quedaron guardados los contratos de antes de esta función');
 
   const grupos = agruparPorDueno([viejo], []);

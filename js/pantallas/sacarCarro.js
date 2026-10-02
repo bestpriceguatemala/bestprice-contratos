@@ -23,8 +23,10 @@ import { q, suma, recargoTarjeta } from '../nucleo/dinero.js';
 import {
   cargarFlota, cargarContratosAbiertos, cargarReservas, cargarAjustes, buscarClientes, cargarClientes,
   guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato, agregarPago, guardarReserva,
+  cargarDuenos, guardarDueno,
 } from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
+import { filtrar } from '../nucleo/busqueda.js';
 // El alta rápida de aquí y la ficha de clientes.js tienen que pedir
 // exactamente los mismos campos (Tarea 7) — por eso esta pantalla ya no
 // inventa su propia lista de siete campos sueltos ni su propia forma de
@@ -33,6 +35,13 @@ import { dinero, fecha, aviso } from '../ui.js';
 import {
   CAMPOS_CLIENTE, construirCliente, nombreCompleto, faltaAlgo,
 } from '../nucleo/cliente.js';
+// El dueño del carro ajeno se escoge de una lista, con el mismo buscador y la
+// misma alta rápida que el cliente: por la misma razón y con el mismo remedio.
+// Escrito a mano, "Juan Pérez" y "juan perez" eran dos personas distintas para
+// el sistema, y lo que se le debe a uno se partía en dos cuentas.
+import {
+  CAMPOS_DUENO, construirDueno, faltaAlgoEnDueno, textoDeDueno,
+} from '../nucleo/dueno.js';
 
 // El diseño (§5) dice: "el porcentaje por defecto es 5 %". Este plan todavía
 // no tiene una lista de empleados con su propio porcentaje (eso es de un
@@ -110,7 +119,7 @@ const tarjetaTieneDatos = (t) => Boolean(t?.ultimos4 || t?.vencimiento || t?.ban
  */
 export function construirContrato(datos) {
   const {
-    id, numero, cliente, ajeno, carro, carroAjeno,
+    id, numero, cliente, ajeno, carro, carroAjeno, duenoId,
     fechaSalida, horaSalida, lugar, dias, precioDia, kmSalida, combustibleSalida, horaTardia,
     seguroDia, seguroTercerosDia, seguroMenoresDia, seguroPaiDia, deducible, deducibleBajo,
     cartaPoderDestino, cartaPoderPrecio, variosDescripcion, variosPrecio,
@@ -160,6 +169,13 @@ export function construirContrato(datos) {
     // aparecen ahí (§7 del diseño: "no entran a vehiculos").
     carroId: ajeno ? null : (carro?.id ?? null),
     carroAjeno: ajeno ? { ...carroAjeno } : null,
+    // El dueño escogido de la lista. `carroAjeno.dueno` (arriba) se queda con
+    // el nombre tal como se vio ese día: es un dato de ESTE contrato, no solo
+    // un puntero — si el registro del dueño se corrige o se renombra después,
+    // el contrato sigue diciendo a quién se le rentó el carro. Es null (y no
+    // ausente) cuando no se escogió ninguno, y los contratos de antes de hoy
+    // ni siquiera traen la llave: nada de lo que lee este campo puede exigirlo.
+    duenoId: ajeno ? (duenoId || null) : null,
     // resumen() (nucleo/contrato.js) solo cobra costo de subarriendo cuando
     // este campo existe; en un carro propio se deja en null a propósito.
     subarriendo: ajeno ? { costoDia: q(carroAjeno?.costoDia) } : null,
@@ -255,6 +271,82 @@ export function conAnticipoComoPago(contrato, reserva, { forma, porcentajeTarjet
   });
 }
 
+// ---------- El buscador de dueños: qué se dibuja ----------
+//
+// Funciones puras, sin DOM, para poder probar la regla que más cuesta aquí:
+// una lectura que FALLÓ no se dibuja como "no hay dueños". El mostrador vería
+// "Sin resultados. Puedes darlo de alta abajo", daría de alta a quien ya
+// existía, y la cuenta de esa persona se partiría en dos — el mismo daño que
+// este buscador existe para evitar.
+//
+// (Esta pantalla no tiene una barra de fallo para sus otras lecturas — ver el
+// comentario de la carga más abajo —, así que este es el único lugar de ella
+// que dice que una lectura falló.)
+
+/** Cuántos resultados se dibujan a lo más, igual que el buscador de clientes. */
+const MAX_RESULTADOS_DUENOS = 8;
+
+/**
+ * Lo que va debajo de la caja de búsqueda de dueños: las filas que
+ * coinciden y, si no hay ninguna, la frase que explica por qué.
+ *
+ * - `leida`: la primera lectura de la lista ya llegó (bien o mal). Antes de
+ *   eso la lista vacía no significa nada.
+ * - `fallo`: la nube no contestó (`{ datos, fallo }` de cargarDuenos).
+ *
+ * Sin coincidencias, "Sin resultados" solo se dice cuando la lista se leyó de
+ * verdad. Con la lectura caída, no encontrar a alguien no prueba que no exista.
+ */
+export function resultadosDeDuenos({
+  duenos, fallo, leida, consulta,
+}) {
+  if (!String(consulta ?? '').trim()) return { filas: [], mensaje: '' };
+  if (!leida) return { filas: [], mensaje: 'Leyendo la lista de dueños...' };
+
+  const lista = Array.isArray(duenos) ? duenos : [];
+  const filas = filtrar(lista, consulta, textoDeDueno).slice(0, MAX_RESULTADOS_DUENOS);
+  if (filas.length) return { filas, mensaje: '' };
+
+  if (fallo && !lista.length) {
+    return { filas, mensaje: 'No se pudo leer la lista de dueños, así que no se sabe si ya está registrado.' };
+  }
+  if (fallo) {
+    return {
+      filas,
+      mensaje: 'No aparece en la lista de este equipo, que puede estar desactualizada: puede que sí esté registrado.',
+    };
+  }
+  return { filas, mensaje: 'Sin resultados. Puedes darlo de alta abajo.' };
+}
+
+/**
+ * La frase fija que acompaña a la caja de dueños mientras la lectura esté
+ * caída — vacía cuando todo va bien o todavía no se sabe. Es aparte de
+ * resultadosDeDuenos porque tiene que verse aunque no haya nada escrito: el
+ * mostrador debe enterarse ANTES de decidir dar de alta a alguien.
+ */
+export function avisoDeListaDeDuenos({ leida, fallo, cantidad }) {
+  if (!leida || !fallo) return '';
+  if (!cantidad) {
+    return 'No se pudo leer la lista de dueños, así que no se sabe si el dueño ya está registrado. '
+      + 'Vuelve a intentar antes de dar de alta a uno nuevo.';
+  }
+  return 'No se pudo actualizar la lista de dueños. Se usa la de este equipo, que puede estar desactualizada.';
+}
+
+/**
+ * La lista que llegó de la nube más los dueños dados de alta en esta misma
+ * pantalla. La sincronía de atrás trae la lista tal como estaba cuando se
+ * pidió: si el mostrador dio de alta a alguien mientras tanto, esa persona no
+ * viene en ella, y sin esto el buscador "no la encontraría" y se daría de alta
+ * dos veces. Si la nube ya la trae, manda la versión de la nube.
+ */
+export function duenosConAltasDeHoy(datos, altas) {
+  const lista = Array.isArray(datos) ? datos : [];
+  const ids = new Set(lista.map((d) => d.id));
+  return [...lista, ...altas.filter((a) => !ids.has(a.id))];
+}
+
 // ---------- La plantilla estática (se pinta una sola vez) ----------
 
 function campo(id, etiqueta, opciones = {}) {
@@ -290,6 +382,15 @@ const CAMPOS_ALTA_VISIBLES = [
 /** El campo de CAMPOS_CLIENTE `c`, dibujado con el input id `sc-nc-<id>`. */
 function campoAlta(c) {
   return campo(`sc-nc-${c.id}`, c.etiqueta, { tipo: TIPO_INPUT_CLIENTE[c.tipo] || 'text' });
+}
+
+/**
+ * El campo de CAMPOS_DUENO `c`, dibujado con el input id `sc-nd-<id>`. Misma
+ * tabla de tipos que el alta del cliente: un teléfono se ve como teléfono aquí
+ * igual que allá.
+ */
+function campoAltaDueno(c) {
+  return campo(`sc-nd-${c.id}`, c.etiqueta, { tipo: TIPO_INPUT_CLIENTE[c.tipo] || 'text' });
 }
 
 function plantilla() {
@@ -344,7 +445,34 @@ function plantilla() {
             ${campo('sc-ajeno-marca', 'Marca')}
             ${campo('sc-ajeno-color', 'Color')}
             ${campo('sc-ajeno-modelo', 'Modelo')}
-            ${campo('sc-ajeno-dueno', 'Dueño')}
+            <div class="sc-campo ancho" id="sc-dueno">
+              <div class="sc-cliente-buscar">
+                <label class="sc-campo ancho">Dueño del carro — buscar por nombre, teléfono o NIT
+                  <input type="search" id="sc-dueno-buscar" placeholder="Escribe para buscar..." autocomplete="off">
+                </label>
+                <ul id="sc-dueno-resultados" class="sc-cliente-resultados" hidden></ul>
+              </div>
+              <div id="sc-dueno-aviso" class="sc-carro-info sc-carro-aviso" hidden>
+                <span id="sc-dueno-aviso-texto"></span>
+                <button type="button" id="sc-dueno-reintentar" class="btn" hidden>Volver a intentar</button>
+              </div>
+              <div id="sc-dueno-elegido" class="sc-cliente-elegido" hidden>
+                <span id="sc-dueno-elegido-nombre"></span>
+                <button type="button" id="sc-dueno-cambiar" class="btn">Cambiar</button>
+              </div>
+              <p class="sc-nota">
+                ¿No está en la lista?
+                <button type="button" id="sc-dueno-nuevo" class="btn">+ Nuevo dueño</button>
+              </p>
+              <div id="sc-dueno-alta" hidden>
+                <div class="sc-campos">
+                  ${CAMPOS_DUENO.map(campoAltaDueno).join('')}
+                </div>
+                <div class="sc-campo ancho">
+                  <button type="button" id="sc-dueno-guardar" class="btn btn-primario">Guardar dueño</button>
+                </div>
+              </div>
+            </div>
             ${campo('sc-ajeno-costo', 'Costo por día', { tipo: 'number', paso: '0.01', minimo: '0' })}
           </div>
         </section>
@@ -516,6 +644,12 @@ function filaCliente(c) {
   return `<li data-id="${esc(c.id)}"><strong>${esc(nombre)}</strong>${detalle ? `<span>${esc(detalle)}</span>` : ''}</li>`;
 }
 
+function filaDueno(d) {
+  const nombre = (d?.nombre || '').trim() || 'Sin nombre';
+  const detalle = [d?.telefono, d?.nit && `NIT ${d.nit}`].filter(Boolean).join(' · ');
+  return `<li data-id="${esc(d.id)}"><strong>${esc(nombre)}</strong>${detalle ? `<span>${esc(detalle)}</span>` : ''}</li>`;
+}
+
 const PREFIJO_RUTA = '#/sacar/';
 let ultimoToken = 0;
 
@@ -536,6 +670,19 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   let ajustes = {};
   let clienteSeleccionado = null;
   let ultimosResultados = [];
+  // El dueño del carro ajeno (ver "Dueño del carro ajeno" más abajo). La
+  // lista se pide la primera vez que se marca "carro ajeno", no al abrir la
+  // pantalla: la mayoría de las salidas son de carros propios y no la usan.
+  // `duenosLeidos` dice si la primera lectura ya llegó (bien o mal) y
+  // `falloDuenos` si la nube no contestó — sin los dos, una lista que todavía
+  // no llega o que falló se vería igual que "no hay dueños".
+  let duenoSeleccionado = null;
+  let duenosDeLaLectura = [];
+  const duenosDeAltaHoy = [];
+  let duenosLeidos = false;
+  let falloDuenos = false;
+  let duenosPedidos = false;
+  let ultimosResultadosDuenos = [];
   let montoPagoTocado = false;
   let comisionTocada = false;
   let tarjetaTocada = false;
@@ -602,9 +749,14 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       carro: ajeno ? null : carroPropio(),
       carroAjeno: ajeno ? {
         placas: texto('sc-ajeno-placas'), tipo: texto('sc-ajeno-tipo'), marca: texto('sc-ajeno-marca'),
-        color: texto('sc-ajeno-color'), modelo: texto('sc-ajeno-modelo'), dueno: texto('sc-ajeno-dueno'),
+        color: texto('sc-ajeno-color'), modelo: texto('sc-ajeno-modelo'),
+        // El nombre tal como se vio ese día (ver construirContrato): el del
+        // dueño escogido, o vacío si no se escogió ninguno. Ya no se escribe
+        // a mano — era lo que partía en dos la cuenta de una misma persona.
+        dueno: duenoSeleccionado?.nombre ?? '',
         costoDia: num('sc-ajeno-costo'),
       } : null,
+      duenoId: ajeno ? (duenoSeleccionado?.id ?? null) : null,
       fechaSalida: texto('sc-fecha-salida') || hoyISO(),
       horaSalida: texto('sc-hora-salida'),
       lugar: texto('sc-lugar'),
@@ -925,6 +1077,118 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     }
   }
 
+  // ---------- Dueño del carro ajeno: buscar, elegir, alta rápida ----------
+  //
+  // Es el mismo buscador y la misma alta rápida que el cliente, por la misma
+  // razón: el dueño de un carro prestado aparece por primera vez con el carro
+  // ya afuera y el cliente esperando. Si dar de alta a alguien obligara a salir
+  // de esta pantalla, el mostrador escribiría un nombre a mano y volveríamos a
+  // tener dos cuentas para una misma persona.
+
+  const listaDuenos = () => duenosConAltasDeHoy(duenosDeLaLectura, duenosDeAltaHoy);
+
+  function pintarDuenos() {
+    const textoAviso = avisoDeListaDeDuenos({
+      leida: duenosLeidos, fallo: falloDuenos, cantidad: duenosDeLaLectura.length,
+    });
+    el('sc-dueno-aviso').hidden = !textoAviso;
+    el('sc-dueno-aviso-texto').textContent = textoAviso;
+    // Reintentar solo cuando no hay nada que mostrar: con una copia local, la
+    // lista ya sirve y la nube se vuelve a intentar sola la próxima vez.
+    el('sc-dueno-reintentar').hidden = !textoAviso || duenosDeLaLectura.length > 0;
+
+    const consulta = el('sc-dueno-buscar').value;
+    const lista = el('sc-dueno-resultados');
+    if (!consulta.trim()) {
+      lista.hidden = true;
+      return;
+    }
+    const { filas, mensaje } = resultadosDeDuenos({
+      duenos: listaDuenos(), fallo: falloDuenos, leida: duenosLeidos, consulta,
+    });
+    ultimosResultadosDuenos = filas;
+    lista.innerHTML = filas.length
+      ? filas.map(filaDueno).join('')
+      : `<li class="sc-vacio">${esc(mensaje)}</li>`;
+    lista.hidden = false;
+  }
+
+  function recibirDuenos(r) {
+    duenosDeLaLectura = Array.isArray(r?.datos) ? r.datos : [];
+    // Una lectura sin forma de lectura (no debería pasar) cuenta como fallo:
+    // nunca como "no hay dueños".
+    falloDuenos = r ? Boolean(r.fallo) : true;
+    duenosLeidos = true;
+    if (sigoVigente()) pintarDuenos();
+  }
+
+  // cargarDuenos sirve la copia local al instante y nunca rechaza; el
+  // `catch` es solo por si IndexedDB mismo falla. Cada sincronía de atrás
+  // (también la que trae el fallo de la nube) vuelve a pintar por `alLlegar`.
+  async function leerDuenos() {
+    try {
+      recibirDuenos(await cargarDuenos(recibirDuenos));
+    } catch {
+      recibirDuenos({ datos: duenosDeLaLectura, fallo: true });
+    }
+  }
+
+  function pedirDuenos() {
+    if (duenosPedidos) return;
+    duenosPedidos = true;
+    leerDuenos();
+  }
+
+  function elegirDueno(d) {
+    duenoSeleccionado = d;
+    el('sc-dueno-resultados').hidden = true;
+    el('sc-dueno-buscar').value = '';
+    el('sc-dueno-alta').hidden = true;
+    el('sc-dueno-elegido').hidden = false;
+    el('sc-dueno-elegido-nombre').textContent = (d?.nombre || '').trim() || 'Dueño sin nombre';
+  }
+
+  // Recorre CAMPOS_DUENO, igual que el alta del cliente recorre CAMPOS_CLIENTE.
+  function leerCamposDueno() {
+    const campos = {};
+    CAMPOS_DUENO.forEach((c) => { campos[c.id] = texto(`sc-nd-${c.id}`); });
+    return campos;
+  }
+
+  async function guardarDuenoNuevo() {
+    const boton = el('sc-dueno-guardar');
+    if (boton.disabled) return;
+    // construirDueno (nucleo/dueno.js) con {} como "existente": es un dueño
+    // nuevo. faltaAlgoEnDueno es la misma regla que usará la ficha de dueños
+    // (solo el nombre es obligatorio), así las dos pantallas piden lo mismo.
+    const nuevo = construirDueno({}, leerCamposDueno());
+    const falta = faltaAlgoEnDueno(nuevo);
+    if (falta.length) {
+      aviso(`Falta completar: ${falta.join(', ')}.`, 'error');
+      return;
+    }
+    boton.disabled = true;
+    try {
+      const dueno = await guardarDueno(nuevo);
+      duenosDeAltaHoy.push(dueno);
+      // Si mientras se guardaba el mostrador ya salió de esta pantalla, el
+      // dueño quedó guardado y no hay nada más que pintar: seguir aquí
+      // tocaría campos que ya no existen y terminaría diciendo "no se pudo
+      // guardar" de algo que sí se guardó.
+      if (!sigoVigente()) return;
+      // A diferencia del alta del cliente, aquí se vacían los campos: si se
+      // abriera otra vez con los mismos datos todavía escritos, un clic más
+      // daría de alta a la misma persona dos veces.
+      CAMPOS_DUENO.forEach((c) => { el(`sc-nd-${c.id}`).value = ''; });
+      elegirDueno(dueno);
+      aviso('Dueño guardado.', 'exito');
+    } catch {
+      aviso('No se pudo guardar el dueño. Intenta de nuevo.', 'error');
+    } finally {
+      boton.disabled = false;
+    }
+  }
+
   // ---------- Guardar el contrato ----------
 
   async function guardar(ev) {
@@ -1015,7 +1279,10 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     recalcular();
   });
   el('sc-form').addEventListener('change', (ev) => {
-    if (ev.target.id === 'sc-ajeno') refrescarCarro();
+    if (ev.target.id === 'sc-ajeno') {
+      refrescarCarro();
+      if (marcado('sc-ajeno')) pedirDuenos();
+    }
     if (ev.target.id === 'sc-t2-agregar') el('sc-t2-campos').hidden = !marcado('sc-t2-agregar');
     if (ev.target.id === 'sc-nc-mas-datos') el('sc-nc-mas-datos-campos').hidden = !marcado('sc-nc-mas-datos');
     if (ev.target.id === 'sc-pago-forma') el('sc-pago-porcentaje-campo').hidden = texto('sc-pago-forma') !== 'tarjeta';
@@ -1044,6 +1311,39 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   });
   el('sc-cliente-guardar').addEventListener('click', guardarClienteNuevo);
 
+  el('sc-dueno-buscar').addEventListener('input', pintarDuenos);
+  el('sc-dueno-resultados').addEventListener('click', (ev) => {
+    const li = ev.target.closest('li[data-id]');
+    if (!li) return;
+    const d = ultimosResultadosDuenos.find((r) => r.id === li.dataset.id);
+    if (d) elegirDueno(d);
+  });
+  el('sc-dueno-nuevo').addEventListener('click', () => { el('sc-dueno-alta').hidden = false; });
+  el('sc-dueno-cambiar').addEventListener('click', () => {
+    duenoSeleccionado = null;
+    el('sc-dueno-elegido').hidden = true;
+  });
+  el('sc-dueno-guardar').addEventListener('click', guardarDuenoNuevo);
+  el('sc-dueno-reintentar').addEventListener('click', async () => {
+    const boton = el('sc-dueno-reintentar');
+    boton.disabled = true;
+    try {
+      await leerDuenos();
+    } finally {
+      boton.disabled = false;
+    }
+  });
+  // Enter dentro de este bloque NO puede mandar el formulario: el dueño se
+  // busca y se da de alta con el contrato ya medio llenado y el cliente ya
+  // escogido, así que un Enter suelto guardaría el contrato entero — con el
+  // carro saliendo — sin dueño. En el alta, Enter guarda al dueño, que es lo
+  // que quien escribe espera.
+  el('sc-dueno').addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' || ev.target.tagName !== 'INPUT') return;
+    ev.preventDefault();
+    if (ev.target.id.startsWith('sc-nd-')) guardarDuenoNuevo();
+  });
+
   refrescarCarro();
   recalcular();
 
@@ -1054,6 +1354,9 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // flota.js), así que por ahora solo toma `datos`, que nunca inventa un
   // arreglo vacío: cae a la copia local si la nube falló, así que un fallo
   // de red nunca se ve aquí como "no hay reservaciones" cuando sí las hay.
+  // La única lectura de esta pantalla que SÍ dice cuando falla es la de los
+  // dueños (ver pintarDuenos): ahí un "no hay" falso empuja a dar de alta a
+  // alguien que ya existe.
   // cargarAjustes() tampoco rechaza (se queda con los valores del dueño si
   // la nube falla o el documento no existe todavía), así que tampoco hace
   // falta un try/catch.
