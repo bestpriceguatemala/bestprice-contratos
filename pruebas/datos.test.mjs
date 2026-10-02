@@ -2,7 +2,10 @@
 // se le entrega a la pantalla, sin tocar Firestore ni IndexedDB.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resultadoLectura, contratoParaGuardar, guardarContrato } from '../js/datos.js';
+import {
+  resultadoLectura, contratoParaGuardar, guardarContrato, duenoParaGuardar,
+} from '../js/datos.js';
+import { CAMPOS_DUENO } from '../js/nucleo/dueno.js';
 
 // CRÍTICO de la revisión final: una lectura de contratos fallida se dibujaba
 // como "todos los carros disponibles" porque cargarConSincronia devolvía []
@@ -86,4 +89,63 @@ test('CRÍTICO: guardarContrato rechaza una garantía liberada si todavía hay s
     garantiaLiberada: true, // el mismo hueco que abre CRÍTICO 2
   };
   await assert.rejects(() => guardarContrato(contrato), /todavía debe/i);
+});
+
+// Los dueños de carros subarrendados. La ficha guardada tiene la forma que
+// dice js/nucleo/dueno.js (CAMPOS_DUENO: nombre, telefono, nit, nota) más los
+// dos campos que sella `duenoParaGuardar`: id y actualizado.
+const dueno = {
+  nombre: 'JUAN PÉREZ',
+  telefono: '7777-7777',
+  nit: '12345678-7',
+  nota: 'Dueño confiable',
+};
+
+test('duenoParaGuardar: un dueño nuevo recibe su id y su sello actualizado', () => {
+  const guardado = duenoParaGuardar(dueno, { id: 'd1', ahora: 5000 });
+  assert.equal(guardado.id, 'd1');
+  assert.equal(guardado.actualizado, 5000);
+  // Lo que escribió el mostrador llega completo, sin tocarse.
+  for (const { id } of CAMPOS_DUENO) assert.equal(guardado[id], dueno[id], `se perdió ${id}`);
+});
+
+test('duenoParaGuardar: sin `ahora` el sello es la hora de ahora, no vacío', () => {
+  const antes = Date.now();
+  const guardado = duenoParaGuardar(dueno, { id: 'd1' });
+  assert.ok(guardado.actualizado >= antes && guardado.actualizado <= Date.now());
+});
+
+test('duenoParaGuardar: un dueño que ya existe conserva su id', () => {
+  const existente = { ...dueno, id: 'd7', actualizado: 100 };
+  // Como lo llama guardarDueno: el id de la referencia es el mismo del dueño.
+  assert.equal(duenoParaGuardar(existente, { id: 'd7', ahora: 200 }).id, 'd7');
+  // Y si quien llama olvida pasarlo, no se pierde: un dueño sin id se
+  // guardaría como un documento nuevo y quedaría duplicado.
+  assert.equal(duenoParaGuardar(existente, { ahora: 200 }).id, 'd7');
+});
+
+test('duenoParaGuardar: los campos que el formulario no conoce sobreviven', () => {
+  // Un bug real de este proyecto borró un campo justo así: la ficha se
+  // guardaba reconstruida solo con lo que la pantalla mostraba. El nombre es
+  // inventado a propósito — tiene que ser uno que CAMPOS_DUENO no conozca.
+  const desconocido = 'campoQueElFormularioNoConoce';
+  assert.ok(!CAMPOS_DUENO.some((c) => c.id === desconocido), 'la prueba exige un campo fuera de la lista');
+  const existente = { ...dueno, id: 'd7', actualizado: 100, [desconocido]: 'se queda' };
+  const guardado = duenoParaGuardar(existente, { id: 'd7', ahora: 200 });
+  assert.equal(guardado[desconocido], 'se queda');
+});
+
+test('duenoParaGuardar: `actualizado` se sella, no se copia del dueño que llega', () => {
+  // mezclar() decide quién gana por este número: si se copiara el viejo, la
+  // ficha recién guardada perdería contra la copia vieja que ya está en la nube.
+  const existente = { ...dueno, id: 'd7', actualizado: 100 };
+  const guardado = duenoParaGuardar(existente, { id: 'd7', ahora: 9999 });
+  assert.equal(guardado.actualizado, 9999);
+  assert.notEqual(guardado.actualizado, existente.actualizado);
+});
+
+test('duenoParaGuardar: no modifica el dueño que recibe', () => {
+  const existente = { ...dueno, id: 'd7', actualizado: 100 };
+  duenoParaGuardar(existente, { id: 'd7', ahora: 9999 });
+  assert.equal(existente.actualizado, 100);
 });

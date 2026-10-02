@@ -41,8 +41,14 @@ const BD = 'bestprice-contratos';
 // versión sube — si no, `onupgradeneeded` nunca se vuelve a correr, y
 // `guardarLocal('reservas', ...)` fallaría con la tienda inexistente aunque
 // 'reservas' ya esté en el arreglo de abajo.
-const VERSION_BD = 2;
-const TIENDAS = ['clientes', 'vehiculos', 'contratos', 'ajustes', 'reservas'];
+// Subida a 3 (dueños de carros subarrendados): misma razón, ahora para
+// 'duenos'. Sin el 3, el guardado en la nube saldría bien y el local fallaría,
+// y `cargarDuenos` reportaría fallo para siempre en esta computadora.
+// Subir la versión no pierde nada: el manejador de abajo solo crea las tiendas
+// que faltan y en ningún lado se borra una (no hay `deleteObjectStore`), así
+// que clientes, carros, contratos y reservaciones guardados se quedan como están.
+const VERSION_BD = 3;
+const TIENDAS = ['clientes', 'vehiculos', 'contratos', 'ajustes', 'reservas', 'duenos'];
 
 function abrir() {
   return new Promise((ok, mal) => {

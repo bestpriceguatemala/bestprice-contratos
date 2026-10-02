@@ -9,6 +9,7 @@
 import { iniciarFirebase } from './firebase-config.js';
 import { mezclar, guardarLocal, leerLocal, idsQueSobran, borrarLocales } from './cache.js';
 import { filtrar, textoDeCliente } from './nucleo/busqueda.js';
+import { textoDeDueno } from './nucleo/dueno.js';
 import { estadoContrato } from './nucleo/estados.js';
 import { estadoReserva } from './nucleo/reserva.js';
 import { resumen } from './nucleo/contrato.js';
@@ -145,6 +146,17 @@ export async function cargarFlota(alLlegar) {
  */
 export async function cargarClientes(alLlegar) {
   return cargarConSincronia('clientes', alLlegar);
+}
+
+/**
+ * Todos los dueños de carros subarrendados, como `{ datos, fallo }` (ver
+ * `resultadoLectura`). Mismo patrón que `cargarClientes`, y a propósito sin
+ * nada más: `cargarConSincronia` ya lleva la regla que este sistema aprendió
+ * a golpes — una lectura fallida de la nube nunca se toma por una colección
+ * vacía —, y reescribirla aquí sería abrir otra puerta por donde se cuele.
+ */
+export async function cargarDuenos(alLlegar) {
+  return cargarConSincronia('duenos', alLlegar);
 }
 
 /**
@@ -346,6 +358,53 @@ export async function guardarCliente(cliente) {
   // Si ya había una búsqueda de la sesión en curso, se le agrega de una vez:
   // el cliente que el mostrador acaba de dar de alta debe aparecer ya mismo.
   if (clientesListos) clientesListos = clientesListos.then((clientes) => mezclar(clientes, [guardado]));
+  return guardado;
+}
+
+// Mismo arreglo que los clientes: los dueños se sincronizan una sola vez por
+// sesión para que buscar mientras se escribe no dependa de la nube en cada
+// letra, y si esa sincronización no trae nada se olvida para reintentar.
+let duenosListos = null;
+
+function duenosDeLaSesion() {
+  if (!duenosListos) {
+    duenosListos = cargarConSincronia('duenos').then((r) => {
+      if (!r.datos.length) duenosListos = null;
+      return r.datos;
+    });
+  }
+  return duenosListos;
+}
+
+/** Busca dueños por nombre, teléfono o NIT en la copia local ya sincronizada. */
+export async function buscarDuenos(consulta) {
+  const duenos = await duenosDeLaSesion();
+  return filtrar(duenos, consulta, textoDeDueno);
+}
+
+/**
+ * Arma el documento que de verdad se guarda para un dueño. Función **pura** —
+ * sin Firestore — mismo patrón que `contratoParaGuardar`, para poder probarla
+ * sin red. El `id` y `actualizado` los sella esta función y no los manda la
+ * pantalla: `actualizado` es lo que `mezclar` usa para decidir quién gana, así
+ * que uno copiado de la ficha vieja le haría perder contra la copia que ya
+ * está en la nube. Todo lo demás de la ficha se arrastra tal cual, también los
+ * campos que el formulario no conoce — así no se pierde ninguno al guardar.
+ */
+export function duenoParaGuardar(dueno, { id, ahora = Date.now() } = {}) {
+  return { ...dueno, id: id ?? dueno?.id, actualizado: ahora };
+}
+
+/** Guarda un dueño en la nube y refresca la copia local. */
+export async function guardarDueno(dueno) {
+  const { db, fsMod } = await iniciarFirebase();
+  const ref = dueno?.id ? fsMod.doc(db, 'duenos', dueno.id) : fsMod.doc(fsMod.collection(db, 'duenos'));
+  const guardado = duenoParaGuardar(dueno, { id: ref.id });
+  await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
+  await guardarLocal('duenos', [guardado]);
+  // Igual que con los clientes: si ya había una búsqueda de la sesión en
+  // curso, el dueño recién dado de alta debe aparecer ya mismo.
+  if (duenosListos) duenosListos = duenosListos.then((duenos) => mezclar(duenos, [guardado]));
   return guardado;
 }
 
