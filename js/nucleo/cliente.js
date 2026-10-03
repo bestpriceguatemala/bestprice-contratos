@@ -11,29 +11,51 @@
  * Las pantallas dibujan el formulario desde aquí, así el alta rápida y la ficha
  * nunca se desincronizan.
  */
+// El orden NO es decorativo: es el del contrato de papel, columna por columna,
+// tal como el dueño lo pasó el 3 de octubre:
+//
+//   FECHA NAC. | CEDULA O PASAPORTE | EXTENDIDA EN | FECHA EXPIRA |
+//   LICENCIA CONDUCIR | LUGAR EMISION | FECHA EXPIRA |
+//   DIRECCION REFERENCIA | MUNICIPIO | TELEFONO | CORREO ELECTRONICO
+//
+// Llenar el formulario es copiar del documento al papel, y el mostrador lo
+// hace con el cliente enfrente. Si la pantalla pide los datos en otro orden,
+// hay que ir saltando de un lado a otro y ahí es donde se escribe la fecha de
+// vencimiento del documento en la casilla de la licencia.
+//
+// Después del correo van los que NO se imprimen pero sí se guardan, y de
+// últimos los "adicional", que son la segunda dirección y tampoco se imprimen.
 export const CAMPOS_CLIENTE = [
   { id: 'nombres', etiqueta: 'Nombres', tipo: 'texto' },
   { id: 'apellidos', etiqueta: 'Apellidos', tipo: 'texto' },
-  { id: 'nacionalidad', etiqueta: 'Nacionalidad', tipo: 'texto' },
+  // --- de aquí en adelante, el orden del contrato impreso ---
   { id: 'fechaNacimiento', etiqueta: 'Fecha de nacimiento', tipo: 'fecha' },
-  { id: 'documento', etiqueta: 'Documento', tipo: 'texto' },
-  { id: 'documentoExtendidoEn', etiqueta: 'Documento extendido en', tipo: 'texto' },
-  { id: 'documentoExpira', etiqueta: 'Documento expira', tipo: 'fecha' },
-  { id: 'licencia', etiqueta: 'Licencia', tipo: 'texto' },
-  { id: 'licenciaEmitidaEn', etiqueta: 'Licencia emitida en', tipo: 'texto' },
-  { id: 'licenciaEmision', etiqueta: 'Licencia emisión', tipo: 'fecha' },
+  { id: 'documento', etiqueta: 'Cédula o pasaporte', tipo: 'texto' },
+  { id: 'documentoExtendidoEn', etiqueta: 'Extendida en', tipo: 'texto' },
+  { id: 'documentoExpira', etiqueta: 'Fecha expira', tipo: 'fecha' },
+  { id: 'licencia', etiqueta: 'Licencia de conducir', tipo: 'texto' },
+  { id: 'licenciaEmitidaEn', etiqueta: 'Lugar de emisión', tipo: 'texto' },
   { id: 'licenciaExpira', etiqueta: 'Licencia expira', tipo: 'fecha' },
   { id: 'direccionReferencia', etiqueta: 'Dirección de referencia', tipo: 'texto' },
   { id: 'municipio', etiqueta: 'Municipio', tipo: 'texto' },
-  { id: 'pais', etiqueta: 'País', tipo: 'texto' },
   { id: 'telefono', etiqueta: 'Teléfono', tipo: 'telefono' },
-  { id: 'correo', etiqueta: 'Correo', tipo: 'correo' },
+  { id: 'correo', etiqueta: 'Correo electrónico', tipo: 'correo' },
+  // --- no se imprimen, pero se guardan ---
+  // `licenciaEmision` (la FECHA de emisión) no está en el contrato de papel:
+  // ahí solo va el LUGAR. Se conserva para no borrarle el dato a los clientes
+  // que ya lo tienen guardado, pero deja de pedirse entre los que sí se
+  // imprimen — era el campo que hacía parecer que la licencia se pedía dos
+  // veces.
+  { id: 'nacionalidad', etiqueta: 'Nacionalidad', tipo: 'texto' },
+  { id: 'pais', etiqueta: 'País', tipo: 'texto' },
+  { id: 'licenciaEmision', etiqueta: 'Licencia emisión', tipo: 'fecha' },
+  { id: 'facturarA', etiqueta: 'Facturar a', tipo: 'texto' },
+  // --- "adicional": la segunda dirección, tampoco se imprime ---
   { id: 'direccionAdicional', etiqueta: 'Dirección adicional', tipo: 'texto' },
   { id: 'ciudadAdicional', etiqueta: 'Ciudad adicional', tipo: 'texto' },
   { id: 'estadoAdicional', etiqueta: 'Estado adicional', tipo: 'texto' },
   { id: 'paisAdicional', etiqueta: 'País adicional', tipo: 'texto' },
   { id: 'telefonoAdicional', etiqueta: 'Teléfono adicional', tipo: 'telefono' },
-  { id: 'facturarA', etiqueta: 'Facturar a', tipo: 'texto' },
 ];
 
 /**
