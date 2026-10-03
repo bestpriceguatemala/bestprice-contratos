@@ -7,6 +7,11 @@ service cloud.firestore {
     match /clientes/{id}   { allow read, write: if haySesion(); }
     match /vehiculos/{id}  { allow read, write: if haySesion(); }
     match /reservas/{id}   { allow read, write: if haySesion(); }
+    // Los dueños de carros ajenos se leen y escriben con la sesión normal: el
+    // alta rápida ocurre en el mostrador, con el carro afuera y el cliente
+    // esperando. Lo que SÍ queda tras la credencial de dinero es cuánto se le
+    // paga a cada uno (pagosDueno, abajo, y contratos/{id}/privado).
+    match /duenos/{id}     { allow read, write: if haySesion(); }
     match /empleados/{id}  { allow read: if haySesion(); allow write: if esDinero(); }
     match /ajustes/{id}    { allow read: if haySesion(); allow write: if haySesion(); }
     match /contadores/{id} { allow read, write: if haySesion(); }
@@ -24,5 +29,9 @@ service cloud.firestore {
     }
 
     match /pagosComision/{id} { allow read, write: if esDinero(); }
+    // Los pagos a dueños de carros ajenos: cuánto se le pagó a cada quién y
+    // cuándo. Igual que pagosComision, cerrado a todos mientras
+    // 'UID_DE_LA_CUENTA_DE_DINERO' siga siendo un placeholder — estado seguro.
+    match /pagosDueno/{id}    { allow read, write: if esDinero(); }
   }
 }
