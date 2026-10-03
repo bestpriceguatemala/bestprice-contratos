@@ -29,7 +29,7 @@ import { hoyISO } from '../nucleo/fechas.js';
 import {
   cargarContrato, agregarPago, guardarContrato, cargarAjustes,
 } from '../datos.js';
-import { dinero, fecha, aviso } from '../ui.js';
+import { dinero, fecha, aviso, hora24 } from '../ui.js';
 
 // Mismo respaldo que PORCENTAJE_TARJETA_DEFECTO en sacarCarro.js: el campo
 // del % de tarjeta arranca en este valor fijo por si cargarAjustes()
@@ -257,10 +257,14 @@ export function totalDeEstaCobranza(contratoConCierre, { monto, forma, porcentaj
 // ---------- La plantilla (se arma una sola vez, con el contrato ya cargado) ----------
 
 function campo(id, etiqueta, opciones = {}) {
-  const { tipo = 'text', paso, minimo, valor = '' } = opciones;
+  const { tipo = 'text', paso, minimo, valor = '', marcador, numerico } = opciones;
   const attrs = [
     paso !== undefined && `step="${paso}"`,
     minimo !== undefined && `min="${minimo}"`,
+    marcador !== undefined && `placeholder="${esc(marcador)}"`,
+    // El teclado numérico del teléfono y la tablet, sin volverlo type=number:
+    // la hora lleva dos puntos, y un campo numérico no los deja escribir.
+    numerico && 'inputmode="numeric"',
   ].filter(Boolean).join(' ');
   return `
     <label class="sc-campo">${esc(etiqueta)}
@@ -289,7 +293,7 @@ function plantilla(contrato, soloCobro) {
           <h2>${enCorreccion ? esc(textoCorreccion(contrato)) : 'Al recibir el carro'}</h2>
           <div class="sc-campos">
             ${campo('rc-fecha-real', 'Fecha real de entrada', { tipo: 'date', valor: iniciales.fechaReal })}
-            ${campo('rc-hora-real', 'Hora real de entrada', { tipo: 'time', valor: iniciales.horaReal })}
+            ${campo('rc-hora-real', 'Hora real de entrada (24 h)', { marcador: 'HH:MM', numerico: true, valor: iniciales.horaReal })}
             ${campo('rc-lugar-entrada', 'Lugar de entrada', { valor: iniciales.lugarEntrada })}
             ${campo('rc-km-entrada', 'Kilometraje de entrada', { tipo: 'number', paso: '1', minimo: '0', valor: iniciales.kmEntrada })}
             ${campo('rc-combustible', 'Combustible (monto a cobrar)', { tipo: 'number', paso: '0.01', minimo: '0', valor: iniciales.combustible })}
@@ -663,6 +667,12 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
     recalcular();
   });
   el('rc-form').addEventListener('change', (ev) => {
+    // La hora se normaliza al salir del campo, no mientras escribe: corregirle
+    // el texto tecla por tecla le movería el cursor bajo los dedos. Al salir,
+    // "1345" o "9:5" ya quedan como 13:45 y 09:05. Lo que no sea una hora
+    // válida se borra en vez de dejarse a medias — "9:" en el contrato
+    // impreso sería una hora falsa.
+    if (ev.target.id === 'rc-hora-real') ev.target.value = hora24(ev.target.value);
     if (ev.target.id === 'rc-pago-forma') {
       el('rc-pago-porcentaje-campo').hidden = texto('rc-pago-forma') !== 'tarjeta';
     }

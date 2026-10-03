@@ -44,3 +44,48 @@ export function aviso(texto, tipo = 'info') {
   caja.appendChild(nota);
   setTimeout(() => nota.remove(), 5000);
 }
+
+/**
+ * La hora, siempre en 24 horas, pase lo que pase en la computadora.
+ *
+ * `<input type="time">` se ve como el navegador quiera: Chrome usa el idioma
+ * del NAVEGADOR, no el de la página, así que en una máquina en inglés sale
+ * "01:58 PM" aunque el contrato de papel y el país trabajen en 24 horas.
+ * Probado: poner `lang="es-GT"` o `lang="de-DE"` en el input no cambia nada.
+ * Por eso el campo pasa a ser de texto y el formato lo decide este archivo.
+ *
+ * Acepta lo que el mostrador teclea de verdad con el cliente enfrente —
+ * "1345", "13:45", "9:5", "0945" — y devuelve siempre 'HH:MM'. Lo que no sea
+ * una hora válida devuelve '' en vez de inventar una: una hora a medio
+ * escribir no es una hora, y guardar "9:" como si fuera algo sería peor que
+ * dejarlo vacío.
+ */
+export function hora24(texto) {
+  const limpio = String(texto ?? '').trim();
+  if (!limpio) return '';
+
+  const soloNumeros = limpio.replace(/\D/g, '');
+  let h;
+  let m;
+
+  if (limpio.includes(':')) {
+    const [hh, mm] = limpio.split(':');
+    h = Number(hh);
+    m = Number(mm);
+  } else if (soloNumeros.length === 4) {
+    h = Number(soloNumeros.slice(0, 2));
+    m = Number(soloNumeros.slice(2));
+  } else if (soloNumeros.length === 3) {
+    h = Number(soloNumeros.slice(0, 1));
+    m = Number(soloNumeros.slice(1));
+  } else if (soloNumeros.length <= 2 && soloNumeros.length > 0) {
+    h = Number(soloNumeros);
+    m = 0;
+  } else {
+    return '';
+  }
+
+  if (!Number.isInteger(h) || !Number.isInteger(m)) return '';
+  if (h < 0 || h > 23 || m < 0 || m > 59) return '';
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}

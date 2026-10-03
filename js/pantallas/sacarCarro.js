@@ -25,7 +25,7 @@ import {
   guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato, agregarPago, guardarReserva,
   cargarDuenos, guardarDueno,
 } from '../datos.js';
-import { dinero, fecha, aviso } from '../ui.js';
+import { dinero, fecha, aviso, hora24 } from '../ui.js';
 import { filtrar, textoDeCliente } from '../nucleo/busqueda.js';
 // El alta rápida de aquí y la ficha de clientes.js tienen que pedir
 // exactamente los mismos campos (Tarea 7) — por eso esta pantalla ya no
@@ -630,11 +630,15 @@ if (typeof window !== 'undefined') {
 // ---------- La plantilla estática (se pinta una sola vez) ----------
 
 function campo(id, etiqueta, opciones = {}) {
-  const { tipo = 'text', ancho = false, paso, minimo, valor = '', autocompletar } = opciones;
+  const { tipo = 'text', ancho = false, paso, minimo, valor = '', autocompletar, marcador, numerico } = opciones;
   const attrs = [
     paso !== undefined && `step="${paso}"`,
     minimo !== undefined && `min="${minimo}"`,
     autocompletar !== undefined && `autocomplete="${autocompletar}"`,
+    marcador !== undefined && `placeholder="${esc(marcador)}"`,
+    // El teclado numérico del teléfono y la tablet, sin volverlo type=number:
+    // la hora lleva dos puntos, y un campo numérico no los deja escribir.
+    numerico && 'inputmode="numeric"',
   ].filter(Boolean).join(' ');
   return `
     <label class="sc-campo${ancho ? ' ancho' : ''}">${esc(etiqueta)}
@@ -779,7 +783,7 @@ export function plantilla() {
           <h2>3. Renta</h2>
           <div class="sc-campos">
             ${campo('sc-fecha-salida', 'Fecha de salida', { tipo: 'date', valor: hoyISO() })}
-            ${campo('sc-hora-salida', 'Hora de salida', { tipo: 'time' })}
+            ${campo('sc-hora-salida', 'Hora de salida (24 h)', { marcador: 'HH:MM', numerico: true })}
             ${campo('sc-lugar', 'Lugar')}
             ${campo('sc-dias', 'Días', { tipo: 'number', paso: '1', minimo: '1' })}
             ${campo('sc-precio-dia', 'Precio por día', { tipo: 'number', paso: '0.01', minimo: '0' })}
@@ -1573,6 +1577,12 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     recalcular();
   });
   el('sc-form').addEventListener('change', (ev) => {
+    // La hora se normaliza al salir del campo, no mientras escribe: corregirle
+    // el texto tecla por tecla le movería el cursor bajo los dedos. Al salir,
+    // "1345" o "9:5" ya quedan como 13:45 y 09:05. Lo que no sea una hora
+    // válida se borra en vez de dejarse a medias — "9:" en el contrato
+    // impreso sería una hora falsa.
+    if (ev.target.id === 'sc-hora-salida') ev.target.value = hora24(ev.target.value);
     if (ev.target.id === 'sc-ajeno') {
       refrescarCarro();
       if (marcado('sc-ajeno')) buscadorDuenos.pedir();
