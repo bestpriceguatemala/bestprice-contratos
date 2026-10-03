@@ -23,7 +23,9 @@ import { resumen } from '../js/nucleo/contrato.js';
 import { construirCierre } from '../js/nucleo/cierre.js';
 import { sumarDias } from '../js/nucleo/fechas.js';
 import { construirContrato } from '../js/pantallas/sacarCarro.js';
-import { agregarPago, anularPago, contratoParaGuardar } from '../js/datos.js';
+import {
+  agregarPago, anularPago, contratoParaGuardar, conCostoDelDueno, costoDelDocumento,
+} from '../js/datos.js';
 
 const AHORA = 1790000000000;
 const CLIENTE = { id: 'k1', nombres: 'Juan', apellidos: 'Pérez' };
@@ -105,8 +107,20 @@ function saldado(c) {
   return c.garantiaMonto > 0 ? { ...conPago, garantiaLiberada: true, garantiaLiberadaEn: c.cierre.fechaReal } : conPago;
 }
 
-/** Lo que de verdad queda escrito: con `id`, `numero`, `actualizado` y `estado` sellados. */
-const guardado = (c) => contratoParaGuardar(c, { id: c.id, numero: c.numero, ahora: AHORA });
+/**
+ * Lo que de verdad queda escrito (con `id`, `numero`, `actualizado` y `estado`
+ * sellados) tal como LLEGA al área de dinero. Desde ADR-002 lo que se escribe ya
+ * NO lleva el costo del dueño: ese va a `privado/dinero` y `datos.js` lo vuelve
+ * a poner dentro del contrato al cargarlo (`conCostoDelDueno`). Aquí se hace el
+ * mismo recorrido, con las mismas funciones de `datos.js` — lo que
+ * `guardarContrato` manda a `privado` es `costoDelDocumento(c)` —, para que
+ * estos contratos tengan la forma que de verdad ve la liquidación y no la
+ * del contrato recién armado en pantalla.
+ */
+const guardado = (c) => conCostoDelDueno(
+  contratoParaGuardar(c, { id: c.id, numero: c.numero, ahora: AHORA }),
+  costoDelDocumento(c),
+);
 
 /** Cerrado, sin atraso: 4 días × Q300 = Q1,200. */
 function cerrado(id, opciones = {}) {

@@ -178,6 +178,9 @@ export function construirContrato(datos) {
     duenoId: ajeno ? (duenoId || null) : null,
     // resumen() (nucleo/contrato.js) solo cobra costo de subarriendo cuando
     // este campo existe; en un carro propio se deja en null a propósito.
+    // Esta es la forma en MEMORIA: el costo del dueño (aquí y en
+    // `carroAjeno.costoDia`) NO se guarda en el documento del contrato.
+    // guardarContrato (datos.js) lo manda a `privado/dinero` — ADR-002.
     subarriendo: ajeno ? { costoDia: q(carroAjeno?.costoDia) } : null,
     carroPlacas: ajeno ? (carroAjeno?.placas || '') : (carro?.placas || ''),
     carroDescripcion: ajeno ? descripcionCarroAjeno(carroAjeno) : descripcionCarroPropio(carro),
