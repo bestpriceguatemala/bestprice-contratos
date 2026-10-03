@@ -227,6 +227,116 @@ export function construirContrato(datos) {
 }
 
 /**
+ * El dueño que se anota en el contrato de un carro ajeno: `{ duenoId, dueno }`.
+ *
+ * - Si el mostrador escogió a alguien de la lista, van los dos: el id (para que
+ *   la liquidación junte todo lo de esa persona en una cuenta) y el nombre tal
+ *   como se vio ese día.
+ * - Si NO escogió a nadie, `duenoId` es null pero lo que escribió NO se tira:
+ *   el nombre queda en `dueno`. Escoger de la lista es opcional a propósito
+ *   —quien maneja el negocio pone el precio que quiere y no quiere avisos—,
+ *   pero que opcional signifique "se pierde en silencio lo que ya tecleó" no
+ *   era el trato: antes de que el campo fuera un buscador, ese texto SE
+ *   GUARDABA, y
+ *   la liquidación ya sabe agrupar un contrato por su texto (`sinEnlazar`).
+ *   Se prefiere lo escrito en el buscador y, si ahí no hay nada, el Nombre de
+ *   un alta rápida que se llenó pero no se guardó (por ejemplo, porque la
+ *   nube rechazó guardar al dueño): también es un nombre tecleado a mano.
+ * - Escoger gana sobre escribir: el clic es deliberado y lo escrito después
+ *   puede ser solo una búsqueda nueva.
+ *
+ * Función pura, para probar con el nombre exacto que llega al contrato.
+ */
+export function duenoDelContrato({ escogido, buscado = '', nuevo = '' }) {
+  if (escogido) return { duenoId: escogido.id ?? null, dueno: escogido.nombre ?? '' };
+  return { duenoId: null, dueno: String(buscado ?? '').trim() || String(nuevo ?? '').trim() };
+}
+
+/**
+ * Los lectores de campos del formulario: `val` (texto crudo), `texto` (sin
+ * espacios de más), `num` (por `q()`, como todo el dinero) y `marcado`. `el(id)`
+ * devuelve el campo con ese id (o nada). Viven aquí, y no dentro de la
+ * pantalla, para que una prueba los use tal cual contra campos de mentira.
+ */
+export function lectorDeCampos(el) {
+  const val = (id) => el(id)?.value ?? '';
+  return {
+    val,
+    num: (id) => q(val(id)),
+    texto: (id) => val(id).trim(),
+    marcado: (id) => Boolean(el(id)?.checked),
+  };
+}
+
+/**
+ * Lee el formulario y arma lo que `construirContrato` recibe. Es el puente
+ * entre los ids de la pantalla y los campos del contrato, y por eso vive fuera
+ * de la pantalla: dentro, nada lo podía probar y un id mal escrito o un campo
+ * olvidado (el dueño, por ejemplo) guardaba contratos incompletos con la suite
+ * en verde (hallazgo I-2).
+ *
+ * `lector` es `lectorDeCampos(el)`; `estado` trae lo que la pantalla recuerda
+ * fuera de los campos: `contratoId`, `cliente`, `carro` (el de la flota que
+ * dice la URL), `duenoEscogido` y `tarjetas` (ya leídas, ver `leerTarjetas`).
+ */
+export function leerFormularioDe({ texto, num, marcado }, estado, numero) {
+  const {
+    contratoId, cliente, carro, duenoEscogido, tarjetas,
+  } = estado;
+  const ajeno = marcado('sc-ajeno');
+  const dueno = duenoDelContrato({
+    escogido: duenoEscogido, buscado: texto('sc-dueno-buscar'), nuevo: texto('sc-nd-nombre'),
+  });
+  return {
+    id: contratoId,
+    numero,
+    cliente,
+    ajeno,
+    carro: ajeno ? null : carro,
+    carroAjeno: ajeno ? {
+      placas: texto('sc-ajeno-placas'), tipo: texto('sc-ajeno-tipo'), marca: texto('sc-ajeno-marca'),
+      color: texto('sc-ajeno-color'), modelo: texto('sc-ajeno-modelo'),
+      // El nombre tal como se vio ese día (ver construirContrato y
+      // duenoDelContrato): el del dueño escogido o, si no se escogió a nadie,
+      // lo que se escribió.
+      dueno: dueno.dueno,
+      costoDia: num('sc-ajeno-costo'),
+    } : null,
+    duenoId: ajeno ? dueno.duenoId : null,
+    fechaSalida: texto('sc-fecha-salida') || hoyISO(),
+    horaSalida: texto('sc-hora-salida'),
+    lugar: texto('sc-lugar'),
+    dias: num('sc-dias'),
+    precioDia: num('sc-precio-dia'),
+    kmSalida: num('sc-km-salida'),
+    combustibleSalida: texto('sc-combustible-salida'),
+    horaTardia: marcado('sc-hora-tardia'),
+    seguroDia: num('sc-seguro-dia'),
+    seguroTercerosDia: num('sc-seguro-terceros-dia'),
+    seguroMenoresDia: num('sc-seguro-menores-dia'),
+    seguroPaiDia: num('sc-seguro-pai-dia'),
+    deducible: num('sc-deducible'),
+    deducibleBajo: num('sc-deducible-bajo'),
+    cartaPoderDestino: texto('sc-carta-poder-destino'),
+    cartaPoderPrecio: num('sc-carta-poder-precio'),
+    variosDescripcion: texto('sc-varios-descripcion'),
+    variosPrecio: num('sc-varios-precio'),
+    tarjetas,
+    forma: texto('sc-pago-forma') || 'efectivo',
+    porcentajeTarjeta: num('sc-pago-porcentaje'),
+    montoPago: num('sc-pago-monto'),
+    rentadoPor: texto('sc-rentado-por'),
+    porcentajeComision: texto('sc-porcentaje-comision'),
+    conductorAdicional: {
+      nombre: texto('sc-conductor-nombre'),
+      licencia: texto('sc-conductor-licencia'),
+      identificacion: texto('sc-conductor-identificacion'),
+    },
+    observaciones: texto('sc-observaciones'),
+  };
+}
+
+/**
  * Tarea 9, Reglas 1 y 3 del dueño sobre el anticipo de una reservación:
  *
  * - Pagado: ya no hace falta cobrarlo otra vez a la salida, así que el monto
@@ -337,12 +447,18 @@ export function resultadosDeLista({
  * caída — vacía cuando todo va bien o todavía no se sabe. Es aparte de
  * resultadosDeLista porque tiene que verse aunque no haya nada escrito: el
  * mostrador debe enterarse ANTES de decidir dar de alta a alguien.
+ *
+ * Y se calla en cuanto ya se escogió a alguien (`elegido`): el aviso existe
+ * para frenar un alta duplicada, y con la ficha ya escogida ese riesgo pasó.
+ * Dejarlo puesto era una caja roja sobre toda la renta por el resto de la
+ * sesión (hallazgo M-2 de la revisión). Si el mostrador pulsa "Cambiar", el
+ * riesgo vuelve y el aviso con él.
  */
 export function avisoDeLista({
-  tipo, leida, fallo, cantidad,
+  tipo, leida, fallo, cantidad, elegido = false,
 }) {
   const { plural, singular } = LISTAS[tipo];
-  if (!leida || !fallo) return '';
+  if (elegido || !leida || !fallo) return '';
   if (!cantidad) {
     return `No se pudo leer la lista de ${plural}, así que no se sabe si el ${singular} ya está registrado. `
       + 'Vuelve a intentar antes de dar de alta a uno nuevo.';
@@ -361,6 +477,154 @@ export function conAltasDeHoy(datos, altas) {
   const lista = Array.isArray(datos) ? datos : [];
   const ids = new Set(lista.map((d) => d.id));
   return [...lista, ...altas.filter((a) => !ids.has(a.id))];
+}
+
+/**
+ * Todo lo que se dibuja de un buscador, decidido sin tocar el DOM: la frase
+ * fija de arriba, si se ve el botón de reintentar, y la lista flotante con sus
+ * filas o la frase que explica por qué no hay ninguna. `pintar` (más abajo)
+ * solo copia esto a la pantalla, así que lo que importa —que una lectura caída
+ * no se dibuje como "no hay nada" y que el aviso se vaya al escoger— queda
+ * dentro de lo que se prueba.
+ *
+ * - `items`: la lista tal como llegó (copia local o nube); `altas`: las fichas
+ *   dadas de alta en esta sesión (ver conAltasDeHoy). Van aparte porque el
+ *   aviso cuenta solo lo que llegó: una alta de hoy no hace que una lectura
+ *   caída "haya funcionado".
+ * - `elegido`: ya se escogió a alguien; el aviso se calla (ver avisoDeLista).
+ *
+ * El reintento solo se ofrece cuando no hay nada que mostrar: con una copia
+ * local la lista ya sirve y la nube se vuelve a intentar sola la próxima vez.
+ */
+export function vistaDeBuscador({
+  tipo, items, altas = [], fallo, leida, consulta, elegido = false,
+}) {
+  const lista = Array.isArray(items) ? items : [];
+  const aviso = avisoDeLista({
+    tipo, leida, fallo, cantidad: lista.length, elegido,
+  });
+  const reintentar = Boolean(aviso) && lista.length === 0;
+  if (!String(consulta ?? '').trim()) {
+    return {
+      aviso, reintentar, abierta: false, filas: [], mensaje: '',
+    };
+  }
+  const { filas, mensaje } = resultadosDeLista({
+    tipo, items: conAltasDeHoy(lista, altas), fallo, leida, consulta,
+  });
+  return {
+    aviso, reintentar, abierta: true, filas, mensaje,
+  };
+}
+
+// ---------- La lista de cada buscador: UNA lectura por sesión ----------
+
+/**
+ * Lo que un buscador sabe de su lista, y cuándo la vuelve a pedir a la nube.
+ * Sin DOM: `cargar` es cargarClientes o cargarDuenos (o uno de mentira en las
+ * pruebas) y devuelve `{ datos, fallo }` — la copia local al instante y la
+ * nube por detrás, que avisa por `alLlegar` si trae cambios o si falla.
+ *
+ * Se crea UNA vez por sesión (ver `listaDeClientes` abajo), no una por cada
+ * apertura de la pantalla. Antes de la Tarea 5 el cliente se sincronizaba una
+ * sola vez por sesión; al pasar al buscador nuevo cada apertura de "Sacar
+ * carro" volvió a leer la colección ENTERA de la nube — una lectura de todos
+ * los clientes por cada renta, en la pantalla que más se abre (hallazgo M-4).
+ *
+ * La regla para ganar esa velocidad sin perder la honestidad: **solo se
+ * recuerda una lectura buena.** Una lectura que falló (al abrir, o después —
+ * la nube que contesta tarde con un error cuando ya se sirvió la copia local)
+ * se vuelve a pedir en la apertura siguiente, nunca queda fijada como "ya se
+ * leyó". Si no, una caída de internet de un minuto dejaría la lista vacía, y
+ * la pantalla diciendo "Sin resultados", por el resto de la sesión.
+ *
+ * - `leer()`: pide la lista si hace falta. Con una lectura buena ya en memoria
+ *   no hace nada; con una en vuelo, se le une en vez de pedir otra; con una
+ *   fallida, vuelve a pedir. `leer({ forzar: true })` pide siempre (el botón
+ *   "Volver a intentar"). Nunca rechaza: sus errores quedan en `estado()`.
+ * - `estado()`: `{ items, altas, fallo, leida }`. `fallo` es "la nube no
+ *   contestó", jamás "no hay nada"; una respuesta sin forma de respuesta o un
+ *   `cargar` que revienta (IndexedDB mismo) también cuentan como fallo.
+ * - `escuchar(fn)`: la pantalla abierta pide que se le avise cuando llegue
+ *   algo. Solo una escucha a la vez: la de la última pantalla abierta.
+ * - `registrarAlta(ficha)`: lo dado de alta en esta sesión se recuerda aquí,
+ *   porque la lista que ya está en memoria no lo trae y la siguiente apertura
+ *   no la vuelve a pedir (ver conAltasDeHoy).
+ * - `olvidar()`: la lista en memoria ya no es de fiar (alguien más pudo haber
+ *   guardado fichas) y se tira la lectura en vuelo; la próxima apertura lee.
+ */
+export function crearListaDeSesion({ cargar }) {
+  let items = [];
+  let fallo = false;
+  let leida = false;
+  let enCurso = null;
+  // El número de la última lectura pedida: lo que conteste una más vieja (la
+  // sincronía tardía de una lectura anterior) ya no puede pisar a la nueva.
+  let vigente = 0;
+  let alCambiar = null;
+  const altas = [];
+
+  function recibir(r) {
+    items = Array.isArray(r?.datos) ? r.datos : [];
+    // Una lectura sin forma de lectura (no debería pasar) cuenta como fallo:
+    // nunca como "no hay nada".
+    fallo = r ? Boolean(r.fallo) : true;
+    leida = true;
+    if (alCambiar) alCambiar();
+  }
+
+  async function pedirALaNube() {
+    const mia = vigente + 1;
+    vigente = mia;
+    const sigue = () => mia === vigente;
+    try {
+      const r = await cargar((tarde) => { if (sigue()) recibir(tarde); });
+      if (sigue()) recibir(r);
+    } catch {
+      // Solo si IndexedDB mismo falla: se conserva lo que ya había, marcado
+      // como fallo.
+      if (sigue()) recibir({ datos: items, fallo: true });
+    }
+  }
+
+  return {
+    estado: () => ({
+      items, altas: [...altas], fallo, leida,
+    }),
+    escuchar(fn) { alCambiar = fn; },
+    registrarAlta(ficha) { altas.push(ficha); },
+    olvidar() {
+      vigente += 1;
+      enCurso = null;
+      leida = false;
+    },
+    leer({ forzar = false } = {}) {
+      if (!forzar) {
+        if (enCurso) return enCurso;
+        if (leida && !fallo) return Promise.resolve();
+      }
+      const lectura = pedirALaNube().finally(() => { if (enCurso === lectura) enCurso = null; });
+      enCurso = lectura;
+      return lectura;
+    },
+  };
+}
+
+// Las listas de la sesión: viven en el módulo, no en la pantalla, y por eso
+// sobreviven de una apertura a otra.
+const listaDeClientes = crearListaDeSesion({ cargar: cargarClientes });
+const listaDeDuenos = crearListaDeSesion({ cargar: cargarDuenos });
+
+// Una ficha guardada en la pantalla de Clientes no pasa por aquí: sin esto, el
+// cliente que acaba de dar de alta allá no aparecería en el buscador de acá
+// hasta recargar, y el mostrador lo daría de alta por segunda vez — el
+// duplicado que estos buscadores existen para evitar. Entrar a esa pantalla
+// vence la lista; la próxima apertura de "Sacar carro" la lee otra vez (la copia
+// local ya trae lo guardado y la nube se sincroniza por detrás, como siempre).
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', () => {
+    if (location.hash.startsWith('#/clientes')) listaDeClientes.olvidar();
+  });
 }
 
 // ---------- La plantilla estática (se pinta una sola vez) ----------
@@ -416,25 +680,32 @@ function campoAltaDueno(c) {
   return campo(`sc-nd-${c.id}`, c.etiqueta, { tipo: TIPO_INPUT_CLIENTE[c.tipo] || 'text' });
 }
 
-function plantilla() {
+export function plantilla() {
   // novalidate: la validación nativa del navegador sale en el idioma del
   // navegador, no en español. Los avisos de guardar() (aviso(), en ui.js)
   // son los que de verdad hablan con el mostrador.
+  //
+  // El aviso rojo de cada buscador (cliente y dueño) va ARRIBA de su caja de
+  // búsqueda, no debajo: la lista de resultados es `position: absolute` y se
+  // dibuja justo debajo de la caja, así que un aviso puesto ahí quedaba tapado
+  // por ella —con "alta a uno nuevo." como lo único legible— justo cuando la
+  // lectura había fallado y el mostrador más necesitaba leerlo (hallazgo M-2).
+  // (Se exporta solo para probar ese orden.)
   return `
     <form id="sc-form" class="sacar-carro" novalidate>
       <div class="sc-bloques">
 
         <section class="sc-bloque">
           <h2>1. Cliente</h2>
+          <div id="sc-cliente-aviso" class="sc-carro-info sc-carro-aviso" hidden>
+            <span id="sc-cliente-aviso-texto"></span>
+            <button type="button" id="sc-cliente-reintentar" class="btn" hidden>Volver a intentar</button>
+          </div>
           <div class="sc-cliente-buscar">
             <label class="sc-campo ancho">Buscar por nombre, apellido, DPI, licencia o teléfono
               <input type="search" id="sc-cliente-buscar" placeholder="Escribe para buscar...">
             </label>
             <ul id="sc-cliente-resultados" class="sc-cliente-resultados" hidden></ul>
-          </div>
-          <div id="sc-cliente-aviso" class="sc-carro-info sc-carro-aviso" hidden>
-            <span id="sc-cliente-aviso-texto"></span>
-            <button type="button" id="sc-cliente-reintentar" class="btn" hidden>Volver a intentar</button>
           </div>
           <div id="sc-cliente-elegido" class="sc-cliente-elegido" hidden>
             <span id="sc-cliente-elegido-nombre"></span>
@@ -473,15 +744,15 @@ function plantilla() {
             ${campo('sc-ajeno-color', 'Color')}
             ${campo('sc-ajeno-modelo', 'Modelo')}
             <div class="sc-campo ancho" id="sc-dueno">
+              <div id="sc-dueno-aviso" class="sc-carro-info sc-carro-aviso" hidden>
+                <span id="sc-dueno-aviso-texto"></span>
+                <button type="button" id="sc-dueno-reintentar" class="btn" hidden>Volver a intentar</button>
+              </div>
               <div class="sc-cliente-buscar">
                 <label class="sc-campo ancho">Dueño del carro — buscar por nombre, teléfono o NIT
                   <input type="search" id="sc-dueno-buscar" placeholder="Escribe para buscar..." autocomplete="off">
                 </label>
                 <ul id="sc-dueno-resultados" class="sc-cliente-resultados" hidden></ul>
-              </div>
-              <div id="sc-dueno-aviso" class="sc-carro-info sc-carro-aviso" hidden>
-                <span id="sc-dueno-aviso-texto"></span>
-                <button type="button" id="sc-dueno-reintentar" class="btn" hidden>Volver a intentar</button>
               </div>
               <div id="sc-dueno-elegido" class="sc-cliente-elegido" hidden>
                 <span id="sc-dueno-elegido-nombre"></span>
@@ -726,10 +997,9 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   contenedor.innerHTML = plantilla();
 
   const el = (id) => document.getElementById(id);
-  const val = (id) => el(id)?.value ?? '';
-  const num = (id) => q(val(id));
-  const texto = (id) => val(id).trim();
-  const marcado = (id) => Boolean(el(id)?.checked);
+  // Los lectores de campos viven fuera de la pantalla (lectorDeCampos) para
+  // poder probar, con los mismos ids, lo que de verdad llega al contrato.
+  const { val, num, texto, marcado } = lectorDeCampos(el);
   const carroPropio = () => flota.find((c) => c.id === carroId) || null;
 
   function leerTarjetas() {
@@ -757,56 +1027,19 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     return tarjetas;
   }
 
-  function leerFormulario(numero) {
-    const ajeno = marcado('sc-ajeno');
-    return {
-      id: contratoId,
-      numero,
+  // Lo que se lee del formulario lo arma leerFormularioDe (arriba, probado con
+  // los mismos ids); aquí solo se le da lo que la pantalla recuerda.
+  const leerFormulario = (numero) => leerFormularioDe(
+    { texto, num, marcado },
+    {
+      contratoId,
       cliente: clienteSeleccionado,
-      ajeno,
-      carro: ajeno ? null : carroPropio(),
-      carroAjeno: ajeno ? {
-        placas: texto('sc-ajeno-placas'), tipo: texto('sc-ajeno-tipo'), marca: texto('sc-ajeno-marca'),
-        color: texto('sc-ajeno-color'), modelo: texto('sc-ajeno-modelo'),
-        // El nombre tal como se vio ese día (ver construirContrato): el del
-        // dueño escogido, o vacío si no se escogió ninguno. Ya no se escribe
-        // a mano — era lo que partía en dos la cuenta de una misma persona.
-        dueno: duenoSeleccionado?.nombre ?? '',
-        costoDia: num('sc-ajeno-costo'),
-      } : null,
-      duenoId: ajeno ? (duenoSeleccionado?.id ?? null) : null,
-      fechaSalida: texto('sc-fecha-salida') || hoyISO(),
-      horaSalida: texto('sc-hora-salida'),
-      lugar: texto('sc-lugar'),
-      dias: num('sc-dias'),
-      precioDia: num('sc-precio-dia'),
-      kmSalida: num('sc-km-salida'),
-      combustibleSalida: texto('sc-combustible-salida'),
-      horaTardia: marcado('sc-hora-tardia'),
-      seguroDia: num('sc-seguro-dia'),
-      seguroTercerosDia: num('sc-seguro-terceros-dia'),
-      seguroMenoresDia: num('sc-seguro-menores-dia'),
-      seguroPaiDia: num('sc-seguro-pai-dia'),
-      deducible: num('sc-deducible'),
-      deducibleBajo: num('sc-deducible-bajo'),
-      cartaPoderDestino: texto('sc-carta-poder-destino'),
-      cartaPoderPrecio: num('sc-carta-poder-precio'),
-      variosDescripcion: texto('sc-varios-descripcion'),
-      variosPrecio: num('sc-varios-precio'),
+      carro: carroPropio(),
+      duenoEscogido: duenoSeleccionado,
       tarjetas: leerTarjetas(),
-      forma: texto('sc-pago-forma') || 'efectivo',
-      porcentajeTarjeta: num('sc-pago-porcentaje'),
-      montoPago: num('sc-pago-monto'),
-      rentadoPor: texto('sc-rentado-por'),
-      porcentajeComision: texto('sc-porcentaje-comision'),
-      conductorAdicional: {
-        nombre: texto('sc-conductor-nombre'),
-        licencia: texto('sc-conductor-licencia'),
-        identificacion: texto('sc-conductor-identificacion'),
-      },
-      observaciones: texto('sc-observaciones'),
-    };
-  }
+    },
+    numero,
+  );
 
   function refrescarCarro() {
     const caja = el('sc-carro-info');
@@ -973,17 +1206,18 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
    * Si la reservación trae un cliente ya vinculado (clienteId), lo
    * preselecciona de verdad — no solo el nombre suelto en el buscador — para
    * que el contrato salga con el mismo clienteId que la reservación, sin que
-   * el mostrador tenga que volver a buscarlo. `cargarClientes` (datos.js) es
-   * la misma lectura que usa la pantalla de Clientes: se pide solo aquí,
-   * cuando de verdad hace falta, para no cargarla en cada "Sacar carro" que
-   * no viene de una reservación.
+   * el mostrador tenga que volver a buscarlo. Se busca en la MISMA lista que
+   * el buscador de clientes (una lectura por sesión): antes esto pedía a la
+   * nube la colección entera una segunda vez, en cada salida que viene de una
+   * reservación.
    */
   async function preseleccionarClienteDeReserva(reserva) {
     if (!reserva?.clienteId) return;
     try {
-      const { datos: clientes } = await cargarClientes();
+      await listaDeClientes.leer();
       if (!sigoVigente()) return;
-      const cliente = clientes.find((c) => c.id === reserva.clienteId);
+      const { items, altas } = listaDeClientes.estado();
+      const cliente = conAltasDeHoy(items, altas).find((c) => c.id === reserva.clienteId);
       if (cliente) elegirCliente(cliente);
     } catch {
       // Sin el cliente vinculado disponible: el mostrador lo busca a mano o
@@ -1043,6 +1277,9 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     el('sc-cliente-alta').hidden = true;
     el('sc-cliente-elegido').hidden = false;
     el('sc-cliente-elegido-nombre').textContent = nombreCompleto(c) || 'Cliente sin nombre';
+    // Ya hay cliente: el aviso rojo de la lista, si la lectura falló, deja de
+    // hacer falta (ver avisoDeLista).
+    buscadorClientes.pintar();
     recalcular();
   }
 
@@ -1055,86 +1292,65 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
    * `sc-<prefijo>-buscar`, `-resultados`, `-aviso`, `-aviso-texto` y
    * `-reintentar`.
    *
-   * `cargar` es cargarClientes o cargarDuenos: sirven la copia local al
-   * instante, nunca rechazan, y entregan `{ datos, fallo }`; cada sincronía de
-   * atrás (también la que trae el fallo de la nube) vuelve a pintar por
-   * `alLlegar`. Se busca en la lista que ya está en memoria, igual de rápido
-   * que antes — sin pedirle a la nube nada por letra.
+   * Aquí solo se DIBUJA. Lo que se sabe de la lista (qué llegó, si falló, las
+   * altas de hoy, y cuándo se vuelve a pedir a la nube) vive en `lista`, una
+   * crearListaDeSesion del módulo: la misma en cada apertura de la pantalla,
+   * así la nube se lee una vez por sesión y no una por renta. Y lo que se
+   * dibuja lo decide vistaDeBuscador, sin DOM; `pintar` solo lo copia. Se busca
+   * en la lista que ya está en memoria, igual de rápido que antes — sin pedirle
+   * a la nube nada por letra.
+   *
+   * `hayElegido` dice si ya se escogió a alguien: con la ficha escogida el
+   * aviso rojo se va (ver avisoDeLista).
    */
   function crearBuscador({
-    tipo, prefijo, cargar, fila,
+    tipo, prefijo, lista, fila, hayElegido,
   }) {
-    let items = [];
-    const altas = [];
-    let leida = false;
-    let fallo = false;
     let pedida = false;
     let ultimos = [];
 
-    const lista = () => conAltasDeHoy(items, altas);
-
     function pintar() {
-      const textoAviso = avisoDeLista({
-        tipo, leida, fallo, cantidad: items.length,
+      const vista = vistaDeBuscador({
+        tipo, ...lista.estado(), consulta: el(`sc-${prefijo}-buscar`).value, elegido: hayElegido(),
       });
-      el(`sc-${prefijo}-aviso`).hidden = !textoAviso;
-      el(`sc-${prefijo}-aviso-texto`).textContent = textoAviso;
-      // Reintentar solo cuando no hay nada que mostrar: con una copia local, la
-      // lista ya sirve y la nube se vuelve a intentar sola la próxima vez.
-      el(`sc-${prefijo}-reintentar`).hidden = !textoAviso || items.length > 0;
+      el(`sc-${prefijo}-aviso`).hidden = !vista.aviso;
+      el(`sc-${prefijo}-aviso-texto`).textContent = vista.aviso;
+      el(`sc-${prefijo}-reintentar`).hidden = !vista.reintentar;
 
-      const consulta = el(`sc-${prefijo}-buscar`).value;
       const caja = el(`sc-${prefijo}-resultados`);
-      if (!consulta.trim()) {
-        caja.hidden = true;
-        return;
-      }
-      const { filas, mensaje } = resultadosDeLista({
-        tipo, items: lista(), fallo, leida, consulta,
-      });
-      ultimos = filas;
-      caja.innerHTML = filas.length
-        ? filas.map(fila).join('')
-        : `<li class="sc-vacio">${esc(mensaje)}</li>`;
-      caja.hidden = false;
+      caja.hidden = !vista.abierta;
+      if (!vista.abierta) return;
+      ultimos = vista.filas;
+      caja.innerHTML = vista.filas.length
+        ? vista.filas.map(fila).join('')
+        : `<li class="sc-vacio">${esc(vista.mensaje)}</li>`;
     }
 
-    function recibir(r) {
-      items = Array.isArray(r?.datos) ? r.datos : [];
-      // Una lectura sin forma de lectura (no debería pasar) cuenta como fallo:
-      // nunca como "no hay nada".
-      fallo = r ? Boolean(r.fallo) : true;
-      leida = true;
-      if (sigoVigente()) pintar();
-    }
-
-    // El `catch` es solo por si IndexedDB mismo falla.
-    async function leer() {
-      try {
-        recibir(await cargar(recibir));
-      } catch {
-        recibir({ datos: items, fallo: true });
-      }
-    }
+    // Lo que llegue de la nube (también un fallo tardío) vuelve a pintar, salvo
+    // que el mostrador ya se haya ido de esta pantalla.
+    lista.escuchar(() => { if (sigoVigente()) pintar(); });
 
     return {
       pintar,
-      leer,
+      reintentar: () => lista.leer({ forzar: true }),
       pedir() {
         if (pedida) return;
         pedida = true;
-        leer();
+        lista.leer();
+        // Con la lista ya en memoria (otra apertura) no llega ningún aviso
+        // nuevo: se pinta lo que hay de una vez.
+        pintar();
       },
-      registrarAlta(ficha) { altas.push(ficha); },
-      porId(id) { return ultimos.find((r) => r.id === id); },
+      registrarAlta: (ficha) => lista.registrarAlta(ficha),
+      porId: (id) => ultimos.find((r) => r.id === id),
     };
   }
 
   const buscadorClientes = crearBuscador({
-    tipo: 'clientes', prefijo: 'cliente', cargar: cargarClientes, fila: filaCliente,
+    tipo: 'clientes', prefijo: 'cliente', lista: listaDeClientes, fila: filaCliente, hayElegido: () => Boolean(clienteSeleccionado),
   });
   const buscadorDuenos = crearBuscador({
-    tipo: 'duenos', prefijo: 'dueno', cargar: cargarDuenos, fila: filaDueno,
+    tipo: 'duenos', prefijo: 'dueno', lista: listaDeDuenos, fila: filaDueno, hayElegido: () => Boolean(duenoSeleccionado),
   });
 
   /**
@@ -1151,7 +1367,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       const boton = el(idBoton);
       boton.disabled = true;
       try {
-        await buscador.leer();
+        await buscador.reintentar();
       } finally {
         boton.disabled = false;
       }
@@ -1223,6 +1439,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     el('sc-dueno-alta').hidden = true;
     el('sc-dueno-elegido').hidden = false;
     el('sc-dueno-elegido-nombre').textContent = (d?.nombre || '').trim() || 'Dueño sin nombre';
+    buscadorDuenos.pintar();
   }
 
   // Recorre CAMPOS_DUENO, igual que el alta del cliente recorre CAMPOS_CLIENTE.
@@ -1387,6 +1604,8 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   el('sc-cliente-cambiar').addEventListener('click', () => {
     clienteSeleccionado = null;
     el('sc-cliente-elegido').hidden = true;
+    // Sin cliente otra vez, el aviso de la lista (si sigue caída) vuelve.
+    buscadorClientes.pintar();
     recalcular();
   });
   el('sc-cliente-guardar').addEventListener('click', guardarClienteNuevo);
@@ -1402,6 +1621,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   el('sc-dueno-cambiar').addEventListener('click', () => {
     duenoSeleccionado = null;
     el('sc-dueno-elegido').hidden = true;
+    buscadorDuenos.pintar();
   });
   el('sc-dueno-guardar').addEventListener('click', guardarDuenoNuevo);
   alReintentar('sc-dueno-reintentar', buscadorDuenos);
@@ -1411,8 +1631,10 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   refrescarCarro();
   recalcular();
   // El cliente se busca en CADA salida, así que su lista se pide al abrir (la
-  // del dueño espera a que se marque "carro ajeno"). Fuera del Promise.all de
-  // abajo a propósito: una nube lenta no debe retrasar el resto de la pantalla.
+  // del dueño espera a que se marque "carro ajeno"). Se lee de la nube una sola
+  // vez por sesión, salvo que esa lectura haya fallado (ver crearListaDeSesion).
+  // Fuera del Promise.all de abajo a propósito: una nube lenta no debe retrasar
+  // el resto de la pantalla.
   buscadorClientes.pedir();
 
   // cargarFlota/cargarContratosAbiertos/cargarReservas sirven la copia local

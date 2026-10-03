@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import {
   construirContrato, ultimos4Digitos, leerParametroRuta, montoSalidaConAnticipo, conAnticipoComoPago,
   resultadosDeLista, avisoDeLista, conAltasDeHoy,
+  vistaDeBuscador, crearListaDeSesion, duenoDelContrato, lectorDeCampos, leerFormularioDe, plantilla,
 } from '../js/pantallas/sacarCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
@@ -549,4 +550,435 @@ test('resultadosDeLista: el mensaje de cada buscador nombra SU lista', () => {
   }).mensaje;
   assert.match(dicen('clientes'), /lista de clientes/);
   assert.match(dicen('duenos'), /lista de dueños/);
+});
+
+// ---------- Lo que se teclea del dueño no se tira (I-1) ----------
+//
+// Antes de que el dueño del carro ajeno se escogiera de una lista, el nombre
+// se escribía a mano y SE GUARDABA. Con el buscador, quien teclea el nombre
+// completo y sigue de largo sin pulsar la fila se llevaba un contrato con
+// `carroAjeno.dueno: ''`: lo escrito desaparecía sin un aviso. Escoger sigue
+// siendo opcional (y sin avisos: así lo quiere quien maneja el negocio), pero
+// lo escrito se queda como el nombre del contrato, con `duenoId: null`.
+//
+// Estas pruebas corren el camino real de los datos: campos de mentira con los
+// ids de la pantalla → lectorDeCampos → leerFormularioDe → construirContrato
+// → contratoParaGuardar. Lo que NO prueban (no se puede desde node:test, no
+// hay DOM): que la pantalla le pase a leerFormularioDe el `duenoSeleccionado`
+// que de verdad recuerda, y que el clic en una fila lo guarde.
+
+// Campos de mentira con la forma de lo que se lee de verdad: `{ value }` o
+// `{ checked }`. Un id que nadie llenó es un campo vacío, como en la pantalla.
+// `pedidos` junta cada id que se leyó, para compararlos con la plantilla.
+const camposDeMentira = (valores = {}) => {
+  const pedidos = new Set();
+  const el = (id) => {
+    pedidos.add(id);
+    const v = valores[id];
+    if (typeof v === 'boolean') return { value: '', checked: v };
+    return { value: v === undefined ? '' : String(v), checked: false };
+  };
+  return { el, pedidos };
+};
+
+const formularioDeCarroAjeno = (extra = {}) => ({
+  'sc-ajeno': true,
+  'sc-ajeno-placas': 'P-1AJN',
+  'sc-ajeno-tipo': 'Pickup',
+  'sc-ajeno-marca': 'Ford',
+  'sc-ajeno-color': 'Rojo',
+  'sc-ajeno-modelo': '2019',
+  'sc-ajeno-costo': '400',
+  'sc-fecha-salida': '2026-09-23',
+  'sc-dias': '4',
+  'sc-precio-dia': '700',
+  'sc-rentado-por': 'Ana',
+  'sc-porcentaje-comision': '5',
+  'sc-pago-forma': 'efectivo',
+  'sc-pago-monto': '2800',
+  ...extra,
+});
+
+// Lo que pasa al pulsar "Guardar" con esos campos: lo que se lee del formulario
+// (`datos`), el contrato armado y el que de verdad se guarda.
+const contratoDeLosCampos = (valores, { duenoEscogido = null, carro = null } = {}) => {
+  const { el } = camposDeMentira(valores);
+  const datos = leerFormularioDe(lectorDeCampos(el), {
+    contratoId: 'c1', cliente: clienteJuan(), carro, duenoEscogido, tarjetas: [],
+  }, 12);
+  const armado = construirContrato(datos);
+  return { datos, armado, guardado: contratoParaGuardar(armado, { id: 'c1', numero: 12, ahora: 1790000000300 }) };
+};
+
+test('el caso de la revisión: "Mario López" tecleado completo y sin pulsar la fila se guarda como nombre, con duenoId null', () => {
+  // d1 (Mario López) existe en la lista, pero nadie lo escogió.
+  const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno({ 'sc-dueno-buscar': 'Mario López' }));
+  assert.equal(guardado.carroAjeno.dueno, 'Mario López', 'lo tecleado ya no se pierde');
+  assert.equal(guardado.duenoId, null, 'pero no se inventa un enlace que nadie escogió');
+  assert.equal(guardado.ajeno, true);
+});
+
+test('lo tecleado se guarda sin espacios de más', () => {
+  const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno({ 'sc-dueno-buscar': '   Mario López  ' }));
+  assert.equal(guardado.carroAjeno.dueno, 'Mario López');
+});
+
+test('escoger de la lista sigue poniendo los dos: duenoId y el nombre de ese día', () => {
+  const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno(), { duenoEscogido: duenoMario() });
+  assert.equal(guardado.duenoId, 'd1');
+  assert.equal(guardado.carroAjeno.dueno, 'Mario López');
+});
+
+test('escoger gana sobre lo tecleado después: una búsqueda nueva no cambia al dueño escogido', () => {
+  const { guardado } = contratoDeLosCampos(
+    formularioDeCarroAjeno({ 'sc-dueno-buscar': 'lucia' }), { duenoEscogido: duenoMario() },
+  );
+  assert.equal(guardado.duenoId, 'd1');
+  assert.equal(guardado.carroAjeno.dueno, 'Mario López');
+});
+
+test('sin escoger ni teclear nada, el contrato se guarda igual: sin dueño, sin bloqueo y sin undefined', () => {
+  const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno());
+  assert.equal(guardado.carroAjeno.dueno, '');
+  assert.equal(guardado.duenoId, null);
+  assert.equal(guardado.estado, 'rentado', 'el contrato salió: escoger sigue siendo opcional');
+});
+
+test('un dueño nuevo tecleado en el alta rápida que no llegó a guardarse (la nube lo rechazó) tampoco se pierde', () => {
+  const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno({ 'sc-nd-nombre': 'Rosa Tum' }));
+  assert.equal(guardado.carroAjeno.dueno, 'Rosa Tum');
+  assert.equal(guardado.duenoId, null);
+});
+
+test('lo tecleado en el buscador manda sobre el nombre a medio llenar del alta', () => {
+  const { guardado } = contratoDeLosCampos(
+    formularioDeCarroAjeno({ 'sc-dueno-buscar': 'Mario López', 'sc-nd-nombre': 'Rosa Tum' }),
+  );
+  assert.equal(guardado.carroAjeno.dueno, 'Mario López');
+});
+
+test('un carro propio no arrastra lo tecleado en la caja del dueño: carroAjeno y duenoId quedan en null', () => {
+  // La caja del dueño se esconde al desmarcar "carro ajeno", pero conserva lo escrito.
+  const { datos, guardado } = contratoDeLosCampos(
+    formularioDeCarroAjeno({ 'sc-ajeno': false, 'sc-dueno-buscar': 'Mario López' }),
+    { duenoEscogido: duenoMario(), carro: { id: 'v1', placas: 'P-999TST', marca: 'Toyota', linea: 'Corolla' } },
+  );
+  // Ya desde la lectura del formulario, no solo al armar el contrato: las dos
+  // capas cuidan que un carro propio no lleve dueño.
+  assert.equal(datos.duenoId, null);
+  assert.equal(datos.carroAjeno, null);
+  assert.equal(guardado.ajeno, false);
+  assert.equal(guardado.carroAjeno, null);
+  assert.equal(guardado.duenoId, null);
+  assert.equal(guardado.carroId, 'v1');
+});
+
+test('un contrato con el dueño tecleado entra a la liquidación bajo ese nombre, marcado como sin enlazar', () => {
+  // La liquidación ya sabe agrupar por texto lo que no tiene duenoId: lo
+  // tecleado sigue contando en la cuenta de esa persona en vez de no aparecer.
+  const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno({ 'sc-dueno-buscar': 'Mario López' }));
+  const cuentas = agruparPorDueno([guardado], []);
+  assert.equal(cuentas.length, 1);
+  assert.equal(cuentas[0].nombre, 'Mario López');
+  assert.equal(cuentas[0].duenoId, null);
+  assert.equal(cuentas[0].sinEnlazar, true);
+});
+
+test('leerFormularioDe pasa el resto del formulario al contrato con los ids de la pantalla', () => {
+  const { armado, guardado } = contratoDeLosCampos(formularioDeCarroAjeno({ 'sc-dueno-buscar': 'Mario López' }));
+  assert.equal(armado.clienteId, 'k1');
+  assert.equal(guardado.numero, 12);
+  assert.equal(guardado.carroPlacas, 'P-1AJN');
+  assert.equal(guardado.carroDescripcion, 'Ford 2019');
+  assert.equal(guardado.dias, 4);
+  assert.equal(guardado.precioDia, 700);
+  assert.equal(guardado.rentadoPor, 'Ana');
+  assert.equal(guardado.pagos[0].monto, 2800);
+  assert.equal(armado.carroAjeno.costoDia, 400, 'el costo del dueño sigue llegando a construirContrato');
+  assert.equal(resumen(guardado).totalSalida, 2800);
+});
+
+test('leerFormularioDe solo lee campos que existen en la plantilla (un id mal escrito no se ve de otro modo)', () => {
+  // Un id con un error de dedo se lee como campo vacío, sin avisar, y el
+  // contrato sale sin ese dato. Se leen TODOS los ids con "carro ajeno"
+  // marcado y se exige que cada uno exista en la plantilla de la pantalla.
+  const { el, pedidos } = camposDeMentira(formularioDeCarroAjeno());
+  leerFormularioDe(lectorDeCampos(el), {
+    contratoId: null, cliente: null, carro: null, duenoEscogido: null, tarjetas: [],
+  }, null);
+  const html = plantilla();
+  assert.ok(pedidos.has('sc-dueno-buscar') && pedidos.has('sc-nd-nombre'), 'lee los dos campos del dueño');
+  const faltan = [...pedidos].filter((id) => !html.includes(`id="${id}"`));
+  assert.deepEqual(faltan, [], 'ids leídos que no existen en la plantilla');
+});
+
+test('duenoDelContrato: escogido, tecleado, alta sin guardar, o nada', () => {
+  assert.deepEqual(duenoDelContrato({ escogido: duenoMario(), buscado: 'otra cosa' }), { duenoId: 'd1', dueno: 'Mario López' });
+  assert.deepEqual(duenoDelContrato({ escogido: null, buscado: ' Mario López ' }), { duenoId: null, dueno: 'Mario López' });
+  assert.deepEqual(duenoDelContrato({ escogido: null, buscado: '', nuevo: 'Rosa Tum' }), { duenoId: null, dueno: 'Rosa Tum' });
+  assert.deepEqual(duenoDelContrato({ escogido: null, buscado: '  ', nuevo: '  ' }), { duenoId: null, dueno: '' });
+  assert.deepEqual(duenoDelContrato({}), { duenoId: null, dueno: '' });
+});
+
+test('lectorDeCampos: texto recorta, num pasa por q(), marcado es booleano, lo que falta es vacío', () => {
+  const { el } = camposDeMentira({ a: '  hola ', b: '12.345', c: true });
+  const { val, texto, num, marcado } = lectorDeCampos(el);
+  assert.equal(val('a'), '  hola ');
+  assert.equal(texto('a'), 'hola');
+  assert.equal(num('b'), 12.35, 'dinero: siempre por q(), a dos decimales');
+  assert.equal(marcado('c'), true);
+  assert.equal(marcado('nada'), false);
+  assert.equal(texto('nada'), '');
+  assert.equal(lectorDeCampos(() => undefined).texto('x'), '', 'un campo que no existe no revienta');
+});
+
+// ---------- La lectura de la lista: una por sesión, y un fallo nunca se recuerda ----------
+//
+// Esto es el estado que antes vivía dentro de la pantalla (`recibir` y `leer`)
+// y que ninguna prueba alcanzaba: dos de sus líneas, al cambiarlas por
+// `fallo = false`, volvían a hacer que una nube caída se viera como "Sin
+// resultados" con la suite en verde. Ahora es crearListaDeSesion, sin DOM, con
+// un `cargar` de mentira que cuenta cuántas veces se le pide.
+//
+// Lo que NO prueba (es DOM): que `pintar` copie la vista a los elementos, y
+// que la pantalla llame a esta lista (y no a otra) al abrir, al escoger y al
+// pulsar "Volver a intentar".
+
+const buena = (datos) => ({ datos, fallo: false });
+const caida = (datos = []) => ({ datos, fallo: true });
+
+// Un `cargar` de mentira: cuenta las veces que se le pide, guarda los `alLlegar`
+// que recibió (la sincronía de atrás) y contesta una respuesta por llamada
+// (la última se repite). Una respuesta que sea un Error se lanza.
+const cargaDeMentira = (...respuestas) => {
+  const alLlegar = [];
+  const cargar = async (cb) => {
+    alLlegar.push(cb);
+    const r = respuestas.length > 1 ? respuestas.shift() : respuestas[0];
+    if (r instanceof Error) throw r;
+    return r;
+  };
+  return { cargar, alLlegar };
+};
+
+test('lista de sesión: una lectura que falló y quedó vacía es un fallo, nunca "no hay nada"', async () => {
+  const lista = crearListaDeSesion({ cargar: cargaDeMentira(caida()).cargar });
+  await lista.leer();
+  assert.deepEqual(lista.estado(), { items: [], altas: [], fallo: true, leida: true });
+  // Y así se dibuja: no como "Sin resultados".
+  const vista = vistaDeBuscador({ tipo: 'clientes', ...lista.estado(), consulta: 'ana' });
+  assert.doesNotMatch(vista.mensaje, /Sin resultados/);
+  assert.match(vista.mensaje, /No se pudo leer/);
+});
+
+test('lista de sesión: una respuesta sin forma de respuesta (undefined o null) cuenta como fallo', async () => {
+  for (const rara of [undefined, null]) {
+    const lista = crearListaDeSesion({ cargar: cargaDeMentira(rara).cargar });
+    await lista.leer();
+    assert.equal(lista.estado().fallo, true, `respuesta: ${rara}`);
+    assert.equal(lista.estado().leida, true);
+  }
+});
+
+test('lista de sesión: una lectura buena no es fallo y trae lo leído', async () => {
+  const lista = crearListaDeSesion({ cargar: cargaDeMentira(buena([clienteJuan()])).cargar });
+  await lista.leer();
+  assert.deepEqual(lista.estado(), { items: [clienteJuan()], altas: [], fallo: false, leida: true });
+});
+
+test('lista de sesión: si cargar mismo revienta (IndexedDB), es un fallo y se conserva lo que ya había', async () => {
+  const { cargar } = cargaDeMentira(buena([clienteJuan()]), new Error('IndexedDB no abre'));
+  const lista = crearListaDeSesion({ cargar });
+  await lista.leer();
+  await lista.leer({ forzar: true });
+  assert.deepEqual(lista.estado(), { items: [clienteJuan()], altas: [], fallo: true, leida: true });
+});
+
+test('lista de sesión: si cargar revienta desde el principio, es un fallo y la lista queda vacía pero leída', async () => {
+  const lista = crearListaDeSesion({ cargar: cargaDeMentira(new Error('no abre')).cargar });
+  await assert.doesNotReject(lista.leer(), 'leer nunca rechaza: el error queda en el estado');
+  assert.deepEqual(lista.estado(), { items: [], altas: [], fallo: true, leida: true });
+});
+
+test('lista de sesión: un fallo que llega TARDE (ya se sirvió la copia local) queda anotado y avisa a la pantalla', async () => {
+  const { cargar, alLlegar } = cargaDeMentira(buena([clienteJuan()]));
+  const lista = crearListaDeSesion({ cargar });
+  let avisos = 0;
+  lista.escuchar(() => { avisos += 1; });
+  await lista.leer();
+  assert.equal(lista.estado().fallo, false, 'con la copia local servida, todavía no hay fallo');
+  assert.equal(avisos, 1);
+
+  alLlegar[0](caida([clienteJuan()]));
+  assert.equal(lista.estado().fallo, true);
+  assert.equal(lista.estado().items.length, 1, 'la copia local sigue sirviendo');
+  assert.equal(avisos, 2, 'la pantalla se entera para volver a pintar');
+});
+
+test('lista de sesión: la sincronía tardía de una lectura vieja no pisa a la lectura nueva', async () => {
+  const { cargar, alLlegar } = cargaDeMentira(buena([clienteJuan()]), buena([clienteJuan(), clienteLucia()]));
+  const lista = crearListaDeSesion({ cargar });
+  await lista.leer();
+  await lista.leer({ forzar: true });
+  alLlegar[0](caida([clienteJuan()])); // la nube de la lectura 1 contesta con un error, ya fuera de turno
+  assert.equal(lista.estado().fallo, false);
+  assert.equal(lista.estado().items.length, 2);
+});
+
+test('lista de sesión: la nube se lee UNA vez por sesión — abrir la pantalla otra vez no vuelve a pedirla', async () => {
+  const { cargar, alLlegar } = cargaDeMentira(buena([clienteJuan(), clienteLucia()]));
+  const lista = crearListaDeSesion({ cargar });
+  await lista.leer(); // primera apertura
+  await lista.leer(); // segunda
+  await lista.leer(); // tercera
+  assert.equal(alLlegar.length, 1, 'tres aperturas, una sola lectura (eran tres)');
+  assert.equal(lista.estado().items.length, 2, 'y la lista sigue en memoria');
+});
+
+test('lista de sesión: una lectura FALLIDA no se recuerda — la siguiente apertura vuelve a pedir', async () => {
+  const { cargar, alLlegar } = cargaDeMentira(caida(), buena([clienteJuan()]));
+  const lista = crearListaDeSesion({ cargar });
+  await lista.leer();
+  assert.equal(lista.estado().fallo, true);
+  await lista.leer();
+  assert.equal(alLlegar.length, 2, 'se pidió otra vez');
+  assert.deepEqual(lista.estado(), { items: [clienteJuan()], altas: [], fallo: false, leida: true });
+  await lista.leer();
+  assert.equal(alLlegar.length, 2, 'ya con una lectura buena, no se pide más');
+});
+
+test('lista de sesión: un fallo que llegó tarde tampoco se recuerda como lectura buena', async () => {
+  const { cargar, alLlegar } = cargaDeMentira(buena([clienteJuan()]));
+  const lista = crearListaDeSesion({ cargar });
+  await lista.leer();
+  alLlegar[0](caida([clienteJuan()]));
+  await lista.leer();
+  assert.equal(alLlegar.length, 2, 'la apertura siguiente reintenta la nube');
+});
+
+test('lista de sesión: dos aperturas seguidas comparten la lectura que sigue en vuelo', async () => {
+  let soltar;
+  const lenta = new Promise((ok) => { soltar = ok; });
+  let pedidas = 0;
+  const lista = crearListaDeSesion({ cargar: () => { pedidas += 1; return lenta; } });
+  const a = lista.leer();
+  const b = lista.leer();
+  soltar(buena([clienteJuan()]));
+  await Promise.all([a, b]);
+  assert.equal(pedidas, 1);
+  assert.equal(lista.estado().leida, true);
+});
+
+test('lista de sesión: forzar (el botón "Volver a intentar") pide aunque ya haya una lectura buena', async () => {
+  const { cargar, alLlegar } = cargaDeMentira(buena([clienteJuan()]));
+  const lista = crearListaDeSesion({ cargar });
+  await lista.leer();
+  await lista.leer({ forzar: true });
+  assert.equal(alLlegar.length, 2);
+});
+
+test('lista de sesión: olvidar() obliga a leer otra vez, y lo que conteste la lectura que iba en vuelo ya no cuenta', async () => {
+  let soltar;
+  const lenta = new Promise((ok) => { soltar = ok; });
+  const respuestas = [lenta, Promise.resolve(buena([clienteJuan(), clienteLucia()]))];
+  let pedidas = 0;
+  const lista = crearListaDeSesion({ cargar: () => { pedidas += 1; return respuestas.shift(); } });
+  const enVuelo = lista.leer();
+  lista.olvidar(); // se entró a la pantalla de Clientes mientras esa lectura seguía en curso
+  await lista.leer();
+  soltar(buena([]));
+  await enVuelo;
+  assert.equal(pedidas, 2);
+  assert.equal(lista.estado().items.length, 2, 'la respuesta vieja no pisó a la nueva');
+
+  lista.olvidar();
+  assert.equal(lista.estado().leida, false, 'vencida: hasta que se lea otra vez, no se sabe');
+});
+
+test('lista de sesión: lo dado de alta hoy se recuerda entre aperturas, y el buscador lo encuentra aunque la lista leída no lo traiga', async () => {
+  const lista = crearListaDeSesion({ cargar: cargaDeMentira(buena([clienteJuan()])).cargar });
+  await lista.leer();
+  lista.registrarAlta(clienteLucia());
+  await lista.leer(); // la apertura siguiente no vuelve a pedir la lista, que no trae a Lucía
+  const vista = vistaDeBuscador({ tipo: 'clientes', ...lista.estado(), consulta: 'mendez' });
+  assert.deepEqual(vista.filas.map((f) => f.id), ['k2']);
+});
+
+test('lista de sesión: solo escucha la última pantalla que lo pidió', async () => {
+  const { cargar, alLlegar } = cargaDeMentira(buena([clienteJuan()]));
+  const lista = crearListaDeSesion({ cargar });
+  const avisos = [];
+  lista.escuchar(() => avisos.push('vieja'));
+  lista.escuchar(() => avisos.push('nueva'));
+  await lista.leer();
+  alLlegar[0](caida([clienteJuan()]));
+  assert.deepEqual(avisos, ['nueva', 'nueva']);
+});
+
+// ---------- El aviso rojo: legible cuando importa, ausente cuando no (M-2) ----------
+
+for (const tipo of ['clientes', 'duenos']) {
+  test(`avisoDeLista (${tipo}): en cuanto se escoge a alguien el aviso se va, haya o no copia local`, () => {
+    assert.equal(avisoDeLista({ tipo, leida: true, fallo: true, cantidad: 0, elegido: true }), '');
+    assert.equal(avisoDeLista({ tipo, leida: true, fallo: true, cantidad: 4, elegido: true }), '');
+    // Y sin escoger, el mismo estado sí lo muestra: el cambio es por escoger, no por callar.
+    assert.notEqual(avisoDeLista({ tipo, leida: true, fallo: true, cantidad: 0, elegido: false }), '');
+    assert.notEqual(avisoDeLista({ tipo, leida: true, fallo: true, cantidad: 4 }), '');
+  });
+
+  test(`vistaDeBuscador (${tipo}): lectura caída y nada escrito — el aviso se ve YA y con el botón, sin lista abierta`, () => {
+    const vista = vistaDeBuscador({ tipo, items: [], fallo: true, leida: true, consulta: '' });
+    assert.match(vista.aviso, /Vuelve a intentar antes de dar de alta a uno nuevo/);
+    assert.equal(vista.reintentar, true);
+    assert.equal(vista.abierta, false);
+  });
+
+  test(`vistaDeBuscador (${tipo}): lectura caída con algo escrito — aviso con botón Y la frase de la lista, ninguna dice "Sin resultados"`, () => {
+    const vista = vistaDeBuscador({ tipo, items: [], fallo: true, leida: true, consulta: 'ana' });
+    assert.match(vista.aviso, /No se pudo leer/);
+    assert.equal(vista.reintentar, true);
+    assert.equal(vista.abierta, true);
+    assert.match(vista.mensaje, /No se pudo leer/);
+    assert.doesNotMatch(`${vista.aviso} ${vista.mensaje}`, /Sin resultados/);
+  });
+
+  test(`vistaDeBuscador (${tipo}): ya escogido, el aviso y el botón desaparecen aunque la lectura siga caída`, () => {
+    const vista = vistaDeBuscador({
+      tipo, items: [], fallo: true, leida: true, consulta: '', elegido: true,
+    });
+    assert.equal(vista.aviso, '');
+    assert.equal(vista.reintentar, false);
+  });
+
+  test(`vistaDeBuscador (${tipo}): con copia local el aviso dice que está desactualizada y NO ofrece reintentar`, () => {
+    const vista = vistaDeBuscador({
+      tipo, items: [tipo === 'clientes' ? clienteJuan() : duenoMario()], fallo: true, leida: true, consulta: '',
+    });
+    assert.match(vista.aviso, /desactualizada/);
+    assert.equal(vista.reintentar, false);
+  });
+
+  test(`vistaDeBuscador (${tipo}): lectura buena — sin aviso; la lista flotante solo se abre si hay algo escrito`, () => {
+    const uno = tipo === 'clientes' ? clienteJuan() : duenoMario();
+    const sinTexto = vistaDeBuscador({ tipo, items: [uno], fallo: false, leida: true, consulta: '   ' });
+    assert.deepEqual([sinTexto.aviso, sinTexto.reintentar, sinTexto.abierta], ['', false, false]);
+    const conTexto = vistaDeBuscador({ tipo, items: [uno], fallo: false, leida: true, consulta: tipo === 'clientes' ? 'juan' : 'mario' });
+    assert.equal(conTexto.abierta, true);
+    assert.equal(conTexto.filas.length, 1);
+  });
+}
+
+test('la plantilla pone el aviso rojo ARRIBA de cada caja de búsqueda: la lista flotante cae debajo de la caja y ya no lo tapa', () => {
+  // Esto prueba el ORDEN del HTML, no el dibujo: que la lista de resultados es
+  // `position: absolute` justo debajo de la caja (css/estilos.css) se vio en el
+  // navegador. Con el aviso debajo de la caja, esa lista lo tapaba.
+  const html = plantilla();
+  for (const prefijo of ['cliente', 'dueno']) {
+    const aviso = html.indexOf(`id="sc-${prefijo}-aviso"`);
+    const caja = html.indexOf(`id="sc-${prefijo}-buscar"`);
+    const lista = html.indexOf(`id="sc-${prefijo}-resultados"`);
+    assert.ok(aviso > -1 && caja > -1 && lista > -1, `${prefijo}: existen los tres`);
+    assert.ok(aviso < caja, `${prefijo}: el aviso va antes de la caja`);
+    assert.ok(aviso < lista, `${prefijo}: y antes de la lista flotante`);
+  }
 });
