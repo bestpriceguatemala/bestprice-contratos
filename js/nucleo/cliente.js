@@ -23,8 +23,20 @@
 // hay que ir saltando de un lado a otro y ahí es donde se escribe la fecha de
 // vencimiento del documento en la casilla de la licencia.
 //
-// Después del correo van los que NO se imprimen pero sí se guardan, y de
-// últimos los "adicional", que son la segunda dirección y tampoco se imprimen.
+// La lista es EXACTAMENTE la del contrato, ni un campo más. El 3 de octubre
+// el dueño pidió que quedara igual a lo que él mandó: se quitaron
+// `nacionalidad`, `pais`, `licenciaEmision` (la FECHA de emisión — en el papel
+// solo va el LUGAR, y ese campo de más era el que hacía parecer que la
+// licencia se pedía dos veces) y `facturarA`. Un campo que no se imprime y que
+// él no usa es una casilla más que llenar con el cliente esperando.
+//
+// Quitarlos de esta lista NO borra nada de lo ya guardado: `construirDueno` y
+// `construirCliente` arrastran hacia adelante los campos que no conocen (ver
+// abajo), así que un cliente viejo conserva su nacionalidad aunque la pantalla
+// ya no la pida. Si alguna vez hacen falta, vuelven a esta lista y reaparecen
+// con su dato intacto.
+//
+// Al final van los "adicional": la segunda dirección, que tampoco se imprime.
 export const CAMPOS_CLIENTE = [
   { id: 'nombres', etiqueta: 'Nombres', tipo: 'texto' },
   { id: 'apellidos', etiqueta: 'Apellidos', tipo: 'texto' },
@@ -40,17 +52,7 @@ export const CAMPOS_CLIENTE = [
   { id: 'municipio', etiqueta: 'Municipio', tipo: 'texto' },
   { id: 'telefono', etiqueta: 'Teléfono', tipo: 'telefono' },
   { id: 'correo', etiqueta: 'Correo electrónico', tipo: 'correo' },
-  // --- no se imprimen, pero se guardan ---
-  // `licenciaEmision` (la FECHA de emisión) no está en el contrato de papel:
-  // ahí solo va el LUGAR. Se conserva para no borrarle el dato a los clientes
-  // que ya lo tienen guardado, pero deja de pedirse entre los que sí se
-  // imprimen — era el campo que hacía parecer que la licencia se pedía dos
-  // veces.
-  { id: 'nacionalidad', etiqueta: 'Nacionalidad', tipo: 'texto' },
-  { id: 'pais', etiqueta: 'País', tipo: 'texto' },
-  { id: 'licenciaEmision', etiqueta: 'Licencia emisión', tipo: 'fecha' },
-  { id: 'facturarA', etiqueta: 'Facturar a', tipo: 'texto' },
-  // --- "adicional": la segunda dirección, tampoco se imprime ---
+  // --- "adicional": la segunda dirección, no se imprime ---
   { id: 'direccionAdicional', etiqueta: 'Dirección adicional', tipo: 'texto' },
   { id: 'ciudadAdicional', etiqueta: 'Ciudad adicional', tipo: 'texto' },
   { id: 'estadoAdicional', etiqueta: 'Estado adicional', tipo: 'texto' },
