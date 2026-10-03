@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   construirContrato, ultimos4Digitos, leerParametroRuta, montoSalidaConAnticipo, conAnticipoComoPago,
-  resultadosDeDuenos, avisoDeListaDeDuenos, duenosConAltasDeHoy,
+  resultadosDeLista, avisoDeLista, conAltasDeHoy,
 } from '../js/pantallas/sacarCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
@@ -406,103 +406,147 @@ test('un contrato de antes aparece en la liquidación bajo el nombre que se escr
   assert.equal(cuentas[0].sinEnlazar, true);
 });
 
-// ---------- El buscador de dueños: qué se dibuja ----------
+// ---------- Los buscadores de cliente y de dueño: qué se dibuja ----------
 //
 // La regla de esta parte es la más vieja del sistema: una lectura que FALLÓ
-// no se dibuja como "no hay nada". Aquí cuesta un dueño duplicado — el mostrador
-// ve "Sin resultados. Puedes darlo de alta abajo", da de alta a quien ya
-// existía, y la cuenta de esa persona se parte en dos.
+// no se dibuja como "no hay nada". Aquí cuesta una ficha duplicada — el
+// mostrador ve "Sin resultados. Puedes darlo de alta abajo", da de alta a
+// quien ya existía, y la historia de esa persona (o la cuenta de ese dueño) se
+// parte en dos. Es la misma regla para el cliente y para el dueño, y por eso
+// cada prueba de abajo corre contra los dos.
+//
+// Los clientes llevan los campos de CAMPOS_CLIENTE (nombres, apellidos,
+// documento, licencia, telefono...), no los viejos nombre1/apellido1.
 
-const duenosLeidos = (duenos = []) => ({ ...resultadoLectura(duenos, { ok: true, valor: duenos }), leida: true });
-
-test('resultadosDeDuenos: sin nada escrito no se dibuja nada', () => {
-  const r = resultadosDeDuenos({ ...duenosLeidos([duenoMario()]), duenos: [duenoMario()], consulta: '   ' });
-  assert.deepEqual(r, { filas: [], mensaje: '' });
+const clienteJuan = () => ({
+  id: 'k1', nombres: 'Juan', apellidos: 'Pérez', documento: '2345 67890 0101', licencia: 'L-445566', telefono: '5555-0000', actualizado: 1790000000000,
+});
+const clienteLucia = () => ({
+  id: 'k2', nombres: 'Lucía', apellidos: 'Méndez', documento: '1111 22222 0303', licencia: 'L-998877', telefono: '4444-7777', actualizado: 1790000000001,
 });
 
-test('resultadosDeDuenos: encuentra por nombre sin acentos, por teléfono y por NIT', () => {
-  const duenos = [duenoMario(), duenaLucia()];
-  const buscar = (consulta) => resultadosDeDuenos({ duenos, fallo: false, leida: true, consulta }).filas.map((d) => d.id);
-  assert.deepEqual(buscar('lopez'), ['d1']);
-  assert.deepEqual(buscar('lucia perez'), ['d2']);
-  assert.deepEqual(buscar('4444'), ['d2'], 'el teléfono');
-  assert.deepEqual(buscar('1234567'), ['d1'], 'el NIT');
-});
+// Cada caso: el tipo de buscador, dos fichas reales, y lo que se busca para encontrarlas.
+const BUSCADORES = [
+  {
+    tipo: 'clientes',
+    uno: clienteJuan, otro: clienteLucia,
+    encuentraA1: ['pérez', 'juan perez', '5555', '2345'], encuentraA2: ['mendez', 'l-998877', '4444'],
+    sinCoincidencia: 'zzz',
+    plural: 'clientes',
+  },
+  {
+    tipo: 'duenos',
+    uno: duenoMario, otro: duenaLucia,
+    encuentraA1: ['lopez', 'mario lopez', '5555', '1234567'], encuentraA2: ['lucia perez', '4444'],
+    sinCoincidencia: 'zzz',
+    plural: 'dueños',
+  },
+];
 
-test('resultadosDeDuenos: una lista leída de verdad y sin coincidencias sí invita a dar de alta', () => {
-  const r = resultadosDeDuenos({ duenos: [duenoMario()], fallo: false, leida: true, consulta: 'zzz' });
-  assert.deepEqual(r.filas, []);
-  assert.match(r.mensaje, /Sin resultados/);
-});
+for (const { tipo, uno, otro, encuentraA1, encuentraA2, sinCoincidencia, plural } of BUSCADORES) {
+  const leido = (items, consulta) => resultadosDeLista({
+    tipo, items, fallo: false, leida: true, consulta,
+  });
 
-test('resultadosDeDuenos: una lista leída de verdad y vacía (todavía no hay dueños) también', () => {
-  const r = resultadosDeDuenos({ duenos: [], fallo: false, leida: true, consulta: 'mario' });
-  assert.match(r.mensaje, /Sin resultados/);
-});
+  test(`resultadosDeLista (${tipo}): sin nada escrito no se dibuja nada`, () => {
+    assert.deepEqual(leido([uno()], '   '), { filas: [], mensaje: '' });
+  });
 
-test('resultadosDeDuenos: una lectura que FALLÓ y quedó vacía no se dibuja como "no hay dueños"', () => {
-  const lectura = resultadoLectura([], { ok: false });
-  const r = resultadosDeDuenos({ duenos: lectura.datos, fallo: lectura.fallo, leida: true, consulta: 'mario' });
-  assert.deepEqual(r.filas, []);
-  assert.match(r.mensaje, /No se pudo leer/);
-  assert.doesNotMatch(r.mensaje, /Sin resultados/);
-  assert.doesNotMatch(r.mensaje, /alta/i, 'no lo empuja a dar de alta a alguien que puede existir');
-});
+  test(`resultadosDeLista (${tipo}): encuentra por nombre sin acentos y por los datos de contacto`, () => {
+    const items = [uno(), otro()];
+    for (const consulta of encuentraA1) assert.deepEqual(leido(items, consulta).filas.map((f) => f.id), [uno().id], consulta);
+    for (const consulta of encuentraA2) assert.deepEqual(leido(items, consulta).filas.map((f) => f.id), [otro().id], consulta);
+  });
 
-test('resultadosDeDuenos: con copia local pero la nube caída, no encontrar no es "no existe"', () => {
-  const lectura = resultadoLectura([duenoMario()], { ok: false });
-  const r = resultadosDeDuenos({ duenos: lectura.datos, fallo: lectura.fallo, leida: true, consulta: 'lucia' });
-  assert.deepEqual(r.filas, []);
-  assert.match(r.mensaje, /desactualizada/);
-  assert.doesNotMatch(r.mensaje, /Sin resultados/);
-  // Y lo que sí hay en la copia se sigue mostrando: la lectura caída no esconde nada.
-  const conCoincidencia = resultadosDeDuenos({ duenos: lectura.datos, fallo: lectura.fallo, leida: true, consulta: 'mario' });
-  assert.deepEqual(conCoincidencia.filas.map((d) => d.id), ['d1']);
-  assert.equal(conCoincidencia.mensaje, '');
-});
+  test(`resultadosDeLista (${tipo}): una lista leída de verdad y sin coincidencias sí invita a dar de alta`, () => {
+    const r = leido([uno()], sinCoincidencia);
+    assert.deepEqual(r.filas, []);
+    assert.match(r.mensaje, /Sin resultados/);
+  });
 
-test('resultadosDeDuenos: mientras la lista todavía no llega, no se dice "sin resultados"', () => {
-  const r = resultadosDeDuenos({ duenos: [], fallo: false, leida: false, consulta: 'mario' });
-  assert.deepEqual(r.filas, []);
-  assert.match(r.mensaje, /Leyendo/);
-  assert.doesNotMatch(r.mensaje, /Sin resultados/);
-});
+  test(`resultadosDeLista (${tipo}): una lista leída de verdad y vacía (todavía no hay ninguno) también`, () => {
+    assert.match(leido([], 'mario').mensaje, /Sin resultados/);
+  });
 
-test('resultadosDeDuenos: muestra a lo más 8, como el buscador de clientes', () => {
-  const muchos = Array.from({ length: 12 }, (_, i) => ({ ...duenoMario(), id: `d${i}`, nombre: `Mario ${i}` }));
-  const r = resultadosDeDuenos({ duenos: muchos, fallo: false, leida: true, consulta: 'mario' });
-  assert.equal(r.filas.length, 8);
-});
+  test(`resultadosDeLista (${tipo}): una lectura que FALLÓ y quedó vacía no se dibuja como "no hay"`, () => {
+    const lectura = resultadoLectura([], { ok: false });
+    const r = resultadosDeLista({
+      tipo, items: lectura.datos, fallo: lectura.fallo, leida: true, consulta: 'mario',
+    });
+    assert.deepEqual(r.filas, []);
+    assert.match(r.mensaje, /No se pudo leer/);
+    assert.ok(r.mensaje.includes(plural), 'dice qué lista no se pudo leer');
+    assert.doesNotMatch(r.mensaje, /Sin resultados/);
+    assert.doesNotMatch(r.mensaje, /alta/i, 'no lo empuja a dar de alta a alguien que puede existir');
+  });
 
-test('avisoDeListaDeDuenos: callado cuando la lista llegó bien o todavía no se sabe', () => {
-  assert.equal(avisoDeListaDeDuenos({ leida: false, fallo: false, cantidad: 0 }), '');
-  assert.equal(avisoDeListaDeDuenos({ leida: true, fallo: false, cantidad: 0 }), '');
-  assert.equal(avisoDeListaDeDuenos({ leida: true, fallo: false, cantidad: 5 }), '');
-});
+  test(`resultadosDeLista (${tipo}): con copia local pero la nube caída, no encontrar no es "no existe"`, () => {
+    const lectura = resultadoLectura([uno()], { ok: false });
+    const buscar = (consulta) => resultadosDeLista({
+      tipo, items: lectura.datos, fallo: lectura.fallo, leida: true, consulta,
+    });
+    const r = buscar(sinCoincidencia);
+    assert.deepEqual(r.filas, []);
+    assert.match(r.mensaje, /desactualizada/);
+    assert.doesNotMatch(r.mensaje, /Sin resultados/);
+    // Y lo que sí hay en la copia se sigue mostrando: la lectura caída no esconde nada.
+    const conCoincidencia = buscar(encuentraA1[0]);
+    assert.deepEqual(conCoincidencia.filas.map((f) => f.id), [uno().id]);
+    assert.equal(conCoincidencia.mensaje, '');
+  });
 
-test('avisoDeListaDeDuenos: una lectura fallida sin copia dice que no se sabe si ya está registrado', () => {
-  const texto = avisoDeListaDeDuenos({ leida: true, fallo: true, cantidad: 0 });
-  assert.match(texto, /No se pudo leer/);
-  assert.match(texto, /ya está registrado/);
-});
+  test(`resultadosDeLista (${tipo}): mientras la lista todavía no llega, no se dice "sin resultados"`, () => {
+    const r = resultadosDeLista({
+      tipo, items: [], fallo: false, leida: false, consulta: 'mario',
+    });
+    assert.deepEqual(r.filas, []);
+    assert.match(r.mensaje, /Leyendo/);
+    assert.doesNotMatch(r.mensaje, /Sin resultados/);
+  });
 
-test('avisoDeListaDeDuenos: una lectura fallida con copia dice que la lista puede estar desactualizada', () => {
-  const texto = avisoDeListaDeDuenos({ leida: true, fallo: true, cantidad: 3 });
-  assert.match(texto, /desactualizada/);
-});
+  test(`resultadosDeLista (${tipo}): muestra a lo más 8`, () => {
+    const muchos = Array.from({ length: 12 }, (_, i) => ({ ...uno(), id: `x${i}` }));
+    assert.equal(leido(muchos, encuentraA1[0]).filas.length, 8);
+  });
 
-test('duenosConAltasDeHoy: un dueño dado de alta aquí no se pierde si la sincronía llega después sin él', () => {
-  // La sincronía de atrás trae la lista tal como estaba cuando se pidió: si el
-  // mostrador dio de alta a Lucía mientras tanto, ella no viene en esa lista, y
-  // sin esto el buscador "no la encontraría" y la daría de alta otra vez.
-  const delaNube = [duenoMario()];
-  const conAlta = duenosConAltasDeHoy(delaNube, [duenaLucia()]);
-  assert.deepEqual(conAlta.map((d) => d.id), ['d1', 'd2']);
-});
+  test(`avisoDeLista (${tipo}): callado cuando la lista llegó bien o todavía no se sabe`, () => {
+    assert.equal(avisoDeLista({ tipo, leida: false, fallo: false, cantidad: 0 }), '');
+    assert.equal(avisoDeLista({ tipo, leida: true, fallo: false, cantidad: 0 }), '');
+    assert.equal(avisoDeLista({ tipo, leida: true, fallo: false, cantidad: 5 }), '');
+  });
 
-test('duenosConAltasDeHoy: si la nube ya la trae, manda la versión de la nube y no se duplica', () => {
-  const nubeConLucia = { ...duenaLucia(), telefono: '4444-0000', actualizado: 1790000009999 };
-  const conAlta = duenosConAltasDeHoy([duenoMario(), nubeConLucia], [duenaLucia()]);
-  assert.equal(conAlta.length, 2);
-  assert.equal(conAlta.find((d) => d.id === 'd2').telefono, '4444-0000');
+  test(`avisoDeLista (${tipo}): una lectura fallida sin copia dice que no se sabe si ya está registrado`, () => {
+    const texto = avisoDeLista({ tipo, leida: true, fallo: true, cantidad: 0 });
+    assert.match(texto, /No se pudo leer/);
+    assert.match(texto, /ya está registrado/);
+    assert.ok(texto.includes(plural));
+    assert.doesNotMatch(texto, /Sin resultados/);
+  });
+
+  test(`avisoDeLista (${tipo}): una lectura fallida con copia dice que la lista puede estar desactualizada`, () => {
+    assert.match(avisoDeLista({ tipo, leida: true, fallo: true, cantidad: 3 }), /desactualizada/);
+  });
+
+  test(`conAltasDeHoy (${tipo}): una ficha dada de alta aquí no se pierde si la sincronía llega después sin ella`, () => {
+    // La sincronía de atrás trae la lista tal como estaba cuando se pidió: si el
+    // mostrador dio de alta a la segunda mientras tanto, ella no viene en esa
+    // lista, y sin esto el buscador "no la encontraría" y la daría de alta otra vez.
+    const conAlta = conAltasDeHoy([uno()], [otro()]);
+    assert.deepEqual(conAlta.map((f) => f.id), [uno().id, otro().id]);
+  });
+
+  test(`conAltasDeHoy (${tipo}): si la nube ya la trae, manda la versión de la nube y no se duplica`, () => {
+    const nubeConLaSegunda = { ...otro(), telefono: '0000-0000', actualizado: 1790000009999 };
+    const conAlta = conAltasDeHoy([uno(), nubeConLaSegunda], [otro()]);
+    assert.equal(conAlta.length, 2);
+    assert.equal(conAlta.find((f) => f.id === otro().id).telefono, '0000-0000');
+  });
+}
+
+test('resultadosDeLista: el mensaje de cada buscador nombra SU lista', () => {
+  const dicen = (tipo) => resultadosDeLista({
+    tipo, items: [], fallo: true, leida: true, consulta: 'x',
+  }).mensaje;
+  assert.match(dicen('clientes'), /lista de clientes/);
+  assert.match(dicen('duenos'), /lista de dueños/);
 });
