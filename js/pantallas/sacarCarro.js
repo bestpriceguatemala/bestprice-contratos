@@ -381,15 +381,22 @@ function campo(id, etiqueta, opciones = {}) {
 const TIPO_INPUT_CLIENTE = { fecha: 'date', correo: 'email', telefono: 'tel' };
 
 /**
- * Lo que hace falta para entregar el carro con el cliente esperando en el
- * mostrador: su nombre, sus documentos y cómo contactarlo. El resto de
- * CAMPOS_CLIENTE (nacionalidad, direcciones adicionales, facturación...) se
- * pide igual, pero detrás de "Más datos" — nadie debería tener que escribir
- * una nacionalidad para que el carro salga del lote.
+ * Detrás de "Más datos" va SOLO la segunda dirección — los campos que dicen
+ * "adicional" — y nada más.
+ *
+ * Antes se escondía ahí todo lo que no fuera lo mínimo para entregar el
+ * carro: nacionalidad, fecha de nacimiento, dónde se extendió el documento,
+ * dónde y cuándo se emitió la licencia, municipio, país y a quién facturar.
+ * El dueño lo corrigió: todo eso **va impreso en el contrato**, así que
+ * esconderlo lo obliga a abrir el bloque en cada alta, que es justo lo
+ * contrario de lo que "Más datos" debería ahorrarle.
+ *
+ * La segunda dirección sí es excepcional de verdad: es para el cliente que
+ * vive en un lado y responde en otro, y la mayoría de altas no la llevan.
  */
-const CAMPOS_ALTA_VISIBLES = [
-  'nombres', 'apellidos', 'documento', 'documentoExpira',
-  'licencia', 'licenciaExpira', 'telefono', 'correo', 'direccionReferencia',
+const CAMPOS_ALTA_ADICIONALES = [
+  'direccionAdicional', 'ciudadAdicional', 'estadoAdicional',
+  'paisAdicional', 'telefonoAdicional',
 ];
 
 /** El campo de CAMPOS_CLIENTE `c`, dibujado con el input id `sc-nc-<id>`. */
@@ -436,13 +443,13 @@ function plantilla() {
           </p>
           <div id="sc-cliente-alta" hidden>
             <div class="sc-campos">
-              ${CAMPOS_CLIENTE.filter((c) => CAMPOS_ALTA_VISIBLES.includes(c.id)).map(campoAlta).join('')}
+              ${CAMPOS_CLIENTE.filter((c) => !CAMPOS_ALTA_ADICIONALES.includes(c.id)).map(campoAlta).join('')}
             </div>
             <label class="sc-checkbox">
-              <input type="checkbox" id="sc-nc-mas-datos"> Más datos
+              <input type="checkbox" id="sc-nc-mas-datos"> Segunda dirección (opcional)
             </label>
             <div id="sc-nc-mas-datos-campos" class="sc-campos" hidden>
-              ${CAMPOS_CLIENTE.filter((c) => !CAMPOS_ALTA_VISIBLES.includes(c.id)).map(campoAlta).join('')}
+              ${CAMPOS_CLIENTE.filter((c) => CAMPOS_ALTA_ADICIONALES.includes(c.id)).map(campoAlta).join('')}
             </div>
             <div class="sc-campo ancho">
               <button type="button" id="sc-cliente-guardar" class="btn btn-primario">Guardar cliente</button>
