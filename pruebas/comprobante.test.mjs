@@ -868,7 +868,17 @@ test('estilos.css trae un @media print que fija Carta vertical y esconde el men�
 });
 
 test('el membrete es solo de Best Price y sin imágenes: texto, para abrir al instante y salir igual en cualquier computadora', () => {
-  assert.equal(MEMBRETE.nombre, 'Best Price Rent a Car');
+  // Confirmado por el dueño el 5 de octubre, campo por campo.
+  assert.equal(MEMBRETE.nombre, 'Best Price Rent a Car Guatemala');
+  // Sin NIT: él dijo que no lo quiere en este papel. Es un comprobante entre
+  // él y el dueño del carro, no una factura, y una prueba que lo fije evita
+  // que alguien lo "complete" después creyendo que faltaba.
+  assert.ok(!/\bNIT\b/i.test(MEMBRETE.contacto.join(' ')));
+  // Los tres WhatsApp que él usa, juntos en una línea.
+  for (const numero of ['4019-3131', '4001-2626', '5770-5278']) {
+    assert.ok(MEMBRETE.contacto.join(' ').includes(numero), `falta el WhatsApp ${numero}`);
+  }
+  assert.ok(MEMBRETE.contacto.join(' ').includes('bestprice.ventas@gmail.com'));
   const html = htmlComprobante(armarComprobante(entrada()));
   assert.ok(!/<img|url\(|<svg/i.test(html));
   assert.ok(html.includes(MEMBRETE.nombre));

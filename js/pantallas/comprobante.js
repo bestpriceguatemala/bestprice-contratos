@@ -48,13 +48,17 @@ import { dinero, fecha } from '../ui.js';
  * la marca es una foto de perfil, no algo que deba viajar impreso en un papel
  * formal. Los datos de contacto son los de la marca; si cambian, es aquí.
  */
+// Confirmado por el dueño el 5 de octubre de 2026, uno por uno. Sin NIT: él
+// dijo que no lo quiere en este papel, y tiene sentido — es un comprobante
+// entre él y el dueño del carro, no una factura.
 export const MEMBRETE = {
-  nombre: 'Best Price Rent a Car',
+  nombre: 'Best Price Rent a Car Guatemala',
   lema: 'Movilidad confiable para cada destino.',
   contacto: [
     '7 av 15-90 zona 13, Colonia Aurora I',
     'Tel. 2261-3575 · rentaautos.gt',
-    'reservaciones@bestpricegt.com',
+    'WhatsApp: 4019-3131 · 4001-2626 · 5770-5278',
+    'bestprice.ventas@gmail.com',
   ],
 };
 
