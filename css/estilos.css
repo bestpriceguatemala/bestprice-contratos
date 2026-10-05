@@ -1200,6 +1200,16 @@ body {
   text-align: right;
 }
 
+/* La nota de que el detalle ya no suma lo pagado: discreta pero a la vista,
+   con el amarillo de la marca al costado. */
+.comp-nota-cambio {
+  margin-top: 8pt !important;
+  padding: 5pt 8pt;
+  font-size: 9pt;
+  border-left: 3px solid var(--amarillo);
+  background: #fffaf0;
+}
+
 .comp-al-dia {
   margin-bottom: 6pt !important;
   font-size: 9pt;
@@ -1319,6 +1329,7 @@ body {
   .comp-tabla tr,
   .comp-firma,
   .comp-sin-pendiente,
+  .comp-nota-cambio,
   .comp-forma {
     break-inside: avoid;
   }

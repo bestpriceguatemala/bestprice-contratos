@@ -34,7 +34,7 @@ import { sumarDias } from '../js/nucleo/fechas.js';
 import { dinero, fecha } from '../js/ui.js';
 import { construirContrato } from '../js/pantallas/sacarCarro.js';
 import {
-  agregarPago, contratoParaGuardar, conCostoDelDueno, costoDelDocumento,
+  agregarPago, anularPago, contratoParaGuardar, conCostoDelDueno, costoDelDocumento,
   construirPagoDueno, pagoDuenoParaGuardar,
 } from '../js/datos.js';
 
@@ -411,6 +411,86 @@ test('una renta ya pagada cuyo costo no se puede leer ahora muestra la falta, y 
 });
 
 // ---------------------------------------------------------------------------
+// Lo pagado es lo pagado: si las rentas cambiaron DESPUÉS del pago, el papel lo dice.
+//
+// El dueño del carro tiene en la mano un papel con un número de comprobante. Si
+// después se corrige una renta ya pagada, la tabla de «Le pagué» deja de sumar
+// el total guardado. El total NO se recalcula (contradiría el comprobante que
+// ya tiene el dueño del carro); el papel dice, en una línea, que el detalle ya
+// no coincide, para que quien lo manda pueda explicarlo.
+// ---------------------------------------------------------------------------
+
+/** La misma renta ya pagada, pero con el costo por día corregido DESPUÉS del pago. */
+const conCostoCorregido = (id, costoDia) => CONTRATOS.map((c) => (
+  c.id === id ? { ...c, subarriendo: { ...c.subarriendo, costoDia } } : c
+));
+
+const NOTA_DE_CAMBIO = 'Las rentas de esta lista cambiaron después del pago';
+
+test('un pago de Q4,100 cuyas rentas hoy suman Q3,900 lleva la nota, y el total sigue siendo lo que se pagó', () => {
+  // ctr-am pasó de Q310 a Q270 por día: (4 + 1) × 270 = Q1,350, y 1,800 + 750 + 1,350 = 3,900.
+  const m = armarComprobante(entrada({ contratos: conCostoCorregido('ctr-am', 270) }));
+  assert.equal(suma(...m.pagado.filas.map((f) => f.monto)), 3900, 'el escenario: las rentas hoy suman Q3,900');
+  assert.equal(m.pagado.cambiaron, true);
+  assert.equal(m.pagado.total, 4100, 'lo pagado es lo pagado: no se recalcula');
+  assert.equal(m.numero, 7, 'ni se renumera: el dueño del carro ya tiene el papel con ese número');
+
+  const html = htmlComprobante(m);
+  assert.ok(html.includes(NOTA_DE_CAMBIO), 'dice que las rentas cambiaron');
+  assert.ok(html.includes(`lo pagado fue ${dinero(4100)}`), 'y dice qué se pagó');
+  assert.match(html, /Total pagado[^]*?Q4,100\.00/, 'el total del pie sigue siendo el pagado');
+  assert.ok(!html.includes(dinero(3900)), 'la suma nueva no se escribe en el papel: contradiría el comprobante');
+  // La nota va dentro de «Le pagué», que es donde está la tabla que ya no suma.
+  assert.ok(html.indexOf('Le pagué') < html.indexOf(NOTA_DE_CAMBIO));
+  assert.ok(html.indexOf(NOTA_DE_CAMBIO) < html.indexOf('Queda pendiente'));
+});
+
+test('un pago cuyas rentas siguen sumando lo pagado NO lleva la nota', () => {
+  const m = armarComprobante(entrada());
+  assert.equal(suma(...m.pagado.filas.map((f) => f.monto)), m.pagado.total, 'el escenario: sí suman');
+  assert.equal(m.pagado.cambiaron, false);
+  assert.ok(!htmlComprobante(m).includes('cambiaron después del pago'));
+});
+
+test('el costo corregido hacia ARRIBA también se avisa (no solo cuando baja)', () => {
+  const m = armarComprobante(entrada({ contratos: conCostoCorregido('ctr-a2', 400) }));
+  assert.equal(m.pagado.cambiaron, true);
+  assert.ok(htmlComprobante(m).includes(NOTA_DE_CAMBIO));
+});
+
+test('una renta ya pagada que ya no está cerrada también hace que el detalle no coincida', () => {
+  // Se anuló un pago del CLIENTE de ctr-a1 después de pagarle al dueño: la renta
+  // vuelve a «devuelto». Su fila sigue en el papel con su costo (se le pagó), pero
+  // el detalle ya no es el de ese día.
+  const anulada = anularPago(A1, 1, { fecha: '2026-09-25' });
+  assert.notEqual(estadoContrato(anulada), 'cerrado', 'el escenario: ya no está cerrada');
+  const m = armarComprobante(entrada({ contratos: CONTRATOS.map((c) => (c.id === 'ctr-a1' ? anulada : c)) }));
+  assert.equal(m.pagado.cambiaron, true);
+  assert.equal(m.pagado.filas[0].monto, 1800, 'su fila sigue ahí');
+  assert.ok(htmlComprobante(m).includes(NOTA_DE_CAMBIO));
+});
+
+test('si un costo no se pudo LEER no se compara: no hay cifra confiable con qué comparar, y la fila ya lo dice', () => {
+  const m = armarComprobante(entrada({ costoSinLeer: ['ctr-a2'] }));
+  assert.equal(m.pagado.cambiaron, false);
+  assert.ok(!htmlComprobante(m).includes('cambiaron después del pago'));
+  assert.ok(htmlComprobante(m).includes('No se pudo leer el costo'));
+});
+
+test('el cambio también se le avisa al dueño del negocio en pantalla, antes de imprimir, y ese aviso no sale en el papel', () => {
+  const c = contenedorFalso();
+  pintarComprobante(c, entrada({ contratos: conCostoCorregido('ctr-am', 270) }));
+  const aviso = c.innerHTML.match(/<div class="barra-lectura-fallida[^"]*"[^>]*>[^]*?<\/div>/);
+  assert.ok(aviso, 'hay aviso');
+  assert.ok(aviso[0].includes('no-imprimir'));
+  assert.match(aviso[0], /ya no coincide/);
+  assert.ok(c.innerHTML.includes(NOTA_DE_CAMBIO), 'y la nota está en la hoja');
+  const limpio = contenedorFalso();
+  pintarComprobante(limpio, entrada());
+  assert.ok(!limpio.innerHTML.includes('ya no coincide'));
+});
+
+// ---------------------------------------------------------------------------
 // Datos del dueño
 // ---------------------------------------------------------------------------
 
@@ -668,7 +748,7 @@ test('el modelo solo tiene las llaves permitidas: una llave nueva (comision, uti
   const permitidas = [
     '.numero', '.fecha', '.hoy', '.rentasSinCosto', '.rentasSinCosto.anotar', '.rentasSinCosto.leer',
     '.dueno', '.dueno.nombre', '.dueno.telefono', '.dueno.nit',
-    '.pagado', '.pagado.filas', '.pagado.total', '.pagado.forma',
+    '.pagado', '.pagado.filas', '.pagado.total', '.pagado.forma', '.pagado.cambiaron',
     '.pendiente', '.pendiente.filas', '.pendiente.total', '.pendiente.incompleto',
     ...['pagado', 'pendiente'].flatMap((t) => ['fecha', 'placas', 'cliente', 'dias', 'diasAtraso', 'costoDia', 'monto', 'sinCosto']
       .map((k) => `.${t}.filas[].${k}`)),

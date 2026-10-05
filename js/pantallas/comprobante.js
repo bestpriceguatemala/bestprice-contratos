@@ -27,15 +27,16 @@
 // lista blanca para que agregar una falle fuerte.
 //
 // Sin cálculos propios: el costo de cada renta es `costoDelSubarriendo`, la
-// deuda pendiente es `cuentaDeDueno(...).totalPorPagar` (las dos de
-// nucleo/liquidacion.js), y lo pagado es el `monto` que quedó guardado en el
-// pago. Si aquí se sumara algo por cuenta propia, un día el papel contradiría la
+// deuda pendiente es `cuentaDeDueno(...).totalPorPagar`, y lo que las rentas de
+// «Le pagué» suman HOY es `totalSeleccionado` (las tres de
+// nucleo/liquidacion.js); lo pagado es el `monto` que quedó guardado en el
+// pago, y es lo que el papel dice siempre. Si aquí se sumara algo por cuenta propia, un día el papel contradiría la
 // pantalla que lo produjo — justo lo que este proyecto ya sufrió cinco veces.
 //
 // El PDF lo hace el navegador (ADR-003): esta hoja se imprime con
 // Cmd + P → Guardar como PDF, y css/estilos.css (@media print) esconde todo lo
 // que no sea ella.
-import { costoDelSubarriendo, agruparPorDueno } from '../nucleo/liquidacion.js';
+import { costoDelSubarriendo, agruparPorDueno, totalSeleccionado } from '../nucleo/liquidacion.js';
 import { atrasoDe } from '../nucleo/contrato.js';
 import { q } from '../nucleo/dinero.js';
 import { diasEntre, sumarDias } from '../nucleo/fechas.js';
@@ -218,6 +219,19 @@ export function armarComprobante({
   const filasPendientes = grupo.cuenta.porPagar.map((c) => filaDeRenta(c, marcas)).sort(porFechaYPlacas);
   const pendienteIncompleto = filasPendientes.some((f) => f.sinCosto);
 
+  // ¿Las rentas de «Le pagué» todavía suman lo que se pagó? Se le pregunta al
+  // núcleo (`totalSeleccionado`, la misma suma que la pantalla enseña al marcar
+  // casillas), no se suman aquí. Si no coinciden es que algo cambió DESPUÉS del
+  // pago —se corrigió el costo de una renta, o se anuló un pago del cliente y la
+  // renta dejó de estar cerrada— y la tabla ya no explica el total. El total no
+  // se toca (lo pagado es lo pagado, y el dueño del carro ya tiene el papel con
+  // ese número): el papel dice, en una línea, que el detalle ya no suma.
+  // Con un costo que no se pudo leer no hay cifra confiable con qué comparar:
+  // la fila ya dice que falta, y comparar contra un 0 inventado daría un aviso falso.
+  const costosLegibles = !filasPagadas.some((f) => f.sinCosto === 'leer');
+  const cambiaron = costosLegibles
+    && totalSeleccionado(delPago, delPago.map((c) => c.id)) !== q(pago.monto);
+
   return {
     numero: pago.numero,
     fecha: pago.fecha,
@@ -233,6 +247,7 @@ export function armarComprobante({
       // pagó ese día y es lo que enseña la pantalla de «ya pagado».
       total: q(pago.monto),
       forma: String(pago.forma ?? ''),
+      cambiaron,
     },
     pendiente: {
       filas: filasPendientes,
@@ -291,6 +306,15 @@ function tablaHtml(filas, pie) {
         ${pie}
       </tfoot>
     </table>`;
+}
+
+/**
+ * La línea que dice la verdad cuando el detalle ya no suma lo pagado. Solo dice
+ * qué se pagó y que las rentas cambiaron: no escribe la suma nueva, que
+ * contradiría el total del comprobante que el dueño del carro ya tiene.
+ */
+function notaDeCambio(totalPagado) {
+  return `<p class="comp-nota-cambio">Nota: lo pagado fue ${dinero(totalPagado)}. Las rentas de esta lista cambiaron después del pago, por eso su detalle ya no suma esa cifra.</p>`;
 }
 
 function seccionPendiente(p, hoy) {
@@ -353,6 +377,7 @@ export function htmlComprobante(m) {
           <td class="num">${dinero(m.pagado.total)}</td>
         </tr>`)}
     <p class="comp-forma">Forma de pago: <strong>${esc(textoDeForma(m.pagado.forma))}</strong></p>
+    ${m.pagado.cambiaron ? notaDeCambio(m.pagado.total) : ''}
   </section>
 
   <section class="comp-seccion comp-pendiente">
@@ -372,10 +397,11 @@ export function htmlComprobante(m) {
 
 /**
  * Lo que se le avisa al dueño del NEGOCIO, solo en pantalla y antes de imprimir,
- * cuando hay rentas sin cifra. No sale en el papel (`no-imprimir`): es para
+ * cuando hay rentas sin cifra o cuando el detalle ya no suma lo pagado. No sale en el papel (`no-imprimir`): es para
  * quien manda el comprobante, no para quien lo recibe.
  */
-function avisoDeRentasSinCosto({ anotar, leer }) {
+function avisosDePantalla(m) {
+  const { anotar, leer } = m.rentasSinCosto;
   const partes = [];
   if (leer) {
     partes.push(
@@ -386,6 +412,12 @@ function avisoDeRentasSinCosto({ anotar, leer }) {
   if (anotar) {
     partes.push(
       `${pluralRentas(anotar)} sin costo anotado: en el papel salen sin cifra. Anota el costo antes de mandar este comprobante.`,
+    );
+  }
+  if (m.pagado.cambiaron) {
+    partes.push(
+      `Lo pagado (${dinero(m.pagado.total)}) ya no coincide con el detalle de las rentas de este comprobante: alguna cambió después del pago. `
+      + 'El papel lo dice en una nota y mantiene el total pagado. Revisa qué cambió antes de mandarlo.',
     );
   }
   if (!partes.length) return '';
@@ -448,7 +480,7 @@ export function pintarComprobante(contenedor, entrada, { imprimir = () => window
     <button type="button" class="btn btn-primario" data-accion="imprimir">Imprimir o guardar como PDF</button>
   </div>
   <p class="comp-ayuda no-imprimir">Para el PDF: Cmd + P y elige «Guardar como PDF». La primera vez apaga «Encabezados y pies de página» en el diálogo.</p>
-  ${avisoDeRentasSinCosto(modelo.rentasSinCosto)}
+  ${avisosDePantalla(modelo)}
   ${htmlComprobante(modelo)}
 </div>`;
 
