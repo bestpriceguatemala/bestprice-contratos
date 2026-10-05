@@ -1273,6 +1273,113 @@ export function mensajeDeMigracion({
   return partes.join(' ');
 }
 
+// ---------- Lo que el área de dinero escribe sobre un contrato que ya existe ----------
+//
+// "Sacar carro" es la única pantalla que escribe el costo del dueño, y solo lo
+// hace al CREAR el contrato. Un contrato cuyo costo quedó en 0 (el campo no es
+// obligatorio) o ilegible no se puede pagar — pagarlo borraría una deuda real
+// por Q0.00 —, y sin una puerta aquí quedaría en «por pagar» para siempre, sin
+// nada que él pudiera hacer. Estas dos funciones son lo único que el área de
+// dinero escribe sobre contratos; el resto de sus escrituras son pagos.
+
+/** Lo que lee el dueño si intenta anotar un costo sin haber entrado al área de dinero. */
+export const MENSAJE_COSTO_SIN_DINERO = 'Primero entra al área de dinero: sin esa contraseña no se puede anotar el costo del dueño.';
+
+/**
+ * Lo que lee el dueño si intenta anotar un costo vacío o en cero. Un 0 no es un
+ * costo: es justo lo que dejó la renta atorada, y guardarlo la dejaría igual.
+ */
+export const MENSAJE_COSTO_SIN_VALOR = 'Escribe cuánto le pagas al dueño por día: un número mayor que cero.';
+
+/**
+ * Anota el costo por día del dueño en un contrato que ya existe. Escribe en
+ * `contratos/{id}/privado/dinero` con la credencial de DINERO — el mismo lugar y
+ * la misma credencial que todo lo demás del área —, y devuelve el costo ya
+ * redondeado (`q()`), que es lo que quedó guardado.
+ *
+ * `privado` MANDA al leer (`conCostoDelDueno`), así que este número le gana a lo
+ * que el documento todavía traiga. Pero un contrato SIN MIGRAR sigue trayendo su
+ * costo viejo (un 0, que es justo por lo que está aquí) en el documento, y la
+ * migración (`moverElCostoDe`) vería ahí dos costos distintos y se negaría a
+ * decidir: «conflicto, hay que revisarlo», sin ninguna pantalla donde revisarlo.
+ * Por eso, después de anotar el costo se quita el viejo del documento, con el
+ * mismo recorte que usa la migración. Es lo único que se hace sobre el documento
+ * y NO es esencial: si falla, el costo ya quedó anotado y el único efecto es que
+ * la migración, cuando corra, lo señale — por eso un fallo ahí se registra y no
+ * se le presenta como si el costo no se hubiera guardado.
+ *
+ * Se niega ANTES de escribir nada si el contrato no es de carro ajeno o no
+ * trae id, si el costo no es un número mayor que cero, o si no hay sesión de
+ * dinero. Nunca escribe en la copia local: la copia local no guarda jamás el
+ * costo de un subarriendo (ver «El costo del dueño del carro», más arriba).
+ *
+ * Las dependencias se pueden inyectar solo para probar sin red.
+ */
+export async function anotarCostoDelDueno(contrato, costoDia, {
+  iniciar = iniciarFirebase, dbDinero = dbDeDinero,
+} = {}) {
+  if (!esAjeno(contrato) || !contrato?.id) {
+    throw new Error('Solo se puede anotar el costo en un contrato de carro ajeno que ya esté guardado.');
+  }
+  const costo = q(costoDia);
+  if (!hayNumero(costoDia) || !(costo > 0)) throw new Error(MENSAJE_COSTO_SIN_VALOR);
+  const db = dbDinero();
+  if (!db) throw new Error(MENSAJE_COSTO_SIN_DINERO);
+  const { fsMod } = await iniciar();
+
+  await escribirCostoDelDueno({ db, fsMod }, contrato.id, costo);
+
+  const cambios = cambiosParaQuitarElCosto(contrato, fsMod);
+  if (Object.keys(cambios).length) {
+    try {
+      await conLimiteDeTiempo(fsMod.updateDoc(fsMod.doc(db, 'contratos', contrato.id), cambios));
+    } catch (error) {
+      console.warn('El costo quedó anotado, pero no se pudo quitar el costo viejo del documento del contrato:', error);
+    }
+  }
+  return costo;
+}
+
+/** Cuántos contratos caben en un solo lote de escritura: Firestore acepta 500 y aquí se deja margen. */
+const CONTRATOS_POR_LOTE = 400;
+
+/**
+ * Enlaza contratos viejos —los que solo traen el nombre del dueño escrito a
+ * mano— a un dueño de la lista: les escribe `duenoId`. Es la salida del grupo
+ * «sin enlazar» de `agruparPorDueno`.
+ *
+ * Escribe SOLO `duenoId` y el sello `actualizado`, con `update` y no con el
+ * contrato entero: reescribir un contrato desde una copia que ya pudo quedar
+ * atrás pisaría `pagos` (un arreglo se reemplaza completo) con lo que había al
+ * leerlo, y perder un abono a mitad de un enlace sería peor que no enlazar.
+ * `update` además falla si el contrato ya no existe, en vez de crear uno vacío.
+ * `actualizado` sube para que la copia local de otras computadoras, que decide
+ * por ese sello (`mezclar`), recoja el cambio. `carroAjeno.dueno` no se toca: el
+ * texto original se conserva (§7 de la liquidación).
+ *
+ * Va por lotes, así que un enlace se aplica entero o no se aplica — salvo con
+ * más de `CONTRATOS_POR_LOTE` contratos de un mismo texto, donde cada lote es
+ * atómico y el siguiente puede fallar: volver a enlazar termina lo que faltó,
+ * porque repetir un enlace no cambia nada. Va con la sesión normal: las reglas
+ * dejan escribir contratos a cualquier sesión y esto no toca dinero.
+ */
+export async function enlazarContratosAlDueno(ids, duenoId, {
+  iniciar = iniciarFirebase, ahora = Date.now(),
+} = {}) {
+  const lista = [...new Set((Array.isArray(ids) ? ids : []).filter(Boolean))];
+  if (!duenoId) throw new Error('Falta escoger a qué dueño de la lista se enlazan los contratos.');
+  if (!lista.length) throw new Error('No hay contratos que enlazar.');
+  const { db, fsMod } = await iniciar();
+  for (let desde = 0; desde < lista.length; desde += CONTRATOS_POR_LOTE) {
+    const lote = fsMod.writeBatch(db);
+    for (const id of lista.slice(desde, desde + CONTRATOS_POR_LOTE)) {
+      lote.update(fsMod.doc(db, 'contratos', id), { duenoId, actualizado: ahora });
+    }
+    await conLimiteDeTiempo(lote.commit());
+  }
+  return lista;
+}
+
 // ---------- Los pagos a dueños de carros ajenos ----------
 //
 // Lo que Best Price le pagó a cada dueño, con el número del comprobante que se

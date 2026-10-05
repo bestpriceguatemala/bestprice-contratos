@@ -22,10 +22,12 @@
     <header class="barra">
       <strong>Best Price — Contratos</strong>
       <!--
-        Revisión final: este buscador y los enlaces a Dinero/Ajustes no
-        tienen ninguna pantalla detrás todavía (ni app.js ni router.js los
-        cablean) — un cuadro de búsqueda que se traga lo que se escribe es
-        peor que no tener buscador. Se ocultan hasta que esos planes existan.
+        Revisión final: este buscador y el enlace a Ajustes no tienen ninguna
+        pantalla detrás todavía (ni app.js ni router.js los cablean) — un cuadro
+        de búsqueda que se traga lo que se escribe es peor que no tener buscador.
+        Se ocultan hasta que esos planes existan. Dinero ya tiene la suya (la
+        liquidación a dueños): su enlace se ve, y la pantalla pide su propia
+        contraseña.
       -->
       <input type="search" id="buscador" placeholder="Buscar cliente, placas o número de contrato" hidden>
       <nav>
@@ -35,7 +37,7 @@
         <a href="#/carros">Carros</a>
         <a href="#/clientes">Clientes</a>
         <a href="#/contratos">Contratos</a>
-        <a href="#/dinero" hidden>Dinero</a>
+        <a href="#/dinero">Dinero</a>
         <a href="#/ajustes" hidden>Ajustes</a>
       </nav>
       <button id="salir" class="btn">Salir</button>

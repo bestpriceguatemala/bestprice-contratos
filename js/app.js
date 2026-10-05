@@ -11,6 +11,10 @@ import { pintarClientes } from './pantallas/clientes.js';
 import { pintarContratos } from './pantallas/contratos.js';
 import { pintarReservas } from './pantallas/reservas.js';
 import { pintarCalendario } from './pantallas/calendario.js';
+import {
+  pintarDinero, pintarCuentaDeDueno, conPuertaDeDinero, enElAreaDeDinero, cerrarElDineroOReiniciar, salirDelSistema,
+} from './pantallas/dinero.js';
+import { pintarDuenos } from './pantallas/duenos.js';
 import { vigilarVersion } from './version.js';
 import { limpiarCopiaLocalDelCosto } from './datos.js';
 
@@ -41,6 +45,14 @@ registrarPantalla('#/reservas/:reservaId', pintarReservas);
 // pantalla, no vuelve a pasar por aquí.
 registrarPantalla('#/calendario', pintarCalendario);
 registrarPantalla('#/calendario/:fecha', pintarCalendario);
+// El área de dinero (§11 del diseño): TODAS sus rutas pasan por conPuertaDeDinero,
+// que pide la segunda contraseña si no hay sesión de dinero abierta. La lista de
+// dueños y la ficha de uno comparten la ruta con parámetro por el mismo motivo que
+// clientes.js: '#/dinero/duenos/nuevo' llega a pintarDuenos con 'nuevo' capturado.
+registrarPantalla('#/dinero', conPuertaDeDinero(pintarDinero));
+registrarPantalla('#/dinero/cuenta/:clave', conPuertaDeDinero(pintarCuentaDeDueno));
+registrarPantalla('#/dinero/duenos', conPuertaDeDinero(pintarDuenos));
+registrarPantalla('#/dinero/duenos/:duenoId', conPuertaDeDinero(pintarDuenos));
 
 const pantallaEntrada = document.getElementById('entrada');
 const pantallaApp = document.getElementById('app');
@@ -92,12 +104,26 @@ forma.addEventListener('submit', async (ev) => {
   }
 });
 
+// «Salir» cierra TAMBIÉN el área de dinero, y primero: la sesión de dinero vive en
+// una app de Firebase aparte, así que salir del mostrador no la cierra, y quien se
+// sentara después leería dinero desde la consola sin ninguna de las dos
+// contraseñas (§11). `salirDelSistema` espera el cierre —no lo dispara y se olvida:
+// la cola de dinero-sesion.js se traga su rechazo— y, si no se pudo cerrar, recarga
+// la página, que es lo único que mata esa sesión con seguridad.
 botonSalir.addEventListener('click', () => {
-  salir().catch(() => {
+  salirDelSistema({
+    salirDelMostrador: salir,
     // Si fallara el cierre de sesión no hay nada más que decirle al dueño:
     // el aviso de sesión (alCambiarSesion) ya gobierna qué pantalla se ve.
-    aviso('No se pudo cerrar la sesión. Intenta de nuevo.', 'error');
+    alFallarElMostrador: () => aviso('No se pudo cerrar la sesión. Intenta de nuevo.', 'error'),
   });
+});
+
+// Salir del área de dinero —a cualquier otra pantalla— la cierra. El enrutador no
+// avisa cuando se deja una pantalla, así que se mira cada cambio de ruta. Sin
+// sesión abierta esto no hace nada (ni baja Firebase para cerrar).
+window.addEventListener('hashchange', () => {
+  if (!enElAreaDeDinero(location.hash)) cerrarElDineroOReiniciar();
 });
 
 // Comienza a vigilar la versión desde el arranque.
@@ -118,8 +144,14 @@ limpiarCopiaLocalDelCosto().catch((error) => {
 // eso es correcto — se avisa en español y la pantalla de entrada se queda
 // visible, en vez de una página en blanco o un error técnico en consola.
 alCambiarSesion((usuario) => {
-  if (usuario) verCascaron();
-  else verEntrada();
+  if (usuario) {
+    verCascaron();
+  } else {
+    // Sea cual sea el motivo por el que el mostrador se quedó sin sesión (Salir, o
+    // que Firebase la venciera), el área de dinero se cierra con ella.
+    cerrarElDineroOReiniciar();
+    verEntrada();
+  }
 }).catch(() => {
   mostrarError('No se pudo conectar con el sistema. Revisa tu conexión a internet o avisa al encargado.');
 });
