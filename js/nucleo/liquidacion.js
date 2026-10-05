@@ -125,6 +125,40 @@ function exigirContratos(contratos) {
 }
 
 /**
+ * La lista de contratos sin ids repetidos (M3 de la revisión de las Tareas 6 y 7,
+ * y Minor 1 de la de la Tarea 8): un contrato que llega dos veces — una pantalla
+ * que junta dos lecturas de rangos de fechas que se traslapan — contaría doble en
+ * el total y dos veces en la lista de rentas, y la cifra que se ve no coincidiría
+ * con la deuda (con `[M1, M2, M1]` la lista decía «3 · Q4,200.00» sobre una deuda
+ * de Q3,000.00 en dos rentas, sin la marca de «incompleto»). Se quitan AQUÍ, en
+ * la cuenta, que es lo que se ve y lo que se paga: así la pantalla, el pago y el
+ * comprobante parten de las mismas rentas.
+ *
+ * De dos copias del mismo id queda la de `actualizado` más nuevo (la regla de
+ * `mezclar`, cache.js; si empatan, la primera), en el lugar de la primera
+ * aparición. Los que no traen id pasan tal cual: no se pueden marcar, así que no
+ * pueden entrar a un pago.
+ *
+ * Una lista que no es lista se devuelve igual: quien lanza es `exigirContratos`.
+ */
+export function sinIdsRepetidos(contratos) {
+  if (!Array.isArray(contratos)) return contratos;
+  const lugarDe = new Map();
+  const lista = [];
+  for (const c of contratos) {
+    if (!c?.id) {
+      lista.push(c);
+    } else if (!lugarDe.has(c.id)) {
+      lugarDe.set(c.id, lista.length);
+      lista.push(c);
+    } else if (Number(c.actualizado || 0) > Number(lista[lugarDe.get(c.id)].actualizado || 0)) {
+      lista[lugarDe.get(c.id)] = c;
+    }
+  }
+  return lista;
+}
+
+/**
  * La cuenta con un dueño: tres listas y el total, ya separadas para que la
  * pantalla solo las dibuje.
  *
@@ -149,7 +183,8 @@ function exigirContratos(contratos) {
  * nada» a quien quizá sí se le debe.
  *
  * `contratos` ya vienen de un solo dueño. Un contrato de carro propio que se
- * colara no le debe nada a nadie, así que no aparece en ninguna lista.
+ * colara no le debe nada a nadie, así que no aparece en ninguna lista. Un
+ * contrato que llegue repetido cuenta una sola vez (ver `sinIdsRepetidos`).
  */
 export function cuentaDeDueno({ contratos, pagos } = {}) {
   const cubiertos = idsCubiertos(pagos);
@@ -158,7 +193,7 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
   const pagados = [];
   const sinCostoAnotado = [];
 
-  for (const c of exigirContratos(contratos)) {
+  for (const c of sinIdsRepetidos(exigirContratos(contratos))) {
     if (!esDeCarroAjeno(c)) continue;
     // Se pregunta por el costo ya calculado, no por `subarriendo.costoDia`:
     // así, cuando el costo se mueva a `privado/dinero` (ADR-002), esta marca
@@ -216,7 +251,10 @@ export function agruparPorDueno(contratos, pagos) {
   idsCubiertos(pagos);
   const grupos = new Map();
 
-  for (const c of exigirContratos(contratos)) {
+  // Antes de repartir, y no solo dentro de cada cuenta: el mismo contrato entregado
+  // dos veces con dueño distinto (una copia ya enlazada y otra vieja) caería en dos
+  // grupos, y quedaría contado en los dos.
+  for (const c of sinIdsRepetidos(exigirContratos(contratos))) {
     if (!esDeCarroAjeno(c)) continue;
     const duenoId = c.duenoId || null;
     const texto = String(c.carroAjeno?.dueno ?? '').trim();
@@ -273,7 +311,7 @@ export function agruparPorDueno(contratos, pagos) {
 export function totalSeleccionado(contratos, idsMarcados) {
   const marcados = new Set(idsMarcados ?? []);
   if (marcados.size === 0) return 0;
-  const elegidos = (Array.isArray(contratos) ? contratos : [])
+  const elegidos = sinIdsRepetidos(Array.isArray(contratos) ? contratos : [])
     .filter((c) => c?.id && marcados.has(c.id) && esPagableAlDueno(c));
   return suma(...elegidos.map(costoDelSubarriendo));
 }

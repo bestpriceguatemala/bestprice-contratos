@@ -54,7 +54,7 @@ function filaDueno(dueno) {
 }
 
 function filasCuerpo(duenos) {
-  if (!duenos.length) return '<tr><td colspan="4" class="pendiente" style="margin-top:0;padding:20px">Sin resultados.</td></tr>';
+  if (!duenos.length) return '<tr><td colspan="4" class="pendiente dn-vacio">Sin resultados.</td></tr>';
   return duenos.map(filaDueno).join('');
 }
 
@@ -71,18 +71,18 @@ export function htmlListaDeDuenos(duenos, { fallo = false } = {}) {
     : '';
   let cuerpo;
   if (ordenados.length) cuerpo = filasCuerpo(ordenados);
-  else if (fallo) cuerpo = '<tr><td colspan="4" class="pendiente" style="margin-top:0;padding:20px">No se pudo leer la lista. Intenta de nuevo o revisa la conexión.</td></tr>';
-  else cuerpo = '<tr><td colspan="4" class="pendiente" style="margin-top:0;padding:20px">Todavía no hay dueños.<br><a href="#/dinero/duenos/nuevo" class="btn btn-primario" style="width:auto">Agregar el primero</a></td></tr>';
+  else if (fallo) cuerpo = '<tr><td colspan="4" class="pendiente dn-vacio">No se pudo leer la lista. Intenta de nuevo o revisa la conexión.</td></tr>';
+  else cuerpo = '<tr><td colspan="4" class="pendiente dn-vacio">Todavía no hay dueños.<br><a href="#/dinero/duenos/nuevo" class="btn btn-primario dn-boton-ancho-auto">Agregar el primero</a></td></tr>';
   return `
     <div class="carros-contenido">
       <div class="carros-encabezado">
         <a href="#/dinero" class="btn">← Dinero</a>
         <h1>Dueños de carros</h1>
-        <a href="#/dinero/duenos/nuevo" class="btn btn-primario" style="margin-top:0">Agregar dueño</a>
+        <a href="#/dinero/duenos/nuevo" class="btn btn-primario dn-boton-suelto">Agregar dueño</a>
       </div>
       ${barra}
       ${ordenados.length ? `
-        <label class="carro-campo" style="margin-bottom:16px">Buscar por nombre, teléfono o NIT
+        <label class="carro-campo dn-buscador">Buscar por nombre, teléfono o NIT
           <input type="search" id="dn-buscar" placeholder="Escribe para buscar...">
         </label>` : ''}
       <table class="tabla-carros">
@@ -141,10 +141,10 @@ export function htmlFormularioDeDueno(dueno, { esNuevo }) {
           </section>
           <div class="carro-botones">
             <button type="button" id="df-volver" class="btn">Cancelar</button>
-            <button type="submit" id="df-guardar" class="btn btn-primario" style="width:auto;margin-top:0">Guardar dueño</button>
+            <button type="submit" id="df-guardar" class="btn btn-primario dn-boton-suelto">Guardar dueño</button>
           </div>
         </form>
-        ${esNuevo ? '' : `<p style="margin:24px 0 0"><a href="${esc(rutaDeCuenta(`id:${dueno?.id}`))}">Ver lo que se le debe</a></p>`}
+        ${esNuevo ? '' : `<p class="dn-ver-cuenta"><a href="${esc(rutaDeCuenta(`id:${dueno?.id}`))}">Ver lo que se le debe</a></p>`}
       </div>
     </div>`;
 }

@@ -43,7 +43,8 @@ import {
   siguienteNumeroComprobante, construirPagoDueno, guardarPagoDueno, anotarCostoDelDueno,
   enlazarContratosAlDueno, conCostoDelDueno, costoDelDocumento, migrarCostosDelDueno, mensajeDeMigracion,
   MENSAJE_PAGO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS, MENSAJE_PAGO_SIN_MONTO, MENSAJE_PAGO_SIN_ID,
-  MENSAJE_COSTO_SIN_DINERO, MENSAJE_COSTO_SIN_VALOR, MENSAJE_MIGRAR_SIN_DINERO,
+  MENSAJE_COSTO_SIN_DINERO, MENSAJE_COSTO_SIN_VALOR, MENSAJE_COSTO_YA_ANOTADO, MENSAJE_COSTO_SIN_COMPROBAR,
+  MENSAJE_MIGRAR_SIN_DINERO,
 } from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
 import { mostrar } from '../router.js';
@@ -103,7 +104,8 @@ export const MENSAJE_FALLO_PAGOS = 'No se pudieron leer los pagos a dueños. Sin
 export const MENSAJE_FALLO_DATOS = 'Hay un contrato o un pago guardado que no se puede leer completo, así que no se muestra ninguna cuenta. Avisa a quien lleva el sistema.';
 export const MENSAJE_FALLO_DUENOS = 'No se pudo leer la lista de dueños. Los nombres que ves pueden estar desactualizados.';
 export const MENSAJE_SIN_COMPROBAR = 'No se pudo comprobar si estas rentas ya tienen un pago registrado, y registrar sin saberlo podría pagarlas dos veces. Revisa tu internet e intenta de nuevo.';
-export const MENSAJE_PAGO_CAMBIO = 'Mientras tanto cambió la cuenta de este dueño: alguna de las rentas marcadas ya no se puede pagar (por ejemplo, ya tiene un pago registrado). No se registró nada; la lista ya está al día, revisa y vuelve a marcar.';
+export const MENSAJE_SIN_COMPROBAR_RENTAS = 'No se pudo comprobar si estas rentas siguen cerradas y con el mismo monto, y registrar sin saberlo podría pagar una renta que ya cambió. Revisa tu internet e intenta de nuevo.';
+export const MENSAJE_PAGO_CAMBIO = 'Mientras tanto cambió la cuenta de este dueño: alguna de las rentas marcadas ya no se puede pagar o cambió de monto (por ejemplo, ya tiene un pago registrado, o se corrigió su cierre). No se registró nada; la lista ya está al día, revisa y vuelve a marcar.';
 export const MENSAJE_PAGO_FALLO = 'No se pudo registrar el pago. Revisa tu internet y vuelve a apretar «Guardar pago»: si ya había quedado guardado, no se duplica. '
   + 'Si sigue sin conectar, recarga la página y revisa «Ya pagado» antes de intentarlo otra vez.';
 export const MENSAJE_COSTO_FALLO = 'No se pudo guardar el costo. Revisa tu internet e intenta de nuevo.';
@@ -283,8 +285,8 @@ function instalarLatidos() {
 
 const FRASES_CONOCIDAS = new Set([
   MENSAJE_PAGO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS, MENSAJE_PAGO_SIN_MONTO, MENSAJE_PAGO_SIN_ID,
-  MENSAJE_COSTO_SIN_DINERO, MENSAJE_COSTO_SIN_VALOR, MENSAJE_MIGRAR_SIN_DINERO,
-  MENSAJE_SIN_COMPROBAR, MENSAJE_PAGO_CAMBIO,
+  MENSAJE_COSTO_SIN_DINERO, MENSAJE_COSTO_SIN_VALOR, MENSAJE_COSTO_YA_ANOTADO, MENSAJE_COSTO_SIN_COMPROBAR,
+  MENSAJE_MIGRAR_SIN_DINERO, MENSAJE_SIN_COMPROBAR, MENSAJE_SIN_COMPROBAR_RENTAS, MENSAJE_PAGO_CAMBIO,
   'La nube no respondió a tiempo.',
   'Solo se puede anotar el costo en un contrato de carro ajeno que ya esté guardado.',
   'Falta escoger a qué dueño de la lista se enlazan los contratos.',
@@ -497,19 +499,31 @@ export function pagosDeLaCuenta(entrada, pagos) {
  * El recorrido, en orden:
  * 1. Vuelve a LEER los pagos antes de escribir. Si el pago de `enCurso` ya está
  *    ahí, un intento anterior sí había llegado: no se escribe nada, se devuelve
- *    ese. Si lo marcado ya no está por pagar (otra pestaña, o un intento
- *    anterior con otras casillas) NO se registra una versión recortada en
- *    silencio —él vio un monto y se guardaría otro—: se devuelve `cambio`.
- * 2. Arma el pago con `construirPagoDueno`, que se niega con su propia frase si
- *    alguna renta marcada no tiene costo legible.
- * 3. Pide el id y el número UNA vez (`enCurso`) y guarda.
+ *    ese.
+ * 2. Vuelve a LEER los contratos, con la misma lectura de la pantalla. La
+ *    cuenta que la pantalla tiene en memoria es la de cuando se abrió, y pudo
+ *    cambiar mientras él armaba el pago: otra pestaña (o el mostrador) pudo
+ *    corregir el cierre de una renta marcada y dejarla otra vez con saldo, y
+ *    entonces ya no es pagable aunque su casilla siga marcada. Sin esta
+ *    relectura el pago se registraba sobre la copia vieja, con su comprobante
+ *    impreso, y el aviso llegaba después. Si no se pueden leer, no se registra.
+ * 3. Si lo marcado ya no está por pagar (otra pestaña, o un intento anterior
+ *    con otras casillas), o suma otra cosa que lo que él vio, NO se registra
+ *    una versión recortada o distinta en silencio —él vio un monto y se
+ *    guardaría otro—: se devuelve `cambio`.
+ * 4. Arma el pago con `construirPagoDueno` sobre lo leído AHORA, que se niega
+ *    con su propia frase si alguna renta marcada no tiene costo legible (el
+ *    «sin leer» también es el de ahora, no el de cuando se abrió).
+ * 5. Pide el id y el número UNA vez (`enCurso`) y guarda.
  *
- * Devuelve `{ tipo, pagos, pago? }` donde `pagos` es siempre la lista leída (la
- * pantalla la toma como la nueva verdad). Lanza lo que lance cada paso.
+ * Devuelve `{ tipo, pagos, contratos?, pago? }`: `pagos` y `contratos` son lo
+ * leído (la pantalla los toma como la nueva verdad; `contratos` falta solo en
+ * `ya-guardado`, que no necesitó leerlos). Lanza lo que lance cada paso.
  */
 export async function registrarElPago({
-  entrada, idsMarcados, forma, fecha: fechaDelPago, costoSinLeer, enCurso = {},
-  leerPagos = cargarPagosDueno, nuevoId = nuevoIdPagoDueno, nuevoNumero = siguienteNumeroComprobante,
+  entrada, idsMarcados, forma, fecha: fechaDelPago, enCurso = {},
+  leerPagos = cargarPagosDueno, leerContratos = cargarContratosParaDinero,
+  nuevoId = nuevoIdPagoDueno, nuevoNumero = siguienteNumeroComprobante,
   guardar = guardarPagoDueno,
 }) {
   if (!idsMarcados.length) throw new Error(MENSAJE_PAGO_SIN_RENTAS);
@@ -520,24 +534,36 @@ export async function registrarElPago({
   const yaGuardado = enCurso?.id ? frescos.datos.find((p) => p?.id === enCurso.id) : null;
   if (yaGuardado) return { tipo: 'ya-guardado', pago: yaGuardado, pagos: frescos.datos };
 
+  // Lo que él vio: la suma de lo marcado sobre la cuenta que tenía en pantalla.
+  const montoVisto = totalSeleccionado(entrada.cuenta.porPagar, idsMarcados);
+
+  // La lectura que falle (o lance) NO se vuelve «ninguna renta»: se dice que no se pudo comprobar.
+  const rentas = await Promise.resolve().then(() => leerContratos()).catch(() => null);
+  // La cuenta se arma con la MISMA regla que la pantalla (`armarVista`), no con otra copia de ella.
+  const vista = armarVista({ contratos: rentas, pagos: frescos });
+  if (!vista.ok) throw new Error(MENSAJE_SIN_COMPROBAR_RENTAS);
+  const cuentaDeAhora = vista.entradas.find((e) => e.clave === entrada.clave);
+  if (!cuentaDeAhora) return { tipo: 'cambio', pagos: frescos.datos, contratos: rentas };
+
   const pago = construirPagoDueno({
     duenoId: entrada.duenoId,
     fecha: fechaDelPago,
     forma,
-    contratos: entrada.contratos,
+    contratos: cuentaDeAhora.contratos,
     pagos: frescos.datos,
     idsMarcados,
-    costoSinLeer,
+    costoSinLeer: rentas.costoSinLeer,
   });
   const igual = pago.contratos.length === idsMarcados.length
-    && idsMarcados.every((id) => pago.contratos.includes(id));
-  if (!igual) return { tipo: 'cambio', pagos: frescos.datos };
+    && idsMarcados.every((id) => pago.contratos.includes(id))
+    && pago.monto === montoVisto;
+  if (!igual) return { tipo: 'cambio', pagos: frescos.datos, contratos: rentas };
 
   // Una vez por intención de pagar, y se conservan aunque este intento falle.
   enCurso.id ??= await nuevoId();
   enCurso.numero ??= await nuevoNumero();
   const guardado = await guardar({ ...pago, id: enCurso.id, numero: enCurso.numero });
-  return { tipo: 'guardado', pago: guardado, pagos: [...frescos.datos, guardado] };
+  return { tipo: 'guardado', pago: guardado, pagos: [...frescos.datos, guardado], contratos: rentas };
 }
 
 /**
@@ -565,25 +591,27 @@ export function entradaDelComprobante({
 // HTML (funciones puras: reciben datos y devuelven texto, sin tocar el DOM)
 // ---------------------------------------------------------------------------
 
-const SIN_MARGEN = 'margin-top:0';
-const DERECHA = 'text-align:right';
-const ROJO_FUERTE = 'color:var(--rojo);font-weight:600';
+// Nada de esta pantalla lleva estilos en línea: cada ajuste es una clase `dn-*` de
+// css/estilos.css (como en las demás pantallas), y el resto —carros-contenido,
+// tabla-carros, carro-seccion, barra-lectura-fallida, btn— son las clases de siempre.
+// La hoja de impresión (`@media print`) y cualquier cambio de aspecto viven en el
+// CSS; un estilo en línea los ganaría a todos sin que nadie lo notara.
 
 /** La entrada: solo pide una contraseña. Nada de correo ni usuario, ni en palabras ni en un campo. */
 export function htmlEntrada({ mensaje = '' } = {}) {
-  const aparte = mensaje ? `<p style="margin:0 0 16px;color:var(--navy)">${esc(mensaje)}</p>` : '';
+  const aparte = mensaje ? `<p class="dn-entrada-mensaje">${esc(mensaje)}</p>` : '';
   return `
-    <div class="carros-contenido" style="max-width:460px">
+    <div class="carros-contenido dn-entrada-caja">
       <form id="dn-entrada" class="carro-formulario" autocomplete="off" novalidate>
         <h1>Área de dinero</h1>
-        <p style="margin:0 0 16px;color:var(--gris)">Esta área tiene su propia contraseña.</p>
+        <p class="dn-entrada-sub">Esta área tiene su propia contraseña.</p>
         ${aparte}
         <label class="carro-campo">Contraseña del área de dinero
           <input type="password" id="dn-clave" name="clave-del-area-de-dinero" autocomplete="new-password" spellcheck="false" required>
         </label>
-        <p id="dn-error" class="barra-lectura-fallida" role="alert" hidden style="margin:16px 0 0"></p>
+        <p id="dn-error" class="barra-lectura-fallida dn-mensaje" role="alert" hidden></p>
         <div class="carro-botones">
-          <button type="submit" id="dn-abrir" class="btn btn-primario" style="width:auto;${SIN_MARGEN}">Abrir</button>
+          <button type="submit" id="dn-abrir" class="btn btn-primario dn-boton-suelto">Abrir</button>
         </div>
       </form>
     </div>`;
@@ -603,7 +631,7 @@ export function htmlFallo(vista) {
     <div class="carros-contenido">
       <div class="carros-encabezado"><h1>Dinero</h1></div>
       ${barraRoja(frases)}
-      <p><button type="button" class="btn btn-primario" data-dn="reintentar" style="width:auto;${SIN_MARGEN}">Volver a leer</button></p>
+      <p><button type="button" class="btn btn-primario dn-boton-suelto" data-dn="reintentar">Volver a leer</button></p>
     </div>`;
 }
 
@@ -617,13 +645,13 @@ function filaDeLista(entrada, costoSinLeer) {
     entrada.sinEnlazar ? '<span class="etiqueta-estado" title="El nombre se escribió a mano en el contrato">Sin enlazar</span>' : '',
     entrada.sinRegistro ? '<span class="etiqueta-estado">No está en la lista de dueños</span>' : '',
   ].join('');
-  const notasHtml = notas.map((n) => `<div style="font-size:12px;${ROJO_FUERTE}">${esc(n)}</div>`).join('');
+  const notasHtml = notas.map((n) => `<div class="dn-alerta dn-nota">${esc(n)}</div>`).join('');
   return `
     <tr class="${apagada ? 'es-fuera' : ''}" data-dn-clave="${esc(entrada.clave)}">
       <td><a href="${esc(rutaDeCuenta(entrada.clave))}">${esc(entrada.nombre)}</a> ${etiquetas}${notasHtml}</td>
       <td>${cuenta.porPagar.length}</td>
-      <td style="${DERECHA}"><strong>${esc(dinero(cuenta.totalPorPagar))}</strong>${
-  notas.length ? `<div style="font-size:11px;${ROJO_FUERTE}">incompleto</div>` : ''}</td>
+      <td class="dn-derecha"><strong>${esc(dinero(cuenta.totalPorPagar))}</strong>${
+  notas.length ? '<div class="dn-alerta dn-nota-mini">incompleto</div>' : ''}</td>
     </tr>`;
 }
 
@@ -635,7 +663,7 @@ export function htmlLista(vista, { migracion = '' } = {}) {
   if (!vista.ok) return htmlFallo(vista);
   const filas = vista.entradas.length
     ? vista.entradas.map((e) => filaDeLista(e, vista.costoSinLeer)).join('')
-    : '<tr><td colspan="3" class="pendiente" style="margin-top:0;padding:24px;cursor:default">Todavía no hay rentas de carros ajenos ni dueños en la lista.</td></tr>';
+    : '<tr><td colspan="3" class="pendiente dn-vacio dn-vacio-ancho dn-sin-clic">Todavía no hay rentas de carros ajenos ni dueños en la lista.</td></tr>';
   return `
     <div class="carros-contenido">
       <div class="carros-encabezado">
@@ -646,17 +674,28 @@ export function htmlLista(vista, { migracion = '' } = {}) {
       ${vista.falloDuenos ? barraRoja([MENSAJE_FALLO_DUENOS]) : ''}
       <table class="tabla-carros">
         <thead>
-          <tr><th>Dueño</th><th>Rentas cerradas por pagar</th><th style="${DERECHA}">Se le debe</th></tr>
+          <tr><th>Dueño</th><th>Rentas cerradas por pagar</th><th class="dn-derecha">Se le debe</th></tr>
         </thead>
         <tbody>${filas}</tbody>
       </table>
-      <section class="carro-seccion" style="margin-top:40px">
+      <section class="carro-seccion dn-seccion-migracion">
         <h2>Mover el costo de los dueños</h2>
-        <p style="margin:0 0 12px;color:var(--gris)">Los contratos que se guardaron antes traen lo que le pagas al dueño por día dentro del contrato, donde lo puede leer quien use el mostrador. Este botón lo pasa detrás de la contraseña de dinero. Se corre una sola vez, a mano; si lo corres otra vez no daña nada.</p>
+        <p class="dn-explica">Los contratos que se guardaron antes traen lo que le pagas al dueño por día dentro del contrato, donde lo puede leer quien use el mostrador. Este botón lo pasa detrás de la contraseña de dinero. Se corre una sola vez, a mano; si lo corres otra vez no daña nada.</p>
         <button type="button" class="btn" data-dn="migrar">Mover el costo ahora</button>
         <div id="dn-migracion">${migracion}</div>
       </section>
     </div>`;
+}
+
+/**
+ * Lo que se enseña debajo del botón «Mover el costo ahora» cuando termina: una
+ * barra roja si algo quedó sin mover o falló, o el recuadro verde si todo salió
+ * bien. Función pura, para poder revisar cómo se ve sin correr la migración.
+ */
+export function htmlMigracion({ mensaje, problema }) {
+  return problema
+    ? `<p class="barra-lectura-fallida dn-mensaje-junto" role="alert">${esc(mensaje)}</p>`
+    : `<p class="dn-migracion-ok">${esc(mensaje)}</p>`;
 }
 
 /** Los días de la renta, con los de atraso señalados. */
@@ -665,26 +704,26 @@ function htmlDeDias(contrato) {
   const base = Number.isFinite(dias) ? `${dias} ${dias === 1 ? 'día' : 'días'}` : '—';
   const atraso = atrasoDe(contrato);
   return atraso > 0
-    ? `${esc(base)} <span style="${ROJO_FUERTE}">+ ${atraso} de atraso</span>`
+    ? `${esc(base)} <span class="dn-alerta">+ ${atraso} de atraso</span>`
     : esc(base);
 }
 
 function htmlCostoDia(contrato, costo, ui) {
   if (costo === 'leido') return esc(dinero(costoDelDocumento(contrato)));
-  if (costo === 'sin-leer') return `<span style="${ROJO_FUERTE}">No se pudo leer</span>`;
+  if (costo === 'sin-leer') return '<span class="dn-alerta">No se pudo leer</span>';
   // Sin costo anotado: aquí está la salida de una renta que, sin esto, se quedaría
   // en «por pagar» para siempre. Solo se ofrece cuando de verdad falta: un costo
   // que no se pudo LEER podría ser uno real, y escribir encima lo pisaría.
   if (ui.anotando === contrato.id) {
-    return `<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">
-      <input type="number" id="dn-costo-input" min="0" step="0.01" inputmode="decimal" placeholder="Q por día"
-        aria-label="Costo por día que le pagas al dueño" style="width:110px;padding:6px 8px;border:1px solid var(--borde);border-radius:6px">
-      <button type="button" class="btn" data-dn="guardar-costo" data-id="${esc(contrato.id)}" style="padding:6px 12px">Guardar</button>
-      <button type="button" class="btn" data-dn="cancelar-costo" style="padding:6px 12px">Cancelar</button>
+    return `<span class="dn-costo-edicion">
+      <input type="number" id="dn-costo-input" class="dn-costo-campo" min="0" step="0.01" inputmode="decimal" placeholder="Q por día"
+        aria-label="Costo por día que le pagas al dueño">
+      <button type="button" class="btn dn-boton-chico" data-dn="guardar-costo" data-id="${esc(contrato.id)}">Guardar</button>
+      <button type="button" class="btn dn-boton-chico" data-dn="cancelar-costo">Cancelar</button>
     </span>`;
   }
-  return `<span style="${ROJO_FUERTE}">Sin costo anotado</span>
-    <button type="button" class="btn" data-dn="anotar-costo" data-id="${esc(contrato.id)}" style="padding:4px 10px;font-size:12px">Anotar costo</button>`;
+  return `<span class="dn-alerta">Sin costo anotado</span>
+    <button type="button" class="btn dn-boton-mini" data-dn="anotar-costo" data-id="${esc(contrato.id)}">Anotar costo</button>`;
 }
 
 function htmlFilaPorPagar(contrato, ctx) {
@@ -693,7 +732,7 @@ function htmlFilaPorPagar(contrato, ctx) {
   const marcada = !bloqueada && ctx.ui.marcados.has(contrato.id);
   const titulo = bloqueada ? ' title="No se puede marcar hasta tener el costo por día"' : '';
   return `
-    <tr style="cursor:default" data-id="${esc(contrato.id)}">
+    <tr class="dn-sin-clic" data-id="${esc(contrato.id)}">
       <td><input type="checkbox" data-dn="marcar" data-id="${esc(contrato.id)}" ${marcada ? 'checked' : ''} ${bloqueada ? 'disabled' : ''}${titulo}
         aria-label="Marcar la renta de ${esc(contrato.carroPlacas)} para pagarla"></td>
       <td>${esc(fecha(contrato.fechaSalida))}</td>
@@ -701,7 +740,7 @@ function htmlFilaPorPagar(contrato, ctx) {
       <td>${esc(contrato.clienteNombre || '—')}</td>
       <td>${htmlDeDias(contrato)}</td>
       <td>${htmlCostoDia(contrato, costo, ctx.ui)}</td>
-      <td style="${DERECHA}">${costo === 'leido' ? `<strong>${esc(dinero(costoDelSubarriendo(contrato)))}</strong>` : '—'}</td>
+      <td class="dn-derecha">${costo === 'leido' ? `<strong>${esc(dinero(costoDelSubarriendo(contrato)))}</strong>` : '—'}</td>
     </tr>`;
 }
 
@@ -712,13 +751,13 @@ function htmlBloquePorPagar(ctx) {
   const marcadas = resumenDeMarcadas(entrada, ui.marcados, vista.costoSinLeer);
   const filas = cuenta.porPagar.length
     ? cuenta.porPagar.map((c) => htmlFilaPorPagar(c, ctx)).join('')
-    : '<tr><td colspan="7" class="pendiente" style="margin-top:0;padding:20px;cursor:default">No hay rentas cerradas por pagar.</td></tr>';
+    : '<tr><td colspan="7" class="pendiente dn-vacio dn-sin-clic">No hay rentas cerradas por pagar.</td></tr>';
 
   const formulario = ui.pagando ? `
-    <div id="dn-pago-form" style="margin-top:16px;padding:16px 20px;background:var(--blanco);border:1px solid var(--borde);border-radius:10px">
+    <div id="dn-pago-form" class="dn-caja dn-pago-form">
       <div class="carro-campos">
         <label class="carro-campo">Forma de pago
-          <select id="dn-forma" style="padding:10px 12px;border:1px solid var(--borde);border-radius:6px;font-size:14px">
+          <select id="dn-forma" class="dn-selector">
             ${FORMAS_DE_PAGO.map((f) => `<option value="${f.valor}" ${ui.forma === f.valor ? 'selected' : ''}>${f.etiqueta}</option>`).join('')}
           </select>
         </label>
@@ -726,11 +765,11 @@ function htmlBloquePorPagar(ctx) {
           <input type="date" id="dn-fecha" value="${esc(ui.fecha)}">
         </label>
       </div>
-      <div class="carro-botones" style="margin-top:16px">
+      <div class="carro-botones dn-botones-pago">
         <button type="button" class="btn" data-dn="cancelar-pago">Cancelar</button>
-        <button type="button" class="btn btn-primario" id="dn-guardar-pago" data-dn="guardar-pago" style="width:auto;${SIN_MARGEN}" ${marcadas.cuantas === 0 ? 'disabled' : ''}>Guardar pago de ${esc(dinero(marcadas.total))}</button>
+        <button type="button" class="btn btn-primario dn-boton-suelto" id="dn-guardar-pago" data-dn="guardar-pago" ${marcadas.cuantas === 0 ? 'disabled' : ''}>Guardar pago de ${esc(dinero(marcadas.total))}</button>
       </div>
-      <p id="dn-mensaje-pago" class="barra-lectura-fallida" role="alert" ${ui.mensajePago ? '' : 'hidden'} style="margin:16px 0 0">${esc(ui.mensajePago)}</p>
+      <p id="dn-mensaje-pago" class="barra-lectura-fallida dn-mensaje" role="alert" ${ui.mensajePago ? '' : 'hidden'}>${esc(ui.mensajePago)}</p>
     </div>` : '';
 
   return `
@@ -739,15 +778,15 @@ function htmlBloquePorPagar(ctx) {
       ${barraRoja(notas)}
       <table class="tabla-carros">
         <thead>
-          <tr><th></th><th>Salida</th><th>Placas</th><th>Cliente</th><th>Días</th><th>Costo por día</th><th style="${DERECHA}">Monto</th></tr>
+          <tr><th></th><th>Salida</th><th>Placas</th><th>Cliente</th><th>Días</th><th>Costo por día</th><th class="dn-derecha">Monto</th></tr>
         </thead>
         <tbody>${filas}</tbody>
       </table>
-      <div style="display:flex;flex-wrap:wrap;gap:12px 32px;align-items:center;justify-content:space-between;margin-top:16px;padding:16px 20px;background:var(--blanco);border:1px solid var(--borde);border-radius:10px">
-        <div>Por pagar en total<br><strong style="font-size:20px">${esc(dinero(cuenta.totalPorPagar))}</strong>${notas.length ? `<br><span style="font-size:12px;${ROJO_FUERTE}">incompleto</span>` : ''}</div>
-        <div id="dn-marcado" style="font-size:16px">Marcado: <strong id="dn-marcadas">${marcadas.cuantas}</strong> ${marcadas.cuantas === 1 ? 'renta' : 'rentas'}<br>
-          <span style="color:var(--gris);font-size:13px">Total marcado</span> <strong id="dn-total-marcado" style="font-size:26px;color:var(--navy)">${esc(dinero(marcadas.total))}</strong></div>
-        <button type="button" class="btn btn-primario" id="dn-registrar" data-dn="registrar" style="width:auto;${SIN_MARGEN}" ${marcadas.cuantas === 0 || ui.pagando ? 'disabled' : ''}>Registrar pago</button>
+      <div class="dn-caja dn-resumen">
+        <div>Por pagar en total<br><strong class="dn-total">${esc(dinero(cuenta.totalPorPagar))}</strong>${notas.length ? '<br><span class="dn-alerta dn-nota">incompleto</span>' : ''}</div>
+        <div id="dn-marcado" class="dn-marcado">Marcado: <strong id="dn-marcadas">${marcadas.cuantas}</strong> ${marcadas.cuantas === 1 ? 'renta' : 'rentas'}<br>
+          <span class="dn-rotulo">Total marcado</span> <strong id="dn-total-marcado" class="dn-total-marcado">${esc(dinero(marcadas.total))}</strong></div>
+        <button type="button" class="btn btn-primario dn-boton-suelto" id="dn-registrar" data-dn="registrar" ${marcadas.cuantas === 0 || ui.pagando ? 'disabled' : ''}>Registrar pago</button>
       </div>
       ${formulario}
     </section>`;
@@ -760,7 +799,7 @@ function htmlBloqueAunNoCierra(ctx) {
     ? cuenta.aunNoCierra.map((c) => {
       const costo = estadoDeCosto(c, cuenta, vista.costoSinLeer);
       return `
-    <tr class="es-fuera" style="cursor:default" data-id="${esc(c.id)}">
+    <tr class="es-fuera dn-sin-clic" data-id="${esc(c.id)}">
       <td>${esc(fecha(c.fechaSalida))}</td>
       <td>${esc(c.carroPlacas || '—')}</td>
       <td>${esc(c.clienteNombre || '—')}</td>
@@ -769,12 +808,12 @@ function htmlBloqueAunNoCierra(ctx) {
       <td>${esc(razonDeNoCierre(c))}</td>
     </tr>`;
     }).join('')
-    : '<tr><td colspan="6" class="pendiente" style="margin-top:0;padding:20px;cursor:default">Ninguna renta de este dueño está esperando cerrar.</td></tr>';
+    : '<tr><td colspan="6" class="pendiente dn-vacio dn-sin-clic">Ninguna renta de este dueño está esperando cerrar.</td></tr>';
   return `
     <section class="carro-seccion">
       <h2>Aún no cierra</h2>
-      <p style="margin:0 0 12px;color:var(--gris);font-size:13px">Estas rentas se ven pero no se pueden marcar ni suman al total: todavía pueden cambiar de monto.</p>
-      <table class="tabla-carros" style="color:var(--gris)">
+      <p class="dn-explica-chica">Estas rentas se ven pero no se pueden marcar ni suman al total: todavía pueden cambiar de monto.</p>
+      <table class="tabla-carros dn-tabla-gris">
         <thead>
           <tr><th>Salida</th><th>Placas</th><th>Cliente</th><th>Días</th><th>Costo por día</th><th>Por qué no cierra</th></tr>
         </thead>
@@ -792,24 +831,24 @@ function htmlBloqueYaPagado(ctx) {
       const c = rentaDe(id);
       return c
         ? `<li>${esc(fecha(c.fechaSalida))} · ${esc(c.carroPlacas || '—')} · ${esc(c.clienteNombre || '—')} · ${htmlDeDias(c)}</li>`
-        : '<li style="color:var(--gris)">Una renta que ya no está en el sistema.</li>';
+        : '<li class="dn-gris">Una renta que ya no está en el sistema.</li>';
     }).join('');
     return `
-      <article style="margin-bottom:16px;padding:16px 20px;background:var(--blanco);border:1px solid var(--borde);border-radius:10px">
-        <div style="display:flex;flex-wrap:wrap;gap:8px 24px;align-items:center;justify-content:space-between">
+      <article class="dn-caja dn-pago-hecho">
+        <div class="dn-pago-cabecera">
           <div><strong>Comprobante N.° ${esc(p.numero ?? '—')}</strong> · ${esc(fecha(p.fecha))} · ${esc(etiquetaDeForma(p.forma))}</div>
-          <div style="display:flex;gap:16px;align-items:center">
-            <strong style="font-size:18px">${esc(dinero(p.monto))}</strong>
+          <div class="dn-pago-monto">
+            <strong class="dn-pago-cifra">${esc(dinero(p.monto))}</strong>
             <button type="button" class="btn" data-dn="comprobante" data-id="${esc(p.id)}">Ver comprobante</button>
           </div>
         </div>
-        <ul style="margin:12px 0 0;padding-left:20px;font-size:13px">${rentas}</ul>
+        <ul class="dn-pago-rentas">${rentas}</ul>
       </article>`;
   }).join('');
   return `
     <section class="carro-seccion">
       <h2>Ya pagado</h2>
-      ${tarjetas || '<p style="color:var(--gris);margin:0">Todavía no se le ha pagado nada.</p>'}
+      ${tarjetas || '<p class="dn-sin-pagos">Todavía no se le ha pagado nada.</p>'}
     </section>`;
 }
 
@@ -826,16 +865,16 @@ function htmlEnlace(ctx) {
   return `
     <section class="carro-seccion" id="dn-enlace">
       <h2>Contratos sin enlazar</h2>
-      <p style="margin:0 0 12px">Estas rentas solo tienen el nombre «${esc(entrada.nombre)}» escrito a mano en el contrato, y mientras no se enlacen a un dueño de la lista se cuentan aparte de las que ese dueño ya tenga.</p>
-      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
-        <select id="dn-enlazar-dueno" aria-label="Dueño de la lista" style="padding:10px 12px;border:1px solid var(--borde);border-radius:6px;font-size:14px">
+      <p class="dn-parrafo">Estas rentas solo tienen el nombre «${esc(entrada.nombre)}» escrito a mano en el contrato, y mientras no se enlacen a un dueño de la lista se cuentan aparte de las que ese dueño ya tenga.</p>
+      <div class="dn-enlace-fila">
+        <select id="dn-enlazar-dueno" class="dn-selector" aria-label="Dueño de la lista">
           <option value="">Escoge un dueño de la lista</option>${opciones}
         </select>
         <button type="button" class="btn" data-dn="enlazar">Enlazar</button>
-        <span style="color:var(--gris)">o</span>
+        <span class="dn-gris">o</span>
         <button type="button" class="btn" data-dn="crear-y-enlazar">Dar de alta a «${esc(entrada.nombre)}» y enlazar</button>
       </div>
-      <p id="dn-mensaje-enlace" class="barra-lectura-fallida" role="alert" ${ui.mensajeEnlace ? '' : 'hidden'} style="margin:12px 0 0">${esc(ui.mensajeEnlace)}</p>
+      <p id="dn-mensaje-enlace" class="barra-lectura-fallida dn-mensaje-junto" role="alert" ${ui.mensajeEnlace ? '' : 'hidden'}>${esc(ui.mensajeEnlace)}</p>
     </section>`;
 }
 
@@ -843,7 +882,7 @@ function htmlEnlace(ctx) {
 export function htmlFicha(ctx) {
   const { entrada, vista } = ctx;
   const datos = entrada.registro
-    ? `<p style="margin:0 0 20px;color:var(--gris)">${[entrada.registro.telefono, entrada.registro.nit ? `NIT ${entrada.registro.nit}` : '']
+    ? `<p class="dn-datos-dueno">${[entrada.registro.telefono, entrada.registro.nit ? `NIT ${entrada.registro.nit}` : '']
       .filter(Boolean).map(esc).join(' · ') || 'Sin teléfono ni NIT anotados.'}
       · <a href="#/dinero/duenos/${esc(entrada.registro.id)}">Editar dueño</a></p>`
     : '';
@@ -1179,11 +1218,13 @@ async function pintarCuentas(contenedor, claveDeFicha) {
         idsMarcados: marcadas.ids,
         forma: ui.forma,
         fecha: ui.fecha,
-        costoSinLeer: vista.costoSinLeer,
         enCurso: ui.enCurso ?? (ui.enCurso = {}),
       });
       if (!lector.actual) return;
       lector.actual.pagos.datos = r.pagos;
+      // Los contratos que se leyeron al guardar son ahora la verdad: si una renta
+      // cambió mientras tanto, la lista ya la dibuja como está, no como estaba.
+      if (r.contratos) lector.actual.contratos = r.contratos;
       if (r.tipo === 'cambio') {
         ui.mensajePago = MENSAJE_PAGO_CAMBIO;
         ui.marcados.clear();
@@ -1271,13 +1312,11 @@ async function pintarCuentas(contenedor, claveDeFicha) {
       });
       const mensaje = mensajeDeMigracion(resultado);
       const hayProblema = resultado.conflictos.length || resultado.fallidos.length || !resultado.copiaLocalLimpia;
-      ui.migracion = hayProblema
-        ? `<p class="barra-lectura-fallida" role="alert" style="margin:12px 0 0">${esc(mensaje)}</p>`
-        : `<p style="margin:12px 0 0;padding:12px 16px;background:var(--blanco);border:1px solid var(--borde);border-left:4px solid var(--verde);border-radius:8px">${esc(mensaje)}</p>`;
+      ui.migracion = htmlMigracion({ mensaje, problema: Boolean(hayProblema) });
     } catch (error) {
       // Sin sesión de dinero, o la lectura de contratos falló: nunca «0 contratos movidos».
       const frase = mensajeSeguro(error, 'No se pudo mover el costo. Revisa tu internet e intenta de nuevo: lo que ya se movió no se repite.');
-      ui.migracion = `<p class="barra-lectura-fallida" role="alert" style="margin:12px 0 0">${esc(frase)}</p>`;
+      ui.migracion = htmlMigracion({ mensaje: frase, problema: true });
     } finally {
       ui.ocupado = false;
     }

@@ -1252,6 +1252,248 @@ body {
   color: var(--gris);
 }
 
+/* ---------- El área de dinero (pantallas/dinero.js y pantallas/duenos.js) ----------
+
+   Usa las mismas clases que las demás pantallas (carros-contenido, tabla-carros,
+   carro-seccion, barra-lectura-fallida, btn); lo de aquí son solo los ajustes
+   propios, con el prefijo dn-. Nada de esas pantallas lleva style="...": un estilo
+   en línea le gana a todo (también a la hoja de impresión) y nadie lo ve en el CSS.
+
+   Los selectores que corrigen a una clase de arriba van compuestos
+   (`.tabla-carros .dn-derecha`, `.btn.dn-boton-suelto`): así ganan en
+   especificidad y no dependen del lugar del archivo donde estén. */
+
+/* La entrada: una sola contraseña, en una caja angosta. */
+.carros-contenido.dn-entrada-caja {
+  max-width: 460px;
+}
+
+.dn-entrada-mensaje {
+  margin: 0 0 16px;
+  color: var(--navy);
+}
+
+.dn-entrada-sub {
+  margin: 0 0 16px;
+  color: var(--gris);
+}
+
+/* Un mensaje rojo pegado a lo que lo causó, sin el margen de abajo de la barra. */
+.barra-lectura-fallida.dn-mensaje {
+  margin: 16px 0 0;
+}
+
+.barra-lectura-fallida.dn-mensaje-junto {
+  margin: 12px 0 0;
+}
+
+/* Botones: los de la barra de arriba de cada ficha y los que van solos. */
+.btn.dn-boton-suelto {
+  width: auto;
+  margin-top: 0;
+}
+
+.btn.dn-boton-ancho-auto {
+  width: auto;
+}
+
+.btn.dn-boton-chico {
+  padding: 6px 12px;
+}
+
+.btn.dn-boton-mini {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* Texto: lo que está corto o mal en rojo, y lo de segundo plano en gris. */
+.dn-alerta {
+  color: var(--rojo);
+  font-weight: 600;
+}
+
+.dn-nota {
+  font-size: 12px;
+}
+
+.dn-nota-mini {
+  font-size: 11px;
+}
+
+.dn-gris {
+  color: var(--gris);
+}
+
+.dn-explica {
+  margin: 0 0 12px;
+  color: var(--gris);
+}
+
+.dn-explica-chica {
+  margin: 0 0 12px;
+  color: var(--gris);
+  font-size: 13px;
+}
+
+.dn-parrafo {
+  margin: 0 0 12px;
+}
+
+.dn-datos-dueno {
+  margin: 0 0 20px;
+  color: var(--gris);
+}
+
+.dn-sin-pagos {
+  margin: 0;
+  color: var(--gris);
+}
+
+.dn-ver-cuenta {
+  margin: 24px 0 0;
+}
+
+/* Tablas: la cifra a la derecha, las filas que no se abren con un clic, y las filas vacías. */
+.tabla-carros .dn-derecha {
+  text-align: right;
+}
+
+.tabla-carros .dn-sin-clic {
+  cursor: default;
+}
+
+.tabla-carros td.dn-vacio {
+  margin-top: 0;
+  padding: 20px;
+}
+
+.tabla-carros td.dn-vacio.dn-vacio-ancho {
+  padding: 24px;
+}
+
+.tabla-carros.dn-tabla-gris {
+  color: var(--gris);
+}
+
+.carro-seccion.dn-seccion-migracion {
+  margin-top: 40px;
+}
+
+.carro-campo.dn-buscador {
+  margin-bottom: 16px;
+}
+
+/* Anotar el costo: el campo y sus dos botones, en la misma celda. */
+.dn-costo-edicion {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dn-costo-campo {
+  width: 110px;
+  padding: 6px 8px;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+}
+
+/* Cajas blancas: el formulario del pago, el resumen de lo marcado y cada pago ya hecho. */
+.dn-caja {
+  padding: 16px 20px;
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+}
+
+.dn-pago-form {
+  margin-top: 16px;
+}
+
+.carro-botones.dn-botones-pago {
+  margin-top: 16px;
+}
+
+.dn-selector {
+  padding: 10px 12px;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.dn-resumen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 32px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+
+.dn-total {
+  font-size: 20px;
+}
+
+.dn-marcado {
+  font-size: 16px;
+}
+
+.dn-rotulo {
+  color: var(--gris);
+  font-size: 13px;
+}
+
+.dn-total-marcado {
+  font-size: 26px;
+  color: var(--navy);
+}
+
+.dn-pago-hecho {
+  margin-bottom: 16px;
+}
+
+.dn-pago-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dn-pago-monto {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.dn-pago-cifra {
+  font-size: 18px;
+}
+
+.dn-pago-rentas {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+}
+
+/* Enlazar contratos viejos a un dueño de la lista. */
+.dn-enlace-fila {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+/* Lo que sale tras mover el costo, cuando todo salió bien. */
+.dn-migracion-ok {
+  margin: 12px 0 0;
+  padding: 12px 16px;
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-left: 4px solid var(--verde);
+  border-radius: 8px;
+}
+
 /* ---------- Al imprimir (ADR-003): Carta, vertical, y solo la hoja ----------
    El PDF lo hace el navegador con Cmd + P → Guardar como PDF. */
 

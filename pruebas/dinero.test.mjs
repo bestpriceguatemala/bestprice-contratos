@@ -12,12 +12,12 @@ import {
   q, suma, conTarjeta, recargoTarjeta, textoDosDecimales, textoConQ, textoEntero,
 } from '../js/nucleo/dinero.js';
 import {
-  CORREO_DE_DINERO, INACTIVIDAD_MS, FORMAS_DE_PAGO, MENSAJE_SIN_COMPROBAR, MENSAJE_PAGO_CAMBIO,
+  CORREO_DE_DINERO, INACTIVIDAD_MS, FORMAS_DE_PAGO, MENSAJE_SIN_COMPROBAR, MENSAJE_SIN_COMPROBAR_RENTAS, MENSAJE_PAGO_CAMBIO,
   MENSAJE_FALLO_CONTRATOS, MENSAJE_FALLO_PAGOS, MENSAJE_FALLO_DATOS, MENSAJE_FALLO_DUENOS, MENSAJE_PAGO_FALLO,
   MENSAJE_INACTIVIDAD, enElAreaDeDinero, claveDeEntrada, rutaDeCuenta, armarVista, rentasSinCostoLegible,
   estadoDeCosto, notasDeTotal, resumenDeMarcadas, razonDeNoCierre, pagosDeLaCuenta, registrarElPago,
   cerrarElDinero, cerrarElDineroOReiniciar, salirDelSistema, crearVigilante, crearLector, mensajeSeguro,
-  htmlEntrada, htmlFallo, htmlLista, htmlFicha, entradaDelComprobante,
+  htmlEntrada, htmlFallo, htmlLista, htmlFicha, htmlMigracion, entradaDelComprobante,
 } from '../js/pantallas/dinero.js';
 import { armarComprobante } from '../js/pantallas/comprobante.js';
 import { htmlListaDeDuenos, htmlFormularioDeDueno } from '../js/pantallas/duenos.js';
@@ -31,7 +31,7 @@ import { mensajeDeErrorDeDinero } from '../js/dinero-sesion.js';
 import {
   agregarPago, contratoParaGuardar, conCostoDelDueno, costoDelDocumento, construirPagoDueno, pagoDuenoParaGuardar,
   guardarPagoDueno, anotarCostoDelDueno, enlazarContratosAlDueno, nuevoIdPagoDueno,
-  MENSAJE_COSTO_SIN_VALOR, MENSAJE_COSTO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS,
+  MENSAJE_COSTO_SIN_VALOR, MENSAJE_COSTO_SIN_DINERO, MENSAJE_COSTO_YA_ANOTADO, MENSAJE_COSTO_SIN_COMPROBAR, MENSAJE_PAGO_SIN_RENTAS,
 } from '../js/datos.js';
 
 test('redondea a dos decimales', () => {
@@ -389,6 +389,39 @@ test('el nombre de un dueño con signos raros no rompe la página', () => {
 // Un total corto lo dice, y una lectura fallida NUNCA es «no le debes nada»
 // ---------------------------------------------------------------------------
 
+// Un contrato que llega dos veces (dos lecturas de rangos de fechas que se traslapan) inflaba
+// lo que se ve: «3 · Q4,200.00» sobre Q3,000.00 en dos rentas, sin la marca de «incompleto», y
+// después el pago se negaba con un aviso de «cambió la cuenta» que nadie había causado.
+// Minor 1 de la revisión de la Tarea 8.
+const SOLO_MARIO_CON_M1_REPETIDA = [M1, M2, M1];
+
+test('un contrato repetido en la lectura no infla lo que se ve: la lista dice 2 rentas y Q3,000.00, no 3 y Q4,200.00', () => {
+  const lectura = lecturaOk({ contratos: { datos: SOLO_MARIO_CON_M1_REPETIDA, fallo: false, costoSinLeer: [] }, pagos: { datos: [], fallo: false } });
+  const vista = armarVista(lectura);
+  const mario = entradaDe(vista, 'Mario López Alvarado');
+  assert.equal(mario.cuenta.totalPorPagar, 3000);
+  assert.deepEqual(mario.cuenta.porPagar.map((c) => c.id), ['m1', 'm2']);
+  assert.deepEqual(mario.contratos.map((c) => c.id), ['m1', 'm2']);
+  const fila = entre(htmlLista(vista), 'data-dn-clave="id:d1"', '</tr>');
+  assert.ok(fila.includes('<td>2</td>') && fila.includes('Q3,000.00'));
+  assert.ok(!fila.includes('Q4,200.00') && !fila.includes('<td>3</td>'));
+  const ficha = fichaDe('Mario López Alvarado', { vista, lectura });
+  assert.equal(ficha.split('P-111AAA').length - 1, 1 + 1, 'una fila, y su casilla lo nombra una vez: la renta no sale dos veces');
+});
+
+test('con un contrato repetido, marcar todo suma Q3,000.00 y el pago SE REGISTRA: no hay callejón con un aviso que culpe a otra cosa', async () => {
+  const lectura = lecturaOk({ contratos: { datos: SOLO_MARIO_CON_M1_REPETIDA, fallo: false, costoSinLeer: [] }, pagos: { datos: [], fallo: false } });
+  const entrada = entradaDe(armarVista(lectura), 'Mario López Alvarado');
+  const marcadas = resumenDeMarcadas(entrada, new Set(['m1', 'm2']), []);
+  assert.equal(marcadas.cuantas, 2, 'no 3');
+  assert.equal(marcadas.total, 3000, 'no Q4,200');
+  const deps = depsDePago({ pagos: [], contratos: SOLO_MARIO_CON_M1_REPETIDA });
+  const r = await registrar(deps, { entrada, idsMarcados: marcadas.ids });
+  assert.equal(r.tipo, 'guardado', 'lo marcado y lo que cubre el pago son lo mismo');
+  assert.equal(r.pago.monto, 3000);
+  assert.deepEqual(r.pago.contratos, ['m1', 'm2']);
+});
+
 test('un total corto por una renta sin costo anotado lo dice en pantalla, junto al total', () => {
   const vista = armarVista(lecturaOk());
   const mario = entradaDe(vista, 'Mario López Alvarado');
@@ -516,9 +549,9 @@ test('Por pagar: una fila con casilla por contrato cerrado sin pagar, con fecha,
   assert.equal((bloque.match(/data-dn="marcar"/g) || []).length, 3, 'm1, m2 y m5');
   const m1 = entre(bloque, 'data-id="m1"', '</tr>');
   for (const texto of ['1 sep 2026', 'P-111AAA', 'Juan Pérez', '4 días', 'Q300.00', 'Q1,200.00']) assert.ok(m1.includes(texto), texto);
-  const m2 = entre(bloque, '<tr style="cursor:default" data-id="m2"', '</tr>');
+  const m2 = entre(bloque, 'data-id="m2"', '</tr>');
   for (const texto of ['5 sep 2026', 'Rosa Díaz', '4 días', '+ 2 de atraso', 'Q300.00', 'Q1,800.00']) assert.ok(m2.includes(texto), texto);
-  assert.ok(!entre(bloque, '<tr style="cursor:default" data-id="m1"', '</tr>').includes('atraso'), 'sin atraso no se señala nada');
+  assert.ok(!entre(bloque, 'data-id="m1"', '</tr>').includes('atraso'), 'sin atraso no se señala nada');
 });
 
 test('la casilla de una renta que se puede pagar viene marcada solo si se marcó; las demás, no', () => {
@@ -533,7 +566,7 @@ test('Aún no cierra: en gris, SIN casillas, con la razón que dicen estadoContr
   const ficha = fichaDe('Mario López Alvarado');
   const bloque = entre(ficha, '<h2>Aún no cierra</h2>', '<h2>Ya pagado</h2>');
   assert.ok(!bloque.includes('type="checkbox"'), 'ninguna casilla');
-  assert.equal((bloque.match(/class="es-fuera"/g) || []).length, 2, 'm3 y m4, en gris');
+  assert.equal((bloque.match(/<tr class="es-fuera[ "]/g) || []).length, 2, 'm3 y m4, en gris');
   assert.ok(bloque.includes('P-333CCC') && bloque.includes('P-444DDD'));
   // La razón sale del núcleo, con las cifras que él mismo calcula.
   assert.equal(pendientesDe(M3).saldo, 1400);
@@ -644,7 +677,7 @@ test('la ficha enseña el total marcado debajo de la tabla, en su propio lugar, 
   assert.match(ficha, /id="dn-marcadas">2</);
   assert.match(ficha, /id="dn-total-marcado"[^>]*>Q3,000\.00</);
   assert.match(fichaDe('Mario López Alvarado'), /id="dn-total-marcado"[^>]*>Q0\.00</, 'sin nada marcado: Q0.00');
-  assert.match(ficha, /id="dn-registrar"[^>]*data-dn="registrar"[^>]*style="[^"]*"\s*>/, 'con algo marcado se puede registrar');
+  assert.doesNotMatch(entre(ficha, 'id="dn-registrar"', '>'), /disabled/, 'con algo marcado se puede registrar');
   assert.match(fichaDe('Mario López Alvarado'), /id="dn-registrar"[^>]*disabled/, 'sin nada marcado no');
 });
 
@@ -707,17 +740,55 @@ test('«Ver comprobante» de un pago a contratos viejos (sin dueño de la lista)
 test('una renta sin costo anotado ofrece «Anotar costo» en su fila, y la que no se pudo leer NO (escribir encima pisaría el costo real)', () => {
   const lectura = lecturaOk({ contratos: { datos: TODOS, fallo: false, costoSinLeer: ['m2'] } });
   const bloque = entre(fichaDe('Mario López Alvarado', { vista: armarVista(lectura), lectura }), '<h2>Por pagar</h2>', '<h2>Aún no cierra</h2>');
-  assert.ok(entre(bloque, '<tr style="cursor:default" data-id="m5"', '</tr>').includes('data-dn="anotar-costo"'));
-  const m2 = entre(bloque, '<tr style="cursor:default" data-id="m2"', '</tr>');
+  assert.ok(entre(bloque, 'data-id="m5"', '</tr>').includes('data-dn="anotar-costo"'));
+  const m2 = entre(bloque, 'data-id="m2"', '</tr>');
   assert.ok(!m2.includes('anotar-costo') && m2.includes('No se pudo leer'));
-  assert.ok(!entre(bloque, '<tr style="cursor:default" data-id="m1"', '</tr>').includes('anotar-costo'));
+  assert.ok(!entre(bloque, 'data-id="m1"', '</tr>').includes('anotar-costo'));
   // Y nunca se dibuja «Q0.00» como si fuera un costo de verdad.
-  assert.ok(!entre(bloque, '<tr style="cursor:default" data-id="m5"', '</tr>').includes('Q0.00'));
+  assert.ok(!entre(bloque, 'data-id="m5"', '</tr>').includes('Q0.00'));
+});
+
+// El traslape es el caso NORMAL, no un borde: un contrato ya migrado cuyo privado/dinero no
+// se pudo leer llega con costo 0 (por eso `cuentaDeDueno` lo apunta como sin costo anotado)
+// Y su id está en `costoSinLeer`, o sea en las dos listas a la vez. La revisión de la Tarea 8
+// intercambió las dos líneas de `estadoDeCosto` y las 825 pruebas siguieron en verde, porque
+// ninguna sembraba un contrato que estuviera en las dos. Esta sí: si alguien vuelve a
+// preguntar por «sin anotar» antes que por «sin leer», la fila ofrece anotar un costo que
+// quizá ya existe.
+const M6 = sigueAfuera('m6', { numero: 16, placas: 'P-666FFF', costoDia: 0 }); // aún no cierra, sin costo
+const TODOS_Y_M6 = [...TODOS, M6];
+
+test('una renta en las DOS listas (sin costo anotado Y costo sin leer) es «sin leer»: no ofrece anotar, en ninguno de los dos bloques', () => {
+  const lectura = lecturaOk({ contratos: { datos: TODOS_Y_M6, fallo: false, costoSinLeer: ['m5', 'm6'] } });
+  const vista = armarVista(lectura);
+  const cuenta = entradaDe(vista, 'Mario López Alvarado').cuenta;
+  for (const id of ['m5', 'm6']) {
+    assert.ok(cuenta.sinCostoAnotado.includes(id), `${id} está en sinCostoAnotado`);
+    assert.ok(vista.costoSinLeer.includes(id), `${id} está en costoSinLeer`);
+  }
+  assert.equal(estadoDeCosto(M5, cuenta, ['m5']), 'sin-leer');
+  assert.equal(estadoDeCosto(M6, cuenta, ['m6']), 'sin-leer');
+  assert.equal(estadoDeCosto(M5, cuenta, []), 'sin-anotar', 'y sin el aviso de lectura, la misma renta sí es «sin anotar»');
+
+  const ficha = fichaDe('Mario López Alvarado', { vista, lectura });
+  for (const id of ['m5', 'm6']) {
+    const fila = entre(ficha, `data-id="${id}"`, '</tr>');
+    assert.ok(fila.includes('No se pudo leer'), `${id} dice que no se pudo leer`);
+    assert.ok(!fila.includes('anotar-costo') && !fila.includes('Anotar costo') && !fila.includes('Sin costo anotado'), `${id} no ofrece anotar`);
+    assert.ok(!fila.includes('dn-costo-input'), `${id} no abre el campo, ni siquiera con ui.anotando`);
+  }
+  // Aunque la pantalla quedara con el campo abierto de antes, una renta sin leer no lo dibuja.
+  const abierta = fichaDe('Mario López Alvarado', { vista, lectura, ui: uiVacia({ anotando: 'm5' }) });
+  assert.ok(!entre(abierta, 'data-id="m5"', '</tr>').includes('dn-costo-input'));
+  // La nota de arriba también es la de «no se pudo leer», no la de «falta anotar».
+  assert.deepEqual(notasDeTotal(entradaDe(vista, 'Mario López Alvarado'), vista.costoSinLeer), [
+    'No se pudo leer el costo de 1 renta: este total puede no ser el real.',
+  ]);
 });
 
 test('al anotar, la fila se vuelve un campo con Guardar y Cancelar', () => {
   const ui = uiVacia({ anotando: 'm5' });
-  const fila = entre(fichaDe('Mario López Alvarado', { ui }), '<tr style="cursor:default" data-id="m5"', '</tr>');
+  const fila = entre(fichaDe('Mario López Alvarado', { ui }), 'data-id="m5"', '</tr>');
   assert.ok(fila.includes('id="dn-costo-input"') && fila.includes('data-dn="guardar-costo"') && fila.includes('data-dn="cancelar-costo"'));
   assert.ok(!fila.includes('data-dn="anotar-costo"'));
 });
@@ -771,6 +842,8 @@ function aplicarCambios(documento, cambios) {
 function nubeMini({ docs = {}, fallan = [] } = {}) {
   const almacen = new Map(Object.entries(docs).map(([ruta, datos]) => [ruta, structuredClone(datos)]));
   const llamadas = [];
+  // Las lecturas van aparte: `llamadas` son las ESCRITURAS, y varias pruebas cuentan solo esas.
+  const lecturas = [];
   const lotes = [];
   const dbDinero = { nombre: 'dinero' };
   const dbMostrador = { nombre: 'mostrador' };
@@ -780,6 +853,11 @@ function nubeMini({ docs = {}, fallan = [] } = {}) {
     doc: (origen, ...segmentos) => (origen.coleccion
       ? { ruta: `${origen.coleccion}/${segmentos[0] ?? 'id-nuevo'}`, id: segmentos[0] ?? 'id-nuevo', db: origen.db }
       : { ruta: segmentos.join('/'), id: segmentos.at(-1), db: origen }),
+    getDoc: async (ref) => {
+      lecturas.push([ref.ruta, ref.db.nombre]);
+      falla('getDoc');
+      return { exists: () => almacen.has(ref.ruta), data: () => structuredClone(almacen.get(ref.ruta)) };
+    },
     setDoc: async (ref, datos, opciones) => {
       llamadas.push(['setDoc', ref.ruta, structuredClone(datos), opciones, ref.db.nombre]);
       falla('setDoc');
@@ -808,7 +886,7 @@ function nubeMini({ docs = {}, fallan = [] } = {}) {
     },
   };
   return {
-    docs: almacen, llamadas, lotes, dbDinero, dbMostrador, fsMod, iniciar: async () => ({ db: dbMostrador, fsMod }),
+    docs: almacen, llamadas, lecturas, lotes, dbDinero, dbMostrador, fsMod, iniciar: async () => ({ db: dbMostrador, fsMod }),
   };
 }
 
@@ -842,6 +920,62 @@ test('anotarCostoDelDueno sin sesión de dinero se niega y no escribe; con la ba
   assert.equal(nube.llamadas.length, 0);
   await anotarCostoDelDueno(M5, 350, { iniciar: nube.iniciar, dbDinero: () => nube.dbDinero });
   assert.ok(nube.llamadas.every((l) => l.at(-1) === 'dinero'), 'todo va con la credencial de dinero');
+});
+
+// ---- El guardia de «no pisar un costo que ya está» (Important 2 de la revisión de la Tarea 8) ----
+//
+// Antes lo único que impedía pisar un costo real era que la pantalla no dibujara el
+// botón «Anotar costo» cuando el costo no se pudo leer — y eso dependía de en qué
+// orden preguntaba `estadoDeCosto`. Aquí se prueba que el guardia está donde se
+// escribe, y no en lo que la pantalla enseñe.
+
+test('anotarCostoDelDueno NO pisa un costo que ya está en privado, aunque el contrato que le llega diga «sin costo»', async () => {
+  // El caso de la revisión: Mario cuesta Q300 por día, guardado detrás de la contraseña. Al abrir
+  // la pantalla la nube no contestó ese documento, así que el contrato llegó sin costo (M5: 0)...
+  const nube = nubeMini({ docs: { 'contratos/m5': { ajeno: true }, 'contratos/m5/privado/dinero': { costoDia: 300 } } });
+  // ...y él escribe lo que recuerda.
+  await assert.rejects(
+    anotarCostoDelDueno(M5, 250, { iniciar: nube.iniciar, dbDinero: () => nube.dbDinero }),
+    { message: MENSAJE_COSTO_YA_ANOTADO },
+  );
+  assert.equal(nube.llamadas.length, 0, 'no se escribió NADA: ni el privado ni el documento');
+  assert.deepEqual(nube.docs.get('contratos/m5/privado/dinero'), { costoDia: 300 }, 'el costo que negoció sigue ahí');
+  assert.deepEqual(nube.lecturas, [['contratos/m5/privado/dinero', 'dinero']], 'lo comprobó con la credencial de dinero');
+});
+
+test('anotarCostoDelDueno, si no puede comprobar qué hay en privado, tampoco escribe: «no se pudo leer» no es «no hay nada»', async () => {
+  const nube = nubeMini({ docs: { 'contratos/m5/privado/dinero': { costoDia: 300 } }, fallan: ['getDoc'] });
+  await assert.rejects(
+    anotarCostoDelDueno(M5, 250, { iniciar: nube.iniciar, dbDinero: () => nube.dbDinero }),
+    { message: MENSAJE_COSTO_SIN_COMPROBAR },
+  );
+  assert.equal(nube.llamadas.length, 0);
+  assert.deepEqual(nube.docs.get('contratos/m5/privado/dinero'), { costoDia: 300 });
+});
+
+test('anotarCostoDelDueno no pisa el costo que el contrato YA trae, y ni siquiera va a la nube a comprobarlo', async () => {
+  const nube = nubeMini({ docs: { 'contratos/m1': {} } });
+  assert.equal(costoDelDocumento(M1), 300, 'el escenario: m1 ya trae su costo');
+  await assert.rejects(
+    anotarCostoDelDueno(M1, 250, { iniciar: nube.iniciar, dbDinero: () => nube.dbDinero }),
+    { message: MENSAJE_COSTO_YA_ANOTADO },
+  );
+  assert.equal(nube.llamadas.length, 0);
+  assert.equal(nube.lecturas.length, 0);
+});
+
+test('un costo en privado que es 0 no es un costo: la renta migrada con costo 0 sí se puede anotar (es la salida de la renta atorada)', async () => {
+  const nube = nubeMini({ docs: { 'contratos/m5': { ajeno: true }, 'contratos/m5/privado/dinero': { costoDia: 0 } } });
+  assert.equal(await anotarCostoDelDueno(M5, 350, { iniciar: nube.iniciar, dbDinero: () => nube.dbDinero }), 350);
+  assert.deepEqual(nube.docs.get('contratos/m5/privado/dinero'), { costoDia: 350 });
+});
+
+test('las dos frases del guardia son nuestras: pasan tal cual a la pantalla, y dicen qué hacer', () => {
+  for (const frase of [MENSAJE_COSTO_YA_ANOTADO, MENSAJE_COSTO_SIN_COMPROBAR]) {
+    assert.equal(mensajeSeguro(new Error(frase), 'respaldo'), frase);
+    assert.ok(!/correo|e-?mail|usuario/i.test(frase));
+  }
+  assert.notEqual(MENSAJE_COSTO_YA_ANOTADO, MENSAJE_COSTO_SIN_COMPROBAR);
 });
 
 test('anotarCostoDelDueno solo acepta contratos de carro ajeno que ya tengan id', async () => {
@@ -948,7 +1082,11 @@ test('después de enlazar, el grupo escrito a mano pasa a ser del dueño de la l
 // Registrar el pago
 // ---------------------------------------------------------------------------
 
-function depsDePago({ pagos = [PAGO_A_LUCIA], fallaLectura = false, fallaGuardar = 0 } = {}) {
+// `contratos` son los que la nube trae AHORA, al momento de guardar (por omisión,
+// los mismos que la pantalla leyó al abrir); `costoSinLeer` son los que no se pudieron leer.
+function depsDePago({
+  pagos = [PAGO_A_LUCIA], contratos = TODOS, costoSinLeer = [], fallaLectura = false, fallaContratos = null, fallaGuardar = 0,
+} = {}) {
   const orden = [];
   let ids = 0;
   let numeros = 100;
@@ -956,6 +1094,13 @@ function depsDePago({ pagos = [PAGO_A_LUCIA], fallaLectura = false, fallaGuardar
   return {
     orden,
     leerPagos: async () => { orden.push('leer'); return fallaLectura ? { datos: null, fallo: true } : { datos: structuredClone(pagos), fallo: false }; },
+    leerContratos: async () => {
+      orden.push('leerContratos');
+      if (fallaContratos === 'lanza') throw new Error('sin internet');
+      if (fallaContratos === 'fallo') return { datos: structuredClone(contratos), fallo: true, costoSinLeer: [] };
+      if (fallaContratos === 'sin-lista') return { datos: structuredClone(contratos), fallo: false, costoSinLeer: null };
+      return { datos: structuredClone(contratos), fallo: false, costoSinLeer };
+    },
     nuevoId: async () => { orden.push('id'); ids += 1; return `pago-${ids}`; },
     nuevoNumero: async () => { orden.push('numero'); numeros += 1; return numeros; },
     guardar: async (pago) => {
@@ -968,14 +1113,14 @@ function depsDePago({ pagos = [PAGO_A_LUCIA], fallaLectura = false, fallaGuardar
 
 const mario = () => entradaDe(armarVista(lecturaOk()), 'Mario López Alvarado');
 const registrar = (deps, cambios = {}) => registrarElPago({
-  entrada: mario(), idsMarcados: ['m1', 'm2'], forma: 'efectivo', fecha: HOY, costoSinLeer: [], enCurso: {}, ...deps, ...cambios,
+  entrada: mario(), idsMarcados: ['m1', 'm2'], forma: 'efectivo', fecha: HOY, enCurso: {}, ...deps, ...cambios,
 });
 
-test('registrar el pago: lee los pagos, arma el pago con la misma suma que se ve, pide id y número y guarda', async () => {
+test('registrar el pago: lee los pagos y los contratos, arma el pago con la misma suma que se ve, pide id y número y guarda', async () => {
   const deps = depsDePago();
   const r = await registrar(deps);
   assert.equal(r.tipo, 'guardado');
-  assert.deepEqual(deps.orden, ['leer', 'id', 'numero', ['guardar', 'pago-1', 101]]);
+  assert.deepEqual(deps.orden, ['leer', 'leerContratos', 'id', 'numero', ['guardar', 'pago-1', 101]]);
   assert.equal(r.pago.monto, 3000);
   assert.deepEqual(r.pago.contratos, ['m1', 'm2']);
   assert.equal(r.pago.duenoId, 'd1');
@@ -983,6 +1128,7 @@ test('registrar el pago: lee los pagos, arma el pago con la misma suma que se ve
   assert.equal(r.pago.forma, 'efectivo');
   assert.equal(r.pago.numero, 101);
   assert.deepEqual(r.pagos.map((p) => p.id), ['pg-lucia', 'pago-1'], 'la lista queda al día, con el pago nuevo');
+  assert.deepEqual(r.contratos.datos.map((c) => c.id), TODOS.map((c) => c.id), 'y los contratos que se leyeron al guardar, para que la pantalla los tome como la nueva verdad');
 });
 
 test('un pago a un grupo de contratos viejos (sin dueño de la lista) se guarda con duenoId null, no undefined', async () => {
@@ -1021,8 +1167,90 @@ test('si lo marcado ya no se puede pagar (otra pestaña ya lo pagó), NO se regi
   const r = await registrar(deps);
   assert.equal(r.tipo, 'cambio');
   assert.deepEqual(r.pagos.map((p) => p.id), ['pg-lucia', 'otra']);
-  assert.deepEqual(deps.orden, ['leer'], 'no se gastó ni un id ni un número, ni se guardó nada');
+  assert.deepEqual(deps.orden, ['leer', 'leerContratos'], 'no se gastó ni un id ni un número, ni se guardó nada');
   assert.ok(MENSAJE_PAGO_CAMBIO.includes('No se registró nada'));
+});
+
+// El caso hermano del de arriba (Important 1 de la revisión de la Tarea 8): el
+// pago ya estaba al día, pero la RENTA no. Antes solo se volvían a leer los pagos;
+// los contratos eran la copia que la pantalla leyó al abrir, así que si otra
+// pestaña corregía el cierre de una renta marcada mientras el formulario estaba
+// abierto, se registraba el pago de una renta que ya no estaba cerrada, con su
+// comprobante impreso, sin un solo aviso.
+//
+// m1 reabierta: el MISMO contrato, con el cierre corregido para que vuelva a tener
+// días de atraso y un saldo sin cobrar (lo arman las mismas funciones que arman los reales).
+const M1_REABIERTA = devueltoConSaldo('m1', { numero: 11, placas: 'P-111AAA', costoDia: 300 });
+// m1 con el cierre corregido y TODAVÍA cerrada (saldada), pero con otro monto: (4 + 2) × 300.
+const M1_CON_OTRO_MONTO = cerradoConAtraso('m1', { numero: 11, placas: 'P-111AAA', costoDia: 300 });
+const conM1 = (m1) => TODOS.map((c) => (c.id === 'm1' ? m1 : c));
+
+test('el escenario del Important 1: m1 reabierta ya no es pagable, y la que solo cambió de monto sigue cerrada', () => {
+  assert.equal(estadoContrato(M1_REABIERTA), 'devuelto');
+  assert.equal(estadoContrato(M1_CON_OTRO_MONTO), 'cerrado');
+  assert.equal(resumen(M1_CON_OTRO_MONTO).costoSubarriendo, 1800);
+});
+
+test('si otra pestaña REABRIÓ una renta marcada, NO se registra el pago: no se escribe nada, y la lista vuelve al día', async () => {
+  const deps = depsDePago({ contratos: conM1(M1_REABIERTA) });
+  const r = await registrar(deps); // marcó m1 + m2: lo que vio sumaba Q3,000
+  assert.equal(r.tipo, 'cambio');
+  assert.deepEqual(deps.orden, ['leer', 'leerContratos'], 'no se gastó ni un id ni un número, ni se guardó nada');
+
+  // La pantalla toma lo leído como la nueva verdad: m1 sale de «por pagar» y pasa a «aún no cierra».
+  const lectura = lecturaOk({ contratos: r.contratos, pagos: { datos: r.pagos, fallo: false } });
+  const fresca = entradaDe(armarVista(lectura), 'Mario López Alvarado');
+  assert.deepEqual(fresca.cuenta.porPagar.map((c) => c.id), ['m2', 'm5']);
+  assert.deepEqual(fresca.cuenta.aunNoCierra.map((c) => c.id), ['m1', 'm3', 'm4']);
+  // Y al volver a marcar, lo marcado suma exactamente lo que sí se puede pagar: solo m2.
+  assert.equal(resumenDeMarcadas(fresca, new Set(['m1', 'm2']), r.contratos.costoSinLeer).total, 1800);
+  const otra = depsDePago({ contratos: conM1(M1_REABIERTA) });
+  const ahora = await registrar(otra, { entrada: fresca, idsMarcados: ['m2'] });
+  assert.equal(ahora.tipo, 'guardado');
+  assert.equal(ahora.pago.monto, 1800);
+  assert.deepEqual(ahora.pago.contratos, ['m2']);
+});
+
+test('si otra pestaña le cambió el MONTO a una renta marcada (sigue cerrada), tampoco se registra: él vio un monto y se guardaría otro', async () => {
+  const deps = depsDePago({ contratos: conM1(M1_CON_OTRO_MONTO) });
+  const r = await registrar(deps); // vio Q1,200 + Q1,800 = Q3,000; ahora serían Q1,800 + Q1,800
+  assert.equal(r.tipo, 'cambio');
+  assert.deepEqual(deps.orden, ['leer', 'leerContratos']);
+  const fresca = entradaDe(armarVista(lecturaOk({ contratos: r.contratos })), 'Mario López Alvarado');
+  assert.equal(resumenDeMarcadas(fresca, new Set(['m1', 'm2']), []).total, 3600, 'la lista al día ya lo muestra con el monto nuevo');
+});
+
+test('si una renta marcada ya no está en la nube, o la cuenta entera desapareció, tampoco se registra', async () => {
+  for (const contratos of [TODOS.filter((c) => c.id !== 'm1'), TODOS.filter((c) => c.duenoId !== 'd1')]) {
+    const deps = depsDePago({ contratos });
+    const r = await registrar(deps);
+    assert.equal(r.tipo, 'cambio');
+    assert.deepEqual(deps.orden, ['leer', 'leerContratos']);
+  }
+});
+
+test('el costo se juzga con la lectura de AHORA: si el costo de una renta marcada ya no se puede leer, no se registra', async () => {
+  const deps = depsDePago({ costoSinLeer: ['m2'] });
+  await assert.rejects(registrar(deps), /No se pudo leer el costo del contrato N° 12/);
+  assert.deepEqual(deps.orden, ['leer', 'leerContratos'], 'ni un número gastado');
+});
+
+test('si no se pueden volver a leer los contratos, NO se registra: sin saber si la renta sigue cerrada se podría pagar una que se reabrió', async () => {
+  for (const fallaContratos of ['fallo', 'lanza', 'sin-lista']) {
+    const deps = depsDePago({ fallaContratos });
+    await assert.rejects(registrar(deps), { message: MENSAJE_SIN_COMPROBAR_RENTAS }, fallaContratos);
+    assert.deepEqual(deps.orden, ['leer', 'leerContratos'], `${fallaContratos}: no se pidió id ni número, ni se guardó nada`);
+  }
+  assert.notEqual(MENSAJE_SIN_COMPROBAR_RENTAS, MENSAJE_SIN_COMPROBAR, 'dice otra cosa: no son los pagos lo que no se pudo leer');
+  assert.equal(mensajeSeguro(new Error(MENSAJE_SIN_COMPROBAR_RENTAS), 'respaldo'), MENSAJE_SIN_COMPROBAR_RENTAS, 'y se le enseña tal cual');
+});
+
+test('un pago que YA llegó a la nube se devuelve sin volver a leer los contratos: no hay nada que comprobar', async () => {
+  const llegado = { ...PAGO_A_LUCIA, id: 'pago-1', numero: 101, contratos: ['m1', 'm2'], duenoId: 'd1', monto: 3000 };
+  const deps = depsDePago({ pagos: [PAGO_A_LUCIA, llegado], fallaContratos: 'lanza' });
+  const r = await registrar(deps, { enCurso: { id: 'pago-1', numero: 101 } });
+  assert.equal(r.tipo, 'ya-guardado');
+  assert.deepEqual(deps.orden, ['leer']);
 });
 
 test('si no se pueden leer los pagos antes de escribir, NO se registra: sin saber qué ya se pagó se podría pagar dos veces', async () => {
@@ -1034,10 +1262,11 @@ test('si no se pueden leer los pagos antes de escribir, NO se registra: sin sabe
 test('una renta sin costo legible no se paga, con la frase de datos.js, y no se gasta ni un número', async () => {
   const deps = depsDePago();
   await assert.rejects(registrar(deps, { idsMarcados: ['m1', 'm5'] }), /^Error: No se registró el pago\. El contrato N° 15 no tiene costo por día anotado/);
-  assert.deepEqual(deps.orden, ['leer']);
-  const sinLeer = depsDePago();
-  await assert.rejects(registrar(sinLeer, { idsMarcados: ['m1'], costoSinLeer: ['m1'] }), /No se pudo leer el costo del contrato N° 11/);
-  assert.deepEqual(sinLeer.orden, ['leer']);
+  assert.deepEqual(deps.orden, ['leer', 'leerContratos']);
+  // «Sin leer» es lo que dice la lectura de AHORA, no la que se hizo al abrir la pantalla.
+  const sinLeer = depsDePago({ costoSinLeer: ['m1'] });
+  await assert.rejects(registrar(sinLeer, { idsMarcados: ['m1'] }), /No se pudo leer el costo del contrato N° 11/);
+  assert.deepEqual(sinLeer.orden, ['leer', 'leerContratos']);
 });
 
 test('sin ninguna renta marcada se niega antes de leer nada', async () => {
@@ -1067,9 +1296,9 @@ test('de punta a punta con guardarPagoDueno de verdad: el mismo pago reintentado
     idsMarcados: ['m1', 'm2'],
     forma: 'transferencia',
     fecha: HOY,
-    costoSinLeer: [],
     enCurso,
     leerPagos: async () => ({ datos: [PAGO_A_LUCIA, ...[...docs.values()]], fallo: false }),
+    leerContratos: async () => ({ datos: TODOS, fallo: false, costoSinLeer: [] }),
     nuevoId: () => nuevoIdPagoDueno({ iniciar: async () => ({ db: {}, fsMod: { ...fsMod, doc: () => ({ id: 'id-del-pago' }), collection: () => ({}) } }), dbDinero: entorno.dbDinero }),
     nuevoNumero: async () => { numerosGastados += 1; return 7; },
     guardar: (pago) => guardarPagoDueno(pago, { ...entorno, numeroNuevo: async () => assert.fail('el número ya viene puesto') }),
@@ -1102,6 +1331,7 @@ test('mensajeSeguro: lo nuestro pasa tal cual; lo de Firebase (en inglés, con c
   const respaldo = 'frase de respaldo';
   assert.equal(mensajeSeguro(new Error(MENSAJE_SIN_COMPROBAR), respaldo), MENSAJE_SIN_COMPROBAR);
   assert.equal(mensajeSeguro(new Error(MENSAJE_COSTO_SIN_VALOR), respaldo), MENSAJE_COSTO_SIN_VALOR);
+  assert.equal(mensajeSeguro(new Error(MENSAJE_SIN_COMPROBAR_RENTAS), respaldo), MENSAJE_SIN_COMPROBAR_RENTAS);
   assert.equal(mensajeSeguro(new Error('No se registró el pago. El contrato N° 15 no tiene costo por día anotado: …'), respaldo).startsWith('No se registró el pago.'), true);
   for (const crudo of [
     Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' }),
@@ -1576,4 +1806,70 @@ test('el formulario del dueño sale de CAMPOS_DUENO y trae lo que ya tenía; el 
   assert.ok(html.includes('href="#/dinero/cuenta/id%3Ad1"'), 'desde la ficha se llega a lo que se le debe');
   const nuevo = htmlFormularioDeDueno(null, { esNuevo: true });
   assert.ok(nuevo.includes('Nuevo dueño') && !nuevo.includes('Ver lo que se le debe'));
+});
+
+// ---------------------------------------------------------------------------
+// El aspecto: nada en línea, y cada clase que se usa existe en la hoja de estilos
+// ---------------------------------------------------------------------------
+//
+// Minor 4 de la revisión de la Tarea 8: esta pantalla llevaba 57 `style="..."` (y
+// duenos.js 8) contra 0 en clientes, comprobante, sacarCarro y recibirCarro. Un estilo
+// en línea le gana a todo, también a la hoja de impresión, y nadie lo ve en el CSS.
+//
+// Mover estilos a clases es justo donde un selector equivocado esconde una cifra sin
+// avisar: la clase no existe, el navegador no se queja, y el estilo simplemente no se
+// aplica. Por eso estas pruebas fijan las dos mitades: que no quede ningún `style=`, y
+// que cada clase `dn-*` que dibuja la pantalla esté DEFINIDA en css/estilos.css (y que
+// ninguna definida ahí sobre).
+
+// Sin comentarios: la cabecera del bloque en el CSS nombra clases a modo de ejemplo, y eso no es definirlas.
+const CSS = leer('../css/estilos.css').replace(/\/\*[\s\S]*?\*\//g, '');
+const DUENOS_FUENTE = leer('../js/pantallas/duenos.js');
+
+/** Todo lo que las pantallas de dinero pueden dibujar, con sus variantes de estado. */
+function todoElHtmlDeDinero() {
+  const lectura = lecturaOk({ contratos: { datos: [...TODOS, M6], fallo: false, costoSinLeer: ['m6'] } });
+  const vista = armarVista(lectura);
+  const ui = uiVacia({
+    marcados: new Set(['m1']), pagando: true, anotando: 'm5', mensajePago: 'Un mensaje', mensajeEnlace: 'Otro mensaje',
+  });
+  const fichas = ['Mario López Alvarado', 'Lucía Barrios', 'Don Mario', 'Zacarías Sin Rentas']
+    .flatMap((nombre) => [fichaDe(nombre, { vista, lectura }), fichaDe(nombre, { vista, lectura, ui })]);
+  const vacia = armarVista(lecturaOk({ contratos: { datos: [], fallo: false, costoSinLeer: [] }, pagos: { datos: [], fallo: false }, duenos: { datos: [], fallo: false } }));
+  return [
+    htmlEntrada(), htmlEntrada({ mensaje: MENSAJE_INACTIVIDAD }),
+    htmlFallo({ problemas: ['contratos', 'pagos', 'datos'] }),
+    htmlLista(vista), htmlLista(vista, { migracion: htmlMigracion({ mensaje: 'Se movieron 3 contratos.', problema: false }) }),
+    htmlLista(vista, { migracion: htmlMigracion({ mensaje: 'No se pudo.', problema: true }) }), htmlLista(vacia),
+    ...fichas,
+    htmlListaDeDuenos(DUENOS), htmlListaDeDuenos([]), htmlListaDeDuenos([], { fallo: true }), htmlListaDeDuenos([REGISTRO_LUCIA], { fallo: true }),
+    htmlFormularioDeDueno(REGISTRO_MARIO, { esNuevo: false }), htmlFormularioDeDueno(null, { esNuevo: true }),
+  ].join('\n');
+}
+
+test('ni dinero.js ni duenos.js llevan un solo estilo en línea, ni en su código ni en lo que dibujan', () => {
+  assert.equal((sinComentarios(PANTALLA).match(/style\s*=/g) || []).length, 0, 'dinero.js');
+  assert.equal((sinComentarios(DUENOS_FUENTE).match(/style\s*=/g) || []).length, 0, 'duenos.js');
+  assert.ok(!/\.style\b|cssText|setAttribute\(\s*['"]style/.test(sinComentarios(PANTALLA) + sinComentarios(DUENOS_FUENTE)), 'ni por el DOM');
+  assert.ok(!/style\s*=/.test(todoElHtmlDeDinero()), 'lo que se dibuja, en cualquier estado, tampoco');
+});
+
+test('cada clase dn-* que dibujan las pantallas de dinero está definida en css/estilos.css', () => {
+  const usadas = new Set();
+  for (const [, valor] of todoElHtmlDeDinero().matchAll(/class="([^"]*)"/g)) {
+    for (const clase of valor.split(/\s+/)) if (clase.startsWith('dn-')) usadas.add(clase);
+  }
+  assert.ok(usadas.size >= 30, `se esperaban muchas clases dn-* y salieron ${usadas.size}`);
+  for (const clase of usadas) {
+    assert.match(CSS, new RegExp(`\\.${clase}(?![\\w-])`), `.${clase} se dibuja pero no está en el CSS: el navegador no avisa, el estilo simplemente no se aplica`);
+  }
+});
+
+test('ninguna clase dn-* del CSS sobra: todas las definidas se usan en las pantallas', () => {
+  const fuente = sinComentarios(PANTALLA) + sinComentarios(DUENOS_FUENTE);
+  const definidas = new Set([...CSS.matchAll(/\.(dn-[a-z0-9-]+)/g)].map((m) => m[1]));
+  assert.ok(definidas.size >= 30);
+  for (const clase of definidas) {
+    assert.match(fuente, new RegExp(`class="[^"]*(?<![\\w-])${clase}(?![\\w-])`), `.${clase} está en el CSS y ninguna pantalla la usa`);
+  }
 });

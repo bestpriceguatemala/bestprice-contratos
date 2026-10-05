@@ -1292,6 +1292,16 @@ export const MENSAJE_COSTO_SIN_DINERO = 'Primero entra al área de dinero: sin e
 export const MENSAJE_COSTO_SIN_VALOR = 'Escribe cuánto le pagas al dueño por día: un número mayor que cero.';
 
 /**
+ * Lo que lee el dueño si intenta anotar el costo de una renta que ya lo tiene. No
+ * se pisa desde aquí: lo que se negoció con el dueño del carro no se cambia con un
+ * campo de texto, y esta pantalla solo existe para llenar lo que falta.
+ */
+export const MENSAJE_COSTO_YA_ANOTADO = 'Esta renta ya tiene un costo anotado, así que no se cambia desde aquí. Vuelve a la lista de dueños y aprieta «Actualizar» para verlo.';
+
+/** Lo que lee el dueño si no se pudo comprobar que la renta siga sin costo: sin saberlo, anotarlo podría pisar uno real. */
+export const MENSAJE_COSTO_SIN_COMPROBAR = 'No se pudo comprobar si esta renta ya tiene un costo anotado, y anotarlo sin saberlo podría pisar el real. Revisa tu internet e intenta de nuevo.';
+
+/**
  * Anota el costo por día del dueño en un contrato que ya existe. Escribe en
  * `contratos/{id}/privado/dinero` con la credencial de DINERO — el mismo lugar y
  * la misma credencial que todo lo demás del área —, y devuelve el costo ya
@@ -1313,6 +1323,22 @@ export const MENSAJE_COSTO_SIN_VALOR = 'Escribe cuánto le pagas al dueño por d
  * dinero. Nunca escribe en la copia local: la copia local no guarda jamás el
  * costo de un subarriendo (ver «El costo del dueño del carro», más arriba).
  *
+ * NUNCA PISA UN COSTO QUE YA ESTÁ, y lo decide aquí, en el punto donde se escribe
+ * (Important 2 de la revisión de la Tarea 8). `setDoc` con `merge` escribe encima
+ * sin mirar qué había, y antes lo único que lo impedía era que la pantalla no
+ * dibujara el botón «Anotar costo» cuando el costo no se pudo leer — algo que
+ * dependía de en qué orden se hacían dos preguntas, y no lo sujetaba ninguna
+ * prueba. Un contrato ya migrado cuyo `privado/dinero` no se pudo leer llega aquí
+ * con el costo en 0, igual que uno al que nunca se le anotó: si él escribiera lo
+ * que recuerda (Q250), pisaría el Q300 que negoció y que está detrás de la
+ * contraseña. Por eso, antes de escribir:
+ *   - si el contrato que llega ya trae un costo mayor que cero, se niega;
+ *   - se LEE `privado/dinero` ahora mismo, con la credencial de dinero: si ya hay
+ *     un costo mayor que cero, se niega; y si no se pudo leer, también — «no se
+ *     pudo leer» no es «no hay nada», y anotar a ciegas es justo lo que se evita.
+ * Un costo de 0 en `privado` no es un costo (es lo que deja migrar una renta que
+ * nunca lo tuvo): ahí sí se puede anotar.
+ *
  * Las dependencias se pueden inyectar solo para probar sin red.
  */
 export async function anotarCostoDelDueno(contrato, costoDia, {
@@ -1325,7 +1351,16 @@ export async function anotarCostoDelDueno(contrato, costoDia, {
   if (!hayNumero(costoDia) || !(costo > 0)) throw new Error(MENSAJE_COSTO_SIN_VALOR);
   const db = dbDinero();
   if (!db) throw new Error(MENSAJE_COSTO_SIN_DINERO);
+  if (costoDelDocumento(contrato) > 0) throw new Error(MENSAJE_COSTO_YA_ANOTADO);
   const { fsMod } = await iniciar();
+
+  let enPrivado;
+  try {
+    enPrivado = await leerCostoPrivado(fsMod, db, contrato.id);
+  } catch {
+    throw new Error(MENSAJE_COSTO_SIN_COMPROBAR);
+  }
+  if (enPrivado !== null && enPrivado > 0) throw new Error(MENSAJE_COSTO_YA_ANOTADO);
 
   await escribirCostoDelDueno({ db, fsMod }, contrato.id, costo);
 
@@ -1466,34 +1501,6 @@ export async function siguienteNumeroComprobante({ iniciar = iniciarFirebase } =
 }
 
 /**
- * La lista de contratos sin ids repetidos (M3 de la revisión de las Tareas 6 y 7):
- * un contrato que llega dos veces — una pantalla que junta dos lecturas de rangos
- * de fechas que se traslapan — contaría doble en el monto y dos veces en la lista
- * de ids, y ambos coincidirían entre sí y no con la deuda. De dos copias del mismo
- * id queda la de `actualizado` más nuevo (la regla de `mezclar`, cache.js; si
- * empatan, la primera), en el lugar de la primera aparición. Los que no traen id
- * pasan tal cual: no se pueden marcar, así que no pueden entrar a un pago.
- *
- * Una lista que no es lista se devuelve igual: `cuentaDeDueno` es la que lanza.
- */
-function sinIdsRepetidos(contratos) {
-  if (!Array.isArray(contratos)) return contratos;
-  const lugarDe = new Map();
-  const lista = [];
-  for (const c of contratos) {
-    if (!c?.id) {
-      lista.push(c);
-    } else if (!lugarDe.has(c.id)) {
-      lugarDe.set(c.id, lista.length);
-      lista.push(c);
-    } else if (Number(c.actualizado || 0) > Number(lista[lugarDe.get(c.id)].actualizado || 0)) {
-      lista[lugarDe.get(c.id)] = c;
-    }
-  }
-  return lista;
-}
-
-/**
  * Lo que lee el dueño cuando marcó rentas que no se pueden pagar porque no tienen
  * un costo por día legible. Función pura. Separa los dos motivos, porque piden
  * cosas distintas: lo que no tiene costo anotado se arregla escribiéndolo; lo que
@@ -1568,7 +1575,8 @@ function mensajeDeRentasSinCosto(contratos, sinLeer) {
 export function construirPagoDueno({
   duenoId, fecha, forma, contratos, pagos, idsMarcados, costoSinLeer,
 } = {}) {
-  const { porPagar, sinCostoAnotado } = cuentaDeDueno({ contratos: sinIdsRepetidos(contratos), pagos });
+  // `cuentaDeDueno` cuenta cada contrato una sola vez (M3 de la revisión de las Tareas 6 y 7).
+  const { porPagar, sinCostoAnotado } = cuentaDeDueno({ contratos, pagos });
   const marcados = new Set(idsMarcados ?? []);
   const elegidos = porPagar.filter((c) => c?.id && marcados.has(c.id));
   const sinAnotar = new Set(sinCostoAnotado);

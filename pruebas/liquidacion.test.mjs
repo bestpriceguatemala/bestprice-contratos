@@ -855,3 +855,92 @@ test('agruparPorDueno: ningún contrato ajeno ni ningún centavo se pierde, enla
     { duenoId: 'd3', nombre: 'Don Mario', sinEnlazar: false, total: 0 },
   ]);
 });
+
+// ---------------------------------------------------------------------------
+// Un id repetido no cuenta dos veces (Minor 1 de la revisión de la Tarea 8)
+//
+// `construirPagoDueno` ya quitaba los contratos repetidos, pero la CUENTA no: con
+// `[M1, M2, M1]` la lista decía «3 · Q4,200.00» sobre una deuda real de Q3,000.00 en
+// dos rentas, sin la marca de «incompleto», y al apretar «Guardar pago» el pago (que sí
+// los quitaba) no coincidía con lo marcado y salía un aviso de «cambió la cuenta» que
+// nadie había causado, sin salida. Una pantalla que junta dos lecturas de rangos de
+// fechas que se traslapan puede entregar el mismo contrato dos veces; la cuenta, que es
+// lo que se ve, tiene que contarlo una sola.
+// ---------------------------------------------------------------------------
+
+test('cuentaDeDueno: el mismo contrato dos veces cuenta una sola — el total es la deuda real y la renta no se repite', () => {
+  const c1 = enlazado(cerrado('c1'), 'd1'); // 1,200
+  const c2 = enlazado(cerradoConAtraso('c2'), 'd1'); // 1,800
+  const cuenta = cuentaDeDueno({ contratos: [c1, c2, c1], pagos: [] });
+  assert.deepEqual(ids(cuenta.porPagar), ['c1', 'c2'], 'cada una en el lugar de su primera aparición');
+  assert.equal(cuenta.totalPorPagar, 3000, 'no Q4,200');
+});
+
+test('cuentaDeDueno: un repetido tampoco repite lo demás — ni «ya pagado», ni «aún no cierra», ni «sin costo anotado»', () => {
+  const pagada = enlazado(cerrado('c1'), 'd1');
+  const sinCierre = enlazado(afuera('c2'), 'd1');
+  const sinCosto = enlazado(cerrado('c3', { costoDia: 0 }), 'd1');
+  const pagos = [pagoADueno({ id: 'p1', duenoId: 'd1', contratos: ['c1'], monto: 1200 })];
+  const cuenta = cuentaDeDueno({ contratos: [pagada, sinCierre, sinCosto, sinCosto, pagada, sinCierre], pagos });
+  assert.deepEqual(ids(cuenta.pagados), ['c1']);
+  assert.deepEqual(ids(cuenta.aunNoCierra), ['c2']);
+  assert.deepEqual(ids(cuenta.porPagar), ['c3']);
+  assert.deepEqual(cuenta.sinCostoAnotado, ['c3'], 'la marca de «sin costo» sale una vez');
+});
+
+test('cuentaDeDueno: de dos copias del mismo contrato manda la más nueva, en cualquier orden', () => {
+  const nuevo = { ...enlazado(cerrado('c1'), 'd1'), actualizado: 300 };
+  const viejoSinCerrar = { ...enlazado(afuera('c1'), 'd1'), actualizado: 100 }; // el carro seguía afuera
+  for (const lista of [[nuevo, viejoSinCerrar], [viejoSinCerrar, nuevo]]) {
+    const cuenta = cuentaDeDueno({ contratos: lista, pagos: [] });
+    assert.deepEqual(ids(cuenta.porPagar), ['c1']);
+    assert.deepEqual(ids(cuenta.aunNoCierra), [], 'la copia vieja no lo «reabre»');
+  }
+  const reabierto = { ...viejoSinCerrar, actualizado: 500 };
+  for (const lista of [[nuevo, reabierto], [reabierto, nuevo]]) {
+    const cuenta = cuentaDeDueno({ contratos: lista, pagos: [] });
+    assert.deepEqual(ids(cuenta.porPagar), [], 'y si la más nueva dice que sigue abierto, no se paga');
+    assert.deepEqual(ids(cuenta.aunNoCierra), ['c1']);
+  }
+});
+
+test('cuentaDeDueno: los contratos sin id pasan tal cual (no se pueden marcar, y no se confunden entre sí) y la lista sigue lanzando si no es lista', () => {
+  const sinId = { ...enlazado(cerrado('x'), 'd1'), id: undefined };
+  assert.equal(cuentaDeDueno({ contratos: [sinId, sinId], pagos: [] }).porPagar.length, 2);
+  assert.throws(() => cuentaDeDueno({ contratos: null, pagos: [] }), { name: 'TypeError', message: /«contratos» debe ser una lista/ });
+});
+
+test('agruparPorDueno: el caso de la revisión — [M1, M2, M1] da UNA cuenta de 2 rentas por Q3,000, no 3 por Q4,200', () => {
+  const m1 = enlazado(cerrado('m1'), 'd1');
+  const m2 = enlazado(cerradoConAtraso('m2'), 'd1');
+  const grupos = agruparPorDueno([m1, m2, m1], []);
+  assert.equal(grupos.length, 1);
+  assert.deepEqual(ids(grupos[0].cuenta.porPagar), ['m1', 'm2']);
+  assert.equal(grupos[0].cuenta.totalPorPagar, 3000);
+});
+
+test('agruparPorDueno: el mismo contrato entregado dos veces con dueño distinto cae en UN solo grupo, el de la copia más nueva', () => {
+  const enlazadoAD1 = { ...enlazado(cerrado('c1'), 'd1'), actualizado: 200 };
+  const todaviaViejo = { ...cerrado('c1', { dueno: 'Don Mario' }), actualizado: 100 }; // antes de enlazarlo
+  for (const lista of [[enlazadoAD1, todaviaViejo], [todaviaViejo, enlazadoAD1]]) {
+    const grupos = agruparPorDueno(lista, []);
+    assert.equal(grupos.length, 1, 'no un grupo por cada copia');
+    assert.equal(grupos[0].duenoId, 'd1');
+    assert.equal(grupos[0].cuenta.totalPorPagar, 1200, 'no Q2,400');
+  }
+});
+
+test('agruparPorDueno: entregar TODA la lista dos veces da el mismo reparto, con los mismos totales y el mismo orden', () => {
+  const contratos = [
+    enlazado(cerrado('c1'), 'd1'), enlazado(cerradoConAtraso('c2'), 'd1'), cerrado('c4', { dueno: 'Don Mario' }),
+    enlazado(afuera('c9'), 'd2'), guardado(saldado(recibido(propio({ id: 'propio1' })))),
+  ];
+  assert.deepEqual(agruparPorDueno([...contratos, ...contratos], []), agruparPorDueno(contratos, []));
+});
+
+test('totalSeleccionado: un contrato repetido en la lista suma una sola vez', () => {
+  const c1 = enlazado(cerrado('c1'), 'd1');
+  const c2 = enlazado(cerradoConAtraso('c2'), 'd1');
+  assert.equal(totalSeleccionado([c1, c2, c1], ['c1']), 1200, 'no Q2,400');
+  assert.equal(totalSeleccionado([c1, c2, c1], new Set(['c1', 'c2'])), 3000);
+});
