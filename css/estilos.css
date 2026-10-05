@@ -986,3 +986,344 @@ body {
   flex: 0 1 auto;
   width: auto;
 }
+
+/* ---------- El comprobante de pago al dueño del carro (ADR-003) ---------- */
+
+/* En pantalla la hoja se ve como el papel que va a salir: se revisa aquí antes
+   de imprimir. Mide una Carta de ancho (8.5 in), con el mismo margen que lleva
+   al imprimir, así que lo que se ve es lo que sale. */
+.comp-pantalla {
+  max-width: 8.5in;
+  margin: 0 auto;
+}
+
+.comp-barra {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+/* .btn-primario es de la pantalla de entrada (ancho completo, margen arriba);
+   aquí es un botón más de la barra. */
+.comp-barra .btn-primario {
+  width: auto;
+  margin-top: 0;
+}
+
+.comp-ayuda {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--gris);
+}
+
+.comprobante {
+  background: var(--blanco);
+  color: #111;
+  padding: 16mm 15mm 18mm;
+  border: 1px solid var(--borde);
+  border-radius: 4px;
+  box-shadow: 0 6px 24px rgba(7, 58, 122, 0.1);
+  font-size: 10.5pt;
+  line-height: 1.4;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.comprobante p {
+  margin: 0;
+}
+
+/* Membrete: el nombre de la empresa en el azul de la marca y la franja
+   amarilla debajo. Sin imágenes: es texto, abre al instante y sale igual en
+   cualquier computadora. */
+.comp-membrete {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 9pt;
+  border-bottom: 3px solid var(--amarillo);
+}
+
+.comp-nombre {
+  font-size: 21pt;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: var(--azul);
+  line-height: 1.1;
+}
+
+/* El lema va chico, como descriptor del nombre, nunca en grande. */
+.comp-lema {
+  margin-top: 3pt !important;
+  font-size: 8.5pt;
+  color: var(--gris);
+}
+
+.comp-contacto {
+  text-align: right;
+  font-size: 8.5pt;
+  line-height: 1.5;
+  color: var(--gris);
+}
+
+.comp-titulo {
+  margin: 16pt 0 11pt;
+  font-size: 15pt;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--navy);
+}
+
+/* Los datos del dueño van primero (a la izquierda) y el número y la fecha
+   después (a la derecha): es el orden de §6 del diseño. */
+.comp-encabezado {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14pt;
+}
+
+.comp-dueno,
+.comp-numero {
+  border: 1px solid var(--borde);
+  border-radius: 4px;
+  padding: 8pt 11pt;
+}
+
+.comp-numero {
+  min-width: 52mm;
+}
+
+.comp-etiqueta {
+  font-size: 7.5pt;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--gris);
+}
+
+.comp-dueno-nombre {
+  margin-top: 2pt !important;
+  font-size: 13pt;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.comp-numero-valor {
+  margin-top: 2pt !important;
+  font-size: 13pt;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.comp-datos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2pt 18pt;
+  margin: 5pt 0 0;
+}
+
+.comp-datos div {
+  display: flex;
+  gap: 5pt;
+}
+
+.comp-datos dt {
+  color: var(--gris);
+}
+
+.comp-datos dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.comp-seccion {
+  margin-top: 18pt;
+}
+
+.comp-seccion h2 {
+  margin: 0 0 7pt;
+  padding-bottom: 3pt;
+  font-size: 13pt;
+  font-weight: 700;
+  color: var(--navy);
+  border-bottom: 1.5px solid var(--navy);
+}
+
+.comp-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9.5pt;
+  font-variant-numeric: tabular-nums;
+}
+
+.comp-tabla th,
+.comp-tabla td {
+  padding: 4pt 6pt;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--borde);
+}
+
+.comp-tabla thead th {
+  font-size: 8pt;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--navy);
+  background: #eef3f9;
+  border-bottom: 1.5px solid var(--navy);
+}
+
+.comp-tabla .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.comp-tabla tfoot th,
+.comp-tabla tfoot td {
+  padding-top: 6pt;
+  font-size: 10.5pt;
+  font-weight: 700;
+  border-top: 1.5px solid var(--navy);
+  border-bottom: none;
+}
+
+.comp-tabla tfoot th {
+  text-align: right;
+}
+
+.comp-forma {
+  margin-top: 6pt !important;
+  text-align: right;
+}
+
+.comp-al-dia {
+  margin-bottom: 6pt !important;
+  font-size: 9pt;
+  color: var(--gris);
+}
+
+.comp-sin-pendiente {
+  padding: 8pt 0;
+  font-size: 11pt;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.comp-sin-pendiente .comp-al-dia {
+  margin: 0 !important;
+  font-weight: 400;
+}
+
+/* Una cifra que falta se ve: rojo y en cursiva, para que quien mande el
+   comprobante lo note antes de mandarlo. Nunca se pinta como Q0.00. */
+.comp-falta {
+  color: var(--rojo);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.comp-firma {
+  width: 78mm;
+  margin-top: 26mm;
+  text-align: center;
+  font-size: 9.5pt;
+}
+
+.comp-firma-linea {
+  border-top: 1px solid #111;
+  margin-bottom: 4pt;
+}
+
+.comp-firma-nombre {
+  color: var(--gris);
+}
+
+/* ---------- Al imprimir (ADR-003): Carta, vertical, y solo la hoja ----------
+   El PDF lo hace el navegador con Cmd + P → Guardar como PDF. */
+
+/* Suelto y no dentro de @media print: solo aplica al imprimir de todos modos, y
+   así también lo lee Safari, que respeta el margen aunque no el tamaño. */
+@page {
+  size: letter portrait;
+  margin: 14mm 14mm;
+}
+
+@media print {
+  /* Lo que nunca va en papel: el menú, la entrada, los avisos, el aviso de
+     versión nueva y todo botón. Es la red de abajo: funciona aunque el
+     navegador no entienda la regla de más abajo. */
+  .barra,
+  .barra-version,
+  #entrada,
+  #avisos,
+  .no-imprimir,
+  .btn,
+  nav {
+    display: none !important;
+  }
+
+  /* Cuando lo que hay en pantalla es un comprobante, SOLO sale el comprobante:
+     se esconde todo elemento que no sea la hoja, ni esté dentro de ella, ni
+     sea un contenedor de ella (esos tienen que quedarse para que la hoja se
+     vea). Así no depende de saber qué más hay en la página: lo que se agregue
+     mañana tampoco sale. */
+  body:has(.comprobante) *:not(:has(.comprobante)):not(.comprobante):not(.comprobante *) {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  body {
+    margin: 0;
+  }
+
+  /* Los contenedores de la hoja no le dejan margen, relleno ni altura mínima:
+     un min-height de pantalla completa en papel sería una hoja de más. */
+  #app {
+    display: block;
+    min-height: 0;
+  }
+
+  #pantalla,
+  .comp-pantalla {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .comprobante {
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    font-size: 10pt;
+  }
+
+  /* Si son muchas rentas y la tabla pasa de una hoja: el encabezado se repite,
+     ninguna fila se parte, y el total aparece una sola vez, al final. */
+  .comp-tabla thead {
+    display: table-header-group;
+  }
+
+  .comp-tabla tfoot {
+    display: table-row-group;
+  }
+
+  .comp-tabla tr,
+  .comp-firma,
+  .comp-sin-pendiente,
+  .comp-forma {
+    break-inside: avoid;
+  }
+
+  .comp-seccion h2 {
+    break-after: avoid;
+  }
+}
