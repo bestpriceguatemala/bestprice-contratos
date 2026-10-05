@@ -13,6 +13,7 @@ import { mezclar, guardarLocal, leerLocal, idsQueSobran, borrarLocales } from '.
 import { filtrar, textoDeCliente } from './nucleo/busqueda.js';
 import { textoDeDueno } from './nucleo/dueno.js';
 import { estadoContrato } from './nucleo/estados.js';
+import { cuentaDeDueno, totalSeleccionado } from './nucleo/liquidacion.js';
 import { estadoReserva } from './nucleo/reserva.js';
 import { resumen } from './nucleo/contrato.js';
 import { q, textoDosDecimales } from './nucleo/dinero.js';
@@ -1140,4 +1141,201 @@ export function mensajeDeMigracion({
     partes.push('No se pudo limpiar la copia de esta computadora. Cierra las otras pestañas del sistema y vuelve a correrlo.');
   }
   return partes.join(' ');
+}
+
+// ---------- Los pagos a dueños de carros ajenos ----------
+//
+// Lo que Best Price le pagó a cada dueño, con el número del comprobante que se
+// le manda. Es dinero que sale de sus manos, y por eso va distinto a los demás
+// guardados en dos cosas:
+//
+// - SOLO con la credencial de dinero (`dbDeDinero`), para leer y para escribir:
+//   es lo único que la regla de `pagosDueno` deja pasar (firestore.rules). La
+//   sesión normal del mostrador no sirve aquí, ni debe.
+// - SIN copia local. Los demás guardados dejan una copia en IndexedDB para que
+//   el sistema abra rápido, pero IndexedDB se lee sin credencial: lo que se le
+//   pagó a cada dueño quedaría al alcance de cualquiera que abra la consola, que
+//   es justo lo que ADR-002 evita con el costo. Además `cache.js` no tiene tienda
+//   `pagosDueno`. El precio es que, si la nube no contesta, no hay copia con qué
+//   servir — y es lo correcto: ver `cargarPagosDueno`.
+
+/** Lo que lee el dueño si intenta registrar un pago sin haber entrado al área de dinero. */
+export const MENSAJE_PAGO_SIN_DINERO = 'Primero entra al área de dinero: sin esa contraseña no se puede registrar el pago.';
+
+/** Lo que lee el dueño si intenta registrar un pago sin ninguna renta marcada. */
+export const MENSAJE_PAGO_SIN_RENTAS = 'Marca al menos una renta cerrada para registrar el pago.';
+
+/**
+ * Toma el siguiente número de comprobante dentro de una transacción sobre
+ * `contadores/comprobantes`. Es `siguienteNumeroContrato()` con otro contador,
+ * a propósito y sin variantes: ese mecanismo ya está probado contra dos
+ * pestañas guardando a la vez, y un número de comprobante repetido es un papel
+ * que el dueño del carro puede disputar.
+ *
+ * Si el guardado falla después de tomar el número, ese número queda sin usar:
+ * un hueco en la numeración se explica, un número repetido no.
+ *
+ * `iniciar` se puede inyectar solo para probar la transacción sin red.
+ */
+export async function siguienteNumeroComprobante({ iniciar = iniciarFirebase } = {}) {
+  const { db, fsMod } = await iniciar();
+  const ref = fsMod.doc(db, 'contadores', 'comprobantes');
+  return conLimiteDeTiempo(fsMod.runTransaction(db, async (tx) => {
+    const actual = await tx.get(ref);
+    const siguiente = (Number(actual.exists() ? actual.data().ultimo : 0) || 0) + 1;
+    tx.set(ref, { ultimo: siguiente });
+    return siguiente;
+  }));
+}
+
+/**
+ * Arma el pago de lo que el dueño marcó, y es el ÚNICO lugar donde `monto` y
+ * `contratos` nacen: los dos salen de la misma lista, así que no pueden
+ * contradecirse.
+ *
+ * Esa lista es `cuentaDeDueno(...).porPagar` — cerrados, de carro ajeno y todavía
+ * sin pagar — recortada a lo marcado. Un contrato que no está ahí nunca entra,
+ * ni con su dinero ni con su id, aunque su casilla siga marcada: una pantalla
+ * que quedó atrás (el contrato se reabrió, o otra pestaña ya lo pagó) no puede
+ * mover un contrato todavía abierto al bloque de «pagado» sin dinero de por
+ * medio, ni cobrar dos veces uno ya pagado. Si `monto` y `contratos` se armaran
+ * cada uno por su lado, esa asimetría sería posible: `totalSeleccionado` filtra
+ * por si el contrato se puede pagar, y una lista de ids tomada directo de las
+ * casillas no.
+ *
+ * `monto` sale de `totalSeleccionado`, la misma suma que la pantalla enseña
+ * mientras se marcan casillas: lo que él ve a la vista es, exacto, lo que se guarda.
+ *
+ * LANZA si `contratos` o `pagos` no son listas (lo hace `cuentaDeDueno`, y aquí
+ * no se ablanda): una lectura fallida de `pagosDueno` no se puede tomar por «nada
+ * pagado», o se le pagaría dos veces a quien ya se le pagó. Tampoco se arregla
+ * pasando `[]`.
+ *
+ * `fecha` llega de afuera (la pantalla arranca en hoy): una regla no mira qué
+ * día es. `duenoId` puede ser null — el grupo de contratos viejos con el dueño
+ * escrito a mano —, y se guarda null y no `undefined`, que Firestore rechaza.
+ *
+ * Con nada pagable marcado devuelve `monto: 0` y `contratos: []`; no inventa
+ * nada, y `guardarPagoDueno` se niega a guardarlo.
+ */
+export function construirPagoDueno({
+  duenoId, fecha, forma, contratos, pagos, idsMarcados,
+} = {}) {
+  const { porPagar } = cuentaDeDueno({ contratos, pagos });
+  const marcados = new Set(idsMarcados ?? []);
+  const elegidos = porPagar.filter((c) => c?.id && marcados.has(c.id));
+  const ids = elegidos.map((c) => c.id);
+  return {
+    duenoId: duenoId ?? null,
+    fecha,
+    forma,
+    // De `elegidos` y con los ids de `elegidos`: la misma lista que `contratos`.
+    monto: totalSeleccionado(elegidos, ids),
+    contratos: ids,
+  };
+}
+
+/**
+ * Arma el documento que de verdad se guarda para un pago a un dueño. Función
+ * **pura** — sin Firestore — mismo patrón que `contratoParaGuardar`, para poder
+ * probarla sin red. Los campos son los de §7 del diseño de la liquidación:
+ * `duenoId`, `fecha`, `forma`, `monto`, `contratos[]`, `numero`, `actualizado`
+ * (más `id`, que es el del documento).
+ *
+ * - `id`, `numero` y `actualizado` los sella esta función; `actualizado` nunca
+ *   se copia del pago que llega (ver `duenoParaGuardar`: es lo que `mezclar`
+ *   usa para decidir quién gana).
+ * - Un pago que ya existe conserva su `id` y su `numero`, aunque quien llama
+ *   pase otros: un comprobante que se renumera solo es peor que ninguno, porque
+ *   el dueño del carro ya tiene el papel con el número anterior. (`id ?? pago.id`
+ *   y no `id` a secas, igual que `duenoParaGuardar`: un pago sin id se guardaría
+ *   como un documento NUEVO, y quedaría duplicado.)
+ * - `monto` pasa por `q()`: nunca se redondea a mano.
+ * - `contratos` nunca queda `undefined` (Firestore lo rechaza, y un pago sin
+ *   lista de rentas no se puede leer después: `cuentaDeDueno` lanza). Una lista
+ *   que no es lista se guarda como `[]`, y `guardarPagoDueno` no deja guardar un
+ *   pago sin rentas, así que esa vía no llega a la nube.
+ */
+export function pagoDuenoParaGuardar(pago, { id, numero, ahora = Date.now() } = {}) {
+  return {
+    ...pago,
+    id: id ?? pago?.id,
+    numero: pago?.numero || numero,
+    monto: q(pago?.monto),
+    contratos: Array.isArray(pago?.contratos) ? [...pago.contratos] : [],
+    actualizado: ahora,
+  };
+}
+
+/**
+ * Guarda un pago a un dueño en la nube, con la credencial de dinero, y le da su
+ * número de comprobante. Si el pago ya trae `numero` (se está editando uno que
+ * ya existe) se respeta; si no, se toma el siguiente de
+ * `siguienteNumeroComprobante()`.
+ *
+ * Pasa por `guardarEnNubeYLocal`, igual que todo guardado, pero con una copia
+ * local que no hace nada a propósito (ver arriba: dinero no se copia a IndexedDB).
+ * Así sigue valiendo la regla de ese camino —lo que ya está en la nube no se
+ * pierde porque algo local falle— y nadie puede volver a escribir aquí una copia
+ * por descuido sin pasar por esta decisión.
+ *
+ * Se niega ANTES de gastar un número de comprobante si no hay sesión de dinero o
+ * si el pago no cubre ninguna renta: un comprobante sin rentas es un papel vacío
+ * con número, y un número gastado no se devuelve. Un pago con un `contratos`
+ * que no se pueda leer como lista tampoco pasa.
+ *
+ * Las dependencias se pueden inyectar solo para probar sin red.
+ */
+export async function guardarPagoDueno(pago, {
+  iniciar = iniciarFirebase, dbDinero = dbDeDinero, numeroNuevo = siguienteNumeroComprobante, avisar = avisarCopiaLocal,
+} = {}) {
+  if (!Array.isArray(pago?.contratos) || pago.contratos.length === 0) throw new Error(MENSAJE_PAGO_SIN_RENTAS);
+  const db = dbDinero();
+  if (!db) throw new Error(MENSAJE_PAGO_SIN_DINERO);
+  const numero = pago.numero || (await numeroNuevo());
+  return guardarEnNubeYLocal(
+    'pagosDueno',
+    pago,
+    (id) => pagoDuenoParaGuardar(pago, { id, numero }),
+    {
+      // La base es la de dinero; de `iniciar` solo se toma el módulo de Firebase,
+      // que es el mismo (ver `costosPrivadosDe`).
+      iniciar: async () => ({ db, fsMod: (await iniciar()).fsMod }),
+      guardarCopia: async () => {},
+      avisar,
+    },
+  );
+}
+
+/**
+ * Todos los pagos a dueños, como `{ datos, fallo }` — pero con una diferencia
+ * respecto a `cargarDuenos` y las demás lecturas, hecha a propósito: **cuando la
+ * lectura falla, `datos` es `null`, no `[]`**.
+ *
+ * Las otras lecturas, si la nube no contesta, devuelven lo que haya en la copia
+ * local. Aquí no hay copia local (ver arriba), así que no hay «lo mejor que hay»
+ * que ofrecer. Y `[]` es peligroso: `cuentaDeDueno` lee una lista vacía de pagos
+ * como «a nadie se le ha pagado», y cada contrato ya pagado reaparece como
+ * deuda — él le pagaría dos veces a quien ya le pagó. Con `null`, una pantalla
+ * que se olvide de mirar `fallo` y pase `datos` a `cuentaDeDueno` choca con un
+ * error en vez de dibujar una deuda inflada. Una lista vacía de verdad
+ * (`{ datos: [], fallo: false }`) sí es «no se ha pagado nada».
+ *
+ * Es `fallo: true` si no hay sesión de dinero (no se intenta leer), si Firebase
+ * no arranca, o si la nube no contesta. Sin sesión de fondo ni callback: se
+ * espera a la nube, como las demás lecturas cuando no tienen copia local.
+ *
+ * Lo que llega se devuelve tal cual está guardado: un pago dañado (sin su lista
+ * de contratos) no se «arregla» aquí, para que `cuentaDeDueno` lo siga viendo.
+ */
+export async function cargarPagosDueno({ iniciar = iniciarFirebase, dbDinero = dbDeDinero } = {}) {
+  const db = dbDinero();
+  if (!db) return { datos: null, fallo: true };
+  try {
+    const { fsMod } = await iniciar();
+    const instantanea = await conLimiteDeTiempo(fsMod.getDocs(fsMod.collection(db, 'pagosDueno')));
+    return { datos: instantanea.docs.map((d) => ({ id: d.id, ...d.data() })), fallo: false };
+  } catch {
+    return { datos: null, fallo: true };
+  }
 }
