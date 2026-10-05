@@ -275,28 +275,56 @@ Colecciones en Firestore:
 - `contratos` — el contrato completo: cliente, carro (o los datos del carro
   ajeno), fechas, días, precios, seguros, extras, tarjetas enmascaradas,
   empleado, conductor, observaciones, estado, cierre y pagos.
-- `contratos/{id}/privado/dinero` — costo por día del dueño, comisión calculada
-  y pagos al dueño. **Lo escribe el sistema al crear el contrato, pero solo se
-  puede leer con la contraseña** (ver §11).
+- `contratos/{id}/privado/dinero` — el costo por día del dueño del carro
+  (`costoDia`), que es lo único que hoy guarda. **Lo escribe el sistema al crear
+  el contrato, pero solo se puede leer con la contraseña** (ver §11). La
+  comisión calculada y los pagos al dueño, que este diseño también le asignaba a
+  este documento, no viven aquí: la comisión sigue en el contrato (ver el
+  pendiente de `porcentajeComision` al final de §7b) y los pagos al dueño tienen
+  su propia colección, `pagosDueno`.
 - `empleados` — nombre, porcentaje de comisión, activo.
 - `pagosComision` — fecha, empleado, contratos incluidos, total, forma de pago.
+- `duenos` — la ficha de cada dueño de un carro ajeno: nombre, teléfono, NIT y
+  una nota (los campos, en §7b). Se lee y se escribe con la sesión normal,
+  porque el alta rápida ocurre en el mostrador, con el carro afuera y el cliente
+  esperando.
+- `pagosDueno` — lo que se le ha pagado a cada dueño de un carro ajeno: fecha,
+  forma, monto, los contratos que cubre y el número de su comprobante (los
+  campos, en §7b). **Solo con la contraseña de dinero**, para leer y para
+  escribir, y sin copia local: la copia local se lee sin credencial, y lo que se
+  le paga a cada dueño no puede quedar ahí.
 - `ajustes` — configuración y calibración.
 - `contadores` — el correlativo del número de contrato (empieza en 1).
 
 Los carros subarrendados **no entran a `vehiculos`**: sus datos viven dentro del
 contrato, igual que en el Excel.
 
-**Nota para el plan de dinero:** el núcleo (plan 1) todavía no tiene dónde
-escribir `contratos/{id}/privado/dinero` — esa subcolección es de este plan de
-dinero, que todavía no existe — así que "Sacar carro" guarda `subarriendo.costoDia`
-(el costo por día del dueño en un carro ajeno) y `porcentajeComision` directo en
-`contratos/{id}`, donde los lee cualquier sesión con acceso a `contratos` (ver
-`firestore.rules`), no solo quien tiene la contraseña de dinero. Es a propósito,
-para no bloquear el núcleo por un plan que todavía no se diseña, pero es una
-concesión, no el destino final: el plan de dinero tiene que mover los dos
-campos a `privado/dinero` **y migrar los contratos que el núcleo ya escribió**
-— no basta con cambiar dónde escribe el sistema de ahora en adelante, los
-contratos viejos se quedarían con el dato expuesto.
+**La deuda de `subarriendo.costoDia`, pagada** (ADR-002:
+`docs/adr/ADR-002-el-costo-del-dueno-vive-tras-la-contrasena.md`). Cuando se
+construyó el núcleo (plan 1), la subcolección `contratos/{id}/privado/dinero`
+todavía no tenía quién la escribiera —era del plan de dinero, que no
+existía—, así que "Sacar carro" guardó `subarriendo.costoDia` (el costo por día
+del dueño en un carro ajeno) y `porcentajeComision` directo en `contratos/{id}`,
+donde los lee cualquier sesión con acceso a `contratos` (ver `firestore.rules`),
+no solo quien tiene la contraseña de dinero. Fue a propósito, para no bloquear
+el núcleo por un plan que todavía no se diseñaba, pero era una concesión, no el
+destino final.
+
+El plan de liquidación a dueños construyó esa área de dinero, y con ella la
+concesión venció: **el costo del dueño del carro se guarda ahora en
+`contratos/{id}/privado/dinero`**, y los contratos nuevos ya no lo llevan en su
+documento. No bastaba con cambiar dónde escribe el sistema de ahora en
+adelante: los contratos que el núcleo ya había escrito se quedarían con el dato
+expuesto. Por eso hay una migración, que se corre **una sola vez y a mano**, con
+el botón «Mover el costo ahora» del área de dinero (`migrarCostosDelDueno` en
+`js/datos.js`). Hasta que se corra, esos contratos siguen trayendo el costo en
+su documento, y el puente de lectura de §7b es lo que los mantiene
+funcionando.
+
+**Lo que esa nota pedía y no se pagó:** que el plan de dinero moviera **los
+dos** campos, el costo del dueño del carro y `porcentajeComision`. ADR-002 movió
+solo el primero. El segundo sigue en el documento del contrato: ver
+«Pendientes conocidos del dinero» al final de §7b.
 
 ## 7b. Los nombres de los campos
 
@@ -310,6 +338,60 @@ los nombres que el sistema entero usa.
 `numero`, `clienteId`, `clienteNombre`, `carroId`, `carroPlacas`, `carroDescripcion`,
 `fechaSalida`, `dias`, `devolucionPrevista`, `precioDia`, `kmSalida`, `garantiaMonto`,
 `garantiaLiberada`, `garantiaLiberadaEn`, `estado`, `porcentajeComision`, `pagos[]`, `cierre{}`.
+
+**Del contrato, lo nuevo y lo que faltaba** (agregado el 5 de octubre, al
+construir la liquidación a dueños). `duenoId` es nuevo de ese plan. Los otros
+cuatro el contrato los guarda desde que existe "Sacar carro", y este glosario
+no los nombraba justo en la parte que ese plan más usa:
+`ajeno`, `carroAjeno{placas, tipo, marca, color, modelo, dueno, costoDia}`,
+`duenoId`, `subarriendo{costoDia}`, `tarjetas[]`.
+
+- `ajeno` es verdadero cuando el carro es de otra persona y falso cuando es de
+  la flota. **Es el único criterio:** «¿este contrato es de un carro ajeno?» se
+  contesta con `Boolean(c.ajeno)` y con nada más. No se deduce de que exista
+  `carroAjeno`, y menos de que exista `subarriendo`: en un contrato guardado hoy
+  esa llave puede no estar (ver abajo), y un carro ajeno sin ella sigue siendo
+  ajeno. Hoy la pregunta se hace en `esDeCarroAjeno` (`nucleo/liquidacion.js`) y
+  en `esAjeno` (`datos.js`), que dicen exactamente lo mismo: si el criterio
+  cambia alguna vez, cambian las dos. La pantalla del detalle también mira
+  `ajeno`, y pide además que `carroAjeno` exista, pero eso es solo para no leer
+  de un objeto que no está.
+- `carroAjeno{…}` son los datos del carro del dueño tal como se escribieron ese
+  día, porque un carro ajeno no entra a `vehiculos` (§7); es `null` en un carro
+  de la flota. `dueno` es el nombre del dueño del carro y `costoDia` lo que Best
+  Price le paga por día, que **ya no se guarda en el documento** (ver
+  `subarriendo`).
+- `duenoId` es el id del dueño escogido de la lista `duenos`, para que la
+  liquidación junte en una sola cuenta todo lo que se le debe a la misma
+  persona. Es `null`, no ausente, cuando no se escogió a nadie o el carro es de
+  la flota, y los contratos de antes de este campo ni siquiera traen la llave:
+  nada que lo lea puede exigirlo. **`carroAjeno.dueno` se queda con el nombre
+  tal como se vio ese día**, porque es un dato de *ese* contrato y no solo un
+  puntero: si después se corrige o se cambia el nombre en la ficha del dueño, el
+  contrato sigue diciendo a quién se le rentó. Y si se escribió un nombre a mano
+  sin escoger a nadie de la lista, ese nombre se conserva igual, con `duenoId`
+  en `null`: la liquidación junta esos contratos por el texto («sin enlazar»)
+  hasta que alguien los enlaza a un dueño de la lista.
+- `subarriendo{costoDia}` es lo que Best Price le paga al dueño del carro por
+  día, y es la forma en que ese costo vive **en memoria**: `resumen()`
+  (`nucleo/contrato.js`) lo lee de aquí para sacar el costo del subarriendo y,
+  de ese costo, la utilidad y lo que se le debe al dueño. En un contrato
+  guardado desde ADR-002 **ya no está en el documento**: `contratoParaGuardar`
+  lo quita, y la llave `subarriendo` entera desaparece si el costo era lo único
+  que traía. En un carro de la flota es `null`. Dónde está de verdad el costo
+  hoy: en `contratos/{id}/privado/dinero`, campo `costoDia`; y quien lo vuelve a
+  poner aquí, en memoria, es el puente de lectura de más abajo.
+- `tarjetas[]` son las tarjetas con que se garantizó la renta, cada una
+  `{ultimos4, vencimiento, banco, autorizacion, montoAutorizado}`. Solo entran
+  las que traen algo escrito (una renta en efectivo no guarda una tarjeta
+  vacía), y `garantiaMonto` es la suma de sus `montoAutorizado`. Del número
+  queda solo `ultimos4`: el número completo y el CBC nunca se guardan (§11).
+
+Esta lista del contrato todavía no nombra todo lo que el contrato guarda —los
+seguros y deducibles, la carta poder, los varios, la hora y el lugar de salida,
+el conductor adicional, `rentadoPor`, las observaciones—. La lista viva es lo
+que arma `construirContrato` (`js/pantallas/sacarCarro.js`), igual que
+`CAMPOS_CLIENTE` lo es para el cliente.
 
 **De un pago:**
 `monto`, `forma`, `porcentajeTarjeta`, `fecha`.
@@ -341,6 +423,57 @@ tipo), y el sistema descuenta capacidad del tipo en ambos casos.
 `codigo`, `placas`, `tipo`, `marca`, `linea`, `color`, `modelo`, `propiedad`,
 `dueno`, `fueraDeServicio`, `motivoFueraDeServicio`.
 
+**Del dueño de un carro ajeno** (colección `duenos`; agregado el 5 de octubre):
+`nombre`, `telefono`, `nit`, `nota`, `actualizado`.
+
+Los cuatro primeros son los de `CAMPOS_DUENO` (`js/nucleo/dueno.js`), que es la
+lista viva: la ficha y el alta rápida dibujan su formulario desde ahí, así no se
+desacuerdan. Solo `nombre` es obligatorio — se puede guardar un dueño sin datos
+de contacto. `id` y `actualizado` no se escriben a mano: los sella
+`duenoParaGuardar` al guardar. `actualizado` es lo que la copia local usa para
+decidir cuál de dos versiones gana, así que uno copiado de la ficha vieja
+perdería contra la que ya está en la nube. Y `duenoParaGuardar` conserva el `id`
+de un dueño que ya lo tiene aunque quien llama lo omita —a propósito, a
+diferencia de lo que hace el contrato—: un guardado sin `id` es un documento
+nuevo, o sea un dueño duplicado. Los campos que el formulario no conoce se
+arrastran tal cual (`construirDueno`), para no perder ninguno al guardar.
+
+Ojo con el nombre: `dueno` aparece en tres lugares que no son el mismo campo. En
+la ficha de un carro de la flota (arriba) es el dueño anotado de ese carro; en el
+contrato es `carroAjeno.dueno`, el texto de ese día; y la ficha de la lista es la
+colección `duenos`, a la que apunta `duenoId`.
+
+**Del pago a un dueño** (colección `pagosDueno`; agregado el 5 de octubre):
+`duenoId`, `fecha`, `forma`, `monto`, `contratos[]`, `numero`, `actualizado`.
+
+- `contratos[]` son los ids de los contratos que ese pago cubre, y **es lo único
+  que dice que un contrato ya se le pagó al dueño del carro**. El contrato no
+  lleva un campo «pagado», y no debe llevarlo: sería la misma verdad en dos
+  lugares, y este glosario existe por eso. Un contrato está pagado cuando su id
+  aparece en el `contratos[]` de algún pago (`cuentaDeDueno`,
+  `nucleo/liquidacion.js`).
+- `monto` y `contratos[]` nacen juntos, de la misma lista y en un solo lugar,
+  `construirPagoDueno`. Por eso no pueden contradecirse —lo que él ve sumar
+  mientras marca casillas es exactamente lo que se guarda— y por eso un contrato
+  que ya no está por pagar no entra al pago aunque su casilla siga marcada.
+  `pagoDuenoParaGuardar` vuelve a pasar `monto` por `q()`: el dinero nunca se
+  redondea a mano.
+- `forma` se llama igual que en un pago del contrato, pero es otro conjunto de
+  valores: efectivo, transferencia o cheque (`FORMAS_DE_PAGO`,
+  `js/pantallas/dinero.js`). No lleva `porcentajeTarjeta`.
+- `numero` es el correlativo del comprobante que se le entrega al dueño del
+  carro. Sale de `siguienteNumeroComprobante()`, una transacción sobre
+  `contadores/comprobantes`, el mismo mecanismo del número de contrato. Un pago
+  que ya existe conserva su número aunque se le pase otro: un comprobante que se
+  renumera solo es peor que ninguno, porque el dueño del carro ya tiene el papel
+  con el número anterior. Si el guardado falla después de tomar un número, queda
+  un hueco en la numeración; un hueco se explica, un número repetido no.
+- `id`, `numero` y `actualizado` los sella `pagoDuenoParaGuardar`. El `id` se
+  pide con `nuevoIdPagoDueno()` **antes del primer intento** y se reusa en cada
+  reintento: así, un doble clic, o un reintento después de que el primer intento
+  venció, cae en el mismo documento y no crea un segundo comprobante por las
+  mismas rentas.
+
 **Los puentes de lectura que siguen en el código:**
 - `pantallas/contratos.js:formaDePago()` — lee `forma` o `formaPago`, por los pagos de la salida que
   salieron guardados con el segundo nombre.
@@ -353,6 +486,32 @@ tipo), y el sistema descuenta capacidad del tipo en ambos casos.
   tiene).
 - `pantallas/clientes.js` y `nucleo/cliente.js` — leen `nombres` o `nombre1`, por los clientes que
   llegaron con ambos del Excel.
+- `datos.js:conCostoDelDueno()` — el costo por día que Best Price le paga al
+  dueño de un carro ajeno puede estar en dos lugares: dentro del documento del
+  contrato (`subarriendo.costoDia`, y su gemelo `carroAjeno.costoDia`; así lo
+  guardaban los contratos de antes de ADR-002) o en
+  `contratos/{id}/privado/dinero` (así lo guarda el sistema ahora). El puente
+  lee los dos, y **si los dos traen un número, gana `privado`**: es donde el
+  costo vive hoy, y el que siga en el documento es el que quedó sin migrar. Lo
+  aplica `cargarContratosParaDinero()` al cargar los contratos del área de
+  dinero —que los lee de la nube: el costo nunca sale de la copia local— y deja
+  el costo puesto en `subarriendo.costoDia`, que es donde lo lee `resumen()`.
+  Si ninguno de los dos lugares trae un número, el contrato queda tal cual, sin
+  inventarle un `costoDia: 0`: sigue siendo una renta «sin costo anotado» y no
+  un costo real que resultó ser cero. Y si `privado` no se pudo leer, la lectura
+  lo marca (`costoSinLeer`) para que la pantalla diga «no se pudo leer» en vez
+  de pintar Q0.00 como si fuera un costo.
+
+  **Por qué vive en `datos.js` y no en el núcleo.** `resumen()` es el único
+  lugar que calcula el costo del subarriendo, y de ese mismo cálculo salen, a la
+  vez, lo que se le debe al dueño del carro y la utilidad del negocio. Un puente
+  metido en la regla de la liquidación habría hecho que la deuda y la utilidad
+  usaran costos distintos sobre el mismo contrato, y nada lo habría avisado. Y
+  meterlo en `resumen()` tampoco sirve: el núcleo es puro y no sabe leer de
+  Firestore. `datos.js` es quien lee, así que ahí se mezcla el costo dentro del
+  contrato **antes** de que el núcleo lo vea, y `resumen()` no se entera de
+  dónde vino el número. Por eso el núcleo no cambió ni una línea, y por eso
+  sigue habiendo un solo lugar que calcula ese costo.
 
 Estos puentes no van a desaparecer nunca: son la forma de que los datos de
 hace un año sigan mostrándose bien cuando se abre el sistema hoy.
@@ -379,6 +538,48 @@ De ahí salen las dos reglas que cierran esta clase de error:
    sobre el sistema. Si un campo no aparece en esta lista, no debería aparecer en
    una prueba.
 
+**La quinta vez (3 de octubre), y por qué mover un campo no es mover un
+número.** Al mover el costo del dueño del carro tras la contraseña de dinero
+(ADR-002), el encargo contaba dos lugares donde vivía ese número: el documento
+del contrato, en `subarriendo.costoDia`, y la copia que el navegador guarda de
+él. Eran **tres**. `construirContrato` no arma `carroAjeno` campo por campo: lo
+copia entero (`{ ...carroAjeno }`), y `carroAjeno` lleva su propio `costoDia`.
+Así que el mismo costo se guardaba también como `carroAjeno.costoDia` —un campo
+que nada leía, y por eso nadie lo había visto—: otra vez un dato bajo dos
+nombres, esta vez dentro del mismo documento. Mover solo `subarriendo.costoDia`
+habría dejado el número a la vista de cualquiera con la sesión normal, en las
+herramientas del navegador, y el candado habría sido de adorno, con todas las
+pruebas en verde.
+
+Lo encontró quien lo implementó, al leer lo que `construirContrato` de verdad
+escribe en vez de fiarse de la lista de lugares del encargo. Hoy los dos nombres
+se quitan juntos (`sinCostoDelDueno`), y la migración limpia los dos.
+
+La copia del navegador, que el encargo sí nombraba, resultó tener su propio
+hueco, y lo encontró la revisión que siguió. Esa copia (IndexedDB) es del
+navegador y no de la cuenta, y sobrevive a cerrar sesión: cualquier computadora
+que corrió el sistema antes de ADR-002, como la del mostrador, guarda el costo
+de todos los subarriendos que abrió, y la migración —que se corre en la
+computadora de él— solo limpia la suya. Además, la sincronía de fondo volvía a
+escribir ahí el costo de cualquier documento que aún no estuviera migrado. De
+ahí que el costo se quite en las tres puertas por las que algo entra a esa
+copia: lo que se guarda (`contratoParaGuardar`), lo que se sincroniza, y lo que
+la copia ya tenía de antes (`limpiarCopiaLocalDelCosto`, una vez por
+computadora al arrancar). La regla, haya corrido la migración o no: **la copia
+local nunca guarda el costo de un subarriendo**. Y el área de dinero lee los
+contratos de la nube, no de esa copia.
+
+De aquí sale una tercera regla, que se suma a las dos de arriba:
+
+3. **Cuando se mueve un dato detrás de un límite —una contraseña, una regla de
+   lectura, otro documento—, no basta con buscar el nombre del campo que uno
+   espera: hay que buscar el *valor*.** Se toma un número real de un contrato
+   real y se busca dónde más aparece: bajo otros nombres, dentro de objetos que
+   se copian enteros, y en cada copia que el sistema guarda por su cuenta. Un
+   candado se mide por lo que queda afuera, no por lo que se movió adentro. Y la
+   prueba tiene que hacer la misma pregunta: no «¿se fue el campo?», sino
+   «¿queda ese número en alguna parte de lo que se guardó?».
+
 ### Pendiente conocido: el carro atrasado no bloquea una reservación futura
 
 Hallado en la revisión final del plan de reservaciones (29 de septiembre) y
@@ -395,6 +596,44 @@ la firma de `choquesDeReserva` y de quienes la llaman. Es un cambio con
 alcance propio: no se mete al final de una rama, después de que la revisión
 final ya pasó, que es justo como se cuelan los errores que nadie vuelve a
 mirar. Va como primera tarea del siguiente plan.
+
+### Pendientes conocidos del dinero
+
+Hallados en las revisiones del plan de liquidación a dueños (5 de octubre) y
+**diferidos a propósito**, no olvidados.
+
+**`porcentajeComision` sigue en el documento del contrato**, legible con una
+sesión normal. §7 ya decía que el plan de dinero tenía que mover **los dos**
+campos —el costo del dueño del carro y el porcentaje de comisión— a
+`privado/dinero`; ADR-002 movió solo el costo, que era lo que la liquidación
+necesitaba. Mientras él sea el único que usa el sistema, nadie más lo ve y no
+corre prisa. Pero el día que un empleado trabaje en el mostrador podrá leer, en
+las herramientas del navegador, el porcentaje de cada contrato y, con él, el de
+cada empleado, y §12b ya dice que ese porcentaje solo lo controla él. Necesita
+**su propia decisión antes de ese día**, y no se resuelve de pasada dentro de
+otro plan. Moverlo reusa la maquinaria que ya existe para el costo (la
+migración, el puente de lectura, la limpieza de la copia local), y hacerlo
+ahora, con pocos contratos guardados, es más barato que hacerlo después.
+
+**Una renta cuyo costo de verdad no se puede leer no se puede pagar, y eso es
+correcto.** `construirPagoDueno` se niega, con una frase que dice cuáles rentas
+son. Hay dos causas y piden cosas distintas: que el costo nunca se anotó (el
+campo no es obligatorio al sacar el carro, y vacío queda en 0: es el
+`sinCostoAnotado` de `cuentaDeDueno`), o que no se pudo leer `privado/dinero`
+(sin la sesión de dinero, o falló la nube: es el `costoSinLeer` de la lectura).
+Pagarla de todos modos saldría en Q0.00: borraría de la lista la deuda con el
+dueño del carro y dejaría un comprobante que no prueba que se pagó nada.
+
+La salida existe y es **`anotarCostoDelDueno`** (`js/datos.js`; es el botón
+«Anotar costo» del área de dinero): escribe el costo en `privado/dinero` con la
+credencial de dinero. Es para llenar lo que falta, no para cambiar lo que ya
+está: se niega a escribir encima de un costo existente —lo mira en `privado` en
+el momento de escribir, y si no lo puede leer tampoco escribe—, porque lo que se
+negoció con el dueño del carro no se cambia con un campo de texto. Y la pantalla
+solo lo ofrece cuando el costo falta de verdad, no cuando solo no se pudo leer: a
+quien tuvo un fallo de internet se le dice que revise y reintente, no que
+escriba de memoria un costo que ya existe. **Nadie debe «arreglar» la negativa**
+dejando pasar esas rentas: sin ella, una deuda real se borra en silencio.
 
 
 ## 8. Impresión
