@@ -5,7 +5,7 @@
 // encima de uno nuevo — o peor, se le borra algo que sí existía.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mezclar, idsQueSobran, abrirBase } from '../js/cache.js';
+import { mezclar, idsQueSobran, abrirBase, depurarLocal } from '../js/cache.js';
 
 const local = [
   { id: 'a', placas: 'P-1', actualizado: 100 },
@@ -225,4 +225,160 @@ test('abrirBase: si tras el bloqueo la apertura falla, rechaza y retira el aviso
   pedido.onerror();
   await assert.rejects(p, /VersionError/);
   assert.equal(a.liberaciones, 1, 'un aviso que nadie puede resolver no se queda en pantalla');
+});
+
+// ---------- Curar lo que ya está guardado: depurarLocal (C1 de la revisión de las Tareas 6 y 7) ----------
+//
+// QUÉ CUBREN ESTAS PRUEBAS Y QUÉ NO. Usan una IndexedDB FALSA que modela solo lo
+// que `depurarLocal` usa: tiendas con `getAll`/`get`/`put`, transacciones que
+// confirman todo junto o, si algo lanza, no escriben nada, y el rechazo de abrir
+// una tienda que la transacción no pidió. Comprueban la LÓGICA: qué se reemplaza,
+// que la marca viaja en la misma transacción, que corre una sola vez, que un fallo
+// no deja marca. NO comprueban que el IndexedDB de un navegador de verdad se
+// comporte así (que `put` dentro de `onsuccess` de `getAll` quede en la misma
+// transacción, que `abort()` descarte lo escrito, que `oncomplete` llegue): eso
+// se verificó a mano en un navegador contra IndexedDB real (ver el reporte).
+
+/** Una base falsa: `tiendas` es `{ nombre: [docs] }`. Anota cada transacción que se abre. */
+function idbFalsa(tiendas) {
+  const confirmado = new Map(Object.entries(tiendas).map(([n, docs]) => [n, new Map(docs.map((d) => [d.id, structuredClone(d)]))]));
+  const bd = {
+    transacciones: [],
+    lectura: (tienda) => [...confirmado.get(tienda).values()].map((d) => structuredClone(d)),
+    transaction(nombres, modo) {
+      const permitidas = [].concat(nombres);
+      const registro = { nombres: permitidas, modo, getAll: [], get: [], put: [] };
+      bd.transacciones.push(registro);
+      const escritos = []; // [tienda, doc]: se confirman solo si la transacción termina bien
+      const tx = { oncomplete: null, onerror: null, onabort: null, error: null };
+      let pendientes = 0;
+      let cerrada = false;
+
+      const terminar = () => {
+        if (cerrada || pendientes > 0) return;
+        cerrada = true;
+        for (const [tienda, doc] of escritos) confirmado.get(tienda).set(doc.id, structuredClone(doc));
+        setImmediate(() => tx.oncomplete?.());
+      };
+      const abortar = (error) => {
+        if (cerrada) return;
+        cerrada = true;
+        tx.error = error;
+        setImmediate(() => tx.onabort?.());
+      };
+      const pedir = (calcular) => {
+        const pedido = { result: undefined, onsuccess: null };
+        pendientes += 1;
+        setImmediate(() => {
+          pedido.result = calcular();
+          pedido.onsuccess?.();
+          pendientes -= 1;
+          terminar();
+        });
+        return pedido;
+      };
+      tx.abort = () => abortar(null); // nada de lo escrito se confirma
+
+      tx.objectStore = (tienda) => {
+        if (!permitidas.includes(tienda)) throw new Error(`NotFoundError: la transacción no pidió «${tienda}»`);
+        return {
+          getAll: () => { registro.getAll.push(tienda); return pedir(() => bd.lectura(tienda)); },
+          get: (id) => { registro.get.push([tienda, id]); return pedir(() => structuredClone(confirmado.get(tienda).get(id))); },
+          put: (doc) => {
+            if (modo !== 'readwrite') throw new Error('ReadOnlyError');
+            registro.put.push([tienda, structuredClone(doc)]);
+            escritos.push([tienda, structuredClone(doc)]);
+            return pedir(() => doc.id);
+          },
+        };
+      };
+      return tx;
+    },
+  };
+  return bd;
+}
+
+const conCosto = (id) => ({ id, ajeno: true, subarriendo: { costoDia: 400 }, carroAjeno: { placas: 'P-1', costoDia: 400 } });
+const limpioDe = (c) => ({ id: c.id, ajeno: true, carroAjeno: { placas: 'P-1' } });
+/** Lo que haría datos.js: reemplazar lo que trae costo, dejar (null) lo que no. */
+const quitarCosto = (c) => (c?.subarriendo || c?.carroAjeno?.costoDia !== undefined ? limpioDe(c) : null);
+
+test('depurarLocal: reemplaza cada documento que `transformar` cambie y deja los demás exactamente como están', async () => {
+  const bd = idbFalsa({ contratos: [conCosto('a'), { id: 'b', ajeno: false }, conCosto('c')], ajustes: [] });
+  const r = await depurarLocal('contratos', quitarCosto, { abrirBd: async () => bd });
+  assert.deepEqual(r, { revisados: 3, cambiados: 2, yaHecha: false });
+  assert.deepEqual(bd.lectura('contratos'), [limpioDe({ id: 'a' }), { id: 'b', ajeno: false }, limpioDe({ id: 'c' })]);
+});
+
+test('depurarLocal: recorre TODA la tienda, no solo lo que se vuelva a leer', async () => {
+  // Es el hallazgo: meses viejos que esta computadora nunca vuelve a abrir.
+  const viejos = Array.from({ length: 200 }, (_, i) => conCosto(`v${i}`));
+  const bd = idbFalsa({ contratos: viejos, ajustes: [] });
+  const r = await depurarLocal('contratos', quitarCosto, { abrirBd: async () => bd });
+  assert.equal(r.cambiados, 200);
+  assert.equal(bd.lectura('contratos').some((c) => JSON.stringify(c).includes('costoDia')), false);
+});
+
+test('depurarLocal: con marca, la marca se guarda en `ajustes` en la MISMA transacción que la limpieza', async () => {
+  const bd = idbFalsa({ contratos: [conCosto('a')], ajustes: [] });
+  await depurarLocal('contratos', quitarCosto, { marca: 'depuracion:x', abrirBd: async () => bd });
+  assert.equal(bd.transacciones.length, 1, 'una sola transacción: no hay estado intermedio «limpié pero no marqué»');
+  assert.deepEqual(bd.transacciones[0].nombres, ['contratos', 'ajustes']);
+  assert.equal(bd.transacciones[0].modo, 'readwrite');
+  const [marca] = bd.lectura('ajustes');
+  assert.equal(marca.id, 'depuracion:x');
+  assert.equal(marca.cambiados, 1);
+  assert.equal(typeof marca.hecha, 'number');
+});
+
+test('depurarLocal: corre UNA sola vez por computadora — con la marca ya puesta no lee ni toca nada', async () => {
+  const bd = idbFalsa({ contratos: [conCosto('a')], ajustes: [] });
+  await depurarLocal('contratos', quitarCosto, { marca: 'depuracion:x', abrirBd: async () => bd });
+  // Después de limpiar, algo (una pestaña vieja) vuelve a dejar un costo en la copia:
+  bd.transacciones.length = 0;
+  const r = await depurarLocal('contratos', () => assert.fail('no debe ni mirar los documentos'), { marca: 'depuracion:x', abrirBd: async () => bd });
+  assert.deepEqual(r, { revisados: 0, cambiados: 0, yaHecha: true });
+  assert.deepEqual(bd.transacciones[0].getAll, [], 'no recorrió la tienda');
+  assert.deepEqual(bd.transacciones[0].put, [], 'y no escribió nada, ni la marca otra vez');
+});
+
+test('depurarLocal: otra marca es otra limpieza — se corre aunque la primera ya esté puesta', async () => {
+  const bd = idbFalsa({ contratos: [conCosto('a')], ajustes: [{ id: 'depuracion:x', hecha: 1 }] });
+  const r = await depurarLocal('contratos', quitarCosto, { marca: 'depuracion:y', abrirBd: async () => bd });
+  assert.equal(r.cambiados, 1);
+});
+
+test('depurarLocal: si `transformar` lanza, NO se escribe nada y NO queda marca — el siguiente arranque lo reintenta y limpia', async () => {
+  const bd = idbFalsa({ contratos: [conCosto('a'), conCosto('b')], ajustes: [] });
+  let n = 0;
+  const falla = (c) => { n += 1; if (n === 2) throw new Error('documento raro'); return quitarCosto(c); };
+  await assert.rejects(depurarLocal('contratos', falla, { marca: 'depuracion:x', abrirBd: async () => bd }), /documento raro/);
+  assert.equal(bd.lectura('contratos').filter((c) => c.subarriendo).length, 2, 'ni el primero quedó a medias');
+  assert.deepEqual(bd.lectura('ajustes'), [], 'sin marca: no se dará por hecha');
+
+  const reintento = await depurarLocal('contratos', quitarCosto, { marca: 'depuracion:x', abrirBd: async () => bd });
+  assert.equal(reintento.cambiados, 2);
+  assert.equal(reintento.yaHecha, false);
+});
+
+test('depurarLocal: si la base no se puede abrir, LANZA — no lo toma por «no había nada» y no deja marca', async () => {
+  // `leerLocal` devuelve [] ante un fallo; una limpieza que hiciera lo mismo
+  // quedaría marcada como hecha sobre una copia sin limpiar.
+  const error = Object.assign(new Error('requested version is less than existing'), { name: 'VersionError' });
+  await assert.rejects(depurarLocal('contratos', quitarCosto, { marca: 'depuracion:x', abrirBd: async () => { throw error; } }), { name: 'VersionError' });
+});
+
+test('depurarLocal: sin marca solo pide la tienda que se le dijo (no abre `ajustes`) y puede correr cuantas veces se quiera', async () => {
+  const bd = idbFalsa({ contratos: [conCosto('a')] });
+  await depurarLocal('contratos', quitarCosto, { abrirBd: async () => bd });
+  assert.deepEqual(bd.transacciones[0].nombres, ['contratos']);
+  const otra = await depurarLocal('contratos', quitarCosto, { abrirBd: async () => bd });
+  assert.equal(otra.cambiados, 0, 'ya estaba limpia');
+});
+
+test('depurarLocal: una tienda vacía se marca igual — no hay nada que limpiar y no se vuelve a mirar', async () => {
+  const bd = idbFalsa({ contratos: [], ajustes: [] });
+  const r = await depurarLocal('contratos', quitarCosto, { marca: 'depuracion:x', abrirBd: async () => bd });
+  assert.deepEqual(r, { revisados: 0, cambiados: 0, yaHecha: false });
+  assert.equal(bd.lectura('ajustes').length, 1);
 });

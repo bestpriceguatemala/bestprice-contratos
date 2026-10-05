@@ -9,7 +9,7 @@
 // — y solo si falla la nube: ver `guardarEnNubeYLocal`.
 import { iniciarFirebase } from './firebase-config.js';
 import { dbDeDinero } from './dinero-sesion.js';
-import { mezclar, guardarLocal, leerLocal, idsQueSobran, borrarLocales } from './cache.js';
+import { mezclar, guardarLocal, leerLocal, idsQueSobran, borrarLocales, depurarLocal } from './cache.js';
 import { filtrar, textoDeCliente } from './nucleo/busqueda.js';
 import { textoDeDueno } from './nucleo/dueno.js';
 import { estadoContrato } from './nucleo/estados.js';
@@ -86,11 +86,27 @@ export async function guardarEnNubeYLocal(coleccion, original, armar, {
 }
 
 /** Trae una colección completa de Firestore, con el id de cada documento. */
-async function leerRemoto(coleccion) {
-  const { db, fsMod } = await iniciarFirebase();
+async function leerRemoto(coleccion, iniciar = iniciarFirebase) {
+  const { db, fsMod } = await iniciar();
   const instantanea = await conLimiteDeTiempo(fsMod.getDocs(fsMod.collection(db, coleccion)));
   return instantanea.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
+
+/**
+ * Lo que de verdad se escribe en la copia local al sincronizar `coleccion`: lo
+ * mismo que llegó de la nube, salvo que a los contratos se les quita el costo
+ * del dueño (ver «El costo del dueño del carro», más abajo).
+ *
+ * La nube de un contrato que todavía no se migró (ADR-002) SÍ trae el costo en
+ * su documento, y sincronizar lo escribía tal cual en IndexedDB: la limpieza de
+ * arranque (`limpiarCopiaLocalDelCosto`) lo habría quitado una vez y la
+ * sincronía siguiente lo habría vuelto a poner. Para que «la copia local nunca
+ * tiene el costo de un subarriendo» sea cierto de verdad y no solo hasta la
+ * próxima lectura, TODA escritura de contratos a la copia local pasa por
+ * `sinCostoDelDueno`: ésta, la del guardado (`contratoParaGuardar`) y la de la
+ * migración.
+ */
+const paraLaCopiaLocal = (coleccion, docs) => (coleccion === 'contratos' ? docs.map(sinCostoDelDueno) : docs);
 
 /**
  * Compara dos copias de una colección por cantidad y por el sello
@@ -140,9 +156,11 @@ export function resultadoLectura(locales, remoto) {
  * que recargar. No se avisa por un éxito que contesta exactamente lo mismo:
  * para eso está la comparación, en vez de redibujar cada vez que llega la nube.
  */
-async function cargarConSincronia(coleccion, alLlegar) {
-  const locales = await leerLocal(coleccion);
-  const sincronizar = leerRemoto(coleccion).then(async (remotos) => {
+async function cargarConSincronia(coleccion, alLlegar, {
+  iniciar = iniciarFirebase, leerCopia = leerLocal, guardarCopia = guardarLocal, borrarCopia = borrarLocales,
+} = {}) {
+  const locales = await leerCopia(coleccion);
+  const sincronizar = leerRemoto(coleccion, iniciar).then(async (remotos) => {
     // Esta lectura trae la colección ENTERA, así que lo que esté en la copia
     // local y no venga aquí está borrado de verdad y se quita. Solo llega a
     // esta línea si la lectura salió bien: si la nube falla, se va por el
@@ -150,8 +168,8 @@ async function cargarConSincronia(coleccion, alLlegar) {
     // fue un error grave del primer plan y no puede volver por esta puerta.
     const sobran = new Set(idsQueSobran(locales, remotos));
     const mezclados = mezclar(locales, remotos).filter((doc) => !sobran.has(doc.id));
-    await guardarLocal(coleccion, mezclados);
-    await borrarLocales(coleccion, [...sobran]);
+    await guardarCopia(coleccion, paraLaCopiaLocal(coleccion, mezclados));
+    await borrarCopia(coleccion, [...sobran]);
     return mezclados;
   });
 
@@ -237,14 +255,36 @@ export async function cargarReservas(alLlegar) {
  * fallo })` recibe la misma forma, ya con `datos` filtrado — quien llama no
  * debería tener que saber que este filtro existe.
  */
-export async function cargarContratosAbiertos(alLlegar) {
+export async function cargarContratosAbiertos(alLlegar, deps) {
   const estaAbierto = (c) => ['rentado', 'devuelto'].includes(c?.estado || 'rentado');
   const soloAbiertos = (contratos) => contratos.filter(estaAbierto);
   const r = await cargarConSincronia(
     'contratos',
     alLlegar && ((res) => alLlegar({ datos: soloAbiertos(res.datos), fallo: res.fallo })),
+    deps,
   );
   return { datos: soloAbiertos(r.datos), fallo: r.fallo };
+}
+
+/** ¿Cae este contrato en el rango de `fechaSalida` pedido? Sin `desde` o sin `hasta`, ese lado queda abierto. */
+const enRangoDe = ({ desde, hasta }) => (c) => (!desde || (c?.fechaSalida || '') >= desde)
+  && (!hasta || (c?.fechaSalida || '') <= hasta);
+
+/**
+ * Los contratos de un rango de `fechaSalida`, leídos de la NUBE y de ningún otro
+ * lado: una consulta filtrada, sin tocar la copia local. Lanza si la nube no
+ * contesta (`conLimiteDeTiempo` la da por vencida). La comparten `cargarContratos`
+ * y `cargarContratosDeLaNube`.
+ */
+async function leerContratosDelRango({ desde, hasta } = {}, iniciar = iniciarFirebase) {
+  const { db, fsMod } = await iniciar();
+  const restricciones = [];
+  if (desde) restricciones.push(fsMod.where('fechaSalida', '>=', desde));
+  if (hasta) restricciones.push(fsMod.where('fechaSalida', '<=', hasta));
+  const referencia = fsMod.collection(db, 'contratos');
+  const consulta = restricciones.length ? fsMod.query(referencia, ...restricciones) : referencia;
+  const instantanea = await conLimiteDeTiempo(fsMod.getDocs(consulta));
+  return instantanea.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
 /**
@@ -270,33 +310,27 @@ export async function cargarContratosAbiertos(alLlegar) {
  * sincroniza por detrás, y nunca confunde "vacío" con "la nube falló"
  * (resultadoLectura). `alLlegar({ datos, fallo })` avisa solo cuando la
  * sincronía de atrás trae algo distinto de lo ya servido, o cuando falla.
+ *
+ * Lo que sincronizar escribe en la copia local nunca lleva el costo del dueño
+ * (`paraLaCopiaLocal`); lo que se le entrega a la pantalla, en memoria, es lo que
+ * la nube trajo. El área de dinero NO usa esta lectura: ver `cargarContratosDeLaNube`.
  */
-export async function cargarContratos({ desde, hasta } = {}, alLlegar) {
-  const enRango = (c) => (!desde || (c?.fechaSalida || '') >= desde)
-    && (!hasta || (c?.fechaSalida || '') <= hasta);
+export async function cargarContratos({ desde, hasta } = {}, alLlegar, {
+  iniciar = iniciarFirebase, leerCopia = leerLocal, guardarCopia = guardarLocal, borrarCopia = borrarLocales,
+} = {}) {
+  const enRango = enRangoDe({ desde, hasta });
 
-  const locales = (await leerLocal('contratos')).filter(enRango);
+  const locales = (await leerCopia('contratos')).filter(enRango);
 
-  async function leerRemotoDelRango() {
-    const { db, fsMod } = await iniciarFirebase();
-    const restricciones = [];
-    if (desde) restricciones.push(fsMod.where('fechaSalida', '>=', desde));
-    if (hasta) restricciones.push(fsMod.where('fechaSalida', '<=', hasta));
-    const referencia = fsMod.collection(db, 'contratos');
-    const consulta = restricciones.length ? fsMod.query(referencia, ...restricciones) : referencia;
-    const instantanea = await conLimiteDeTiempo(fsMod.getDocs(consulta));
-    return instantanea.docs.map((d) => ({ id: d.id, ...d.data() }));
-  }
-
-  const sincronizar = leerRemotoDelRango().then(async (remotos) => {
+  const sincronizar = leerContratosDelRango({ desde, hasta }, iniciar).then(async (remotos) => {
     // `locales` ya viene filtrado por el mismo rango que se le pidió a la
     // nube, así que se comparan dos listas del mismo alcance: lo que falte
     // está borrado. Un contrato de otro mes ni siquiera entró en `locales`,
     // de modo que leer marzo no puede tocar lo de agosto.
     const sobran = new Set(idsQueSobran(locales, remotos));
     const mezclados = mezclar(locales, remotos).filter((doc) => !sobran.has(doc.id));
-    await guardarLocal('contratos', mezclados);
-    await borrarLocales('contratos', [...sobran]);
+    await guardarCopia('contratos', paraLaCopiaLocal('contratos', mezclados));
+    await borrarCopia('contratos', [...sobran]);
     return mezclados;
   });
 
@@ -490,11 +524,18 @@ export async function siguienteNumeroContrato() {
 //     había visto. Mover solo el primero habría dejado el segundo legible para
 //     cualquier sesión, y el movimiento habría sido de adorno;
 //   - la copia local de IndexedDB, que guarda el documento tal cual lo
-//     escribió `guardarEnNubeYLocal`.
+//     escribió `guardarEnNubeYLocal` — y también tal cual lo trajo la nube al
+//     sincronizar, que antes de migrar todavía lo trae.
 //
-// Por eso el costo se quita en UN solo lugar, `contratoParaGuardar` (lo que de
-// verdad se escribe, en la nube y en la copia local a la vez), y solo vuelve a
-// entrar al LEER, en memoria, para el área de dinero (`cargarContratosParaDinero`).
+// Por eso el costo se quita al ESCRIBIR, y solo vuelve a entrar al LEER, en
+// memoria, para el área de dinero (`cargarContratosParaDinero`). Tres puertas,
+// todas por `sinCostoDelDueno`: lo que se guarda (`contratoParaGuardar`, en la
+// nube y en la copia local a la vez), lo que sincronizar escribe en la copia
+// local (`paraLaCopiaLocal`) y lo que la copia local ya tenía de antes
+// (`limpiarCopiaLocalDelCosto`, una vez por computadora al arrancar). La regla
+// que decidió el dueño del proyecto: la copia local NUNCA guarda el costo de un
+// subarriendo, en ninguna computadora, haya corrido la migración o no — y por
+// eso el área de dinero lo lee de la nube y no de ahí (`cargarContratosDeLaNube`).
 // El núcleo no cambió: resumen() sigue siendo el único lugar que calcula el
 // costo, así que la deuda al dueño y la utilidad usan siempre la misma cifra.
 
@@ -547,6 +588,42 @@ export function sinCostoDelDueno(contrato) {
     copia.carroAjeno = resto;
   }
   return copia;
+}
+
+/** ¿Trae el contrato la llave `costoDia` en alguna de sus dos copias, valga lo que valga? */
+const traeLlaveDeCosto = (c) => (esObjeto(c?.subarriendo) && 'costoDia' in c.subarriendo)
+  || (esObjeto(c?.carroAjeno) && 'costoDia' in c.carroAjeno);
+
+/** La marca con que `depurarLocal` recuerda que esta computadora ya se limpió. Con otro nombre, se volvería a correr. */
+export const MARCA_COPIA_SIN_COSTO = 'depuracion:costo-del-dueno:1';
+
+/**
+ * Limpia, UNA vez por computadora y al arrancar, el costo del dueño que la copia
+ * local de contratos ya tenga guardado — `subarriendo.costoDia` y
+ * `carroAjeno.costoDia` — de TODOS los contratos, no solo de los que esta
+ * computadora vuelva a leer.
+ *
+ * Por qué hace falta (C1 de la revisión de las Tareas 6 y 7): ADR-002 promete que
+ * un contrato migrado deja de exponer el costo a quien solo tenga la sesión
+ * normal, pero IndexedDB es del PERFIL del navegador, no de la cuenta de
+ * Firebase, y sobrevive a cerrar la sesión. La computadora del mostrador, que
+ * corrió el sistema meses antes de ADR-002, guarda el costo de todos los
+ * subarriendos viejos, y la migración (que corre en la computadora del dueño)
+ * no la toca; esa computadora solo se limpia de los meses que vuelva a abrir, y
+ * un contrato cerrado puede no abrirse nunca. Cualquiera que se siente ahí lo lee
+ * en las herramientas del navegador. Así que la regla es esta, sin importar la
+ * migración: la copia local nunca guarda el costo de un subarriendo.
+ *
+ * Esta limpieza es la mitad de esa regla (lo que ya estaba guardado); la otra
+ * mitad es que nada nuevo lo vuelva a escribir (`paraLaCopiaLocal`,
+ * `contratoParaGuardar`). Y es seguro quitarlo de aquí porque el área de dinero
+ * NO lo lee de aquí: lee de la nube (`cargarContratosDeLaNube`).
+ *
+ * LANZA si no pudo limpiar (ver `depurarLocal`): sin marca puesta, el siguiente
+ * arranque lo vuelve a intentar. `depurar` se puede inyectar solo para probar.
+ */
+export async function limpiarCopiaLocalDelCosto({ depurar = depurarLocal } = {}) {
+  return depurar('contratos', (c) => (traeLlaveDeCosto(c) ? sinCostoDelDueno(c) : null), { marca: MARCA_COPIA_SIN_COSTO });
 }
 
 /**
@@ -626,15 +703,29 @@ async function escribirCostoDelDueno({ db, fsMod }, id, costoDia) {
  * (por ejemplo porque la pantalla lo pidió antes para imprimirlo) se respeta
  * ese mismo número en vez de gastar uno nuevo.
  *
- * El costo del dueño, si el contrato lo trae, se escribe PRIMERO en
- * `privado/dinero` y el documento del contrato se escribe sin él (ver
- * `contratoParaGuardar`). Primero, y no después, por si algo falla: un
- * `privado` huérfano, de un contrato que no llegó a guardarse, no lo ve nadie
+ * El costo del dueño, si el contrato lo trae Y SE GUARDA POR PRIMERA VEZ, se
+ * escribe PRIMERO en `privado/dinero` y el documento del contrato se escribe
+ * sin él (ver `contratoParaGuardar`). Primero, y no después, por si algo falla:
+ * un `privado` huérfano, de un contrato que no llegó a guardarse, no lo ve nadie
  * y el reintento (mismo id) lo reutiliza; un contrato guardado SIN su costo,
  * en cambio, quedaría diciendo "sin costo anotado" y nadie sabría que lo que
  * faltó fue un guardado a medias. Si el contrato NO trae costo (uno ya
  * migrado que se vuelve a guardar al cobrar o al recibir el carro), `privado`
  * ni se toca: escribir ahí un 0 pisaría el costo real.
+ *
+ * `privado` MANDA (M2 de la revisión de las Tareas 6 y 7), igual que al leer
+ * (`conCostoDelDueno`) y que en la migración (que ante un costo distinto no
+ * decide: avisa). Un contrato que ya existía — trae `actualizado`, que
+ * `contratoParaGuardar` sella en todo lo que escribe, así que solo lo trae el
+ * que vino de la nube o de la copia local — NO escribe su costo en `privado`
+ * aunque el documento todavía lo traiga: la sesión normal no puede LEER
+ * `privado`, no sabe qué hay ahí, y pisarlo con el del documento resolvía en
+ * silencio, a favor del documento, un conflicto que la migración dejó para
+ * revisar. Ese costo se queda donde está (en el documento de la nube, que un
+ * `setDoc` con `merge` no borra) hasta que la migración lo mueva, que sí lee
+ * `privado` antes de tocar nada. Un contrato nuevo no tiene sello y su
+ * `privado` está vacío por construcción: ahí sí se escribe, y un reintento del
+ * mismo guardado (mismo contrato en memoria, aún sin sello) escribe lo mismo.
  *
  * Las dependencias se pueden inyectar solo para probar el orden sin red.
  */
@@ -658,7 +749,7 @@ export async function guardarContrato(contrato, {
   }
   const numero = contrato?.numero || (await numeroNuevo());
   let original = contrato;
-  const costoDia = costoDelDocumento(contrato);
+  const costoDia = contrato?.actualizado ? null : costoDelDocumento(contrato);
   if (costoDia !== null) {
     const nube = await iniciar();
     // El id se decide ya, para que `privado` y el contrato caigan en el mismo documento.
@@ -933,6 +1024,42 @@ async function conCostosDeDinero({ datos, fallo }, deps) {
 }
 
 /**
+ * Los contratos de un rango para el área de dinero, leídos SOLO de la nube: ni
+ * se sirve ni se escribe la copia local. Es lo que `cargarContratosParaDinero`
+ * usa por omisión, y por qué no usa `cargarContratos` es lo importante de esta
+ * función (C1 de la revisión de las Tareas 6 y 7):
+ *
+ * `cargarContratos` sirve primero la copia local, y solo avisa de lo que la nube
+ * cambió si cambió el sello `actualizado`. Si el costo del dueño de un contrato
+ * que todavía no se migró se leyera de ahí, limpiar la copia local (que es lo
+ * que hay que hacer: ver `limpiarCopiaLocalDelCosto`) lo haría desaparecer de la
+ * pantalla de dinero sin que nada avisara — la nube sigue trayéndolo, con el
+ * MISMO sello —, y una deuda real se vería como «sin costo anotado». El costo del
+ * dueño sale de la nube: del documento del contrato (lo viejo) o de
+ * `privado/dinero` (lo nuevo), nunca de la copia local.
+ *
+ * Es más lenta que servir lo local, y es lo que hay: de todos modos cada contrato
+ * de carro ajeno pide su `privado/dinero` a la nube, así que esta pantalla no
+ * puede abrir sin red.
+ *
+ * Si la nube no contesta devuelve lo que haya en la copia local, SIN el costo
+ * del dueño aunque esa copia todavía lo tuviera, junto con `fallo: true`: nunca
+ * una lista vacía inventada a partir de una lectura fallida (`resultadoLectura`),
+ * y nunca un costo leído de aquí. Sin costo, esos contratos no se pueden pagar
+ * (`construirPagoDueno`). No hay sincronía de fondo, así que no usa `alLlegar`.
+ */
+export async function cargarContratosDeLaNube({ desde, hasta } = {}, _alLlegar, {
+  iniciar = iniciarFirebase, leerCopia = leerLocal,
+} = {}) {
+  try {
+    return resultadoLectura([], { ok: true, valor: await leerContratosDelRango({ desde, hasta }, iniciar) });
+  } catch {
+    const locales = (await leerCopia('contratos')).filter(enRangoDe({ desde, hasta }));
+    return resultadoLectura(locales.map(sinCostoDelDueno), { ok: false });
+  }
+}
+
+/**
  * Los contratos para el área de dinero, con el costo del dueño ya DENTRO de
  * cada contrato de carro ajeno (`subarriendo.costoDia`), venga de donde venga:
  * de `privado/dinero` (lo nuevo) o del documento (lo viejo, mientras no se
@@ -944,13 +1071,14 @@ async function conCostosDeDinero({ datos, fallo }, deps) {
  *   una y otra usaran costos distintos sobre el mismo contrato, sin avisar;
  * - el núcleo es puro y no sabe leer de Firestore.
  *
- * Lo mezcla DESPUÉS de la copia local: llama a `cargarContratos`, que ya
- * terminó de leer y de guardar lo suyo, y mezcla sobre copias. Mezclarlo antes,
- * o en el mismo objeto, lo dejaría escrito en IndexedDB — legible sin
- * credencial —, que es justo lo que este movimiento existe para evitar.
+ * Los contratos se leen de la NUBE (`cargarContratosDeLaNube`), no de la copia
+ * local: de ahí sale tanto el costo viejo del documento como el de `privado`.
+ * Con eso, que la copia local nunca guarde el costo (`limpiarCopiaLocalDelCosto`)
+ * no esconde nada de esta pantalla. Y el costo se mezcla sobre COPIAS de lo que
+ * se leyó, nunca en el mismo objeto.
  *
- * Devuelve `{ datos, fallo, costoSinLeer }`. `fallo` es el de `cargarContratos`
- * (la nube no contestó). `costoSinLeer` son los ids de contratos ajenos cuyo
+ * Devuelve `{ datos, fallo, costoSinLeer }`. `fallo` es el de la lectura de
+ * contratos (la nube no contestó). `costoSinLeer` son los ids de contratos ajenos cuyo
  * `privado/dinero` no se pudo leer — sin sesión de dinero, o falló la nube:
  * ahí el costo es 0 y la pantalla tiene que decirlo, no pintar "Q0.00" como si
  * fuera un costo de verdad. La marca que ya existe para eso es
@@ -960,13 +1088,16 @@ async function conCostosDeDinero({ datos, fallo }, deps) {
  * es el MOTIVO, para decir «no se pudo leer» y no «sin costo anotado» cuando
  * lo que pasó es lo primero.
  *
- * `alLlegar` (la sincronía de fondo) recibe la misma forma, ya mezclada.
- * `cargar`, `iniciar` y `dbDinero` se pueden inyectar para probar sin red.
+ * `alLlegar` (la sincronía de fondo) recibe la misma forma, ya mezclada, SI el
+ * `cargar` que se use tiene sincronía de fondo. El de por omisión no la tiene
+ * (espera a la nube), así que con él `alLlegar` no se llama nunca.
+ * `cargar`, `iniciar`, `dbDinero` y `leerCopia` se pueden inyectar para probar sin red.
  */
-export async function cargarContratosParaDinero({ desde, hasta } = {}, alLlegar, { cargar = cargarContratos, ...deps } = {}) {
+export async function cargarContratosParaDinero({ desde, hasta } = {}, alLlegar, { cargar = cargarContratosDeLaNube, ...deps } = {}) {
   const lectura = await cargar(
     { desde, hasta },
     alLlegar && ((resultado) => { conCostosDeDinero(resultado, deps).then(alLlegar); }),
+    deps,
   );
   return conCostosDeDinero(lectura, deps);
 }
@@ -1039,10 +1170,9 @@ async function moverElCostoDe(contrato, { db, fsMod }) {
  * Los contratos se leen de la NUBE, no de la copia local, que puede traer solo
  * algunos meses. Y al final se limpia la copia local de esta computadora: el
  * documento ya no trae el costo, pero IndexedDB guardaba su propia copia, y
- * mover el costo sin limpiarla sería de adorno. (Las copias de otras
- * computadoras se limpian solas la próxima vez que lean esos contratos: la
- * versión de la nube, aunque tenga el mismo sello `actualizado`, reemplaza a
- * la local — ver `mezclar` en cache.js.)
+ * mover el costo sin limpiarla sería de adorno. Las copias de las OTRAS
+ * computadoras no dependen de esto: cada una se limpia sola al arrancar
+ * (`limpiarCopiaLocalDelCosto`), de TODOS sus contratos, los vuelva a leer o no.
  *
  * Devuelve `{ revisados, migrados, conflictos, fallidos, copiaLocalLimpia }`;
  * `conflictos` y `fallidos` son listas de `{ id, numero }`. `mensajeDeMigracion`
@@ -1166,6 +1296,46 @@ export const MENSAJE_PAGO_SIN_DINERO = 'Primero entra al área de dinero: sin es
 export const MENSAJE_PAGO_SIN_RENTAS = 'Marca al menos una renta cerrada para registrar el pago.';
 
 /**
+ * Lo que lee quien intente guardar un pago que sale en Q0.00 (o sin un monto que
+ * se pueda leer). Es la última línea: `construirPagoDueno` ya rechaza las rentas
+ * sin costo y con su propio mensaje, que dice cuáles son; esta frase es para
+ * lo que llegue por cualquier otro camino.
+ */
+export const MENSAJE_PAGO_SIN_MONTO = 'Este pago saldría en Q0.00, y un comprobante en cero no prueba que se pagó nada. '
+  + 'Revisa que cada renta marcada tenga su costo por día anotado.';
+
+/**
+ * Lo que lee quien intente guardar un pago sin el id que se decide antes del
+ * primer intento. No debería llegar a la pantalla: es la salvaguarda de que
+ * nadie escriba un guardado de pagos que, al repetirse, cree otro comprobante.
+ */
+export const MENSAJE_PAGO_SIN_ID = 'Este pago no tiene su identificador todavía, y sin él repetir el intento crearía un segundo comprobante. '
+  + 'Pídelo con nuevoIdPagoDueno() antes del primer intento y úsalo en todos los reintentos.';
+
+/**
+ * Un id nuevo para un pago a un dueño, sin escribir nada todavía: Firestore lo
+ * genera localmente, sin ida y vuelta a la nube. Es `nuevoIdContrato` para los
+ * pagos, y por la misma razón.
+ *
+ * La pantalla lo pide UNA vez cada vez que él decide «Registrar pago», antes del
+ * primer intento de guardar, y lo conserva en su estado. Si el internet se pone
+ * lento y `conLimiteDeTiempo` se da por vencido antes de que la escritura en
+ * verdad llegue — o si él aprieta el botón dos veces —, el reintento con
+ * `guardarPagoDueno` cae en este mismo documento (lo sobrescribe con
+ * `merge: true`) en vez de crear otro: dos documentos del mismo pago son dos
+ * comprobantes sobre las mismas rentas, y la deuda quedaría registrada dos veces.
+ *
+ * Con la base de DINERO, la misma en la que luego se escribe (`guardarPagoDueno`),
+ * y con su misma negativa si no hay sesión de dinero.
+ */
+export async function nuevoIdPagoDueno({ iniciar = iniciarFirebase, dbDinero = dbDeDinero } = {}) {
+  const db = dbDinero();
+  if (!db) throw new Error(MENSAJE_PAGO_SIN_DINERO);
+  const { fsMod } = await iniciar();
+  return fsMod.doc(fsMod.collection(db, 'pagosDueno')).id;
+}
+
+/**
  * Toma el siguiente número de comprobante dentro de una transacción sobre
  * `contadores/comprobantes`. Es `siguienteNumeroContrato()` con otro contador,
  * a propósito y sin variantes: ese mecanismo ya está probado contra dos
@@ -1186,6 +1356,62 @@ export async function siguienteNumeroComprobante({ iniciar = iniciarFirebase } =
     tx.set(ref, { ultimo: siguiente });
     return siguiente;
   }));
+}
+
+/**
+ * La lista de contratos sin ids repetidos (M3 de la revisión de las Tareas 6 y 7):
+ * un contrato que llega dos veces — una pantalla que junta dos lecturas de rangos
+ * de fechas que se traslapan — contaría doble en el monto y dos veces en la lista
+ * de ids, y ambos coincidirían entre sí y no con la deuda. De dos copias del mismo
+ * id queda la de `actualizado` más nuevo (la regla de `mezclar`, cache.js; si
+ * empatan, la primera), en el lugar de la primera aparición. Los que no traen id
+ * pasan tal cual: no se pueden marcar, así que no pueden entrar a un pago.
+ *
+ * Una lista que no es lista se devuelve igual: `cuentaDeDueno` es la que lanza.
+ */
+function sinIdsRepetidos(contratos) {
+  if (!Array.isArray(contratos)) return contratos;
+  const lugarDe = new Map();
+  const lista = [];
+  for (const c of contratos) {
+    if (!c?.id) {
+      lista.push(c);
+    } else if (!lugarDe.has(c.id)) {
+      lugarDe.set(c.id, lista.length);
+      lista.push(c);
+    } else if (Number(c.actualizado || 0) > Number(lista[lugarDe.get(c.id)].actualizado || 0)) {
+      lista[lugarDe.get(c.id)] = c;
+    }
+  }
+  return lista;
+}
+
+/**
+ * Lo que lee el dueño cuando marcó rentas que no se pueden pagar porque no tienen
+ * un costo por día legible. Función pura. Separa los dos motivos, porque piden
+ * cosas distintas: lo que no tiene costo anotado se arregla escribiéndolo; lo que
+ * no se pudo leer, con internet y la contraseña de dinero — y decirle «anótalo» a
+ * quien solo tuvo un fallo de red lo mandaría a escribir un costo que ya existe.
+ */
+function mensajeDeRentasSinCosto(contratos, sinLeer) {
+  const porLeer = contratos.filter((c) => sinLeer.has(c.id));
+  const porAnotar = contratos.filter((c) => !sinLeer.has(c.id));
+  const partes = [];
+  if (porAnotar.length) {
+    partes.push(
+      porAnotar.length === 1
+        ? `El contrato ${numerosDe(porAnotar)} no tiene costo por día anotado: anota lo que le pagas al dueño por día y vuelve a marcarlo.`
+        : `Los contratos ${numerosDe(porAnotar)} no tienen costo por día anotado: anota lo que le pagas al dueño por día en cada uno y vuelve a marcarlos.`,
+    );
+  }
+  if (porLeer.length) {
+    partes.push(
+      porLeer.length === 1
+        ? `No se pudo leer el costo del contrato ${numerosDe(porLeer)}. Revisa tu internet y que el área de dinero siga abierta, y vuelve a intentarlo.`
+        : `No se pudo leer el costo de los contratos ${numerosDe(porLeer)}. Revisa tu internet y que el área de dinero siga abierta, y vuelve a intentarlo.`,
+    );
+  }
+  return `No se registró el pago. ${partes.join(' ')}`;
 }
 
 /**
@@ -1217,13 +1443,31 @@ export async function siguienteNumeroComprobante({ iniciar = iniciarFirebase } =
  *
  * Con nada pagable marcado devuelve `monto: 0` y `contratos: []`; no inventa
  * nada, y `guardarPagoDueno` se niega a guardarlo.
+ *
+ * UNA RENTA SIN COSTO LEGIBLE NO SE PAGA. Si entre lo marcado hay una renta cuyo
+ * costo por día es 0 o no llegó (`sinCostoAnotado` de `cuentaDeDueno`), o cuyo
+ * `privado/dinero` no se pudo leer (`costoSinLeer`, el que devuelve
+ * `cargarContratosParaDinero`), esto LANZA con un mensaje que dice cuáles y qué
+ * hacer. No las deja fuera en silencio: él marcó tres, el pago saldría por dos y
+ * no sabría por qué. Y no las deja pasar: un 0 que en realidad es un número que
+ * falta, pagado, borra la deuda del dueño del carro y deja un comprobante por
+ * Q0.00 (I1 de la revisión de las Tareas 6 y 7). Las no marcadas no estorban.
+ *
+ * Que `privado` no se pudiera leer basta aunque el documento traiga un costo
+ * viejo: `privado` es el que manda (ver `conCostoDelDueno`) y no se sabe qué decía.
+ * Un contrato cuyo costo de verdad es 0 se queda en «por pagar» marcado «sin costo
+ * anotado» hasta que alguien le anote el costo real.
  */
 export function construirPagoDueno({
-  duenoId, fecha, forma, contratos, pagos, idsMarcados,
+  duenoId, fecha, forma, contratos, pagos, idsMarcados, costoSinLeer,
 } = {}) {
-  const { porPagar } = cuentaDeDueno({ contratos, pagos });
+  const { porPagar, sinCostoAnotado } = cuentaDeDueno({ contratos: sinIdsRepetidos(contratos), pagos });
   const marcados = new Set(idsMarcados ?? []);
   const elegidos = porPagar.filter((c) => c?.id && marcados.has(c.id));
+  const sinAnotar = new Set(sinCostoAnotado);
+  const sinLeer = new Set(costoSinLeer ?? []);
+  const sinCosto = elegidos.filter((c) => sinAnotar.has(c.id) || sinLeer.has(c.id));
+  if (sinCosto.length) throw new Error(mensajeDeRentasSinCosto(sinCosto, sinLeer));
   const ids = elegidos.map((c) => c.id);
   return {
     duenoId: duenoId ?? null,
@@ -1279,10 +1523,24 @@ export function pagoDuenoParaGuardar(pago, { id, numero, ahora = Date.now() } = 
  * pierde porque algo local falle— y nadie puede volver a escribir aquí una copia
  * por descuido sin pasar por esta decisión.
  *
- * Se niega ANTES de gastar un número de comprobante si no hay sesión de dinero o
- * si el pago no cubre ninguna renta: un comprobante sin rentas es un papel vacío
- * con número, y un número gastado no se devuelve. Un pago con un `contratos`
- * que no se pueda leer como lista tampoco pasa.
+ * Se niega ANTES de gastar un número de comprobante si no hay sesión de dinero,
+ * si el pago no cubre ninguna renta o si sale en Q0.00: un comprobante sin rentas
+ * es un papel vacío con número, y uno en cero no prueba que se pagó nada, y un
+ * número gastado no se devuelve. Un pago con un `contratos` que no se pueda leer
+ * como lista tampoco pasa.
+ *
+ * EL PAGO TRAE SU `id`, pedido antes del primer intento con `nuevoIdPagoDueno()`
+ * y reusado en cada reintento (ver ahí por qué): sin id, cada llamada mintearía
+ * un documento distinto y un doble clic, o un reintento después de que el primer
+ * intento venció, dejaría dos comprobantes de las mismas rentas. Por eso sin id
+ * se niega. Si un reintento no trae `numero`, toma uno nuevo y el número del
+ * intento anterior queda sin usar —un hueco en la numeración se explica, un
+ * número repetido no—; la pantalla que quiera evitar el hueco puede tomar el
+ * número una vez (`siguienteNumeroComprobante`) y mandarlo en cada intento.
+ *
+ * Lo que esto NO cubre: dos pestañas, o dos computadoras, que registran cada una
+ * su propio pago (con su propio id) de la misma renta. Ninguna sabe lo que hizo
+ * la otra, y esta función no vuelve a leer `pagosDueno` antes de escribir.
  *
  * Las dependencias se pueden inyectar solo para probar sin red.
  */
@@ -1290,8 +1548,13 @@ export async function guardarPagoDueno(pago, {
   iniciar = iniciarFirebase, dbDinero = dbDeDinero, numeroNuevo = siguienteNumeroComprobante, avisar = avisarCopiaLocal,
 } = {}) {
   if (!Array.isArray(pago?.contratos) || pago.contratos.length === 0) throw new Error(MENSAJE_PAGO_SIN_RENTAS);
+  // Un pago por Q0.00 no es un pago: borraría la deuda del dueño del carro y
+  // dejaría un comprobante que no prueba nada (I1 de la revisión). `q()` y no
+  // `> 0` a secas, para que un texto o un NaN no pasen por números.
+  if (!(q(pago.monto) > 0)) throw new Error(MENSAJE_PAGO_SIN_MONTO);
   const db = dbDinero();
   if (!db) throw new Error(MENSAJE_PAGO_SIN_DINERO);
+  if (!pago.id) throw new Error(MENSAJE_PAGO_SIN_ID);
   const numero = pago.numero || (await numeroNuevo());
   return guardarEnNubeYLocal(
     'pagosDueno',

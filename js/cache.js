@@ -197,6 +197,78 @@ export async function borrarLocales(coleccion, ids = []) {
   });
 }
 
+/**
+ * Recorre UNA tienda de la copia local entera y reemplaza cada documento por lo
+ * que `transformar(doc)` devuelva; si devuelve `null`/`undefined`, ese documento
+ * ya está bien y no se toca. Es el «curar lo que ya está guardado» que ni
+ * `guardarLocal` (solo escribe lo nuevo) ni `mezclar` (solo mira lo que la nube
+ * trae) pueden hacer: un documento que esta computadora nunca vuelve a leer no
+ * se limpia solo (C1 de la revisión de las Tareas 6 y 7).
+ *
+ * Con `marca`, corre UNA sola vez por computadora: la marca se guarda en la
+ * tienda `ajustes` dentro de la MISMA transacción que la limpieza. Así o se hace
+ * todo y queda marcado, o no se hace nada y no queda marcado, y no hay un
+ * estado intermedio en el que la computadora diga «ya limpié» sin haber limpiado.
+ * Si la marca ya está, no se toca nada.
+ *
+ * A diferencia de `leerLocal`, un fallo AQUÍ SE LANZA. `leerLocal` devuelve `[]`
+ * cuando algo sale mal, y una limpieza que leyera `[]` de una base que no pudo
+ * abrir diría «no había nada» y dejaría la marca puesta: la computadora quedaría
+ * sin limpiar y sin volver a intentarlo. Quien llama decide qué hacer con el error.
+ *
+ * Devuelve `{ revisados, cambiados, yaHecha }`. `abrirBd` se puede inyectar solo
+ * para probar sin un navegador.
+ */
+export async function depurarLocal(coleccion, transformar, { marca, abrirBd = abrir } = {}) {
+  const bd = await abrirBd();
+  return new Promise((ok, mal) => {
+    const tx = bd.transaction(marca ? [coleccion, 'ajustes'] : [coleccion], 'readwrite');
+    const resultado = { revisados: 0, cambiados: 0, yaHecha: false };
+    // Si `transformar` lanza se aborta la transacción A MANO y se guarda la
+    // causa: el navegador, en cambio, aborta con un `AbortError` genérico que
+    // no dice qué documento falló.
+    let causa = null;
+    tx.oncomplete = () => ok(resultado);
+    tx.onerror = () => mal(tx.error);
+    tx.onabort = () => mal(causa || tx.error || new Error('La limpieza de la copia local se canceló.'));
+
+    const tienda = tx.objectStore(coleccion);
+    const recorrer = () => {
+      const pedido = tienda.getAll();
+      pedido.onsuccess = () => {
+        try {
+          for (const doc of pedido.result || []) {
+            resultado.revisados += 1;
+            const nuevo = transformar(doc);
+            if (nuevo) {
+              tienda.put(nuevo);
+              resultado.cambiados += 1;
+            }
+          }
+          if (marca) {
+            tx.objectStore('ajustes').put({
+              id: marca, hecha: Date.now(), revisados: resultado.revisados, cambiados: resultado.cambiados,
+            });
+          }
+        } catch (error) {
+          causa = error;
+          tx.abort();
+        }
+      };
+    };
+
+    if (!marca) {
+      recorrer();
+      return;
+    }
+    const previa = tx.objectStore('ajustes').get(marca);
+    previa.onsuccess = () => {
+      if (previa.result) resultado.yaHecha = true;
+      else recorrer();
+    };
+  });
+}
+
 /** Lee una colección de la copia local. Si algo falla, devuelve vacío: la nube manda. */
 export async function leerLocal(coleccion) {
   try {

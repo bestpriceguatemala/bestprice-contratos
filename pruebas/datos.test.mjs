@@ -6,9 +6,10 @@ import { readFileSync } from 'node:fs';
 import {
   resultadoLectura, contratoParaGuardar, guardarContrato, duenoParaGuardar, guardarEnNubeYLocal,
   costoDelDocumento, sinCostoDelDueno, conCostoDelDueno, cargarContratosParaDinero,
+  cargarContratos, cargarContratosAbiertos, limpiarCopiaLocalDelCosto, MARCA_COPIA_SIN_COSTO,
   migrarCostosDelDueno, mensajeDeMigracion, MENSAJE_MIGRAR_SIN_DINERO,
   pagoDuenoParaGuardar, construirPagoDueno, guardarPagoDueno, cargarPagosDueno, siguienteNumeroComprobante,
-  MENSAJE_PAGO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS,
+  nuevoIdPagoDueno, MENSAJE_PAGO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS, MENSAJE_PAGO_SIN_ID, MENSAJE_PAGO_SIN_MONTO,
 } from '../js/datos.js';
 import { CAMPOS_DUENO } from '../js/nucleo/dueno.js';
 import { mezclar } from '../js/cache.js';
@@ -335,6 +336,16 @@ const viejo = (c) => ({ ...c, actualizado: 1790000000000, estado: estadoContrato
 /** El documento tal como lo escribe `guardarContrato` hoy: sin el costo. */
 const nuevo = (c) => contratoParaGuardar(c, { id: c.id, numero: c.numero, ahora: 1790000000000 });
 
+/**
+ * Un contrato como lo recibe de verdad el área de dinero: el documento TAL COMO
+ * SE GUARDA (`nuevo`: sin el costo, en ninguna de sus dos llaves) con el costo
+ * que dijo `privado` puesto por el puente de lectura (`conCostoDelDueno`). No la
+ * forma en memoria de `construirContrato`, que todavía trae `carroAjeno.costoDia`:
+ * con ella las pruebas del dinero dependerían de un campo que el área de dinero
+ * ya nunca recibe.
+ */
+const paraDinero = (c, costoPrivado) => conCostoDelDueno(nuevo(c), costoPrivado);
+
 const sinId = ({ id: _id, ...resto }) => resto;
 
 /** Dónde está la palabra `costoDia` dentro de algo, para afirmar que NO está en ningún lado. */
@@ -399,9 +410,15 @@ function nubeEnMemoria({
       const datos = docs.get(ref.ruta);
       return { exists: () => datos !== undefined, data: () => structuredClone(datos) };
     },
+    // Una consulta con `where`, como la de cargarContratos por rango de fechas.
+    where: (campo, operador, valor) => ({ campo, operador, valor }),
+    query: (col, ...restricciones) => ({ ...col, restricciones }),
     getDocs: async (col) => {
       llamadas.push(['getDocs', col.coleccion, col.db.nombre]);
       if (falla('getDocs', col.coleccion)) throw new Error('sin internet');
+      const cumple = (datos) => (col.restricciones ?? []).every(({ campo, operador, valor }) => (
+        operador === '>=' ? datos[campo] >= valor : datos[campo] <= valor
+      ));
       // Las reglas: `pagosDueno` solo se lee con la credencial de dinero.
       if (col.coleccion === 'pagosDueno' && !col.db.esDinero) {
         throw Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' });
@@ -409,6 +426,7 @@ function nubeEnMemoria({
       return {
         docs: [...docs]
           .filter(([ruta]) => ruta.startsWith(`${col.coleccion}/`) && ruta.split('/').length === 2)
+          .filter(([, datos]) => cumple(datos))
           .map(([ruta, datos]) => ({ id: ruta.split('/')[1], data: () => structuredClone(datos) })),
       };
     },
@@ -494,6 +512,7 @@ function copiaLocalEnMemoria(iniciales = []) {
     guardados,
     leerCopia: async () => [...guardados.values()].map((c) => structuredClone(c)),
     guardarCopia: async (_coleccion, docs) => { for (const d of docs) guardados.set(d.id, structuredClone(d)); },
+    borrarCopia: async (_coleccion, ids) => { for (const id of ids) guardados.delete(id); },
   };
 }
 
@@ -679,16 +698,76 @@ test('guardarContrato: un contrato sin id recibe uno, y privado y contrato caen 
 });
 
 test('guardarContrato: guardar un contrato viejo (con su costo adentro) no lo migra a escondidas', async () => {
-  // La migración es a mano, una vez, y alguien la ve correr. Guardar un viejo
-  // copia su costo a privado y deja de escribirlo, pero no le borra al
-  // documento lo que ya tenía en la nube (set con merge no borra campos).
+  // La migración es a mano, una vez, y alguien la ve correr. Guardar un contrato
+  // que ya existía (cobrar el saldo, recibir el carro) no escribe su costo en
+  // `privado` ni le borra al documento lo que ya tenía en la nube (set con merge
+  // no borra campos): el costo se queda donde está hasta que la migración lo mueva.
   const antiguo = viejo(salidaAjena({ id: 'c1', costoDia: 400 }));
   const nube = nubeEnMemoria({ contratos: [antiguo] });
   const copia = copiaLocalEnMemoria();
   await guardarYMirar({ ...antiguo, observaciones: 'cobró el saldo' }, nube, copia);
-  assert.equal(nube.leer('contratos/c1/privado/dinero').costoDia, 400);
+  assert.equal(nube.leer('contratos/c1/privado/dinero'), undefined, 'privado no se tocó');
   assert.equal(nube.leer('contratos/c1').subarriendo.costoDia, 400, 'sigue en el documento hasta que se corra la migración');
-  assert.equal(traeCostoDia([...copia.guardados.values()]), false, 'pero lo que se escribe ya no lo lleva');
+  assert.equal(nube.leer('contratos/c1').observaciones, 'cobró el saldo', 'y el guardado en sí sí se hizo');
+  assert.equal(traeCostoDia([...copia.guardados.values()]), false, 'pero lo que se escribe a la copia local ya no lo lleva');
+});
+
+// ---------- `privado` manda también al guardar (M2 de la revisión) ----------
+//
+// Al LEER manda `privado` (el puente, `conCostoDelDueno`) y la migración no pisa
+// un costo distinto en `privado` (lo deja como conflicto, para revisarlo). Pero
+// `guardarContrato` hacía lo contrario: el costo que traía el documento se
+// escribía encima de `privado`, y un conflicto que la migración había dejado
+// para revisar se resolvía en silencio, a favor del documento, la siguiente vez
+// que el mostrador guardaba cualquier cobro. La sesión normal no puede LEER
+// `privado` (las reglas), así que no puede saber qué hay ahí: por eso un contrato
+// que ya existía nunca escribe su costo en `privado`. Solo lo hace la primera vez
+// que se guarda (Sacar carro, donde `privado` está vacío por construcción) y lo
+// hace la migración, que sí lo lee antes de tocar nada.
+
+test('M2: guardar un contrato que ya existía NO pisa lo que hay en privado, aunque el documento traiga otro costo', async () => {
+  const antiguo = viejo(salidaAjena({ id: 'c1', costoDia: 400 })); // el documento dice 400…
+  const nube = nubeEnMemoria({ contratos: [antiguo], privados: { c1: { costoDia: 450 } } }); // …y privado dice 450
+  await guardarYMirar({ ...antiguo, observaciones: 'cobró el saldo' }, nube);
+  assert.equal(nube.leer('contratos/c1/privado/dinero').costoDia, 450, 'manda privado');
+  assert.deepEqual(nube.escrituras().map(([, ruta]) => ruta), ['contratos/c1'], 'privado ni se escribió');
+});
+
+test('M2: un guardado ordinario no resuelve en silencio el conflicto que dejó la migración', async () => {
+  const antiguo = viejo(CERRADO('a', 400));
+  const nube = nubeEnMemoria({ contratos: [antiguo], privados: { a: { costoDia: 450 } } });
+  const antes = await migrar(nube);
+  assert.deepEqual(antes.conflictos, [{ id: 'a', numero: 1 }], 'punto de partida: un conflicto para revisar');
+
+  await guardarYMirar({ ...nube.leer('contratos/a'), observaciones: 'cobró el saldo' }, nube);
+
+  assert.equal(nube.leer('contratos/a/privado/dinero').costoDia, 450);
+  const despues = await migrar(nube);
+  assert.deepEqual(despues.conflictos, [{ id: 'a', numero: 1 }], 'sigue siendo un conflicto: nadie lo decidió');
+  assert.equal(despues.migrados, 0);
+});
+
+test('M2: la primera vez que se guarda un contrato nuevo sí escribe su costo en privado, y un reintento cae en el mismo lugar', async () => {
+  const nube = nubeEnMemoria({ fallan: [{ op: 'setDoc', ruta: 'contratos/c1' }] });
+  const contrato = salidaAjena({ id: 'c1', costoDia: 400 });
+  assert.equal('actualizado' in contrato, false, 'punto de partida: un contrato recién armado no trae sello');
+
+  await assert.rejects(guardarYMirar(contrato, nube), /sin internet/);
+  assert.equal(nube.leer('contratos/c1/privado/dinero').costoDia, 400, 'privado quedó escrito aunque el contrato no');
+  // Sacar carro reintenta con el MISMO contrato en memoria (guardarContrato no lo muta).
+  nube.fallan.length = 0;
+  await guardarYMirar(contrato, nube);
+
+  assert.deepEqual(nube.leer('contratos/c1/privado/dinero'), { id: 'c1', costoDia: 400 });
+  assert.ok(nube.leer('contratos/c1'), 'y ahora el contrato también');
+  assert.equal(traeCostoDia(nube.leer('contratos/c1')), false);
+});
+
+test('M2: un contrato que ya existía y NO trae costo sigue sin tocar privado (como antes)', async () => {
+  const migrado = nuevo(salidaAjena({ id: 'c1', costoDia: 400 }));
+  const nube = nubeEnMemoria({ contratos: [migrado], privados: { c1: { costoDia: 450 } } });
+  await guardarYMirar({ ...migrado, observaciones: 'x' }, nube);
+  assert.equal(nube.leer('contratos/c1/privado/dinero').costoDia, 450);
 });
 
 // ---------- El área de dinero carga contratos con su costo ----------
@@ -892,6 +971,212 @@ test('de punta a punta: lo que guarda Sacar carro llega al área de dinero, y la
   });
   assert.equal(costoDelSubarriendo(r.datos[0]), 1600);
   assert.equal(traeCostoDia([...copia.guardados.values()]), false, 'después de cargar para dinero, IndexedDB sigue sin el costo');
+});
+
+// ---------- La copia local nunca guarda el costo, y el área de dinero no lo lee de ahí (C1) ----------
+//
+// ADR-002 promete que un contrato migrado deja de exponer el costo a quien solo
+// tenga la sesión normal. La revisión lo desmintió contra IndexedDB de verdad: la
+// computadora del mostrador, que corrió el sistema meses antes de ADR-002, guarda
+// el costo de todos los subarriendos viejos, la migración (que corre en la
+// computadora del dueño) no la toca, y solo se limpia de los meses que vuelva a
+// abrir. La regla que decidió el dueño del proyecto: la copia local NUNCA guarda el
+// costo de un subarriendo, en ninguna computadora, haya corrido la migración o no.
+// Tres piezas que se sostienen una a la otra, y cada una tiene su prueba:
+//   1. el área de dinero lee el costo de la NUBE y no de la copia local, para que
+//      limpiar la copia no esconda un costo que aún no se migró;
+//   2. sincronizar no vuelve a escribir en la copia local el costo que una nube sin
+//      migrar todavía trae;
+//   3. al arrancar se limpia lo que ya estaba guardado (`limpiarCopiaLocalDelCosto`).
+//
+// QUÉ CUBREN: la lógica, con una nube y una copia local de mentira. NO cubren que
+// IndexedDB de verdad guarde, lea y borre así, ni que `app.js` llame a la limpieza
+// al arrancar con un navegador real: eso se miró en un navegador (ver el reporte).
+
+/** Todo lo que las lecturas de contratos reciben de afuera: la nube, la sesión de dinero y la copia local de mentira. */
+const conLaNube = (nube, copia) => ({
+  iniciar: nube.iniciar,
+  dbDinero: () => nube.dbDinero,
+  leerCopia: copia.leerCopia,
+  guardarCopia: copia.guardarCopia,
+  borrarCopia: copia.borrarCopia,
+});
+
+/** La copia local con una lectura contada, para afirmar que NO se leyó. */
+const copiaContada = (iniciales) => {
+  const copia = copiaLocalEnMemoria(iniciales);
+  const leidas = { veces: 0 };
+  return { ...copia, leidas, leerCopia: async (...a) => { leidas.veces += 1; return copia.leerCopia(...a); } };
+};
+
+test('C1: el área de dinero lee el costo de la NUBE — una copia local ya limpiada no esconde un costo que aún no se migró', async () => {
+  const antiguo = viejo(CERRADO('c1', 400)); // la nube todavía lo trae en el documento, y privado está vacío
+  const nube = nubeEnMemoria({ contratos: [antiguo] });
+  // Esta computadora ya se limpió: su copia no trae el costo, y trae el MISMO sello.
+  const copia = copiaContada([sinCostoDelDueno(antiguo)]);
+  assert.equal(traeCostoDia([...copia.guardados.values()]), false, 'punto de partida: la copia local ya está limpia');
+
+  const r = await cargarContratosParaDinero({}, undefined, conLaNube(nube, copia));
+
+  assert.equal(costoDelSubarriendo(r.datos[0]), 1600, 'la deuda real sigue viéndose: el costo salió del documento en la nube');
+  assert.deepEqual(cuentaDeDueno({ contratos: r.datos, pagos: [] }).sinCostoAnotado, []);
+  assert.deepEqual(r.costoSinLeer, []);
+  assert.equal(r.fallo, false);
+});
+
+test('C1: el área de dinero NO lee la copia local — lo que esa copia diga del costo (viejo, sin limpiar) no cuenta', async () => {
+  const nube = nubeEnMemoria({ contratos: [viejo(CERRADO('c1', 400))] }); // la nube dice 400
+  const copia = copiaContada([viejo(CERRADO('c1', 999))]); // una copia vieja y sin limpiar dice 999
+  const r = await cargarContratosParaDinero({}, undefined, conLaNube(nube, copia));
+  assert.equal(r.datos[0].subarriendo.costoDia, 400);
+  assert.equal(copia.leidas.veces, 0, 'ni siquiera se abrió la copia local');
+  assert.equal(nube.llamadas.filter(([op]) => op === 'getDocs').length, 1, 'de la nube sí');
+});
+
+test('C1: el costo de privado, ya migrado, también sale de la nube — y la copia local no se escribe', async () => {
+  const guardado = nuevo(CERRADO('c1', 400));
+  const nube = nubeEnMemoria({ contratos: [guardado], privados: { c1: { costoDia: 400 } } });
+  const copia = copiaContada([]);
+  const r = await cargarContratosParaDinero({}, undefined, conLaNube(nube, copia));
+  assert.equal(costoDelSubarriendo(r.datos[0]), 1600);
+  assert.equal(copia.guardados.size, 0, 'cargar para dinero no deja nada en IndexedDB');
+});
+
+test('C1: el área de dinero pide a la nube solo el rango de fechas que se le pidió', async () => {
+  const septiembre = nuevo(CERRADO('c1', 400)); // fechaSalida 2026-09-01
+  const octubre = { ...nuevo(CERRADO('c2', 250)), fechaSalida: '2026-10-05' };
+  const nube = nubeEnMemoria({ contratos: [septiembre, octubre], privados: { c1: { costoDia: 400 }, c2: { costoDia: 250 } } });
+  const r = await cargarContratosParaDinero({ desde: '2026-09-01', hasta: '2026-09-30' }, undefined, conLaNube(nube, copiaContada([])));
+  assert.deepEqual(r.datos.map((c) => c.id), ['c1']);
+});
+
+test('C1: si la nube no contesta se ven los contratos de la copia local pero SIN costo, y se avisa (fallo) — ni lista vacía ni un costo viejo', async () => {
+  const nube = nubeEnMemoria({
+    contratos: [viejo(CERRADO('c1', 400))],
+    fallan: [{ op: 'getDocs', ruta: 'contratos' }, { op: 'getDoc', ruta: 'contratos/c1/privado/dinero' }],
+  });
+  // Una copia local de una computadora que todavía no se limpió: trae el costo.
+  const copia = copiaContada([viejo(CERRADO('c1', 400)), { ...viejo(CERRADO('c9', 100)), fechaSalida: '2026-12-01' }]);
+
+  const r = await cargarContratosParaDinero({ desde: '2026-09-01', hasta: '2026-09-30' }, undefined, conLaNube(nube, copia));
+
+  assert.equal(r.fallo, true);
+  assert.deepEqual(r.datos.map((c) => c.id), ['c1'], 'lo local del rango pedido, no una lista vacía');
+  assert.equal(traeCostoDia(r.datos), false, 'el costo de la copia local no llega a la pantalla de dinero');
+  assert.deepEqual(r.costoSinLeer, ['c1']);
+  assert.deepEqual(cuentaDeDueno({ contratos: r.datos, pagos: [] }).sinCostoAnotado, ['c1'], 'sin costo, no se puede pagar');
+  assert.equal(traeCostoDia([...copia.guardados.values()]), true, 'y esta lectura no tocó la copia local');
+});
+
+test('C1: sincronizar contratos de una nube SIN migrar no escribe el costo en la copia local', async () => {
+  const antiguos = [viejo(CERRADO('c1', 400)), viejo(CERRADO('c2', 250))];
+  const nube = nubeEnMemoria({ contratos: antiguos });
+  const copia = copiaLocalEnMemoria();
+
+  const r = await cargarContratos({}, undefined, conLaNube(nube, copia));
+
+  assert.equal(r.datos.length, 2, 'primera vez en esta computadora: se esperó a la nube');
+  assert.equal(copia.guardados.size, 2, 'los contratos sí quedaron en la copia local');
+  assert.equal(traeCostoDia([...copia.guardados.values()]), false, 'pero sin el costo del dueño, en ninguna de las dos llaves');
+  // Y lo demás del contrato llegó completo.
+  assert.equal(copia.guardados.get('c1').carroAjeno.dueno, 'Mario López');
+  assert.equal(copia.guardados.get('c1').ajeno, true);
+});
+
+test('C1: la sincronía de FONDO de contratos tampoco lo escribe — ni sobre una copia local que ya estaba limpia', async () => {
+  const antiguo = viejo(CERRADO('c1', 400));
+  const nube = nubeEnMemoria({ contratos: [antiguo] });
+  const copia = copiaLocalEnMemoria([sinCostoDelDueno(antiguo)]); // limpia, mismo sello: la nube lo reemplaza (mezclar)
+  const escrita = new Promise((ok) => {
+    cargarContratos({}, undefined, {
+      ...conLaNube(nube, copia),
+      guardarCopia: async (c, d) => { await copia.guardarCopia(c, d); ok(); },
+    });
+  });
+  await escrita;
+  assert.equal(traeCostoDia([...copia.guardados.values()]), false, 'la nube sin migrar no lo devuelve a IndexedDB');
+});
+
+test('C1: la lectura de contratos abiertos (la de la flota) tampoco lo escribe', async () => {
+  const nube = nubeEnMemoria({ contratos: [viejo(salidaAjena({ id: 'c1', costoDia: 400 }))] });
+  const copia = copiaLocalEnMemoria();
+  const r = await cargarContratosAbiertos(undefined, conLaNube(nube, copia));
+  assert.equal(r.datos.length, 1);
+  assert.equal(traeCostoDia([...copia.guardados.values()]), false);
+});
+
+test('C1: lo que sincronizar le entrega a la pantalla no se mutó: la limpieza es solo de lo que se escribe a la copia local', async () => {
+  const antiguo = viejo(salidaAjena({ id: 'c1', costoDia: 400 }));
+  const nube = nubeEnMemoria({ contratos: [antiguo] });
+  const entregado = await cargarContratos({}, undefined, conLaNube(nube, copiaLocalEnMemoria()));
+  // Antes de ADR-002 la nube lo trae, y una sesión normal ya lo lee de ahí: no se esconde en memoria.
+  assert.equal(entregado.datos[0].subarriendo.costoDia, 400);
+});
+
+// ---------- La limpieza de arranque ----------
+
+test('limpiarCopiaLocalDelCosto: le pide a la copia local limpiar la colección entera, y una sola vez por computadora', async () => {
+  const pedidos = [];
+  await limpiarCopiaLocalDelCosto({ depurar: async (...a) => { pedidos.push(a); return { revisados: 0, cambiados: 0, yaHecha: false }; } });
+  assert.equal(pedidos.length, 1);
+  assert.equal(pedidos[0][0], 'contratos');
+  assert.equal(pedidos[0][2].marca, MARCA_COPIA_SIN_COSTO, 'con marca: es lo que hace que corra una sola vez');
+  assert.ok(MARCA_COPIA_SIN_COSTO.length > 0);
+});
+
+test('limpiarCopiaLocalDelCosto: lo que le manda a la copia local quita el costo de las dos llaves y deja lo demás', async () => {
+  let limpiar;
+  await limpiarCopiaLocalDelCosto({ depurar: async (_c, f) => { limpiar = f; } });
+
+  const sucio = viejo(salidaAjena({ id: 'c1', costoDia: 400 }));
+  const original = structuredClone(sucio);
+  const limpio = limpiar(sucio);
+  assert.equal(traeCostoDia(limpio), false);
+  assert.equal(limpio.carroAjeno.dueno, 'Mario López');
+  assert.equal(limpio.ajeno, true);
+  assert.deepEqual(sucio, original, 'el documento que recibe no se muta');
+
+  // Siempre devuelve un documento nuevo (nunca null) cuando había una llave de costo.
+  const limpiado = (c) => {
+    const r = limpiar(c);
+    assert.ok(r, `no devolvió el documento limpio de ${JSON.stringify(c)}`);
+    return r;
+  };
+  // Solo una de las dos llaves (la segunda copia que nadie leía, o la primera suelta).
+  assert.equal(traeCostoDia(limpiado({ id: 'a', ajeno: true, carroAjeno: { placas: 'P-1', costoDia: 250 } })), false);
+  assert.equal(traeCostoDia(limpiado({ id: 'b', ajeno: true, subarriendo: { costoDia: 250 } })), false);
+  // Con la llave presente pero vacía o en cero, igual: lo que importa es que no quede ninguna.
+  for (const costoDia of [0, '', null, 'abc']) {
+    assert.equal(traeCostoDia(limpiado({ id: 'c', ajeno: true, subarriendo: { costoDia }, carroAjeno: { costoDia } })), false, `costoDia: ${String(costoDia)}`);
+    assert.equal(traeCostoDia(limpiado({ id: 'd', ajeno: true, carroAjeno: { placas: 'P-1', costoDia } })), false, `solo carroAjeno, costoDia: ${String(costoDia)}`);
+  }
+});
+
+test('limpiarCopiaLocalDelCosto: lo que ya está limpio, o es de un carro propio, no se vuelve a escribir (devuelve null)', async () => {
+  let limpiar;
+  await limpiarCopiaLocalDelCosto({ depurar: async (_c, f) => { limpiar = f; } });
+  assert.equal(limpiar(nuevo(salidaAjena({ id: 'c1' }))), null);
+  assert.equal(limpiar(nuevo(salidaPropia({ id: 'p1' }))), null);
+  assert.equal(limpiar(viejo(salidaPropia({ id: 'p2' }))), null, 'subarriendo: null no es un costo');
+  assert.equal(limpiar(null), null);
+  assert.equal(limpiar({ id: 'x' }), null);
+});
+
+test('limpiarCopiaLocalDelCosto: si la copia local falla, el error SALE — sin marca, el siguiente arranque lo reintenta', async () => {
+  const error = new Error('VersionError');
+  await assert.rejects(limpiarCopiaLocalDelCosto({ depurar: async () => { throw error; } }), (e) => e === error);
+});
+
+test('estructura: app.js llama a limpiarCopiaLocalDelCosto al arrancar, sin esperar a ninguna sesión', () => {
+  // NO es una prueba de comportamiento: lee el código fuente. app.js toca el DOM
+  // y no se puede importar en Node; que de verdad corra al abrir el sistema se
+  // miró en un navegador. Esto solo cuida que nadie quite la llamada sin querer.
+  const fuente = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(fuente, /import \{[^}]*\blimpiarCopiaLocalDelCosto\b[^}]*\} from '\.\/datos\.js';/);
+  const llamada = fuente.indexOf('limpiarCopiaLocalDelCosto()');
+  assert.ok(llamada > 0, 'app.js no llama a limpiarCopiaLocalDelCosto()');
+  assert.ok(llamada < fuente.indexOf('alCambiarSesion(('), 'debe correr antes de esperar la sesión: la copia local es de la computadora, no de quien entra');
+  assert.match(fuente.slice(llamada, llamada + 200), /\.catch\(/, 'un fallo se avisa en consola; no revienta el arranque');
 });
 
 // ---------- La migración ----------
@@ -1234,12 +1519,12 @@ test('pagoDuenoParaGuardar: no modifica el pago que recibe, y lo que no conoce s
 // y p9, un carro propio cerrado, que no le debe nada a nadie.
 const SELECCION = {
   contratos: [
-    CERRADO('c1', 400, 4),
-    CERRADO('c2', 250, 3),
-    salidaAjena({ id: 'c3', costoDia: 300 }),
-    CERRADO('c4', 100, 4),
-    CERRADO('c5', 500, 2),
-    devuelto(salidaPropia({ id: 'p9' })),
+    paraDinero(CERRADO('c1', 400, 4), 400),
+    paraDinero(CERRADO('c2', 250, 3), 250),
+    paraDinero(salidaAjena({ id: 'c3', costoDia: 300 }), 300),
+    paraDinero(CERRADO('c4', 100, 4), 100),
+    paraDinero(CERRADO('c5', 500, 2), 500),
+    paraDinero(devuelto(salidaPropia({ id: 'p9' }))),
   ],
   pagos: [pagoDuenoParaGuardar(
     { duenoId: 'd1', fecha: '2026-09-10', forma: 'efectivo', monto: 400, contratos: ['c4'] },
@@ -1250,6 +1535,16 @@ const TODOS_LOS_IDS = ['c1', 'c2', 'c3', 'c4', 'c5', 'p9', 'no-existe'];
 
 const construirDe = (idsMarcados, extra = {}) => construirPagoDueno({
   duenoId: 'd1', fecha: '2026-09-20', forma: 'transferencia', ...SELECCION, idsMarcados, ...extra,
+});
+
+test('los contratos de estas pruebas son los que recibe el área de dinero: sin carroAjeno.costoDia, con el costo del puente', () => {
+  const ajenos = SELECCION.contratos.filter((c) => c.ajeno);
+  assert.equal(ajenos.length, 5);
+  for (const c of ajenos) {
+    assert.equal('costoDia' in c.carroAjeno, false, `${c.id}: la segunda copia del costo no llega al área de dinero`);
+    assert.equal(typeof c.subarriendo.costoDia, 'number', `${c.id}: el costo lo puso el puente de lectura`);
+    assert.equal(typeof c.actualizado, 'number', `${c.id}: es un documento guardado, con su sello`);
+  }
 });
 
 test('construirPagoDueno: el pago de lo marcado lleva su monto exacto y sus ids, en el orden de la lista', () => {
@@ -1355,6 +1650,174 @@ test('construirPagoDueno: un pago dañado en la lista (sin su lista de contratos
   assert.throws(() => construirDe(['c1'], { pagos: [{ id: 'p5', monto: 1600 }] }), /«contratos» de un pago/);
 });
 
+// ---------- Una renta sin costo legible no se puede pagar (I1 de la revisión) ----------
+//
+// La revisión lo reprodujo: dos contratos cerrados, `cz` con costo guardado en 0
+// y `sl` con Q777 por día en `privado` pero cuya lectura falló. `cuentaDeDueno`
+// los marca bien en `sinCostoAnotado`, él los marcaba igual, y el pago salía por
+// Q0.00 sobre las dos rentas: la deuda desaparecía de «por pagar» para siempre y
+// existía un comprobante «Le pagué Q0.00». Un número que falta, leído como un
+// cero de verdad, justo en el paso que no se deshace desde la pantalla.
+//
+// Los contratos de estas pruebas tienen la forma que de verdad recibe el área de
+// dinero (`paraDinero`, arriba), no la forma en memoria de `construirContrato`.
+
+/** Cuatro contratos cerrados, con número distinto para poder nombrarlos: c1 normal, cz en cero, sl sin leer, ca con costo en el documento. */
+const cerradoN = (id, numero, costoDia, dias = 4) => devuelto(salidaAjena({ id, numero, costoDia, dias }));
+const SIN_COSTO = {
+  contratos: [
+    paraDinero(cerradoN('c1', 11, 400), 400), // 4 × 400 = 1,600
+    paraDinero(cerradoN('cz', 12, 0), 0), // el costo se guardó en 0
+    paraDinero(cerradoN('sl', 13, 777), undefined), // privado dice 777, pero no se pudo leer: no llegó ningún costo
+    conCostoDelDueno(viejo(cerradoN('ca', 14, 300)), undefined), // costo viejo en el documento; privado no se pudo leer
+  ],
+  pagos: [],
+};
+const construirSinCosto = (idsMarcados, extra = {}) => construirPagoDueno({
+  duenoId: 'd1', fecha: '2026-09-20', forma: 'efectivo', ...SIN_COSTO, idsMarcados, costoSinLeer: ['sl', 'ca'], ...extra,
+});
+
+test('I1: el punto de partida — la liquidación sí los marca, y los cuatro están por pagar', () => {
+  const cuenta = cuentaDeDueno(SIN_COSTO);
+  assert.deepEqual(cuenta.porPagar.map((c) => c.id), ['c1', 'cz', 'sl', 'ca']);
+  assert.deepEqual(cuenta.sinCostoAnotado, ['cz', 'sl'], 'cz: costo 0; sl: ningún costo llegó. ca trae costo por dentro');
+  assert.equal(traeCostoDia(SIN_COSTO.contratos[2]), false, 'sl no trae costo: no se le inventa uno');
+});
+
+test('I1: una renta con costo 0 o que no se pudo leer NO se puede pagar — se rechaza, no sale un pago por Q0.00', () => {
+  // La reproducción de la revisión: marcar los dos.
+  assert.throws(() => construirSinCosto(['cz', 'sl']), /No se registró el pago/);
+  // Y cada una por separado.
+  assert.throws(() => construirSinCosto(['cz']), /No se registró el pago/);
+  assert.throws(() => construirSinCosto(['sl']), /No se registró el pago/);
+});
+
+test('I1: dice POR QUÉ, con el número de contrato que él conoce — para ir a anotar el costo y no preguntarse dónde quedó la renta', () => {
+  assert.throws(() => construirSinCosto(['cz']), (e) => {
+    assert.match(e.message, /N° 12/);
+    assert.match(e.message, /no tiene costo por día anotado/);
+    assert.match(e.message, /anota/i);
+    return true;
+  });
+  // Si lo que pasó es que no se pudo LEER, es otro consejo: no «anótalo» sino «revisa tu internet».
+  assert.throws(() => construirSinCosto(['sl']), (e) => {
+    assert.match(e.message, /No se pudo leer el costo del contrato N° 13/);
+    assert.match(e.message, /internet/);
+    assert.doesNotMatch(e.message, /no tiene costo por día anotado/, 'no se acusa de «sin anotar» a lo que solo no se pudo leer');
+    return true;
+  });
+  // Varias: se nombran todas, en plural.
+  assert.throws(() => construirSinCosto(['cz', 'sl']), (e) => {
+    assert.match(e.message, /N° 12/);
+    assert.match(e.message, /N° 13/);
+    return true;
+  });
+});
+
+test('I1: «no se pudo leer privado» también la rechaza si el documento trae un costo viejo — privado manda y no se sabe qué decía', () => {
+  // `ca` tiene Q300 en el documento, así que NO está en `sinCostoAnotado`; pero
+  // privado (que ganaría si dijera otra cosa) no se pudo leer.
+  assert.deepEqual(cuentaDeDueno(SIN_COSTO).sinCostoAnotado.includes('ca'), false);
+  assert.throws(() => construirSinCosto(['ca']), /No se pudo leer el costo del contrato N° 14/);
+  // Leído bien (ya no está en `costoSinLeer`), ese mismo contrato sí se paga, por su costo viejo.
+  const pago = construirSinCosto(['ca'], { costoSinLeer: [] });
+  assert.deepEqual(pago.contratos, ['ca']);
+  assert.equal(pago.monto, 1200);
+});
+
+test('I1: no se paga ni una parte en silencio — marcar una renta buena y una sin costo rechaza todo el pago', () => {
+  assert.throws(() => construirSinCosto(['c1', 'cz']), /N° 12/);
+});
+
+test('I1: una renta sin costo que NO se marcó no estorba — las demás se pagan, y su monto es exacto', () => {
+  const pago = construirSinCosto(['c1']);
+  assert.deepEqual(pago.contratos, ['c1']);
+  assert.equal(pago.monto, 1600);
+});
+
+test('I1: lo rechazado sigue debiéndose: nada se guardó, y las dos rentas siguen en «por pagar»', async () => {
+  const nube = nubeEnMemoria();
+  assert.throws(() => construirSinCosto(['cz', 'sl']));
+  assert.equal(nube.escrituras().length, 0);
+  assert.deepEqual(cuentaDeDueno(SIN_COSTO).porPagar.map((c) => c.id), ['c1', 'cz', 'sl', 'ca']);
+});
+
+test('I1: sin la lista de rentas sin leer (no se pasó) se sigue protegiendo lo que ya se sabe: costo 0 o ausente', () => {
+  assert.throws(() => construirSinCosto(['cz'], { costoSinLeer: undefined }), /N° 12/);
+  assert.throws(() => construirSinCosto(['sl'], { costoSinLeer: undefined }), /N° 13/);
+});
+
+// ---------- Un id repetido no cuenta dos veces (M3 de la revisión) ----------
+//
+// `contratos: [c1, c1]` daba `monto: 3200, contratos: ['c1', 'c1']` sobre una
+// deuda real de 1,600: monto y lista coincidían entre sí y no con la deuda. Una
+// pantalla que junta dos lecturas de rangos de fechas que se traslapan puede
+// entregar el mismo contrato dos veces.
+
+test('M3: el mismo contrato dos veces cuenta una sola — el monto es la deuda real y el id no se repite', () => {
+  const c1 = SELECCION.contratos[0]; // Q400 × 4 = Q1,600
+  const pago = construirDe(['c1'], { contratos: [c1, c1] });
+  assert.equal(pago.monto, 1600, 'no Q3,200');
+  assert.deepEqual(pago.contratos, ['c1']);
+});
+
+test('M3: repetidos mezclados con otros contratos — todo cuenta una vez y el orden de la lista se conserva', () => {
+  const [c1, c2, , , c5] = SELECCION.contratos;
+  const pago = construirDe(['c1', 'c2', 'c5'], { contratos: [c5, c1, c2, c1, c5, c2, c1] });
+  assert.deepEqual(pago.contratos, ['c5', 'c1', 'c2'], 'cada uno en el lugar de su primera aparición');
+  assert.equal(pago.monto, 1000 + 1600 + 750);
+});
+
+test('M3: de dos copias del mismo contrato manda la más nueva, en cualquier orden — una vieja no lo «reabre» ni lo «cierra»', () => {
+  const cerrado = { ...SELECCION.contratos[0], actualizado: 200 };
+  const sinCerrar = { ...paraDinero(salidaAjena({ id: 'c1', costoDia: 400 }), 400), actualizado: 100 }; // la copia vieja: el carro seguía afuera
+  assert.equal(estadoContrato(sinCerrar), 'rentado');
+  for (const lista of [[cerrado, sinCerrar], [sinCerrar, cerrado]]) {
+    const pago = construirDe(['c1'], { contratos: lista });
+    assert.deepEqual(pago.contratos, ['c1']);
+    assert.equal(pago.monto, 1600);
+  }
+  // Y al revés: si la nueva es la que dice que sigue abierto, no se paga.
+  const reabierto = { ...sinCerrar, actualizado: 300 };
+  for (const lista of [[cerrado, reabierto], [reabierto, cerrado]]) {
+    assert.deepEqual(construirDe(['c1'], { contratos: lista }).contratos, []);
+  }
+});
+
+test('M3: quitar repetidos no cambia nada cuando no hay — las 128 combinaciones siguen dando lo mismo', () => {
+  for (let mascara = 0; mascara < 2 ** TODOS_LOS_IDS.length; mascara += 1) {
+    const marcados = TODOS_LOS_IDS.filter((_, i) => mascara & (1 << i));
+    assert.deepEqual(
+      construirDe(marcados, { contratos: [...SELECCION.contratos, ...SELECCION.contratos] }),
+      construirDe(marcados),
+      `casillas ${JSON.stringify(marcados)}`,
+    );
+  }
+});
+
+test('I1: guardarPagoDueno nunca guarda un pago por Q0.00 — se niega ANTES de gastar un número', async () => {
+  for (const monto of [0, 0.004, -5, '', null, undefined, 'abc', NaN]) {
+    const nube = nubeEnMemoria({ contadores: { comprobantes: { ultimo: 3 } } });
+    const g = guardarCon(nube, { ...pagoBase, monto, contratos: ['cz', 'sl'] });
+    await assert.rejects(g.promesa, (e) => e.message === MENSAJE_PAGO_SIN_MONTO, `monto: ${String(monto)}`);
+    assert.equal(g.numeros.pedidos, 0, 'no se gastó un comprobante');
+    assert.equal(nube.leer('contadores/comprobantes').ultimo, 3);
+    assert.equal(nube.escrituras().length, 0, 'y no se escribió nada');
+  }
+});
+
+test('I1: el rechazo por monto habla claro — dice que Q0.00 no prueba nada y qué revisar', () => {
+  assert.match(MENSAJE_PAGO_SIN_MONTO, /Q0\.00/);
+  assert.match(MENSAJE_PAGO_SIN_MONTO, /costo por día/);
+});
+
+test('I1: un pago de verdad por más de cero sigue guardándose (el candado no estorba lo bueno)', async () => {
+  const nube = nubeEnMemoria();
+  const guardado = await guardarCon(nube, construirSinCosto(['c1'])).promesa;
+  assert.equal(guardado.monto, 1600);
+  assert.deepEqual(guardado.contratos, ['c1']);
+});
+
 // ---------- siguienteNumeroComprobante ----------
 
 const numeroDe = (nube) => siguienteNumeroComprobante({ iniciar: nube.iniciar });
@@ -1404,17 +1867,28 @@ test('siguienteNumeroComprobante: si la nube falla, falla — no inventa un núm
 
 // ---------- guardarPagoDueno ----------
 
-/** Un guardado contra la nube de mentira, con la credencial de dinero puesta y un contador falso o el de verdad. */
+/**
+ * Un guardado contra la nube de mentira, con la credencial de dinero puesta y
+ * un contador falso o el de verdad.
+ *
+ * Un pago NUEVO llega sin `id` y aquí se le pide uno antes del primer intento,
+ * que es lo que tiene que hacer la pantalla (`nuevoIdPagoDueno`): sin id,
+ * `guardarPagoDueno` se niega. El id se pide con una base de dinero buena
+ * aunque `extra` ponga una mala, para que cada prueba mida lo suyo.
+ */
 function guardarCon(nube, pago, extra = {}) {
   const avisos = [];
   const numeros = { pedidos: 0 };
-  const promesa = guardarPagoDueno(pago, {
-    iniciar: nube.iniciar,
-    dbDinero: () => nube.dbDinero,
-    numeroNuevo: async () => { numeros.pedidos += 1; return siguienteNumeroComprobante({ iniciar: nube.iniciar }); },
-    avisar: (coleccion, e) => avisos.push([coleccion, e]),
-    ...extra,
-  });
+  const promesa = (async () => {
+    const id = pago.id ?? await nuevoIdPagoDueno({ iniciar: nube.iniciar, dbDinero: () => nube.dbDinero });
+    return guardarPagoDueno({ ...pago, id }, {
+      iniciar: nube.iniciar,
+      dbDinero: () => nube.dbDinero,
+      numeroNuevo: async () => { numeros.pedidos += 1; return siguienteNumeroComprobante({ iniciar: nube.iniciar }); },
+      avisar: (coleccion, e) => avisos.push([coleccion, e]),
+      ...extra,
+    });
+  })();
   return { promesa, avisos, numeros };
 }
 
@@ -1518,6 +1992,108 @@ test('guardarPagoDueno: no deja copia local — lo que se le pagó a cada dueño
   const g = guardarCon(nube, pagoBase);
   await g.promesa;
   assert.deepEqual(g.avisos, [], 'ningún intento de copia local, ni fallido');
+});
+
+// ---------- Guardar un pago es repetible (I2 de la revisión de las Tareas 6 y 7) ----------
+//
+// La revisión grabó Q4,700 contra una deuda real de Q2,350: dos llamadas con el
+// mismo pago daban dos documentos, con los comprobantes 1 y 2, sobre las mismas
+// rentas. Un doble clic lo hace, y también el reintento de quien vio fallar el
+// primer intento por el límite de 8 segundos mientras la escritura seguía en
+// camino — justo lo que pasa con mala conexión, cuando más probable es que
+// vuelva a apretar el botón. Los contratos lo resolvieron con `nuevoIdContrato`:
+// el id se decide ANTES de escribir, y un reintento cae en el mismo documento.
+//
+// QUÉ CUBREN: que, con el mismo id, dos guardados son un solo documento en la
+// Firestore de mentira, y que `guardarPagoDueno` no deja guardar sin id. NO
+// cubren que el SDK de verdad aplique `setDoc` con `merge` sobre el mismo
+// documento ni en qué orden aterrizan dos escrituras en vuelo: eso es de
+// Firebase, no se probó aquí.
+
+const losPagos = (nube) => [...nube.docs.keys()].filter((r) => r.startsWith('pagosDueno/'));
+const sumaDeLoGuardado = (nube) => losPagos(nube).reduce((total, ruta) => total + nube.docs.get(ruta).monto, 0);
+
+test('nuevoIdPagoDueno: da un id sin escribir nada, con la colección de dinero, y cada uno es distinto', async () => {
+  const nube = nubeEnMemoria();
+  const pedir = () => nuevoIdPagoDueno({ iniciar: nube.iniciar, dbDinero: () => nube.dbDinero });
+  const a = await pedir();
+  const b = await pedir();
+  assert.ok(a && b && a !== b);
+  assert.equal(nube.escrituras().length, 0, 'pedir el id no escribe nada: como nuevoIdContrato, solo lo decide');
+  assert.equal(nube.docs.size, 0);
+});
+
+test('nuevoIdPagoDueno: sin sesión de dinero se niega con la frase de siempre y ni arranca Firebase', async () => {
+  const nube = nubeEnMemoria();
+  let arrancó = false;
+  await assert.rejects(
+    nuevoIdPagoDueno({ iniciar: async () => { arrancó = true; return nube.iniciar(); }, dbDinero: () => null }),
+    (e) => e.message === MENSAJE_PAGO_SIN_DINERO,
+  );
+  assert.equal(arrancó, false);
+});
+
+test('guardarPagoDueno: apretar el botón dos veces (mismo id) es UN comprobante, no dos — la suma sigue siendo la deuda', async () => {
+  const nube = nubeEnMemoria();
+  const id = await nuevoIdPagoDueno({ iniciar: nube.iniciar, dbDinero: () => nube.dbDinero });
+  const pago = { ...pagoBase, id };
+  const [a, b] = await Promise.all([guardarCon(nube, pago).promesa, guardarCon(nube, pago).promesa]);
+
+  assert.equal(a.id, b.id);
+  assert.equal(losPagos(nube).length, 1, 'un solo documento en pagosDueno');
+  assert.equal(sumaDeLoGuardado(nube), 2350, 'lo registrado es lo que se debía, no Q4,700');
+});
+
+test('guardarPagoDueno: el reintento después de que el primer intento venció cae en el MISMO documento', async () => {
+  const nube = nubeEnMemoria();
+  const id = await nuevoIdPagoDueno({ iniciar: nube.iniciar, dbDinero: () => nube.dbDinero });
+  // El primer intento vence por el límite de 8 s, pero la escritura sí llegó a
+  // la nube (iba en camino). Quien lo vio fallar vuelve a apretar el botón.
+  let primera = true;
+  const fsVence = {
+    ...nube.fsMod,
+    setDoc: async (...a) => {
+      await nube.fsMod.setDoc(...a);
+      if (primera) { primera = false; throw new Error('La nube no respondió a tiempo.'); }
+    },
+  };
+  const iniciar = async () => ({ db: nube.dbMostrador, fsMod: fsVence });
+  const pago = { ...pagoBase, id };
+  await assert.rejects(guardarCon(nube, pago, { iniciar }).promesa, /no respondió a tiempo/);
+  const reintento = await guardarCon(nube, pago, { iniciar }).promesa;
+
+  assert.equal(losPagos(nube).length, 1, 'el reintento no creó un segundo documento');
+  assert.equal(reintento.id, id);
+  assert.equal(sumaDeLoGuardado(nube), 2350);
+  assert.deepEqual(nube.leer(`pagosDueno/${id}`), reintento, 'lo que quedó es lo que el reintento devolvió');
+});
+
+test('guardarPagoDueno: pagos DISTINTOS (cada uno con su id) siguen siendo documentos distintos', async () => {
+  const nube = nubeEnMemoria();
+  const a = await guardarCon(nube, pagoBase).promesa;
+  const b = await guardarCon(nube, { ...pagoBase, contratos: ['c5'], monto: 1000 }).promesa;
+  assert.notEqual(a.id, b.id);
+  assert.equal(losPagos(nube).length, 2);
+});
+
+test('guardarPagoDueno: sin id se niega ANTES de gastar un número — un guardado que no se puede repetir no existe', async () => {
+  const nube = nubeEnMemoria({ contadores: { comprobantes: { ultimo: 3 } } });
+  for (const id of [undefined, null, '']) {
+    const numeros = { pedidos: 0 };
+    await assert.rejects(
+      guardarPagoDueno({ ...pagoBase, id }, {
+        iniciar: nube.iniciar,
+        dbDinero: () => nube.dbDinero,
+        numeroNuevo: async () => { numeros.pedidos += 1; return 99; },
+        avisar: () => {},
+      }),
+      (e) => e.message === MENSAJE_PAGO_SIN_ID,
+      `id: ${String(id)}`,
+    );
+    assert.equal(numeros.pedidos, 0);
+  }
+  assert.equal(nube.leer('contadores/comprobantes').ultimo, 3);
+  assert.equal(nube.escrituras().length, 0);
 });
 
 // ---------- cargarPagosDueno ----------

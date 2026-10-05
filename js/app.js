@@ -12,6 +12,7 @@ import { pintarContratos } from './pantallas/contratos.js';
 import { pintarReservas } from './pantallas/reservas.js';
 import { pintarCalendario } from './pantallas/calendario.js';
 import { vigilarVersion } from './version.js';
+import { limpiarCopiaLocalDelCosto } from './datos.js';
 
 registrarPantalla('#/flota', pintarFlota);
 registrarPantalla('#/sacar/:carroId', pintarSacarCarro);
@@ -101,6 +102,16 @@ botonSalir.addEventListener('click', () => {
 
 // Comienza a vigilar la versión desde el arranque.
 vigilarVersion();
+
+// Limpia, una vez por computadora, el costo de los dueños que la copia local de
+// contratos haya guardado desde antes de ADR-002. Va aquí y no tras iniciar
+// sesión: IndexedDB es del navegador y no de la cuenta, y sobrevive a «Salir»,
+// así que quien se siente en esta computadora la lee igual. Corre por detrás y
+// sin esperar: si falla (otra pestaña con la base bloqueada, por ejemplo) no hay
+// marca puesta y el siguiente arranque lo reintenta; al dueño no le cambia nada.
+limpiarCopiaLocalDelCosto().catch((error) => {
+  console.warn('No se pudo limpiar el costo de los dueños de la copia local de contratos:', error);
+});
 
 // Escucha la sesión antes de dibujar nada: mientras Firebase no exista de
 // verdad (claves sin pegar en firebase-config.js) esta promesa se rechaza, y
