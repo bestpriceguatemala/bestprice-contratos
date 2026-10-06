@@ -8,6 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { avisosDeSalida } from '../js/nucleo/avisos.js';
+import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
 
 const cliente = { id: 'k1', licenciaExpira: '2030-02-09', documentoExpira: '2030-02-09' };
 const carro = { id: 'v1', placas: 'P-234IFN' };
@@ -231,4 +232,120 @@ test('con tres reservaciones cruzadas, el plural dice "reservaciones" (sin tilde
   assert.match(r[0].mensaje, /21 ago 2026/);
   assert.match(r[0].mensaje, /2 reservaciones más/);
   assert.doesNotMatch(r[0].mensaje, /reservaciónes/, 'la tilde se cae en el plural: "reservaciones", no "reservaciónes"');
+});
+
+// ---------- El carro que ya volvió no choca con lo que se había previsto ----------
+//
+// El dueño: «recibí el carro antes y ya quedó libre, pero me sigue apareciendo que
+// lo devuelven el 12». Un contrato de la renta del 3 al 12 de octubre, recibido el
+// 6, sigue ABIERTO mientras le quede un saldo (aquí, Q200 de daños) y por eso entra
+// a `contratosDelCarro`; el aviso comparaba contra la devolución PREVISTA y le
+// pintaba un rojo falso a un carro que estaba en el patio. Un aviso que se
+// equivoca siempre enseña a ignorar los que no se equivocan.
+//
+// Los contratos se arman con las funciones que arman los reales
+// (pruebas/fixtures/contratoDeUnCarro.mjs): el regreso es `cierre.fechaReal`.
+
+const recibidoElSeis = () => contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 9, recibidoEl: '2026-10-06' });
+const rentaDelSiete = { ...contrato, fechaSalida: '2026-10-07', dias: 3, devolucionPrevista: '2026-10-10' };
+
+test('un carro recibido antes de lo previsto NO avisa que está comprometido hasta la fecha prevista', () => {
+  const abierto = recibidoElSeis();
+  assert.equal(abierto.estado, 'devuelto', 'el escenario: el contrato sigue abierto');
+  assert.equal(abierto.devolucionPrevista, '2026-10-12');
+  assert.deepEqual(avisosDeSalida({
+    ...base, hoy: '2026-10-07', contrato: rentaDelSiete, contratosDelCarro: [abierto],
+  }), []);
+});
+
+test('lo que SÍ se cruza con el tiempo que el carro estuvo afuera sigue avisando, y dice el día real de regreso', () => {
+  const abierto = recibidoElSeis();
+  // Una renta del 5 al 8 empieza antes de que el carro volviera, el 6: choque de verdad.
+  const r = avisosDeSalida({
+    ...base,
+    hoy: '2026-10-05',
+    contrato: { ...contrato, fechaSalida: '2026-10-05', dias: 3, devolucionPrevista: '2026-10-08' },
+    contratosDelCarro: [abierto],
+  });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].nivel, 'alto');
+  assert.match(r[0].mensaje, /3 oct 2026 al 6 oct 2026/, 'el día en que de verdad volvió');
+  assert.doesNotMatch(r[0].mensaje, /12 oct/, 'no la fecha prevista, que ya no es cierta');
+});
+
+test('el día en que el carro volvió puede volver a salir: tocarse no es cruzarse', () => {
+  assert.deepEqual(avisosDeSalida({
+    ...base,
+    hoy: '2026-10-06',
+    contrato: { ...contrato, fechaSalida: '2026-10-06', dias: 2, devolucionPrevista: '2026-10-08' },
+    contratosDelCarro: [recibidoElSeis()],
+  }), []);
+});
+
+test('un carro recibido TARDE sí estuvo afuera hasta el día real: una renta intermedia avisa con esa fecha', () => {
+  // Debía volver el 5 y volvió el 8. Una renta del 6 al 9 no choca con lo previsto,
+  // pero el carro de verdad no estaba: el aviso tiene que decirlo.
+  const tarde = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 2, recibidoEl: '2026-10-08' });
+  const r = avisosDeSalida({
+    ...base,
+    hoy: '2026-10-06',
+    contrato: { ...contrato, fechaSalida: '2026-10-06', dias: 3, devolucionPrevista: '2026-10-09' },
+    contratosDelCarro: [tarde],
+  });
+  assert.equal(r.length, 1);
+  assert.match(r[0].mensaje, /3 oct 2026 al 8 oct 2026/);
+});
+
+test('un carro que sigue afuera con la fecha prevista ya vencida SÍ choca con una renta que cae hoy', () => {
+  // Debía volver el 8 y hoy es el 10: no ha vuelto, es el carro con menos
+  // probabilidad de estar libre. Una renta del 9 al 12 incluye el día de hoy.
+  const atrasado = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 5 });
+  const r = avisosDeSalida({
+    ...base,
+    hoy: '2026-10-10',
+    contrato: { ...contrato, fechaSalida: '2026-10-09', dias: 3, devolucionPrevista: '2026-10-12' },
+    contratosDelCarro: [atrasado],
+  });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].nivel, 'alto');
+  assert.match(r[0].mensaje, /debía volver el 8 oct 2026 y sigue afuera/);
+  assert.doesNotMatch(r[0].mensaje, /3 oct 2026 al 8 oct 2026/, 'no dice que terminó el 8: no ha vuelto');
+});
+
+test('un carro atrasado avisa si la renta empieza HOY: hoy sigue afuera y no puede salir otra vez', () => {
+  const atrasado = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 5 });
+  const r = avisosDeSalida({
+    ...base,
+    hoy: '2026-10-10',
+    contrato: { ...contrato, fechaSalida: '2026-10-10', dias: 3, devolucionPrevista: '2026-10-13' },
+    contratosDelCarro: [atrasado],
+  });
+  assert.equal(r.length, 1);
+  assert.match(r[0].mensaje, /3 oct 2026, que debía volver el 8 oct 2026 y sigue afuera/);
+});
+
+test('un carro atrasado no avisa por rentas que empiezan después de hoy: no se sabe cuándo volverá', () => {
+  const atrasado = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 5 });
+  assert.deepEqual(avisosDeSalida({
+    ...base,
+    hoy: '2026-10-10',
+    contrato: { ...contrato, fechaSalida: '2026-10-14', dias: 3, devolucionPrevista: '2026-10-17' },
+    contratosDelCarro: [atrasado],
+  }), []);
+  // Ni siquiera la de mañana: hoy es lo último que se sabe.
+  assert.deepEqual(avisosDeSalida({
+    ...base,
+    hoy: '2026-10-10',
+    contrato: { ...contrato, fechaSalida: '2026-10-11', dias: 3, devolucionPrevista: '2026-10-14' },
+    contratosDelCarro: [atrasado],
+  }), []);
+});
+
+test('un contrato a tiempo (el carro sigue afuera dentro de lo previsto) avisa con su fecha prevista, como siempre', () => {
+  const aTiempo = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 9 });
+  const r = avisosDeSalida({
+    ...base, hoy: '2026-10-05', contrato: { ...contrato, fechaSalida: '2026-10-08', dias: 2, devolucionPrevista: '2026-10-10' }, contratosDelCarro: [aTiempo],
+  });
+  assert.equal(r.length, 1);
+  assert.match(r[0].mensaje, /3 oct 2026 al 12 oct 2026/);
 });

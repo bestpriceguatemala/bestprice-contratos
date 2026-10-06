@@ -6,7 +6,12 @@
 // planes cambian a última hora.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { construirReserva, estadoReserva, seCruzan, faltaAlgoEnReserva, textoAnticipo, choquesDeReserva } from '../js/nucleo/reserva.js';
+import { readFileSync } from 'node:fs';
+import {
+  construirReserva, estadoReserva, seCruzan, seCruzanConContrato, faltaAlgoEnReserva, textoAnticipo, choquesDeReserva,
+} from '../js/nucleo/reserva.js';
+import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
+import { sumarDias } from '../js/nucleo/fechas.js';
 import { reservaParaGuardar } from '../js/datos.js';
 
 const campos = {
@@ -198,4 +203,129 @@ test('reservaParaGuardar sella "entregada" aunque también venga cancelada: true
   const reserva = { ...construirReserva({}, campos), contratoId: 'c9', cancelada: true };
   const guardado = reservaParaGuardar(reserva, { id: 'r1' });
   assert.equal(guardado.estado, 'entregada');
+});
+
+// ---------------------------------------------------------------------------
+// Un contrato ocupa el carro hasta su fin EFECTIVO, no hasta el previsto.
+//
+// El dueño: «recibí el carro antes y ya quedó libre, pero me sigue apareciendo que
+// lo devuelven el 12». Es la misma regla que en los avisos de salida
+// (finDelContrato, nucleo/estados.js): `cierre.fechaReal` cuando el carro ya
+// volvió, la fecha prevista mientras sigue afuera, y — si ya pasó esa fecha y no
+// ha vuelto — todo el día de hoy (queda libre desde mañana, como pronto). Los contratos se arman con las funciones que
+// arman los reales (pruebas/fixtures/contratoDeUnCarro.mjs).
+// ---------------------------------------------------------------------------
+
+const recibidoAntes = () => contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 9, recibidoEl: '2026-10-06' });
+const del8al11 = { fechaSalida: '2026-10-08', dias: 3, devolucionPrevista: '2026-10-11' };
+
+test('seCruzanConContrato: un contrato recibido antes ocupa solo hasta el día que se recibió', () => {
+  const c = recibidoAntes();
+  assert.equal(c.devolucionPrevista, '2026-10-12');
+  // Lo que la regla vieja (la fecha prevista) decía cruce, ya no lo es.
+  assert.equal(seCruzan(del8al11, c), true, 'seCruzan compara rangos PREVISTOS: no es para un contrato ya hecho');
+  assert.equal(seCruzanConContrato(del8al11, c, '2026-10-08'), false);
+  assert.equal(seCruzanConContrato({ fechaSalida: '2026-10-06', devolucionPrevista: '2026-10-09' }, c, '2026-10-06'), false, 'tocarse no es cruzarse');
+  assert.equal(seCruzanConContrato({ fechaSalida: '2026-10-05', devolucionPrevista: '2026-10-08' }, c, '2026-10-05'), true, 'el 5 el carro todavía estaba afuera');
+});
+
+test('un carro exacto recibido antes de lo previsto ya no avisa que tiene un contrato esos días', () => {
+  const abierto = recibidoAntes();
+  assert.equal(abierto.estado, 'devuelto', 'el escenario: el contrato sigue abierto');
+  assert.deepEqual(choquesDeReserva({
+    reserva: { ...del8al11, carroId: 'v1' }, flota, reservas: [], contratos: [abierto], hoy: '2026-10-07',
+  }), []);
+});
+
+test('y si la reservación SÍ cae mientras el carro estaba afuera, avisa y dice el día real de regreso', () => {
+  const r = choquesDeReserva({
+    reserva: { fechaSalida: '2026-10-05', dias: 3, devolucionPrevista: '2026-10-08', carroId: 'v1' },
+    flota, reservas: [], contratos: [recibidoAntes()], hoy: '2026-10-05',
+  });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].nivel, 'alto');
+  assert.match(r[0].mensaje, /3 oct 2026 al 6 oct 2026/);
+  assert.doesNotMatch(r[0].mensaje, /12 oct/);
+});
+
+test('por tipo: un carro ya recibido no cuenta como comprometido por el resto de su fecha prevista', () => {
+  // Un solo SEDÁN (v3) y su contrato del 3 al 12, recibido el 6: del 8 en adelante está libre.
+  const abierto = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 9, recibidoEl: '2026-10-06', carroId: 'v3', placas: 'P-333CCC' });
+  const reserva = { ...del8al11, tipoVehiculo: 'SEDÁN' };
+  assert.deepEqual(choquesDeReserva({ reserva, flota, reservas: [], contratos: [abierto], hoy: '2026-10-07' }), []);
+  // Antes del regreso sí: el 5 el único sedán estaba afuera.
+  const antes = choquesDeReserva({
+    reserva: { fechaSalida: '2026-10-04', dias: 2, devolucionPrevista: '2026-10-06', tipoVehiculo: 'SEDÁN' },
+    flota, reservas: [], contratos: [abierto], hoy: '2026-10-04',
+  });
+  assert.equal(antes[0].mensaje, 'Solo tienes 1 SEDÁN y ya está comprometido en esas fechas.');
+});
+
+// El gemelo al revés: el carro que NO ha vuelto y ya pasó su fecha prevista.
+// (Diferido en la revisión de reservaciones: «una reservación posterior no cruza y
+// no avisa, justo en el carro con menos probabilidad de estar libre».)
+
+test('un carro atrasado (afuera pasada su fecha prevista) avisa para una reservación que incluye hoy', () => {
+  const atrasado = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 5 });
+  assert.equal(atrasado.devolucionPrevista, '2026-10-08');
+  const r = choquesDeReserva({
+    reserva: { fechaSalida: '2026-10-09', dias: 3, devolucionPrevista: '2026-10-12', carroId: 'v1' },
+    flota, reservas: [], contratos: [atrasado], hoy: '2026-10-10',
+  });
+  assert.equal(r.length, 1);
+  assert.match(r[0].mensaje, /debía volver el 8 oct 2026 y sigue afuera/);
+});
+
+test('un carro atrasado también cuenta contra la capacidad del tipo', () => {
+  const atrasado = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 5, carroId: 'v3', placas: 'P-333CCC' });
+  const r = choquesDeReserva({
+    reserva: { fechaSalida: '2026-10-09', dias: 3, devolucionPrevista: '2026-10-12', tipoVehiculo: 'SEDÁN' },
+    flota, reservas: [], contratos: [atrasado], hoy: '2026-10-10',
+  });
+  assert.equal(r[0].mensaje, 'Solo tienes 1 SEDÁN y ya está comprometido en esas fechas.');
+});
+
+test('un carro atrasado avisa para una reservación que empieza HOY: hoy sigue afuera', () => {
+  const atrasado = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 5 });
+  const r = choquesDeReserva({
+    reserva: { fechaSalida: '2026-10-10', dias: 3, devolucionPrevista: '2026-10-13', carroId: 'v1' },
+    flota, reservas: [], contratos: [atrasado], hoy: '2026-10-10',
+  });
+  assert.equal(r.length, 1);
+  assert.match(r[0].mensaje, /debía volver el 8 oct 2026 y sigue afuera/);
+});
+
+test('un carro atrasado no avisa para una reservación que empieza después de hoy: no se sabe cuándo volverá', () => {
+  const atrasado = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 5 });
+  for (const salida of ['2026-10-11', '2026-10-14']) {
+    assert.deepEqual(choquesDeReserva({
+      reserva: { fechaSalida: salida, dias: 3, devolucionPrevista: sumarDias(salida, 3), carroId: 'v1' },
+      flota, reservas: [], contratos: [atrasado], hoy: '2026-10-10',
+    }), [], salida);
+  }
+});
+
+test('sin saber qué día es, un contrato se mide por su fecha prevista (la regla no lee el reloj)', () => {
+  const atrasado = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 5 });
+  assert.deepEqual(choquesDeReserva({
+    reserva: { fechaSalida: '2026-10-09', dias: 3, devolucionPrevista: '2026-10-12', carroId: 'v1' },
+    flota, reservas: [], contratos: [atrasado],
+  }), []);
+});
+
+test('«atrasada» es solo de contratos: una reservación pendiente con fechas pasadas no se alarga hasta hoy', () => {
+  // Una reservación que quedó sin cancelar ni entregar, de principios de mes: su
+  // rango es el que apartó. Alargarla hasta hoy inventaría un choque con todo lo nuevo.
+  const vieja = { id: 'r-vieja', carroId: 'v1', fechaSalida: '2026-10-01', devolucionPrevista: '2026-10-05' };
+  assert.deepEqual(choquesDeReserva({
+    reserva: { fechaSalida: '2026-10-18', dias: 4, devolucionPrevista: '2026-10-22', carroId: 'v1' },
+    flota, reservas: [vieja], contratos: [], hoy: '2026-10-20',
+  }), []);
+});
+
+test('la pantalla de reservaciones le da `hoy` a choquesDeReserva (sin eso el atraso no se ve)', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/reservas.js', import.meta.url), 'utf8');
+  const llamada = /choquesDeReserva\(\{([^}]*)\}\)/.exec(fuente);
+  assert.ok(llamada, 'se encontró la llamada');
+  assert.match(llamada[1], /hoy: hoyISO\(\)/, 'hoy se recibe en el borde de la pantalla, no se lee dentro de la regla');
 });

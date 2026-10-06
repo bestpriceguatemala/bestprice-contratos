@@ -11,7 +11,11 @@ import { textoDosDecimales } from './dinero.js';
 // 20, y eso pasa a diario), así que la comparación es estricta. Dos copias de
 // la misma regla es como se arregla un error en un lado y se queda vivo en el
 // otro — por eso esta pantalla usa la de reserva.js en vez de mantener la suya.
-import { seCruzan, estadoReserva } from './reserva.js';
+// Y hasta cuándo ocupa un contrato su carro tampoco se decide aquí: es
+// `finDelContrato` (estados.js), vía `seCruzanConContrato` y `textoDeOcupacion`.
+import {
+  seCruzan, seCruzanConContrato, textoDeOcupacion, estadoReserva,
+} from './reserva.js';
 
 const alto = (mensaje) => ({ nivel: 'alto', mensaje });
 const medio = (mensaje) => ({ nivel: 'medio', mensaje });
@@ -45,10 +49,15 @@ export function avisosDeSalida({
     avisos.push(medio(`Este cliente ya devolvió tarde ${tardes} ${plural}.`));
   }
 
+  // El otro contrato ocupa el carro hasta su fin EFECTIVO, no hasta el previsto:
+  // uno que ya se recibió (y sigue abierto solo porque queda un saldo) dejó el
+  // carro libre el día que volvió. Comparar contra la fecha prevista le pintaba al
+  // dueño un rojo falso sobre un carro que estaba en su patio — y un aviso que se
+  // equivoca siempre enseña a ignorar los que no se equivocan.
   const encimado = contratosDelCarro.find((otro) =>
-    otro.id !== contrato?.id && seCruzan(contrato, otro));
+    otro.id !== contrato?.id && seCruzanConContrato(contrato, otro, hoy));
   if (encimado) {
-    avisos.push(alto(`Este carro tiene otro contrato del ${textoFecha(encimado.fechaSalida)} al ${textoFecha(encimado.devolucionPrevista)}.`));
+    avisos.push(alto(`Este carro tiene otro contrato ${textoDeOcupacion(encimado, hoy)}.`));
   }
 
   // El carro que está por salir puede estar apartado para otro cliente

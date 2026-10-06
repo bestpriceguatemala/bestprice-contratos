@@ -7,8 +7,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  estadoContrato, puedeCerrar, pendientesDe, garantiaPorLiberar, estadoCarro,
+  estadoContrato, puedeCerrar, pendientesDe, garantiaPorLiberar, estadoCarro, finDelContrato,
 } from '../js/nucleo/estados.js';
+import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
 
 const rentado = {
   id: 'c1', carroId: 'v1', dias: 4, precioDia: 700,
@@ -172,4 +173,68 @@ test('un carro parado en el taller sí sale fuera de servicio', () => {
 test('si no se dice qué día es, no se asume que el carro viene a tiempo', () => {
   const viejo = { ...rentado, devolucionPrevista: '2020-01-01' };
   assert.equal(estadoCarro({ id: 'v1' }, [viejo]).estado, 'atrasado');
+});
+
+// ---------------------------------------------------------------------------
+// finDelContrato: hasta cuándo ocupa un contrato su carro.
+//
+// Es la ÚNICA regla del fin de un contrato. El dueño lo vio fallar así: «recibí
+// el carro antes y ya quedó libre, pero me sigue apareciendo que lo devuelven el
+// 12». Los contratos de estas pruebas se arman con las funciones que arman los
+// reales (pruebas/fixtures/contratoDeUnCarro.mjs): el regreso se marca con
+// `cierre.fechaReal` y con nada más.
+// ---------------------------------------------------------------------------
+
+test('finDelContrato: con el carro afuera y a tiempo, el fin es la devolución prevista', () => {
+  const afuera = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 9 });
+  assert.equal(finDelContrato(afuera, '2026-10-05'), '2026-10-12');
+  assert.equal(finDelContrato(afuera, '2026-10-12'), '2026-10-12', 'el día mismo de la devolución todavía no es atraso');
+});
+
+test('finDelContrato: un carro recibido ANTES termina el día que se recibió, no el día previsto', () => {
+  // El caso del dueño: 3 oct → 12 oct, recibido el 6, y el contrato sigue abierto
+  // porque quedó un saldo de daños. El carro ya está en el patio desde el 6.
+  const recibidoAntes = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 9, recibidoEl: '2026-10-06' });
+  assert.equal(estadoContrato(recibidoAntes), 'devuelto', 'el escenario: sigue abierto, no cerrado');
+  assert.equal(recibidoAntes.devolucionPrevista, '2026-10-12');
+  assert.equal(finDelContrato(recibidoAntes, '2026-10-07'), '2026-10-06');
+  assert.equal(finDelContrato(recibidoAntes, '2026-10-30'), '2026-10-06', 'hoy no lo mueve: ya volvió');
+});
+
+test('finDelContrato: un carro recibido TARDE termina el día que de verdad volvió', () => {
+  const tarde = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 2, recibidoEl: '2026-10-08' });
+  assert.equal(tarde.devolucionPrevista, '2026-10-05');
+  assert.equal(finDelContrato(tarde, '2026-10-09'), '2026-10-08');
+});
+
+test('finDelContrato: un contrato cerrado también termina el día que se recibió', () => {
+  const cerradoYa = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 9, recibidoEl: '2026-10-06', danos: 0 });
+  assert.equal(estadoContrato(cerradoYa), 'cerrado');
+  assert.equal(finDelContrato(cerradoYa, '2026-10-07'), '2026-10-06');
+});
+
+test('finDelContrato: un carro todavía afuera después de su fecha prevista no queda libre ni hoy', () => {
+  // Debía volver el 8 y hoy es el 10: no ha vuelto, así que no se puede decir
+  // que el carro quedó libre el 8. Lo único que se sabe es que hoy sigue afuera
+  // (está registrado como afuera): hoy no puede salir otra vez, mañana quién sabe.
+  const atrasado = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 5 });
+  assert.equal(atrasado.devolucionPrevista, '2026-10-08');
+  assert.equal(finDelContrato(atrasado, '2026-10-10'), '2026-10-11');
+  assert.equal(finDelContrato(atrasado, '2026-10-09'), '2026-10-10');
+  assert.equal(finDelContrato(atrasado, '2026-12-31'), '2027-01-01', 'cruza el fin de mes y de año');
+});
+
+test('finDelContrato: sin saber qué día es no se inventa un atraso, y recibido gana sobre atrasado', () => {
+  const atrasado = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 5 });
+  assert.equal(finDelContrato(atrasado), '2026-10-08', 'sin `hoy`, la fecha prevista: la regla no lee el reloj');
+  assert.equal(finDelContrato(atrasado, ''), '2026-10-08');
+  // Pasada su fecha prevista pero ya recibido: manda el regreso, no el atraso.
+  const recibido = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 5, recibidoEl: '2026-10-07' });
+  assert.equal(finDelContrato(recibido, '2026-10-20'), '2026-10-07');
+});
+
+test('finDelContrato: un contrato sin fechas no inventa un fin', () => {
+  assert.equal(finDelContrato({}, '2026-10-10'), '');
+  assert.equal(finDelContrato(null, '2026-10-10'), '');
+  assert.equal(finDelContrato(undefined), '');
 });

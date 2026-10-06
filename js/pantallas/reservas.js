@@ -482,8 +482,10 @@ async function dibujarFicha(
     el('rs-devolucion-prevista').textContent = borrador.devolucionPrevista ? fecha(borrador.devolucionPrevista) : '—';
     el('rs-anticipo-texto').textContent = textoAnticipo(borrador);
 
+    // `hoy` entra aquí, en el borde: la regla no lee el reloj, y sin él un carro
+    // que sigue afuera pasada su fecha prevista se vería libre.
     const choques = choquesDeReserva({
-      reserva: borrador, flota, reservas, contratos,
+      reserva: borrador, flota, reservas, contratos, hoy: hoyISO(),
     });
     // Los rojos primero (brief, Paso 2); los choques nunca bloquean — el
     // botón de guardar sigue habilitado pase lo que pase aquí.

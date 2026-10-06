@@ -8,7 +8,7 @@
 // que se sobrescribe, nunca una reservación nueva.
 import { devolucionPrevista as calcularDevolucionPrevista, diasEntre, textoFecha } from './fechas.js';
 import { q, textoDosDecimales } from './dinero.js';
-import { estadoContrato } from './estados.js';
+import { estadoContrato, estaAtrasado, finDelContrato } from './estados.js';
 
 /**
  * Construye el objeto reservación para guardar, preservando campos que no
@@ -51,16 +51,59 @@ export function estadoReserva(r) {
 }
 
 /**
- * ¿Se cruzan dos rangos de fechas {fechaSalida, devolucionPrevista}?
+ * La regla de cruce, para cuatro fechas sueltas. Es la ÚNICA copia: tocarse no es
+ * cruzarse, porque un carro que regresa el 20 puede volver a salir el 20, y eso
+ * pasa a diario. Solo hay cruce cuando los rangos de verdad se traslapan, por eso
+ * se usa diasEntre() > 0 (estricto) y no una comparación de "o igual". Con
+ * cualquier fecha ausente no hay rango, y no hay cruce.
+ */
+function seTraslapan(desdeA, hastaA, desdeB, hastaB) {
+  if (!desdeA || !hastaA || !desdeB || !hastaB) return false;
+  return diasEntre(desdeA, hastaB) > 0 && diasEntre(desdeB, hastaA) > 0;
+}
+
+/**
+ * ¿Se cruzan dos rangos PREVISTOS {fechaSalida, devolucionPrevista}? Para dos
+ * reservaciones, o para una reservación o un contrato que todavía se está
+ * escribiendo contra otra reservación: ahí la fecha prevista es el rango que se
+ * apartó y no hay otro.
  *
- * La misma regla que seEnciman en avisos.js: tocarse no es cruzarse, porque
- * un carro que regresa el 20 puede volver a salir el 20, y eso pasa a diario.
- * Solo hay cruce cuando los rangos de verdad se traslapan, por eso se usa
- * diasEntre() > 0 (estricto) y no una comparación de "o igual".
+ * NO es para un contrato que ya se hizo: ese ocupa el carro hasta su fin
+ * efectivo, que no siempre es el previsto (el carro puede haber vuelto antes, o
+ * seguir afuera pasada la fecha). Para eso, `seCruzanConContrato`.
  */
 export function seCruzan(a, b) {
-  if (!a?.fechaSalida || !a?.devolucionPrevista || !b?.fechaSalida || !b?.devolucionPrevista) return false;
-  return diasEntre(a.fechaSalida, b.devolucionPrevista) > 0 && diasEntre(b.fechaSalida, a.devolucionPrevista) > 0;
+  return seTraslapan(a?.fechaSalida, a?.devolucionPrevista, b?.fechaSalida, b?.devolucionPrevista);
+}
+
+/**
+ * ¿Lo que se quiere apartar (`aparte`: una reservación o el contrato que se está
+ * escribiendo, con su rango previsto) se cruza con lo que un CONTRATO ya hecho
+ * ocupa de verdad? El contrato ocupa del día que salió hasta su fin efectivo
+ * (`finDelContrato`, nucleo/estados.js), con el mismo cruce estricto de siempre.
+ * `hoy` se recibe: sin él un contrato afuera se mide por su fecha prevista.
+ */
+export function seCruzanConContrato(aparte, contrato, hoy) {
+  return seTraslapan(aparte?.fechaSalida, aparte?.devolucionPrevista, contrato?.fechaSalida, finDelContrato(contrato, hoy));
+}
+
+/**
+ * Cuándo ocupa un contrato su carro, tal como se le dice al mostrador:
+ * «del 3 oct 2026 al 6 oct 2026» (el día que de verdad volvió, o el previsto si
+ * sigue afuera), o — si ya pasó su fecha prevista y no ha vuelto — «del 3 oct 2026,
+ * que debía volver el 8 oct 2026 y sigue afuera». Ese caso no dice «al <fin>»:
+ * el fin efectivo de un carro atrasado es solo «mañana, como pronto», no una
+ * fecha de regreso, y escribirlo así la haría pasar por una.
+ *
+ * Los dos avisos que hablan de un contrato (el de salida y el de una
+ * reservación) usan este texto, así que nunca pueden dar fechas distintas.
+ */
+export function textoDeOcupacion(contrato, hoy) {
+  const desde = textoFecha(contrato?.fechaSalida);
+  if (estaAtrasado(contrato, hoy)) {
+    return `del ${desde}, que debía volver el ${textoFecha(contrato.devolucionPrevista)} y sigue afuera`;
+  }
+  return `del ${desde} al ${textoFecha(finDelContrato(contrato, hoy))}`;
 }
 
 /**
@@ -125,14 +168,22 @@ function tipoComprometido(item, flota) {
  * entregada no aparta nada (estadoReserva), y un contrato cerrado tampoco
  * (estadoContrato) — el carro ya volvió y ya se saldó. Se compara por id para
  * que editar una reservación no choque contra sí misma.
+ *
+ * Un contrato abierto ocupa el carro hasta su fin EFECTIVO (`finDelContrato`):
+ * uno que ya se recibió (aunque siga abierto cobrando un saldo) lo ocupa solo
+ * hasta el día que volvió, y uno que sigue afuera pasada su fecha prevista, por
+ * lo menos durante hoy (queda libre desde mañana, como pronto). Por eso `hoy` se recibe, igual que en los avisos de
+ * salida; sin él, un contrato afuera se mide por su fecha prevista.
  */
-export function choquesDeReserva({ reserva, flota = [], reservas = [], contratos = [] }) {
+export function choquesDeReserva({
+  reserva, flota = [], reservas = [], contratos = [], hoy,
+}) {
   if (!reserva) return [];
 
   const reservasVivas = reservas.filter((r) =>
     r?.id !== reserva.id && estadoReserva(r) === 'pendiente' && seCruzan(reserva, r));
   const contratosVivos = contratos.filter((c) =>
-    estadoContrato(c) !== 'cerrado' && seCruzan(reserva, c));
+    estadoContrato(c) !== 'cerrado' && seCruzanConContrato(reserva, c, hoy));
 
   if (reserva.carroId) {
     const otraReserva = reservasVivas.find((r) => r.carroId === reserva.carroId);
@@ -141,7 +192,7 @@ export function choquesDeReserva({ reserva, flota = [], reservas = [], contratos
     }
     const otroContrato = contratosVivos.find((c) => c.carroId === reserva.carroId);
     if (otroContrato) {
-      return [alto(`Este carro tiene un contrato del ${textoFecha(otroContrato.fechaSalida)} al ${textoFecha(otroContrato.devolucionPrevista)}.`)];
+      return [alto(`Este carro tiene un contrato ${textoDeOcupacion(otroContrato, hoy)}.`)];
     }
     return [];
   }

@@ -727,22 +727,45 @@ De aquí sale una tercera regla, que se suma a las dos de arriba:
    prueba tiene que hacer la misma pregunta: no «¿se fue el campo?», sino
    «¿queda ese número en alguna parte de lo que se guardó?».
 
-### Pendiente conocido: el carro atrasado no bloquea una reservación futura
+### Hasta cuándo ocupa un contrato su carro
 
-Hallado en la revisión final del plan de reservaciones (29 de septiembre) y
-**diferido a propósito**, no olvidado.
+Una sola regla, `finDelContrato(c, hoy)` en `nucleo/estados.js`. Todo lo que
+pregunte «¿este carro está libre de tal día en adelante?» — el aviso al sacar un
+carro (`avisosDeSalida`), los choques de una reservación (`choquesDeReserva`) —
+pregunta ahí, vía `seCruzanConContrato` y `textoDeOcupacion` (`nucleo/reserva.js`),
+y ninguno vuelve a mirar `devolucionPrevista` por su cuenta:
 
-`choquesDeReserva` mide el cruce contra la `devolucionPrevista` del contrato.
-Un contrato vivo pero **atrasado** ya pasó esa fecha, así que una reservación
-posterior no se cruza con él y no avisa — justo en el carro con menos
-probabilidad de estar libre, porque el cliente anterior todavía no lo trae.
+- **El carro ya volvió** (`cierre.fechaReal`, la única marca de un regreso): el
+  contrato ocupa el carro hasta ese día, sea antes o después de lo previsto. Un
+  contrato `devuelto` (carro en el patio, saldo por cobrar) NO bloquea el carro.
+- **El carro sigue afuera, a tiempo:** hasta la `devolucionPrevista`.
+- **El carro sigue afuera y ya pasó su fecha prevista:** no queda libre ni hoy
+  (mañana, como pronto), con `hoy` recibido y nunca leído del reloj dentro de la
+  regla: está registrado como afuera, así que hoy no puede salir otra vez. Una
+  renta que empieza hoy avisa; una que empieza mañana o después no, porque nadie
+  sabe cuándo volverá. El aviso lo dice como es («debía volver el 8 oct 2026 y
+  sigue afuera»), no como si «mañana» fuera una fecha de regreso. (El pendiente
+  de la revisión de reservaciones proponía «el mayor entre la fecha prevista y
+  hoy»; con eso, como tocarse no es cruzarse, una renta que empieza hoy nunca
+  avisaría, y era justo el caso que había que atajar.)
 
-Arreglarlo bien pide que la regla sepa qué día es hoy (el fin efectivo de un
-contrato vivo es el mayor entre su `devolucionPrevista` y hoy), y eso cambia
-la firma de `choquesDeReserva` y de quienes la llaman. Es un cambio con
-alcance propio: no se mete al final de una rama, después de que la revisión
-final ya pasó, que es justo como se cuelan los errores que nadie vuelve a
-mirar. Va como primera tarea del siguiente plan.
+Solo se aplica a contratos: una reservación no tiene `cierre` ni se «atrasa».
+`seCruzan` compara dos rangos previstos y es solo para reservaciones.
+
+Salió de dos hallazgos que eran el mismo error visto de los dos lados. Primero el
+del dueño, con el carro ya recibido: «recibí el carro antes y ya quedó libre, pero
+me sigue apareciendo que lo devuelven el 12» (el contrato seguía abierto por un
+saldo y se comparaba contra la fecha prevista). Y el que la revisión final del plan
+de reservaciones (29 de septiembre) había diferido a propósito: un carro atrasado no
+bloqueaba una reservación posterior, justo el carro con menos probabilidad de estar
+libre. Arreglar uno sin el otro habría dejado dos reglas de «fin de un contrato».
+
+Lo que se revisó y NO cambia: `estadoCarro` (usa `cierre.fechaReal` para saber si
+está afuera, y la fecha prevista solo para contar el atraso de un carro que sí lo
+está) y el calendario (`regresan` y `atrasados` solo miran contratos que siguen
+afuera; `yaRegresaron` lista los citados ese día que ya volvieron). Para que
+«atrasado» y «ya volvió» tampoco tengan dos copias, el calendario importa esas
+dos preguntas de `estados.js`.
 
 ### Pendientes conocidos del dinero
 

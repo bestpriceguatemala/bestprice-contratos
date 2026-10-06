@@ -6,7 +6,10 @@
 // los números; las pantallas deciden cómo pintarlos.
 import { diasEntre } from './fechas.js';
 import { estadoReserva } from './reserva.js';
-import { garantiaPorLiberar } from './estados.js';
+// `yaVolvio` y `estaAtrasado` viven en estados.js: son las mismas preguntas con las
+// que se decide hasta cuándo ocupa un contrato su carro (`finDelContrato`), y una
+// regla de «atrasado» en dos archivos es una que se corrige en uno solo.
+import { garantiaPorLiberar, yaVolvio, estaAtrasado } from './estados.js';
 
 /**
  * Todas las fechas de un mes, en orden. `mes` es 'YYYY-MM'.
@@ -57,37 +60,6 @@ export function cuadriculaDelMes(mes) {
     semanas.push(celdas.slice(i, i + 7));
   }
   return semanas;
-}
-
-/**
- * ¿Ya volvió el carro de este contrato? La única marca de que el carro
- * regresó es `cierre.fechaReal` (§7b del diseño: "Del cierre: fechaReal...").
- * "Cerrado" NO es un campo guardado — es un estado que se DERIVA
- * (`estadoContrato` en estados.js: sin `cierre.fechaReal` el contrato sigue
- * `'rentado'`; con ella, `'cerrado'` o `'devuelto'` según `puedeCerrar`), así
- * que nunca hay que leer un `c.cerrado` que no existe. Y no hace falta
- * replicar esa derivación completa aquí: un contrato no puede estar cerrado
- * sin que el carro ya haya vuelto, así que preguntar solo por
- * `cierre.fechaReal` ya cubre ese caso. Una sola función para las dos
- * preguntas que la comparten (atrasados y el corte regresan/yaRegresaron de
- * abajo) — para que "qué cuenta como ya vuelto" sea una sola regla, no dos
- * que se puedan desviar.
- */
-function yaVolvio(c) {
-  return Boolean(c?.cierre?.fechaReal);
-}
-
-/**
- * ¿Ya pasó la devolución prevista de este contrato, sin que el carro haya
- * vuelto? Un contrato con el carro de vuelta nunca cuenta, sin importar las
- * fechas: ya no es un pendiente de regreso, sin importar si todavía debe
- * cobro o garantía. El atraso se mide contra `fecha` (el día que se está
- * mirando en el calendario), no contra un reloj real, para que un día
- * pasado del calendario muestre lo que de verdad estaba atrasado ESE día.
- */
-function estaAtrasado(c, fecha) {
-  if (yaVolvio(c)) return false;
-  return diasEntre(c?.devolucionPrevista, fecha) > 0;
 }
 
 /**

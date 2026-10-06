@@ -5,7 +5,9 @@
 // que falte y se le suelte la garantía de la tarjeta. Si se amarraran, un
 // cliente que no paga unos daños dejaría el carro parado sin necesidad.
 import { resumen } from './contrato.js';
-import { diasAtraso, hoyISO } from './fechas.js';
+import {
+  diasAtraso, diasEntre, hoyISO, sumarDias,
+} from './fechas.js';
 import { q } from './dinero.js';
 
 /**
@@ -63,6 +65,70 @@ export function garantiaPorLiberar(c) {
 export function puedeCerrar(c) {
   const { saldo, garantia } = pendientesDe(c);
   return saldo <= 0 && !garantia;
+}
+
+/**
+ * ¿Ya volvió el carro de este contrato? La única marca de que el carro
+ * regresó es `cierre.fechaReal` (§7b del diseño: "Del cierre: fechaReal...").
+ * "Cerrado" NO es un campo guardado — es un estado que se DERIVA
+ * (`estadoContrato`: sin `cierre.fechaReal` el contrato sigue `'rentado'`; con
+ * ella, `'cerrado'` o `'devuelto'` según `puedeCerrar`), así que nunca hay que
+ * leer un `c.cerrado` ni un `c.fechaDevolucion` que no existen. Y no hace falta
+ * replicar esa derivación completa: un contrato no puede estar cerrado sin que
+ * el carro ya haya vuelto, así que preguntar solo por `cierre.fechaReal` ya
+ * cubre ese caso.
+ */
+export function yaVolvio(c) {
+  return Boolean(c?.cierre?.fechaReal);
+}
+
+/**
+ * ¿Ya pasó la devolución prevista de este contrato, sin que el carro haya
+ * vuelto? Un contrato con el carro de vuelta nunca cuenta, sin importar las
+ * fechas: ya no es un pendiente de regreso, sin importar si todavía debe
+ * cobro o garantía. El atraso se mide contra `hoy` (el día que se está
+ * mirando, recibido de quien llama), no contra un reloj real, para que un día
+ * pasado del calendario muestre lo que de verdad estaba atrasado ESE día.
+ * Sin `hoy` no se sabe: no está atrasado.
+ */
+export function estaAtrasado(c, hoy) {
+  if (yaVolvio(c)) return false;
+  return diasEntre(c?.devolucionPrevista, hoy) > 0;
+}
+
+/**
+ * Hasta cuándo ocupa un contrato su carro: su FIN EFECTIVO, que es el primer día
+ * en que el carro puede volver a salir (por eso tocarse no es cruzarse: un carro
+ * que regresa el 20 sale otra vez el 20). Es la ÚNICA regla de esto — los avisos
+ * de salida, los choques de una reservación y todo lo que pregunte «¿este carro
+ * está libre de tal día en adelante?» preguntan aquí, y ninguno vuelve a mirar
+ * `devolucionPrevista` por su cuenta.
+ *
+ * - Con el carro ya de vuelta: el día que de verdad volvió, `cierre.fechaReal`.
+ *   Sea antes de lo previsto (el carro está en el patio y libre, aunque el
+ *   contrato siga abierto cobrando un saldo) o después (estuvo fuera de
+ *   verdad hasta ese día). La fecha prevista ya no dice nada cierto.
+ * - Con el carro todavía afuera y a tiempo: la devolución prevista, que es lo
+ *   único que se sabe.
+ * - Con el carro todavía afuera y la fecha prevista ya vencida: mañana. No se
+ *   sabe cuándo volverá, pero sí que hoy sigue afuera —está registrado como
+ *   afuera— y por eso hoy no puede salir otra vez: no queda libre el día
+ *   previsto, ni siquiera hoy. Es el carro con menos probabilidad de estar libre,
+ *   y que su fecha vencida lo mostrara libre fue el gemelo al revés del aviso
+ *   falso de un carro ya recibido. Más allá de hoy no se inventa nada: una renta
+ *   que empieza mañana no avisa, porque nadie sabe si para entonces habrá vuelto.
+ *
+ * `hoy` se recibe, nunca se lee del reloj aquí. Sin él, un contrato afuera se
+ * mide por su fecha prevista (no se inventa un atraso que no se puede comprobar).
+ * Devuelve '' si el contrato no tiene ninguna de las fechas.
+ *
+ * Solo se aplica a CONTRATOS. Una reservación no tiene `cierre` ni está
+ * «atrasada» por tener fechas pasadas: apartó ese rango y ese es el que ocupa.
+ */
+export function finDelContrato(c, hoy) {
+  if (yaVolvio(c)) return c.cierre.fechaReal;
+  if (estaAtrasado(c, hoy)) return sumarDias(hoy, 1);
+  return c?.devolucionPrevista ?? '';
 }
 
 /** 'rentado' mientras el carro anda fuera, 'devuelto' hasta cerrarlo, 'cerrado' al final. */
