@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { baseComision, comisionDe } from '../js/nucleo/comision.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
+import { contratoGuardadoConHoraTardiaAlSalir } from './fixtures/contratoGuardadoConHoraTardiaAlSalir.mjs';
 
 const base = () => ({
   dias: 4,
@@ -64,13 +65,15 @@ test('la comisión queda firme hasta que el carro regresa', () => {
   assert.equal(comisionDe(base()).firme, true);
 });
 
-// La hora tardía es un cobro extra de la salida, de la misma familia que la
-// carta poder: se cobra, pero no entra a la base de la comisión. Si entrara,
-// subirle Q150 a un contrato le subiría la comisión al empleado sin que nadie
-// lo haya decidido (Q7.50 al 5 %, en cada hora tardía).
-test('la hora tardía de Q150 no mueve la base ni la comisión, aunque sí sube lo que se cobra', () => {
+// La hora tardía es un cobro extra del cierre (se cobra «solo al devolver»), de
+// la misma familia que los daños, el combustible y los varios: se cobra, pero no
+// entra a la base de la comisión. Si entrara, subirle Q150 a un contrato le
+// subiría la comisión al empleado sin que nadie lo haya decidido (Q7.50 al 5 %,
+// en cada hora tardía). Se comprueba desde el lado de la devolución, que es
+// donde vive hoy, y desde las dos formas viejas.
+test('la hora tardía de Q150 al recibir no mueve la base ni la comisión, aunque sí sube lo que se cobra', () => {
   const sin = base();
-  const con = { ...base(), horaTardia: 150 };
+  const con = { ...base(), cierre: { ...base().cierre, horaTardia: 150 } };
 
   assert.equal(baseComision(con), 3200, 'la misma base de siempre: 5 días × Q700 − Q300');
   assert.equal(baseComision(con), baseComision(sin));
@@ -79,14 +82,27 @@ test('la hora tardía de Q150 no mueve la base ni la comisión, aunque sí sube 
 
   // ...y la hora tardía de verdad se está cobrando, para que esta prueba no
   // pase solo porque el campo no se leyera en ningún lado.
-  assert.equal(resumen(con).totalSalida, resumen(sin).totalSalida + 150);
+  assert.equal(resumen(con).totalDevolucion, resumen(sin).totalDevolucion + 150);
+  assert.equal(resumen(con).subtotal, resumen(sin).subtotal + 150);
 });
 
-test('la hora tardía no se cuenta como días ni como precio: el estimado de un carro rentado tampoco cambia', () => {
+test('la hora tardía de un contrato que sigue rentado no cuenta como días ni como precio: el estimado tampoco cambia', () => {
+  // Sin cierre no hay dónde anotarla todavía; la forma vieja de la salida (un
+  // número en el contrato) tampoco la deja entrar a la base.
   const rentado = { ...base(), cierre: null, horaTardia: 150 };
   assert.equal(baseComision(rentado), 2800, '4 días × Q700');
   assert.equal(comisionDe(rentado).monto, 140);
   assert.equal(comisionDe(rentado).firme, false);
+});
+
+test('la hora tardía anotada en la salida (la forma de unas horas) tampoco mueve la comisión', () => {
+  const alSalir = contratoGuardadoConHoraTardiaAlSalir();
+  const sinCampo = contratoGuardadoConHoraTardiaAlSalir();
+  delete sinCampo.horaTardia;
+  assert.equal(baseComision(alSalir), 2800, '4 días × Q700: ni Q2,950');
+  assert.deepEqual(comisionDe(alSalir), comisionDe(sinCampo));
+  assert.equal(comisionDe(alSalir).monto, 140);
+  assert.equal(resumen(alSalir).totalSalida, resumen(sinCampo).totalSalida + 150, 'y sí se está cobrando');
 });
 
 test('un contrato viejo con horaTardia: true tiene la misma comisión que sin el campo', () => {

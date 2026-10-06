@@ -120,7 +120,7 @@ const tarjetaTieneDatos = (t) => Boolean(t?.ultimos4 || t?.vencimiento || t?.ban
 export function construirContrato(datos) {
   const {
     id, numero, cliente, ajeno, carro, carroAjeno, duenoId,
-    fechaSalida, horaSalida, lugar, dias, precioDia, kmSalida, combustibleSalida, horaTardia,
+    fechaSalida, horaSalida, lugar, dias, precioDia, kmSalida, combustibleSalida,
     seguroDia, seguroTercerosDia, seguroMenoresDia, seguroPaiDia, deducible, deducibleBajo,
     cartaPoderDestino, cartaPoderPrecio, variosDescripcion, variosPrecio,
     tarjetas = [], forma, porcentajeTarjeta, montoPago,
@@ -192,12 +192,10 @@ export function construirContrato(datos) {
     precioDia: precioDiaNum,
     kmSalida: q(kmSalida),
     combustibleSalida: combustibleSalida || '',
-    // Un MONTO, no una casilla (§7b): lo que se cobra por la hora tardía, que
-    // entra al total de la salida (lineasSalida) igual que cartaPoderPrecio.
-    // Pasa por q() como todo el dinero. Los contratos viejos lo traen como
-    // verdadero o falso; horaTardiaDe (nucleo/contrato.js) es quien los lee,
-    // y este campo nunca los convierte.
-    horaTardia: q(horaTardia),
+    // Aquí NO va `horaTardia`: la hora tardía se cobra al recibir el carro (el
+    // dueño la cobra «solo al devolver») y se escribe en `cierre.horaTardia`
+    // (recibirCarro.js). Un contrato nuevo no trae el campo; los viejos sí
+    // (`true` o un número), y horaTardiaDe (nucleo/contrato.js) los lee.
     devolucionPrevista: devolucionPrevista(fechaSalidaVal, diasNum),
 
     // El precio por día ya incluye el seguro y el seguro de terceros (§5):
@@ -318,7 +316,6 @@ export function leerFormularioDe({ texto, num, marcado }, estado, numero) {
     precioDia: num('sc-precio-dia'),
     kmSalida: num('sc-km-salida'),
     combustibleSalida: texto('sc-combustible-salida'),
-    horaTardia: num('sc-hora-tardia'),
     seguroDia: num('sc-seguro-dia'),
     seguroTercerosDia: num('sc-seguro-terceros-dia'),
     seguroMenoresDia: num('sc-seguro-menores-dia'),
@@ -819,7 +816,6 @@ export function plantilla() {
             ${campo('sc-seguro-pai-dia', 'Seguro PAI (por día)', { tipo: 'number', paso: '0.01', minimo: '0' })}
             ${campo('sc-deducible', 'Deducible (informativo)', { tipo: 'number', paso: '0.01', minimo: '0' })}
             ${campo('sc-deducible-bajo', 'Deducible bajo', { tipo: 'number', paso: '0.01', minimo: '0' })}
-            ${campo('sc-hora-tardia', 'Hora tardía — precio', { tipo: 'number', paso: '0.01', minimo: '0' })}
             ${campo('sc-carta-poder-destino', 'Carta poder — destino')}
             ${campo('sc-carta-poder-precio', 'Carta poder — precio', { tipo: 'number', paso: '0.01', minimo: '0' })}
             ${campo('sc-varios-descripcion', 'Varios — descripción')}

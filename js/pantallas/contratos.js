@@ -139,16 +139,22 @@ export function numeroEnmascarado(valor) {
 
 /**
  * Lo que dice el detalle de la hora tardía cuando NO hay un monto que mostrar
- * como cobro: `''` casi siempre, y «Sí, sin monto registrado» en un contrato
- * viejo que trae `horaTardia: true` (una casilla marcada, sin cifra). Es un
- * dato, dicho tal cual: no lleva aviso ni color, porque el precio lo pone el
- * dueño y nada aquí le pide que lo ponga. Un contrato con monto no pasa por
- * aquí: su cobro ya sale como línea «Hora tardía» en «Cobro al salir».
- * Pregunta a `horaTardiaDe` (nucleo/contrato.js), que es quien sabe leer las
- * dos formas del campo.
+ * como cobro: `''` casi siempre, y «Marcada al salir, sin monto registrado» en
+ * un contrato viejo que trae `horaTardia: true`.
+ *
+ * Es el registro de lo que se marcó en el formulario de «Sacar carro» cuando
+ * la hora tardía era una casilla de sí/no, y por eso se queda en «Datos de la
+ * salida», donde se marcó. Hoy la hora tardía se escribe y se cobra al recibir
+ * el carro (el dueño la cobra «solo al devolver»), así que esa marca vieja no
+ * dice que se deba nada: solo deja a la vista algo que se anotó y que, si no,
+ * desaparecería. No inventa una cifra, no lleva color ni aviso: el precio lo
+ * pone el dueño y nada aquí le pide que lo ponga. Se apaga sola en cuanto el
+ * contrato tiene un monto al recibir, que ya sale como línea en «Cobro al
+ * recibir». Pregunta a `horaTardiaDe` (nucleo/contrato.js), que es quien sabe
+ * leer las formas del campo.
  */
 export function textoHoraTardia(c) {
-  return horaTardiaDe(c).sinMonto ? 'Sí, sin monto registrado' : '';
+  return horaTardiaDe(c).sinMonto ? 'Marcada al salir, sin monto registrado' : '';
 }
 
 /** 'Saldo' o 'A favor del cliente', con el monto ya en positivo — mismo criterio que recibirCarro.js (textoSaldo). */

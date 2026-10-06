@@ -23,7 +23,7 @@
 // para que un cierre ya hecho no se pueda reabrir ni reeditar por accidente
 // desde aquí.
 import { construirCierre, problemasDelCierre } from '../nucleo/cierre.js';
-import { lineasDevolucion, resumen } from '../nucleo/contrato.js';
+import { lineasDevolucion, resumen, horaTardiaDe } from '../nucleo/contrato.js';
 import { q, textoEntero } from '../nucleo/dinero.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
@@ -278,6 +278,10 @@ export function leerCamposDelCierre({ texto, num }) {
     combustible: num('rc-combustible'),
     danos: num('rc-danos'),
     danosDetalle: texto('rc-danos-detalle'),
+    // La hora tardía se escribe aquí, al recibir el carro, y no al sacarlo: el
+    // dueño la cobra «solo al devolver». Es un monto, y entra al total de la
+    // devolución (lineasDevolucion).
+    horaTardia: num('rc-hora-tardia'),
     varios: num('rc-varios'),
     variosDetalle: texto('rc-varios-detalle'),
     descuento: num('rc-descuento'),
@@ -302,7 +306,8 @@ function campo(id, etiqueta, opciones = {}) {
     </label>`;
 }
 
-function plantilla(contrato, soloCobro) {
+// Se exporta solo para probar qué campos dibuja y con qué valores arranca.
+export function plantilla(contrato, soloCobro) {
   const pagadoSalida = resumen(contrato).pagado;
   const encabezado = [contrato.carroDescripcion, contrato.carroPlacas].filter(Boolean).join(' · ');
 
@@ -313,6 +318,12 @@ function plantilla(contrato, soloCobro) {
   // verdad se guardó, en vez de arrancar en blanco listo para pisarlo.
   const enCorreccion = Boolean(textoCorreccion(contrato));
   const iniciales = valoresIniciales(contrato);
+  // La hora tardía ya guardada en el cierre, leída por horaTardiaDe (el único
+  // que sabe que un `true` viejo no es un monto) y no de `iniciales`. Vacía, y
+  // no «0», cuando no hay ninguna: un recibir nuevo no debe arrancar con un 0
+  // escrito. Un contrato que trae la hora tardía en la salida (formas viejas)
+  // tampoco la trae aquí: esa ya está en su total de la salida.
+  const horaTardiaGuardada = horaTardiaDe(contrato).alRecibir || '';
 
   // Modo de solo cobro: el bloque "Al recibir el carro" no se dibuja en
   // absoluto (ni fecha real, ni kilometraje, ni daños) — no hay nada de eso
@@ -329,6 +340,7 @@ function plantilla(contrato, soloCobro) {
             ${campo('rc-combustible', 'Combustible (monto a cobrar)', { tipo: 'number', paso: '0.01', minimo: '0', valor: iniciales.combustible })}
             ${campo('rc-danos', 'Daños', { tipo: 'number', paso: '0.01', minimo: '0', valor: iniciales.danos })}
             ${campo('rc-danos-detalle', 'Daños — detalle', { valor: iniciales.danosDetalle })}
+            ${campo('rc-hora-tardia', 'Hora tardía — precio', { tipo: 'number', paso: '0.01', minimo: '0', valor: horaTardiaGuardada })}
             ${campo('rc-varios', 'Varios', { tipo: 'number', paso: '0.01', minimo: '0', valor: iniciales.varios })}
             ${campo('rc-varios-detalle', 'Varios — detalle', { valor: iniciales.variosDetalle })}
             ${campo('rc-descuento', 'Descuento', { tipo: 'number', paso: '0.01', minimo: '0', valor: iniciales.descuento })}

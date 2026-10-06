@@ -11,10 +11,13 @@ import { readFileSync } from 'node:fs';
 import {
   conKmSalidaNormalizado, textoBotonPago, textoAvisoRecibido, textoSaldo, totalDeEstaCobranza,
   leerParametroRuta, textoAvisoCobro, valoresIniciales, textoCorreccion,
-  textoEstadoPago, textoAvisoSobrecobro, montoInicialPago, leerCamposDelCierre,
+  textoEstadoPago, textoAvisoSobrecobro, montoInicialPago, leerCamposDelCierre, plantilla,
 } from '../js/pantallas/recibirCarro.js';
-import { resumen } from '../js/nucleo/contrato.js';
+import { resumen, lineasDevolucion, saldoConTarjeta } from '../js/nucleo/contrato.js';
+import { construirCierre } from '../js/nucleo/cierre.js';
 import { agregarPago } from '../js/datos.js';
+import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
+import { contratoGuardadoConHoraTardiaAlSalir } from './fixtures/contratoGuardadoConHoraTardiaAlSalir.mjs';
 
 test('conKmSalidaNormalizado: compatibilidad con contratos guardados antes del cambio de nombre (kilometrajeSalida -> kmSalida)', () => {
   const contrato = { id: 'c1', kilometrajeSalida: 45000 };
@@ -283,7 +286,7 @@ test('leerCamposDelCierre trae los mismos campos de siempre, y la fecha real vac
     'rc-fecha-real': '', 'rc-lugar-entrada': ' Oficina ', 'rc-km-entrada': '45100', 'rc-danos': '200',
   }));
   assert.deepEqual(Object.keys(campos).sort(), [
-    'combustible', 'danos', 'danosDetalle', 'descuento', 'fechaReal', 'horaReal', 'kmEntrada', 'lugarEntrada', 'varios', 'variosDetalle',
+    'combustible', 'danos', 'danosDetalle', 'descuento', 'fechaReal', 'horaReal', 'horaTardia', 'kmEntrada', 'lugarEntrada', 'varios', 'variosDetalle',
   ]);
   assert.equal(campos.fechaReal, '', 'problemasDelCierre necesita ver ese vacío para avisar que falta');
   assert.equal(campos.lugarEntrada, 'Oficina');
@@ -298,4 +301,118 @@ test('todos los ids que lee el cierre existen en la plantilla de la pantalla (un
   const plantilla = fuente.slice(fuente.indexOf('function plantilla'));
   assert.ok(plantilla.length > 1000, 'se encontró la plantilla');
   for (const id of pedidos) assert.ok(plantilla.includes(`'${id}'`) || plantilla.includes(`id="${id}"`), `${id} no está en la plantilla`);
+});
+
+// ---------------------------------------------------------------------------
+// La hora tardía se escribe AL RECIBIR el carro (no al sacarlo)
+//
+// El dueño la cobra «solo al devolver»: es un monto del cierre, igual que los
+// varios o el combustible, y entra al total de la devolución. Estas pruebas
+// corren el camino real —campo de la pantalla → leerCamposDelCierre →
+// construirCierre → resumen—, con cifras exactas sobre el ejemplo de la §5.
+// ---------------------------------------------------------------------------
+
+/** Un contrato nuevo: sale con el ejemplo de la §5 y, desde ahora, sin `horaTardia` en la salida. */
+const contratoNuevoSinHoraTardia = () => {
+  const { horaTardia: _casilla, ...sinCasilla } = contratoGuardadoConHoraTardiaSiNo();
+  return sinCasilla;
+};
+
+/** Lo que el mostrador teclea al recibir el carro del ejemplo (1 día tarde, Q200 de daños, Q130, −Q300). */
+const camposTecleados = (extra = {}) => ({
+  'rc-fecha-real': '2026-09-28', 'rc-km-entrada': '45600', 'rc-danos': '200', 'rc-combustible': '130', 'rc-descuento': '300',
+  ...extra,
+});
+
+test('leerCamposDelCierre lee «Hora tardía — precio» como un monto: 150 es el número 150', () => {
+  assert.equal(leerCamposDelCierre(lectoresDe({ 'rc-hora-tardia': '150' })).horaTardia, 150);
+  assert.equal(typeof leerCamposDelCierre(lectoresDe({ 'rc-hora-tardia': '150' })).horaTardia, 'number');
+  assert.equal(leerCamposDelCierre(lectoresDe()).horaTardia, 0, 'sin tocar el campo, cero');
+  // Los centavos de más los redondea construirCierre (pruebas/cierre.test.mjs).
+  const campos = leerCamposDelCierre(lectoresDe(camposTecleados({ 'rc-hora-tardia': '150.005' })));
+  assert.equal(construirCierre(contratoNuevoSinHoraTardia(), campos).cierre.horaTardia, 150.01);
+});
+
+test('Q150 en «Hora tardía — precio» al recibir sube el total de la DEVOLUCIÓN a Q880, y deja la salida en Q3,150', () => {
+  const campos = leerCamposDelCierre(lectoresDe(camposTecleados({ 'rc-hora-tardia': '150' })));
+  const conCierre = construirCierre(contratoNuevoSinHoraTardia(), campos);
+  assert.equal(conCierre.cierre.horaTardia, 150, 'se guarda en el cierre, como número');
+  assert.equal('horaTardia' in conCierre, false, 'y no en el contrato');
+
+  const r = resumen(conCierre);
+  assert.equal(r.totalSalida, 3150, 'Total al salir: no se mueve');
+  assert.equal(r.totalDevolucion, 880, 'Total al recibir: 730 del ejemplo + 150');
+  assert.equal(r.subtotal, 4030);
+  assert.equal(r.saldo, 880, 'lo que ya pagó es solo lo de la salida: 3,150');
+  assert.deepEqual(lineasDevolucion(conCierre).map((l) => [l.concepto, l.monto]), [
+    ['Cobro días de atraso', 700], ['Daños', 200], ['Combustible', 130], ['Hora tardía', 150], ['Descuento', -300],
+  ]);
+});
+
+test('sin tocar «Hora tardía — precio» el cierre da el ejemplo de la §5 tal cual: Q730 al recibir y Q817.60 con tarjeta', () => {
+  const campos = leerCamposDelCierre(lectoresDe(camposTecleados()));
+  const conCierre = construirCierre(contratoNuevoSinHoraTardia(), campos);
+  assert.equal(conCierre.cierre.horaTardia, 0);
+  const r = resumen(conCierre);
+  assert.equal(r.totalDevolucion, 730);
+  assert.equal(r.subtotal, 3880);
+  assert.deepEqual(saldoConTarjeta(conCierre, 12), { saldo: 730, recargo: 87.6, total: 817.6 });
+});
+
+test('cobrar la hora tardía con tarjeta: los Q880 del saldo cuestan Q985.60, con Q105.60 de recargo', () => {
+  const campos = leerCamposDelCierre(lectoresDe(camposTecleados({ 'rc-hora-tardia': '150' })));
+  const conCierre = construirCierre(contratoNuevoSinHoraTardia(), campos);
+  assert.deepEqual(
+    totalDeEstaCobranza(conCierre, { monto: 880, forma: 'tarjeta', porcentajeTarjeta: 12, fecha: '2026-09-28' }),
+    { total: 985.6, recargo: 105.6 },
+  );
+});
+
+test('la plantilla de recibir pide la hora tardía como un campo de monto dentro de «Al recibir el carro», junto a los varios', () => {
+  const html = plantilla(contratoNuevoSinHoraTardia(), false);
+  assert.match(html, /<input type="number" id="rc-hora-tardia" value=""[^>]*step="0.01"[^>]*min="0"/);
+  assert.ok(html.includes('Hora tardía — precio'));
+  const inicio = html.indexOf('Al recibir el carro');
+  const fin = html.indexOf('</section>', inicio);
+  const campo = html.indexOf('id="rc-hora-tardia"');
+  const varios = html.indexOf('id="rc-varios"');
+  assert.ok(inicio > -1 && fin > inicio, 'existe el bloque');
+  assert.ok(campo > inicio && campo < fin, 'el campo está dentro del bloque «Al recibir el carro»');
+  assert.ok(campo < varios && varios < fin, 'y va justo antes de los varios');
+});
+
+test('en el modo de solo cobro no se dibuja el campo: el cierre ya está hecho y no se reedita desde ahí', () => {
+  assert.equal(plantilla(contratoNuevoSinHoraTardia(), true).includes('rc-hora-tardia'), false);
+});
+
+test('al corregir un cierre ya guardado, el campo trae la hora tardía que se guardó', () => {
+  const cerrado = construirCierre(contratoNuevoSinHoraTardia(), leerCamposDelCierre(lectoresDe(camposTecleados({ 'rc-hora-tardia': '150' }))));
+  assert.match(plantilla(cerrado, false), /id="rc-hora-tardia" value="150"/);
+});
+
+test('el campo arranca vacío —no en «0», no en «1»— cuando el contrato no trae ninguna hora tardía en el cierre', () => {
+  const vacio = /id="rc-hora-tardia" value=""/;
+  assert.match(plantilla(contratoNuevoSinHoraTardia(), false), vacio, 'recibir por primera vez');
+  const sinHora = construirCierre(contratoNuevoSinHoraTardia(), leerCamposDelCierre(lectoresDe(camposTecleados())));
+  assert.match(plantilla(sinHora, false), vacio, 'cierre guardado sin hora tardía (se guardó 0)');
+  // Un contrato viejo con la casilla marcada: `true` no es un monto, ni 1 ni nada.
+  assert.match(plantilla(contratoGuardadoConHoraTardiaSiNo(), false), vacio, 'horaTardia: true');
+  // Uno de cuando se anotaba al salir: sus Q150 ya están en su total de la salida, no se repiten aquí.
+  assert.match(plantilla(contratoGuardadoConHoraTardiaAlSalir(), false), vacio, 'horaTardia: 150 en la salida');
+});
+
+test('un contrato viejo con `true`, al recibirlo sin anotar nada, queda igual que siempre: Q3,880.00 de subtotal', () => {
+  const cerrado = construirCierre(contratoGuardadoConHoraTardiaSiNo(), leerCamposDelCierre(lectoresDe(camposTecleados())));
+  assert.equal(cerrado.horaTardia, true, 'el booleano viejo sigue tal cual');
+  assert.equal(cerrado.cierre.horaTardia, 0);
+  assert.equal(resumen(cerrado).subtotal, 3880);
+});
+
+test('un contrato guardado con la hora tardía en la salida, al recibirlo, conserva sus Q3,300.00 de salida y no la cobra otra vez', () => {
+  const cerrado = construirCierre(contratoGuardadoConHoraTardiaAlSalir(), leerCamposDelCierre(lectoresDe(camposTecleados())));
+  assert.equal(cerrado.cierre.horaTardia, 0);
+  const r = resumen(cerrado);
+  assert.equal(r.totalSalida, 3300);
+  assert.equal(r.totalDevolucion, 730);
+  assert.equal(r.subtotal, 4030);
 });

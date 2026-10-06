@@ -90,23 +90,24 @@ subtotal         = renta + cobro de atraso + seguros extra
 montos solo se desglosan en el contrato impreso, nunca se suman aparte.
 El **deducible bajo** se cobra una sola vez, no por día.
 Los **daños** y el **combustible** se escriben a mano al recibir el carro.
-La **hora tardía** es un monto que el mostrador escribe al sacar el carro (Q150
-en el ejemplo del Excel) y se cobra una sola vez, con la salida. El Excel la
-copiaba a la hoja CONTRATOS y la imprimía en el contrato, pero **ninguna
-fórmula de esa hoja la sumaba**: BQ no la incluye, así que el dueño la cobraba
-aparte, a mano. El sistema sí la suma, y por eso, en un contrato con hora
-tardía, el subtotal ya no coincide con el de BQ: la diferencia es exactamente
-ese monto.
+La **hora tardía** es un monto que el mostrador escribe **al recibir el carro**
+(Q150 en el ejemplo del Excel) y se cobra una sola vez, con la devolución: el
+dueño la cobra «solo al devolver». El Excel la tenía en el bloque de entrada de
+la renta, la copiaba a la hoja CONTRATOS y la imprimía en el contrato, pero
+**ninguna fórmula de esa hoja la sumaba**: BQ no la incluye, así que el dueño la
+cobraba aparte, a mano. El sistema sí la suma, y por eso, en un contrato con
+hora tardía, el subtotal ya no coincide con el de BQ: la diferencia es
+exactamente ese monto.
 
 ### Qué se cobra en cada momento
 
 Al salir el carro se cobra **todo lo que ya se sabe**: la renta de los días
-contratados, los seguros por día de esos días, el deducible bajo, la hora
-tardía, la carta poder y los varios.
+contratados, los seguros por día de esos días, el deducible bajo, la carta poder
+y los varios.
 
 En la devolución se cobra **solo lo que apareció después**: los días de atraso,
-los seguros por día de esos días de atraso, los daños y el combustible, menos el
-descuento que se le dé.
+los seguros por día de esos días de atraso, los daños, el combustible y la hora
+tardía, menos el descuento que se le dé.
 
 ### El porcentaje de tarjeta
 
@@ -197,8 +198,8 @@ Un solo formulario, seis bloques, uno debajo del otro:
 3. **Renta** — fecha y hora de salida, lugar, días, precio por día, kilometraje
    de salida, combustible. La devolución prevista se calcula sola.
 4. **Cobros extra** — desglose de seguro y seguro de terceros, seguro de
-   menores, seguro PAI, deducible, deducible bajo, hora tardía (precio), carta
-   poder (destino y precio), varios.
+   menores, seguro PAI, deducible, deducible bajo, carta poder (destino y
+   precio), varios. La hora tardía **no** va aquí: se escribe al recibir el carro.
 5. **Tarjetas** — número, vencimiento, CBC, banco, autorización y monto
    autorizado; segunda tarjeta opcional.
 6. **Cierre del formulario** — quién lo rentó (empleado), conductor adicional
@@ -217,8 +218,8 @@ porcentaje de tarjeta si aplica) y el botón **Guardar e imprimir contrato**.
 ### Recibir carro
 
 Se abre desde el carro, con los datos del contrato ya puestos. Se llena: fecha y
-hora real de entrada, kilometraje, combustible, daños, varios, descuento y forma
-de pago del saldo. El sistema muestra el detalle del cobro (§5), y al guardar
+hora real de entrada, kilometraje, combustible, daños, hora tardía (precio),
+varios, descuento y forma de pago del saldo. El sistema muestra el detalle del cobro (§5), y al guardar
 libera el carro e imprime el cierre.
 
 Botón aparte, **Liberar garantía**, que cierra el contrato cuando ya no queda
@@ -438,13 +439,16 @@ entran en la cuenta y cuáles solo se anotan:
   y que **sí se cobra, una sola vez** (no por día), al salir, dentro de «Seguros
   extra». Los dos nombres se parecen y no se tratan igual: uno no entra a ninguna
   cuenta y el otro sí. Filtrar por `deducible` a secas trae los dos.
-- `horaTardia` es el **cobro por hora tardía**: un monto en quetzales, el que se
-  escribe en «Hora tardía — precio». Pasa por `q()` como todo el dinero y **sí se
-  cobra, al salir el carro y no al recibirlo**: `lineasSalida` emite la línea
-  «Hora tardía» solo si el monto no es cero, igual que la carta poder, y el campo
-  vive en el formulario de «Sacar carro» (junto a la hora de salida), no en el
-  cierre. **No entra a la comisión**: `baseComision` no lo lee (§5), igual que la
-  carta poder. Es el mismo dato que el Excel guardaba en la celda «HORA TARDIA»
+- `horaTardia` es el **cobro por hora tardía**, y **vive en el cierre**:
+  `cierre.horaTardia`, un monto en quetzales que se escribe al recibir el carro
+  en «Hora tardía — precio» (bloque «Al recibir el carro», junto a `varios`).
+  Pasa por `q()` como todo el dinero y **sí se cobra, al recibirlo y no al
+  salir**: `lineasDevolucion` emite la línea «Hora tardía» solo si el monto no es
+  cero, y entra al total de la devolución. Se cobra al devolver porque así lo
+  cobra el dueño: cuando se le preguntó directamente dijo «solo al devolver». El
+  formulario de «Sacar carro» ya no la pide ni la guarda. **No entra a la
+  comisión**: `baseComision` no lo lee (§5), igual que los daños, el combustible
+  y los varios. Es el mismo dato que el Excel guardaba en la celda «HORA TARDIA»
   (`INGRESO DE DATOS!C33`, Q150 en el ejemplo), que se copiaba a `CONTRATOS!AH` y
   se imprimía en el contrato.
 
@@ -462,17 +466,26 @@ entran en la cuenta y cuáles solo se anotan:
   hoja CONTRATOS celda por celda, porque BQ nunca la sumó (§5): lo que el Excel
   imprime y no suma también hay que mirarlo.
 
-  **Hay dos formas guardadas.** Todo contrato guardado antes de este cambio trae
-  `horaTardia` como verdadero o falso. `true` quiere decir «hubo una hora tardía
-  y nadie anotó cuánto»: la cifra **no se sabe y nunca se convierte en un
-  número** (ni en Q1, que es lo que daría `q(true)`, ni en Q150). `horaTardiaDe`
-  (`nucleo/contrato.js`) es el único lugar que lee el campo: un número es el
-  monto; `true` vale 0 en el cobro y el detalle del contrato lo dice tal cual,
-  «Hora tardía: Sí, sin monto registrado»; `false`, `0` o la ausencia no son
-  nada. Por eso ningún total de un contrato que ya se cobró y se cerró se movió,
-  y no hay migración ni debe haberla: reescribir esos `true` sería inventar un
-  cobro que nadie hizo. Un contrato nuevo siempre guarda un número, `0` si no
-  hubo hora tardía.
+  **Hay tres formas guardadas, y las tres siguen en la nube.**
+  `horaTardiaDe` (`nucleo/contrato.js`) es el único lugar que las lee y devuelve
+  `{ alSalir, alRecibir, sinMonto }`:
+  1. `cierre.horaTardia` (número): la de hoy. `alRecibir`, y entra a la
+     devolución.
+  2. `horaTardia` en la raíz del contrato (número): la de unas pocas horas, cuando
+     se escribía al salir y se cobraba dentro del total de la salida. `alSalir`.
+     Esos contratos ya se cobraron con ese total y se siguen leyendo donde se
+     guardaron: moverlos le cambiaría el total a un contrato ya cobrado. Ningún
+     contrato nuevo la escribe.
+  3. `horaTardia: true` en la raíz: la casilla original. Quiere decir «hubo una
+     hora tardía y nadie anotó cuánto»: la cifra **no se sabe y nunca se convierte
+     en un número** (ni en Q1, que es lo que daría `q(true)`, ni en Q150), así
+     que no es `alSalir` ni `alRecibir` (valen 0) y `sinMonto` deja que el
+     detalle diga la verdad: «Hora tardía: Marcada al salir, sin monto
+     registrado». Si después se anota un monto al recibir, deja de decirlo.
+
+  Por eso ningún total de un contrato que ya se cobró y se cerró se movió, y no
+  hay migración ni debe haberla: reescribir esos valores sería inventar un cobro
+  que nadie hizo. Un contrato nuevo no trae `horaTardia` en la raíz.
 - `cartaPoderDestino` y `cartaPoderPrecio` son la carta poder: el destino que se
   anota para ella (texto libre) y lo que se cobra por ella. Van de a par, pero no
   pesan lo mismo: la línea «Carta poder» del cobro existe solo si el precio no es
@@ -532,7 +545,7 @@ La lista viva sigue siendo lo que arma `construirContrato`
 
 **Del cierre:**
 `fechaReal`, `horaReal`, `lugarEntrada`, `kmEntrada`, `combustible`, `danos`,
-`danosDetalle`, `varios`, `variosDetalle`, `descuento`.
+`danosDetalle`, `horaTardia`, `varios`, `variosDetalle`, `descuento`.
 
 **De la reservación** (agregado el 28 de septiembre, al notar que §12b describía
 las reservaciones sin dejar sus campos en esta lista — el hueco por donde entró

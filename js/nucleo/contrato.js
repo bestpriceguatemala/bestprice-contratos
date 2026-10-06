@@ -2,9 +2,9 @@
 //
 // El cobro sucede en dos momentos, como en el mostrador: al salir el carro se
 // cobra todo lo que ya se sabe (renta, seguros por día de los días contratados,
-// deducible bajo, hora tardía, carta poder, varios) y al recibirlo solo lo que
-// apareció después (atraso, seguros por día de esos días, daños, combustible,
-// descuento).
+// deducible bajo, carta poder, varios) y al recibirlo solo lo que apareció
+// después (atraso, seguros por día de esos días, daños, combustible, hora
+// tardía, varios, descuento).
 //
 // El porcentaje de tarjeta se aplica a CADA pago, no una sola vez al final:
 // el cliente puede pagar la renta con tarjeta y el saldo en efectivo, y solo lo
@@ -21,27 +21,46 @@ export function atrasoDe(c) {
 }
 
 /**
- * Lo que dice `horaTardia` de un contrato: `{ monto, sinMonto }`. ÚNICO lugar
- * que lo interpreta — el cobro (`lineasSalida`) y el detalle del contrato
- * (pantallas/contratos.js) preguntan aquí y ninguno vuelve a mirar el campo.
+ * Lo que dice un contrato de la hora tardía: `{ alSalir, alRecibir, sinMonto }`.
+ * ÚNICO lugar que mira esos campos — el cobro (`lineasSalida`,
+ * `lineasDevolucion`), el cierre (`construirCierre`), la pantalla de recibir y el
+ * detalle del contrato preguntan aquí y ninguno vuelve a leerlos por su cuenta.
  *
- * `horaTardia` es un MONTO en quetzales desde que se recuperó el cobro que el
- * Excel traía en la celda «HORA TARDIA» y que el sistema había convertido en
- * una casilla de sí/no (ver §7b del diseño). Pero todo contrato guardado antes
- * de ese cambio lo trae como verdadero o falso, y ahí está la trampa: con
- * `q()` a secas, un `true` vale 1 y cada contrato viejo ganaba Q1.00 en
- * silencio, moviendo el saldo de un contrato que ya se cobró y se cerró.
+ * La hora tardía se cobra AL RECIBIR el carro: el dueño lo dijo así («solo al
+ * devolver», cuando se le preguntó directamente) y es un monto en quetzales que
+ * vive en `cierre.horaTardia`, igual que `varios` o `combustible`. Pero el campo
+ * ha tenido tres formas guardadas, y las tres siguen existiendo en la nube:
  *
- *   número  -> es el monto, tal cual (`q`).
- *   true    -> hubo hora tardía y nadie anotó cuánto. NO se sabe, así que
- *              vale 0 en el cobro y `sinMonto` lo deja decir la verdad en el
- *              detalle; nunca se le inventa una cifra.
+ *   `cierre.horaTardia` (número) -> la de hoy. `alRecibir`, y entra al total de
+ *      la devolución.
+ *   `horaTardia` (número) -> la de unas pocas horas, cuando se escribía al salir
+ *      y se cobraba dentro del total de la salida. `alSalir`. Esos contratos ya
+ *      se guardaron y se cobraron con ese total, así que se siguen leyendo donde
+ *      se guardaron: cambiarlos de lugar les movería el total sin que nadie lo
+ *      tocara. Ningún contrato nuevo lo escribe.
+ *   `horaTardia: true` -> la original, una casilla de sí/no que nada leía. Quiere
+ *      decir «hubo una hora tardía y nadie anotó cuánto»: la cifra NO se sabe,
+ *      así que no es ni `alSalir` ni `alRecibir` (valen 0) y `sinMonto` deja
+ *      decir la verdad en el detalle. Nunca se le inventa una cifra.
+ *
+ * La trampa es el `true`: con `q()` a secas vale 1, y cada contrato viejo ganaba
+ * Q1.00 en silencio, moviendo el saldo de uno que ya se cobró y se cerró. Por
+ * eso un booleano nunca pasa por `q()` aquí. Si el mostrador anota después un
+ * monto al recibir (`alRecibir`), el `true` ya no está «sin monto» y el detalle
+ * deja de decirlo.
+ *
  *   false, ausente o cualquier otra cosa -> nada.
  */
 export function horaTardiaDe(c) {
-  const v = c?.horaTardia;
-  if (typeof v === 'number') return { monto: q(v), sinMonto: false };
-  return { monto: 0, sinMonto: v === true };
+  const alSalir = c?.horaTardia;
+  const alRecibir = c?.cierre?.horaTardia;
+  const montoDe = (v) => (typeof v === 'boolean' ? 0 : q(v));
+  const recibido = montoDe(alRecibir);
+  return {
+    alSalir: montoDe(alSalir),
+    alRecibir: recibido,
+    sinMonto: alSalir === true && !recibido,
+  };
 }
 
 /** Lo que se cobra al salir el carro. */
@@ -60,14 +79,15 @@ export function lineasSalida(c) {
     lineas.push({ concepto: 'Seguros extra', detalle: 'menores, PAI, deducible bajo', monto: extra });
   }
 
-  // Se cobra al salir porque es de la salida: la hora tardía se anota en el
-  // formulario de «Sacar carro» (junto a la hora de salida) y sale impresa en
-  // el contrato que se entrega, igual que la carta poder. Como ella, la línea
-  // existe solo si el monto no es cero — y un contrato viejo con `true` no
-  // tiene monto (ver horaTardiaDe).
-  const horaTardia = horaTardiaDe(c).monto;
-  if (horaTardia) {
-    lineas.push({ concepto: 'Hora tardía', detalle: '', monto: horaTardia });
+  // La hora tardía ya NO se cobra al salir: se cobra al recibir el carro
+  // (lineasDevolucion), porque así lo cobra el dueño. Esta línea existe solo
+  // para los contratos guardados cuando se escribía al salir (`horaTardia`
+  // como número, ver horaTardiaDe): ya se cobraron con ese total y siguen
+  // mostrándolo. Un contrato nuevo no la trae, y uno viejo con `true` tampoco
+  // (no tiene monto).
+  const horaTardiaAlSalir = horaTardiaDe(c).alSalir;
+  if (horaTardiaAlSalir) {
+    lineas.push({ concepto: 'Hora tardía', detalle: '', monto: horaTardiaAlSalir });
   }
 
   if (q(c?.cartaPoderPrecio)) {
@@ -98,6 +118,14 @@ export function lineasDevolucion(c) {
 
   if (q(c.cierre.danos)) lineas.push({ concepto: 'Daños', detalle: c.cierre.danosDetalle || '', monto: q(c.cierre.danos) });
   if (q(c.cierre.combustible)) lineas.push({ concepto: 'Combustible', detalle: '', monto: q(c.cierre.combustible) });
+  // La hora tardía se decide al recibir el carro (el dueño la cobra «solo al
+  // devolver»), así que va con los demás cobros del cierre y, como ellos, entra
+  // al total de la devolución. Se lee con horaTardiaDe y no directo de
+  // `cierre.horaTardia`: ese lector es el único que sabe que un booleano no es
+  // un monto. Igual que la carta poder, la línea existe solo si el monto no es
+  // cero. No entra a la comisión (comision.js no la lee).
+  const horaTardia = horaTardiaDe(c).alRecibir;
+  if (horaTardia) lineas.push({ concepto: 'Hora tardía', detalle: '', monto: horaTardia });
   // CRÍTICO de la revisión final: "Varios" (la llave perdida, el lavado, la
   // silla de bebé no devuelta) se guardaba en el cierre pero nunca aparecía
   // aquí, así que nunca subía el saldo ni se cobraba — el mostrador tecleaba

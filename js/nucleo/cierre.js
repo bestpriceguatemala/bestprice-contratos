@@ -10,7 +10,7 @@
 
 import { q, textoDosDecimales, textoConQ } from './dinero.js';
 import { diasEntre, textoFecha } from './fechas.js';
-import { resumen } from './contrato.js';
+import { resumen, horaTardiaDe } from './contrato.js';
 
 /**
  * Arma el cierre del contrato preservando todo lo que ya traía.
@@ -28,6 +28,11 @@ export function construirCierre(contrato, campos) {
     combustible: q(cierreBase.combustible),
     danos: q(cierreBase.danos),
     varios: q(cierreBase.varios),
+    // La hora tardía se decide al recibir el carro, así que es un campo del
+    // cierre como `varios`. Pasa por horaTardiaDe y no por q() a secas: es el
+    // único que sabe que un booleano no es un monto (q(true) vale 1), y un
+    // cierre armado sobre un contrato viejo no debe inventarse ni un centavo.
+    horaTardia: horaTardiaDe({ ...contrato, cierre: cierreBase }).alRecibir,
     descuento: q(cierreBase.descuento),
   };
 

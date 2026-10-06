@@ -6,9 +6,10 @@
 // El precio por día va COMPLETO: ya lleva el seguro y el seguro de terceros
 // adentro, y esos solo se desglosan en el contrato impreso. No entran daños,
 // combustible, hora tardía, carta poder, seguros extra, varios ni el recargo de
-// tarjeta. La hora tardía es un cobro extra de la salida, de la misma familia
-// que la carta poder: la base no la lee, así que cobrarla no le sube a nadie la
-// comisión (pruebas/comision.test.mjs lo fija con un monto real).
+// tarjeta. La hora tardía es un cobro extra del cierre (el dueño la cobra «solo
+// al devolver»), de la misma familia que los daños, el combustible y los varios:
+// la base no la lee, así que cobrarla no le sube a nadie la comisión
+// (pruebas/comision.test.mjs lo fija con un monto real).
 //
 // El porcentaje se guarda en el contrato el día que se hace, para que subirle el
 // porcentaje a un empleado no mueva las comisiones de meses ya pagados.

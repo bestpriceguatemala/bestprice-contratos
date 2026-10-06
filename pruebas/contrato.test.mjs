@@ -10,6 +10,7 @@ import {
 } from '../js/nucleo/contrato.js';
 import { construirCierre } from '../js/nucleo/cierre.js';
 import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
+import { contratoGuardadoConHoraTardiaAlSalir } from './fixtures/contratoGuardadoConHoraTardiaAlSalir.mjs';
 
 /** El contrato del ejemplo de la §5 del diseño, ya cobrado por completo. */
 const ejemplo = () => ({
@@ -235,80 +236,139 @@ test('anular el pago equivocado deja el contrato otra vez con saldo — el estad
   assert.equal(resumen(corregido).saldo, 2800, 'anulado el pago, vuelve a deber la renta completa');
 });
 
-// ---------- Hora tardía: un cobro de la salida, con monto ----------
+// ---------- Hora tardía: un cobro de la devolución, con monto ----------
 //
 // En el Excel era una celda con un monto (Q150 en el ejemplo) que se imprimía
-// en el contrato y se cobraba; el sistema la volvió una casilla de sí/no y
-// desde entonces nunca se cobró. Ahora `horaTardia` es un monto que entra al
-// total de la salida igual que la carta poder (cartaPoderPrecio).
+// en el contrato y se cobraba aparte, a mano; el sistema la volvió una casilla
+// de sí/no y desde entonces nunca se cobró. Se recuperó como un monto, primero
+// al salir y, cuando se le preguntó al dueño, «solo al devolver»: ahora vive en
+// `cierre.horaTardia`, igual que `varios`, y entra al total de la DEVOLUCIÓN.
 //
 // Todas estas cifras son exactas, no formas: Q150 sobre el ejemplo de la §5
-// (4 × Q700 de renta, Q350 de carta poder) da Q3,300 al salir.
+// (devolución de Q730) da Q880 al recibir, y la salida se queda en Q3,150.
 
-test('la hora tardía de Q150 sale como una línea del cobro al salir, antes de la carta poder', () => {
-  const lineas = lineasSalida({ ...ejemplo(), horaTardia: 150 });
-  assert.deepEqual(lineas, [
-    { concepto: 'Renta', detalle: '4 días × Q700.00', monto: 2800 },
+/** El ejemplo de la §5 con Q`monto` de hora tardía anotados al recibir el carro. */
+const conHoraTardiaAlRecibir = (monto, c = ejemplo()) => ({ ...c, cierre: { ...c.cierre, horaTardia: monto } });
+
+test('la hora tardía de Q150 sale como una línea del cobro al recibir, entre el combustible y el descuento', () => {
+  assert.deepEqual(lineasDevolucion(conHoraTardiaAlRecibir(150)), [
+    { concepto: 'Cobro días de atraso', detalle: '1 × Q700.00', monto: 700 },
+    { concepto: 'Daños', detalle: '', monto: 200 },
+    { concepto: 'Combustible', detalle: '', monto: 130 },
     { concepto: 'Hora tardía', detalle: '', monto: 150 },
-    { concepto: 'Carta poder', detalle: '', monto: 350 },
+    { concepto: 'Descuento', detalle: '', monto: -300 },
   ]);
 });
 
-test('la hora tardía de Q150 entra al total: Q3,300 al salir y Q150 más en el saldo', () => {
-  const c = { ...ejemplo(), horaTardia: 150 };
-  const r = resumen(c);
-  assert.equal(r.totalSalida, 3300, '2,800 de renta + 150 de hora tardía + 350 de carta poder');
-  assert.equal(r.totalDevolucion, 730, 'lo de la devolución no cambia: la hora tardía no es de ahí');
+test('lo que se anota al recibir NO sale al salir: el cobro de la salida no se mueve', () => {
+  const c = conHoraTardiaAlRecibir(150);
+  assert.deepEqual(lineasSalida(c), lineasSalida(ejemplo()), 'ni una línea de hora tardía en la salida');
+  assert.deepEqual(lineasSalida(c).map((l) => [l.concepto, l.monto]), [['Renta', 2800], ['Carta poder', 350]]);
+});
+
+test('la hora tardía de Q150 al recibir entra al total de la devolución: Q880, y Q150 más en el saldo', () => {
+  const r = resumen(conHoraTardiaAlRecibir(150));
+  assert.equal(r.totalSalida, 3150, 'la salida es la del ejemplo: 2,800 de renta + 350 de carta poder');
+  assert.equal(r.totalDevolucion, 880, '730 del ejemplo + 150 de hora tardía');
   assert.equal(r.subtotal, 4030, '3,880 del ejemplo + 150');
   assert.equal(r.pagado, 4345.6, 'los dos pagos ya hechos siguen valiendo lo mismo');
   assert.equal(r.saldo, 150, 'sin pagar la hora tardía, es justo lo que falta: Q150 y ni un centavo más');
 });
 
+// §5, «Ejemplo que debe cuadrar»: la hora tardía cambió de lugar y de total, no
+// de cifras. El ejemplo no tiene hora tardía, así que NINGUNA de sus celdas se
+// mueve; y con Q150 al recibir, solo se mueve lo de la devolución.
+test('§5 sigue cuadrando celda por celda: salida 3,528.00, saldo con tarjeta 817.60, subtotal 3,880.00, total cobrado 4,345.60', () => {
+  const alSalir = { ...ejemplo(), pagos: [ejemplo().pagos[0]] };
+  const r = resumen(alSalir);
+  assert.equal(r.totalSalida, 3150);
+  assert.equal(r.pagado, 3528, 'Salida · Pagado');
+  assert.equal(r.subtotal, 3880);
+  assert.equal(r.saldo, 730);
+  assert.deepEqual(saldoConTarjeta(alSalir, 12), { saldo: 730, recargo: 87.6, total: 817.6 }, 'Devolución · Saldo por cobrar');
+
+  const completo = resumen(ejemplo());
+  assert.equal(completo.subtotal, 3880);
+  assert.equal(completo.totalCobrado, 4345.6, 'Total cobrado');
+  assert.equal(completo.saldo, 0);
+});
+
+test('§5 con Q150 de hora tardía al recibir: la salida sigue en 3,528.00 y el saldo con tarjeta sube a 985.60', () => {
+  const alSalir = { ...conHoraTardiaAlRecibir(150), pagos: [ejemplo().pagos[0]] };
+  const r = resumen(alSalir);
+  assert.equal(r.pagado, 3528, 'lo que se cobró al salir no se toca: la hora tardía no es de ahí');
+  assert.equal(r.totalSalida, 3150);
+  assert.equal(r.subtotal, 4030);
+  assert.equal(r.saldo, 880);
+  // 880 × 1.12 = 985.60: los 817.60 del ejemplo más 150 × 1.12 = 168.
+  assert.deepEqual(saldoConTarjeta(alSalir, 12), { saldo: 880, recargo: 105.6, total: 985.6 });
+});
+
 test('con la hora tardía pagada con tarjeta, el 12 % se le aplica a ella también', () => {
-  // Al salir se cobra 3,300 (no 3,150) con 12 %: 3,300 × 1.12 = 3,696.
-  const c = { ...ejemplo(), horaTardia: 150, cierre: null, pagos: [{ monto: 3300, porcentajeTarjeta: 12 }] };
+  // Al recibir se cobra 880 (no 730) con 12 %: 880 × 1.12 = 985.60.
+  const c = { ...conHoraTardiaAlRecibir(150), pagos: [{ monto: 3150, porcentajeTarjeta: 12 }, { monto: 880, porcentajeTarjeta: 12 }] };
   const r = resumen(c);
-  assert.equal(r.totalSalida, 3300);
-  assert.equal(r.pagado, 3696);
+  assert.equal(r.pagado, 3528 + 985.6);
   assert.equal(r.saldo, 0);
 });
 
 test('un monto con centavos de más pasa por q(): 150.005 es Q150.01, no 150.00500000000001', () => {
-  const lineas = lineasSalida({ ...ejemplo(), horaTardia: 150.005 });
+  const lineas = lineasDevolucion(conHoraTardiaAlRecibir(150.005));
   assert.equal(lineas.find((l) => l.concepto === 'Hora tardía').monto, 150.01);
-  assert.equal(resumen({ ...ejemplo(), horaTardia: 150.005 }).totalSalida, 3300.01);
+  assert.equal(resumen(conHoraTardiaAlRecibir(150.005)).totalDevolucion, 880.01);
 });
 
-test('hora tardía en cero: no hay línea y el total es el de siempre', () => {
-  const lineas = lineasSalida({ ...ejemplo(), horaTardia: 0 });
+test('hora tardía en cero al recibir: no hay línea y el total es el de siempre', () => {
+  const lineas = lineasDevolucion(conHoraTardiaAlRecibir(0));
   assert.equal(lineas.some((l) => l.concepto === 'Hora tardía'), false, 'cero no deja una línea de Q0.00');
-  assert.deepEqual(lineas.map((l) => [l.concepto, l.monto]), [['Renta', 2800], ['Carta poder', 350]]);
-  assert.deepEqual(resumen({ ...ejemplo(), horaTardia: 0 }), resumen(ejemplo()), 'ni un número del resumen se mueve');
+  assert.deepEqual(lineas, lineasDevolucion(ejemplo()));
+  assert.deepEqual(resumen(conHoraTardiaAlRecibir(0)), resumen(ejemplo()), 'ni un número del resumen se mueve');
 });
 
-test('horaTardiaDe: un monto es el monto; falso, ausente o cero no son nada', () => {
-  assert.deepEqual(horaTardiaDe({ horaTardia: 150 }), { monto: 150, sinMonto: false });
-  assert.deepEqual(horaTardiaDe({ horaTardia: 150.005 }), { monto: 150.01, sinMonto: false });
-  assert.deepEqual(horaTardiaDe({ horaTardia: 0 }), { monto: 0, sinMonto: false });
-  assert.deepEqual(horaTardiaDe({ horaTardia: false }), { monto: 0, sinMonto: false });
-  assert.deepEqual(horaTardiaDe({}), { monto: 0, sinMonto: false }, 'un contrato que nunca trajo el campo');
-  assert.deepEqual(horaTardiaDe(undefined), { monto: 0, sinMonto: false });
-  assert.deepEqual(horaTardiaDe({ horaTardia: null }), { monto: 0, sinMonto: false });
+test('mientras el carro no regresa no hay hora tardía que cobrar: sin cierre, la devolución está vacía', () => {
+  assert.deepEqual(lineasDevolucion({ ...ejemplo(), cierre: null }), []);
 });
 
-// ---------- Los contratos de antes: `horaTardia: true` ----------
+test('horaTardiaDe: las formas del campo, una por una', () => {
+  const cero = { alSalir: 0, alRecibir: 0, sinMonto: false };
+  // La de hoy: un monto en el cierre.
+  assert.deepEqual(horaTardiaDe({ cierre: { horaTardia: 150 } }), { alSalir: 0, alRecibir: 150, sinMonto: false });
+  assert.deepEqual(horaTardiaDe({ cierre: { horaTardia: 150.005 } }), { alSalir: 0, alRecibir: 150.01, sinMonto: false });
+  // La de unas horas: un monto en el contrato, de cuando se anotaba al salir.
+  assert.deepEqual(horaTardiaDe({ horaTardia: 150 }), { alSalir: 150, alRecibir: 0, sinMonto: false });
+  assert.deepEqual(horaTardiaDe({ horaTardia: 150.005 }), { alSalir: 150.01, alRecibir: 0, sinMonto: false });
+  // La original: `true` es «hubo y nadie anotó cuánto». No es un monto de ningún lado.
+  assert.deepEqual(horaTardiaDe({ horaTardia: true }), { alSalir: 0, alRecibir: 0, sinMonto: true });
+  // Nada: cero, falso, ausente.
+  assert.deepEqual(horaTardiaDe({ horaTardia: 0 }), cero);
+  assert.deepEqual(horaTardiaDe({ horaTardia: false }), cero);
+  assert.deepEqual(horaTardiaDe({ cierre: { horaTardia: 0 } }), cero);
+  assert.deepEqual(horaTardiaDe({ cierre: { fechaReal: '2026-08-25' } }), cero, 'un cierre viejo que nunca trajo el campo');
+  assert.deepEqual(horaTardiaDe({}), cero, 'un contrato que nunca trajo el campo');
+  assert.deepEqual(horaTardiaDe(undefined), cero);
+  assert.deepEqual(horaTardiaDe({ horaTardia: null }), cero);
+});
+
+test('horaTardiaDe: un booleano nunca es un monto, ni en el contrato ni en el cierre (q(true) vale 1)', () => {
+  assert.deepEqual(horaTardiaDe({ cierre: { horaTardia: true } }), { alSalir: 0, alRecibir: 0, sinMonto: false });
+  assert.deepEqual(horaTardiaDe({ cierre: { horaTardia: false } }), { alSalir: 0, alRecibir: 0, sinMonto: false });
+  assert.deepEqual(horaTardiaDe({ horaTardia: true, cierre: { horaTardia: true } }), { alSalir: 0, alRecibir: 0, sinMonto: true });
+  assert.equal(resumen(conHoraTardiaAlRecibir(true)).totalDevolucion, 730, 'ni Q731');
+});
+
+// ---------- Los contratos de antes (1): `horaTardia: true` ----------
 //
 // Lo que más importa de este cambio. Un `true` guardado significa que hubo una
 // hora tardía y que nadie anotó cuánto: la cifra NO se sabe. Si se leyera con
 // q() a secas valdría 1, y cada contrato viejo ganaría Q1.00 en silencio; si
 // alguien "arreglara" eso poniéndole Q150, se inventaría un cobro que nadie
-// hizo. Se lee como lo que es: sin monto.
+// hizo. Se lee como lo que es: sin monto, ni al salir ni al recibir.
 
 test('un contrato guardado con horaTardia: true no gana ningún monto, ni siquiera Q1', () => {
   const viejo = contratoGuardadoConHoraTardiaSiNo();
   assert.equal(viejo.horaTardia, true, 'la fixture es de verdad el booleano que se guardó');
 
-  assert.deepEqual(horaTardiaDe(viejo), { monto: 0, sinMonto: true });
+  assert.deepEqual(horaTardiaDe(viejo), { alSalir: 0, alRecibir: 0, sinMonto: true });
   assert.deepEqual(lineasSalida(viejo).map((l) => [l.concepto, l.monto]), [
     ['Renta', 2800],
     ['Carta poder', 350],
@@ -329,24 +389,86 @@ test('un contrato viejo con horaTardia: true da EXACTAMENTE el mismo resumen que
   assert.deepEqual(lineasDevolucion(viejo), lineasDevolucion(sinCampo));
 });
 
+/** Los campos del cierre del ejemplo de la §5, tal como los arma la pantalla de recibir. */
+const camposDelEjemplo = (extra = {}) => ({
+  fechaReal: '2026-09-28', horaReal: '10:00', lugarEntrada: 'Oficina', kmEntrada: 45600,
+  danos: 200, danosDetalle: 'Rayón', combustible: 130, varios: 0, variosDetalle: '', descuento: 300,
+  ...extra,
+});
+
 test('un contrato viejo ya recibido y cobrado sigue en Q3,880.00 de subtotal y saldo cero', () => {
   // El caso que no se puede romper: un contrato que el dueño ya cerró y cobró
   // con la casilla marcada. Se arma igual que la pantalla de recibir: el
   // cierre se le agrega con construirCierre y el segundo pago con tarjeta.
-  const cerrado = construirCierre(contratoGuardadoConHoraTardiaSiNo(), {
-    fechaReal: '2026-09-28', horaReal: '10:00', lugarEntrada: 'Oficina', kmEntrada: 45600,
-    danos: 200, danosDetalle: 'Rayón', combustible: 130, varios: 0, variosDetalle: '', descuento: 300,
-  });
+  const cerrado = construirCierre(contratoGuardadoConHoraTardiaSiNo(), camposDelEjemplo());
   cerrado.pagos.push({
     monto: 730, forma: 'tarjeta', porcentajeTarjeta: 12, fecha: '2026-09-28',
   });
   cerrado.garantiaLiberada = true;
 
   assert.equal(cerrado.horaTardia, true, 'cerrar el contrato no toca el campo');
+  assert.equal(cerrado.cierre.horaTardia, 0, 'y el cierre no se inventa una hora tardía: ni 1 ni 150');
   const r = resumen(cerrado);
   assert.equal(r.totalSalida, 3150);
   assert.equal(r.totalDevolucion, 730, 'atraso de 1 día + daños + combustible − descuento, como el ejemplo');
   assert.equal(r.subtotal, 3880, 'el mismo 3,880.00 del ejemplo del diseño');
   assert.equal(r.pagado, 4345.6);
   assert.equal(r.saldo, 0, 'el contrato sigue cerrado y sin deber nada');
+});
+
+test('a un contrato viejo con `true` SÍ se le puede anotar la hora tardía al recibir: entra a la devolución y el `true` ya no está «sin monto»', () => {
+  const cerrado = construirCierre(contratoGuardadoConHoraTardiaSiNo(), camposDelEjemplo({ horaTardia: 150 }));
+  assert.equal(cerrado.horaTardia, true, 'el booleano viejo sigue ahí, tal cual');
+  assert.equal(cerrado.cierre.horaTardia, 150);
+  assert.deepEqual(horaTardiaDe(cerrado), { alSalir: 0, alRecibir: 150, sinMonto: false });
+  const r = resumen(cerrado);
+  assert.equal(r.totalSalida, 3150, 'la salida no se mueve');
+  assert.equal(r.totalDevolucion, 880);
+  assert.equal(r.subtotal, 4030);
+});
+
+// ---------- Los contratos de antes (2): `horaTardia: 150` en la salida ----------
+//
+// Durante unas horas la hora tardía se escribía al salir y se cobraba en el
+// total de la salida. Esos contratos ya se guardaron, ya se cobraron y ya
+// mostraron Q3,300.00 al salir. Cuando el cobro se mudó a la devolución su
+// total no se podía mover: si se dejara de leer ese número, el contrato
+// mostraría Q3,150.00, el pago de Q3,300 le sobraría y saldría un saldo a favor
+// del cliente que nadie anotó. Se siguen leyendo donde se guardaron.
+
+test('un contrato guardado con la hora tardía en la salida sigue mostrando Q3,300.00 al salir, igual que cuando se guardó', () => {
+  const guardado = contratoGuardadoConHoraTardiaAlSalir();
+  assert.equal(typeof guardado.horaTardia, 'number', 'la fixture es de verdad el número que se guardó al salir');
+
+  assert.deepEqual(horaTardiaDe(guardado), { alSalir: 150, alRecibir: 0, sinMonto: false });
+  assert.deepEqual(lineasSalida(guardado), [
+    { concepto: 'Renta', detalle: '4 días × Q700.00', monto: 2800 },
+    { concepto: 'Hora tardía', detalle: '', monto: 150 },
+    { concepto: 'Carta poder', detalle: 'Ciudad de Guatemala', monto: 350 },
+  ]);
+  assert.deepEqual(lineasDevolucion(guardado), [], 'todavía no regresa: nada que cobrar al recibir');
+  const r = resumen(guardado);
+  assert.equal(r.totalSalida, 3300, '2,800 de renta + 150 de hora tardía + 350 de carta poder');
+  assert.equal(r.subtotal, 3300);
+  assert.equal(r.pagado, 3696, '3,300 con 12 % de tarjeta, como se cobró ese día');
+  assert.equal(r.saldo, 0, 'ni un saldo a favor ni uno por cobrar que nadie anotó');
+});
+
+test('ese contrato, ya recibido: la hora tardía de la salida se queda en la salida y no se cobra dos veces', () => {
+  const cerrado = construirCierre(contratoGuardadoConHoraTardiaAlSalir(), camposDelEjemplo());
+  assert.equal(cerrado.horaTardia, 150, 'cerrar el contrato no mueve el número que ya traía');
+  assert.equal(cerrado.cierre.horaTardia, 0, 'y el cierre no lo copia: eso la cobraría otra vez');
+  const r = resumen(cerrado);
+  assert.equal(r.totalSalida, 3300, 'el mismo total que mostró al guardarse');
+  assert.equal(r.totalDevolucion, 730, 'el de la devolución del ejemplo, sin la hora tardía');
+  assert.equal(r.subtotal, 4030);
+  assert.deepEqual(lineasDevolucion(cerrado).map((l) => l.concepto), ['Cobro días de atraso', 'Daños', 'Combustible', 'Descuento']);
+});
+
+test('ese contrato, cuando el mostrador anota además una hora tardía al recibir, la suma: es lo que escribió', () => {
+  const cerrado = construirCierre(contratoGuardadoConHoraTardiaAlSalir(), camposDelEjemplo({ horaTardia: 200 }));
+  const r = resumen(cerrado);
+  assert.equal(r.totalSalida, 3300, 'la de la salida sigue en su lugar');
+  assert.equal(r.totalDevolucion, 930, '730 + 200 que se escribió al recibir');
+  assert.equal(r.subtotal, 4230);
 });

@@ -124,3 +124,59 @@ test('sin kmSalida registrado, no se valida que el kilometraje retroceda', () =>
   const p = problemasDelCierre(sinKmSalida, { ...campos, kmEntrada: 44000 });
   assert.equal(p.filter((m) => /kilometraje/i.test(m)).length, 0, 'no hay problema de km sin kmSalida');
 });
+
+// ---------- La hora tardía es un campo del cierre ----------
+//
+// El dueño la cobra «solo al devolver»: se decide con lo demás que se decide
+// cuando el carro regresa, así que vive en `cierre.horaTardia` y la arma
+// construirCierre, igual que `varios`.
+
+test('la hora tardía llega al cierre como un número, y de verdad se cobra: mueve el saldo', () => {
+  const c = construirCierre(contrato(), { ...campos, horaTardia: 150 });
+  assert.equal(c.cierre.horaTardia, 150);
+  assert.equal(typeof c.cierre.horaTardia, 'number');
+
+  // Igual que con los varios: no basta con que el campo se guarde.
+  const sin = resumen(construirCierre(contrato(), { ...campos, horaTardia: 0 }));
+  const con = resumen(c);
+  assert.equal(con.saldo, sin.saldo + 150, 'los Q150 de hora tardía tienen que subir el saldo por cobrar');
+  assert.equal(con.totalDevolucion, 880);
+  assert.equal(con.totalSalida, sin.totalSalida, 'y solo el de la devolución: la salida no se mueve');
+});
+
+test('la hora tardía pasa por q(): lo tecleado con centavos de más se guarda a dos decimales', () => {
+  assert.equal(construirCierre(contrato(), { ...campos, horaTardia: 150.005 }).cierre.horaTardia, 150.01);
+});
+
+test('sin hora tardía el cierre guarda 0, no un campo ausente ni false', () => {
+  assert.equal(construirCierre(contrato(), campos).cierre.horaTardia, 0);
+  assert.equal(construirCierre(contrato(), { ...campos, horaTardia: '' }).cierre.horaTardia, 0);
+  assert.equal(resumen(construirCierre(contrato(), campos)).subtotal, 3880, 'el ejemplo del diseño, intacto');
+});
+
+test('un booleano en el cierre no se vuelve un monto: true no es Q1', () => {
+  // La trampa de q(true) === 1: nadie escribe un booleano aquí hoy, pero el
+  // mismo campo tuvo esa forma en el contrato y este es el camino por donde
+  // volvería a colarse un centavo inventado.
+  assert.equal(construirCierre(contrato(), { ...campos, horaTardia: true }).cierre.horaTardia, 0);
+  assert.equal(construirCierre(contrato(), { ...campos, horaTardia: false }).cierre.horaTardia, 0);
+  assert.equal(resumen(construirCierre(contrato(), { ...campos, horaTardia: true })).subtotal, 3880);
+});
+
+test('corregir un cierre ya guardado conserva la hora tardía si no se toca, y la cambia si se corrige', () => {
+  const yaCerrado = construirCierre(contrato(), { ...campos, horaTardia: 150 });
+  // Un cierre armado sin ese campo (otra pantalla, un campo que no se mandó)
+  // no se lo lleva por delante.
+  const { horaTardia: _quitado, ...sinElCampo } = { ...campos, horaTardia: 0 };
+  assert.equal(construirCierre(yaCerrado, sinElCampo).cierre.horaTardia, 150, 'lo que no se corrigió sigue ahí');
+  assert.equal(construirCierre(yaCerrado, { ...campos, horaTardia: 100 }).cierre.horaTardia, 100, 'lo nuevo manda');
+  assert.equal(construirCierre(yaCerrado, { ...campos, horaTardia: 0 }).cierre.horaTardia, 0, 'y se puede quitar');
+});
+
+test('el aviso del descuento cuenta la hora tardía: el cobro en negativo se calcula con ella dentro', () => {
+  // Sin hora tardía: 3,150 de la salida + 1,030 de la devolución − 4,300 = −120.
+  const sin = problemasDelCierre(contrato(), { ...campos, descuento: 4300 });
+  assert.match(sin.join(' '), /-Q120\.00/);
+  // Con Q150 de hora tardía el cobro queda en +30: ya no hay nada que avisar.
+  assert.deepEqual(problemasDelCierre(contrato(), { ...campos, descuento: 4300, horaTardia: 150 }), []);
+});
