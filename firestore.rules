@@ -18,8 +18,17 @@ service cloud.firestore {
 
     match /contratos/{id} {
       allow read, write: if haySesion();
-      // El costo del dueño y la comisión se escriben al crear el contrato,
-      // pero solo se pueden LEER con la credencial del área de dinero.
+      // Aquí vive el costo por día que se le paga al dueño de un carro ajeno:
+      // se escribe al crear el contrato, pero solo se puede LEER con la
+      // credencial del área de dinero.
+      //
+      // OJO — este comentario decía antes "el costo del dueño Y LA COMISIÓN", y
+      // era falso: `porcentajeComision` sigue en la raíz del contrato, donde lo
+      // lee cualquiera con la sesión del mostrador. Moverlo quedó pendiente a
+      // propósito (ver §7b del diseño y ADR-002), y mientras el dueño sea el
+      // único usuario no hace daño — pero hay que decidirlo antes de que un
+      // empleado use el mostrador. El diferimiento está bien; lo que no estaba
+      // bien era un comentario que lo volvía invisible.
       // El UID es el de la cuenta dinero@bestpricegt.com, que el dueño creó el
       // 5 de octubre de 2026. Si algún día esa cuenta cambia, este número tiene
       // que cambiar aquí también, o el área de dinero deja de abrir.
