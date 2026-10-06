@@ -387,11 +387,106 @@ no los nombraba justo en la parte que ese plan más usa:
   vacía), y `garantiaMonto` es la suma de sus `montoAutorizado`. Del número
   queda solo `ultimos4`: el número completo y el CBC nunca se guardan (§11).
 
-Esta lista del contrato todavía no nombra todo lo que el contrato guarda —los
-seguros y deducibles, la carta poder, los varios, la hora y el lugar de salida,
-el conductor adicional, `rentadoPor`, las observaciones—. La lista viva es lo
-que arma `construirContrato` (`js/pantallas/sacarCarro.js`), igual que
-`CAMPOS_CLIENTE` lo es para el cliente.
+**Del contrato, el resto de lo que guarda «Sacar carro»** (agregado el 6 de
+octubre, al cerrar el último hueco de esta lista). Son diecinueve campos que
+`construirContrato` y `contratoParaGuardar` escriben en cada contrato y que esta
+sección no nombraba. Un hueco aquí es peor que una ausencia obvia: quien busca un
+campo y no lo encuentra no piensa «falta anotarlo en la lista», piensa «ese campo
+no existe», y le pone un nombre. Es el mismo tipo de hueco por el que entró la
+cuarta ocurrencia (más abajo). Van agrupados como los bloques de la pantalla
+«Sacar carro» (§6) y no en el orden del código; el bloque de las tarjetas ya está
+arriba (`tarjetas[]`). En un contrato que se arma hoy ninguno falta, salvo
+`actualizado`, que se sella al guardar: lo que se dejó en blanco queda en `0`, en
+`''` o en `false`, no ausente.
+
+*La renta* (bloque «Renta»):
+- `horaSalida` es la hora en que salió el carro, en texto de 24 horas
+  (`'13:45'`). Se corrige al salir del campo (`hora24`, `js/ui.js`): «1345» queda
+  `'13:45'`, y lo que no sea una hora válida se guarda vacío, `''`, en vez de una
+  hora a medias. La de regreso es `cierre.horaReal`.
+- `lugar` es dónde se entregó el carro, en texto libre. **Se llama `lugar` a
+  secas, sin «Salida» al final**, aunque el de regreso sí lleva apellido,
+  `cierre.lugarEntrada`: quien lo busque con el nombre largo no lo va a encontrar,
+  y no debe inventarlo.
+- `combustibleSalida` es el nivel del tanque al salir, que se escoge de una lista
+  (`Lleno`, `3/4`, `1/2`, `1/4`, `Vacío`) y queda vacío si no se escogió. **No es
+  el `combustible` del cierre**: ese es un monto de dinero que se escribe a mano
+  al recibir el carro, porque el sistema no calcula nada por nivel de tanque. Uno
+  es lo que había en el tanque; el otro, lo que se cobra.
+- `horaTardia` es la casilla «Hora tardía» de la renta: verdadero o falso. Hoy
+  solo se guarda: ninguna regla de cobro, aviso ni pantalla la lee, y el código no
+  dice qué quiere decir para el negocio. Antes de usarla para cobrar o avisar hay
+  que preguntarle al dueño qué significa.
+
+*Los cobros extra* (bloque «Cobros extra»). Aquí lo que importa es saber cuáles
+entran en la cuenta y cuáles solo se anotan:
+- `seguroDia` y `seguroTercerosDia` son lo que cuestan por día el seguro y el
+  seguro de terceros. **Solo informativos:** el precio por día ya los incluye
+  (§5), así que se guardan para desglosarlos cuando se imprima el contrato (§8) y
+  no entran a ningún total. `lineasSalida` no los lee, y hoy nada más lo hace.
+- `seguroMenoresDia` y `seguroPaiDia` son el seguro de menores y el seguro PAI,
+  por día, y **estos sí se cobran**: se multiplican por los días contratados al
+  salir y por los días de atraso al recibir (`lineasSalida`, `lineasDevolucion`),
+  y salen en la línea «Seguros extra».
+- `deducible` es el deducible normal, también **solo informativo**: se anota para
+  el contrato impreso y no se cobra.
+- `deducibleBajo` es la opción de deducible bajo: un monto que el mostrador anota
+  y que **sí se cobra, una sola vez** (no por día), al salir, dentro de «Seguros
+  extra». Los dos nombres se parecen y no se tratan igual: uno no entra a ninguna
+  cuenta y el otro sí. Filtrar por `deducible` a secas trae los dos.
+- `cartaPoderDestino` y `cartaPoderPrecio` son la carta poder: el destino que se
+  anota para ella (texto libre) y lo que se cobra por ella. Van de a par, pero no
+  pesan lo mismo: la línea «Carta poder» del cobro existe solo si el precio no es
+  cero, y el destino solo se muestra como el detalle de esa línea. Un destino sin
+  precio no cobra nada y tampoco se vuelve a ver en el contrato guardado.
+- `variosDescripcion` y `variosPrecio` son un cargo libre al salir: qué es y
+  cuánto. Igual que la carta poder, la línea «Varios» solo existe si el precio no
+  es cero. **No son `varios` y `variosDetalle` del cierre**: esos son el cargo
+  libre que aparece al recibir el carro (la llave perdida, el lavado). Es la misma
+  idea en dos momentos, con dos pares de nombres, y cada par lo lee una sola
+  función: `lineasSalida` el de aquí y `lineasDevolucion` el del cierre.
+
+*Quién lo rentó y el cierre del formulario* (bloque «Cierre del formulario»). Ojo
+con el nombre: es el último bloque de la pantalla «Sacar carro» y **no tiene nada
+que ver con `cierre{}`**, que es lo que se anota al recibir el carro.
+- `rentadoPor` es el **empleado** que atendió la renta, no el cliente (el cliente
+  es `clienteId` y `clienteNombre`). Se escribe a mano en «¿Quién lo rentó?» y se
+  guarda como texto, no como una referencia: hoy no hay una lista de empleados de
+  donde escoger (§12b), así que «Juan» y «juan» son dos nombres distintos para el
+  sistema. Es la persona a quien le toca la comisión del contrato
+  (`porcentajeComision`), y la búsqueda de contratos también lo encuentra por
+  este nombre.
+- `conductorAdicional{nombre, licencia, identificacion}` es el segundo conductor
+  de la renta, cuando lo hay. Siempre es un objeto con esas tres llaves, vacías
+  (`''`) si no hay conductor adicional: no es `null`. Ojo con `identificacion`,
+  que va sin acento.
+- `observaciones` es la nota libre del mostrador sobre esa renta, `''` si no hay.
+  En el contrato se llama `observaciones`; `nota` es el nombre que usan la
+  reservación y el dueño, y no hay que pasarlo de uno a otro.
+
+*Lo que se sella al guardar.* Estos dos no se escriben a mano nunca:
+`contratoParaGuardar` los pone, y con ellos `numero` y `estado` (el `estado` que
+traiga el contrato en memoria se pisa siempre con `estadoContrato()`).
+- `id` es el nombre del documento del contrato en la nube, y lo que lo une a su
+  `contratos/{id}/privado/dinero`. «Sacar carro» lo pide una sola vez por alquiler
+  (`nuevoIdContrato`), antes del primer intento, y lo reusa en cada reintento: así
+  un guardado que venció y se repite cae en el mismo contrato y no crea un
+  segundo, que sería un carro comprometido dos veces y una tarjeta autorizada dos
+  veces. `construirContrato` lo deja en `null` si quien lo llama no trae uno, y
+  `guardarContrato` le da uno la primera vez que de verdad se guarda.
+- `actualizado` es la hora del guardado, en milisegundos (`Date.now()`), y se
+  pone de nuevo en cada guardado. Sirve para dos cosas. La copia local lo usa para
+  decidir cuál de dos versiones gana (`mezclar`, `js/cache.js`: gana la de
+  `actualizado` mayor). Y `guardarContrato` lo usa para saber si el contrato **ya
+  existía**: uno que lo trae vino de la nube o de la copia local, y por eso no
+  vuelve a escribir su costo del dueño en `privado/dinero` (la sesión normal no
+  puede leer qué hay ahí). Un contrato nuevo no lo trae; si uno nuevo lo trajera
+  copiado de uno viejo, se tomaría por uno que ya existía y su costo no se
+  escribiría.
+
+La lista viva sigue siendo lo que arma `construirContrato`
+(`js/pantallas/sacarCarro.js`) y lo que sella `contratoParaGuardar`
+(`js/datos.js`), igual que `CAMPOS_CLIENTE` lo es para el cliente.
 
 **De un pago:**
 `monto`, `forma`, `porcentajeTarjeta`, `fecha`.
