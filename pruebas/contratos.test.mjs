@@ -12,8 +12,10 @@ import { textoDeContrato } from '../js/nucleo/busqueda.js';
 import { garantiaPorLiberar } from '../js/nucleo/estados.js';
 import {
   primerDiaMes, ultimoDiaMes, filtrarPorEstado, contratosVisibles,
-  claseFilaContrato, textoCuenta, numeroEnmascarado, textoConfirmarAnular,
+  claseFilaContrato, textoCuenta, numeroEnmascarado, textoConfirmarAnular, textoHoraTardia,
 } from '../js/pantallas/contratos.js';
+import { lineasSalida, resumen } from '../js/nucleo/contrato.js';
+import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
 
 /** El contrato del ejemplo de la §5 del diseño (igual que pruebas/contrato.test.mjs). */
 const ejemplo = () => ({
@@ -293,4 +295,40 @@ test('el ejemplo del diseño: subtotal Q3,880.00 y total cobrado Q4,345.60, exac
   // 'cerrado' (puedeCerrar), así que la fila se ve apagada (es-fuera), no en
   // rojo: el atraso de 1 día quedó cobrado, no es algo que siga pendiente.
   assert.equal(claseFilaContrato(c), 'es-fuera');
+});
+
+// ---------- La hora tardía en el detalle del contrato ----------
+//
+// Un contrato nuevo con monto la muestra como una línea de «Cobro al salir»
+// (lineasSalida, que prueba contrato.test.mjs). Un contrato viejo trae
+// `horaTardia: true`, una casilla marcada sin cifra: el detalle dice eso, tal
+// cual, y no le pone ni un monto ni un aviso.
+test('textoHoraTardia: un contrato viejo con la casilla marcada dice «Sí, sin monto registrado»', () => {
+  const viejo = contratoGuardadoConHoraTardiaSiNo();
+  assert.equal(viejo.horaTardia, true);
+  assert.equal(textoHoraTardia(viejo), 'Sí, sin monto registrado');
+});
+
+test('textoHoraTardia: con monto, en cero, falso o ausente no dice nada (el monto ya sale en el cobro)', () => {
+  assert.equal(textoHoraTardia({ horaTardia: 150 }), '');
+  assert.equal(textoHoraTardia({ horaTardia: 0 }), '');
+  assert.equal(textoHoraTardia({ horaTardia: false }), '');
+  assert.equal(textoHoraTardia({}), '');
+  assert.equal(textoHoraTardia(undefined), '');
+});
+
+test('el detalle de un contrato viejo con horaTardia: true sigue mostrando Q3,150.00 al salir y ninguna línea de hora tardía', () => {
+  const viejo = contratoGuardadoConHoraTardiaSiNo();
+  assert.deepEqual(lineasSalida(viejo).map((l) => [l.concepto, l.monto]), [['Renta', 2800], ['Carta poder', 350]]);
+  assert.equal(resumen(viejo).totalSalida, 3150);
+  assert.equal(textoCuenta(viejo), 'En curso', 'y su estado no cambia');
+});
+
+test('el detalle de un contrato con Q150 de hora tardía muestra la línea y el total de Q3,300.00 al salir', () => {
+  const nuevo = { ...contratoGuardadoConHoraTardiaSiNo(), horaTardia: 150 };
+  assert.deepEqual(lineasSalida(nuevo).map((l) => [l.concepto, l.monto]), [
+    ['Renta', 2800], ['Hora tardía', 150], ['Carta poder', 350],
+  ]);
+  assert.equal(resumen(nuevo).totalSalida, 3300);
+  assert.equal(textoHoraTardia(nuevo), '');
 });

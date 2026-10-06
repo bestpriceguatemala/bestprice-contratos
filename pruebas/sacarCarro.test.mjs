@@ -14,6 +14,7 @@ import { resumen } from '../js/nucleo/contrato.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
 import { agruparPorDueno } from '../js/nucleo/liquidacion.js';
 import { resultadoLectura, contratoParaGuardar } from '../js/datos.js';
+import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
 
 test('ultimos4Digitos se queda solo con los últimos 4 dígitos', () => {
   assert.equal(ultimos4Digitos('4111 1111 1111 3343'), '3343');
@@ -981,4 +982,63 @@ test('la plantilla pone el aviso rojo ARRIBA de cada caja de búsqueda: la lista
     assert.ok(aviso < caja, `${prefijo}: el aviso va antes de la caja`);
     assert.ok(aviso < lista, `${prefijo}: y antes de la lista flotante`);
   }
+});
+
+// ---------- Hora tardía: un monto en el formulario, que entra al total de la salida ----------
+//
+// Era la casilla «Hora tardía» (un sí/no que nada leía) y el Excel traía ahí
+// un monto de Q150 que se imprimía en el contrato y se cobraba. Ahora el
+// formulario pide el monto, igual que «Carta poder — precio»: estas pruebas
+// corren el camino real, campo de la pantalla → leerFormularioDe →
+// construirContrato → contratoParaGuardar → resumen, con cifras exactas.
+
+test('Q150 en «Hora tardía — precio» llega al contrato guardado como el número 150 y sube el total de la salida', () => {
+  const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno({ 'sc-hora-tardia': '150' }));
+  assert.equal(guardado.horaTardia, 150);
+  assert.equal(typeof guardado.horaTardia, 'number', 'un monto, ya no el booleano de la casilla');
+  const r = resumen(guardado);
+  assert.equal(r.totalSalida, 2950, '4 días × Q700 de renta + Q150 de hora tardía');
+  assert.equal(r.subtotal, 2950);
+  assert.equal(r.saldo, 150, 'se pagaron los 2,800 de la renta: faltan justo los Q150');
+});
+
+test('el monto de la hora tardía pasa por q(): lo tecleado con centavos de más se guarda a dos decimales', () => {
+  const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno({ 'sc-hora-tardia': '150.005' }));
+  assert.equal(guardado.horaTardia, 150.01);
+  assert.equal(resumen(guardado).totalSalida, 2950.01);
+});
+
+test('sin tocar «Hora tardía — precio» se guarda 0 y el total de la salida no cambia', () => {
+  const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno());
+  assert.equal(guardado.horaTardia, 0, 'un cero guardado, no un campo ausente ni false');
+  assert.equal(resumen(guardado).totalSalida, 2800);
+  assert.equal(resumen(guardado).saldo, 0);
+});
+
+test('construirContrato (sin pasar por el formulario) guarda la hora tardía como monto, y 0 si no se da', () => {
+  assert.equal(construirContrato({ ...datosBase(), horaTardia: 150 }).horaTardia, 150);
+  assert.equal(construirContrato(datosBase()).horaTardia, 0);
+  // Con los Q350 de carta poder de datosBase: 2,800 + 150 + 350.
+  assert.equal(resumen(construirContrato({ ...datosBase(), horaTardia: 150 })).totalSalida, 3300);
+});
+
+test('la plantilla pide la hora tardía como un campo de monto en «Cobros extra», ya no como una casilla', () => {
+  const html = plantilla();
+  assert.equal(html.includes('type="checkbox" id="sc-hora-tardia"'), false, 'la casilla de sí/no ya no existe');
+  assert.match(html, /<input type="number" id="sc-hora-tardia"[^>]*step="0.01"[^>]*min="0"/);
+  assert.ok(html.includes('Hora tardía — precio'));
+  // Dentro del bloque de cobros extra, junto a la carta poder y los varios.
+  const inicio = html.indexOf('4. Cobros extra');
+  const fin = html.indexOf('5. Tarjetas');
+  const campo = html.indexOf('id="sc-hora-tardia"');
+  assert.ok(inicio > -1 && fin > inicio, 'existen los dos encabezados de bloque');
+  assert.ok(campo > inicio && campo < fin, 'el campo está dentro del bloque «Cobros extra»');
+});
+
+test('volver a guardar un contrato viejo (pagos, cierre, garantía) deja `horaTardia: true` tal cual: nunca se vuelve un número', () => {
+  const viejo = contratoGuardadoConHoraTardiaSiNo();
+  const guardado = contratoParaGuardar(viejo, { id: viejo.id, numero: viejo.numero, ahora: 1790000009999 });
+  assert.equal(guardado.horaTardia, true, 'el mismo booleano que ya traía, no 1 ni 150');
+  assert.equal(guardado.estado, 'rentado');
+  assert.equal(resumen(guardado).totalSalida, 3150, 'y el total que ya tenía');
 });

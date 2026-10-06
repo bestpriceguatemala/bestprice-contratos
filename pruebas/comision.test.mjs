@@ -2,10 +2,12 @@
 //
 // La regla, dicha por el dueño: 5 % de los días rentados por el precio por día,
 // contando los días de atraso y restando el descuento. Nada más entra: ni daños,
-// ni combustible, ni carta poder, ni el recargo de tarjeta.
+// ni combustible, ni carta poder, ni hora tardía, ni el recargo de tarjeta.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { baseComision, comisionDe } from '../js/nucleo/comision.js';
+import { resumen } from '../js/nucleo/contrato.js';
+import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
 
 const base = () => ({
   dias: 4,
@@ -60,4 +62,38 @@ test('la comisión queda firme hasta que el carro regresa', () => {
   assert.equal(comisionDe(rentado).firme, false);
   assert.equal(comisionDe(rentado).monto, 140, 'se estima con los días contratados');
   assert.equal(comisionDe(base()).firme, true);
+});
+
+// La hora tardía es un cobro extra de la salida, de la misma familia que la
+// carta poder: se cobra, pero no entra a la base de la comisión. Si entrara,
+// subirle Q150 a un contrato le subiría la comisión al empleado sin que nadie
+// lo haya decidido (Q7.50 al 5 %, en cada hora tardía).
+test('la hora tardía de Q150 no mueve la base ni la comisión, aunque sí sube lo que se cobra', () => {
+  const sin = base();
+  const con = { ...base(), horaTardia: 150 };
+
+  assert.equal(baseComision(con), 3200, 'la misma base de siempre: 5 días × Q700 − Q300');
+  assert.equal(baseComision(con), baseComision(sin));
+  assert.deepEqual(comisionDe(con), comisionDe(sin), 'base, porcentaje, monto y firmeza, todo igual');
+  assert.equal(comisionDe(con).monto, 160, 'Q160, no Q167.50');
+
+  // ...y la hora tardía de verdad se está cobrando, para que esta prueba no
+  // pase solo porque el campo no se leyera en ningún lado.
+  assert.equal(resumen(con).totalSalida, resumen(sin).totalSalida + 150);
+});
+
+test('la hora tardía no se cuenta como días ni como precio: el estimado de un carro rentado tampoco cambia', () => {
+  const rentado = { ...base(), cierre: null, horaTardia: 150 };
+  assert.equal(baseComision(rentado), 2800, '4 días × Q700');
+  assert.equal(comisionDe(rentado).monto, 140);
+  assert.equal(comisionDe(rentado).firme, false);
+});
+
+test('un contrato viejo con horaTardia: true tiene la misma comisión que sin el campo', () => {
+  const viejo = contratoGuardadoConHoraTardiaSiNo();
+  const sinCampo = contratoGuardadoConHoraTardiaSiNo();
+  delete sinCampo.horaTardia;
+  assert.equal(baseComision(viejo), 2800, '4 días × Q700: ni Q2,801 ni Q2,950');
+  assert.deepEqual(comisionDe(viejo), comisionDe(sinCampo));
+  assert.equal(comisionDe(viejo).monto, 140);
 });

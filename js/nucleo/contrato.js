@@ -2,8 +2,9 @@
 //
 // El cobro sucede en dos momentos, como en el mostrador: al salir el carro se
 // cobra todo lo que ya se sabe (renta, seguros por día de los días contratados,
-// deducible bajo, carta poder, varios) y al recibirlo solo lo que apareció
-// después (atraso, seguros por día de esos días, daños, combustible, descuento).
+// deducible bajo, hora tardía, carta poder, varios) y al recibirlo solo lo que
+// apareció después (atraso, seguros por día de esos días, daños, combustible,
+// descuento).
 //
 // El porcentaje de tarjeta se aplica a CADA pago, no una sola vez al final:
 // el cliente puede pagar la renta con tarjeta y el saldo en efectivo, y solo lo
@@ -17,6 +18,30 @@ import { diasAtraso as calcularAtraso } from './fechas.js';
 /** Los días de atraso de un contrato, 0 si todavía no ha regresado. */
 export function atrasoDe(c) {
   return calcularAtraso(c?.devolucionPrevista, c?.cierre?.fechaReal);
+}
+
+/**
+ * Lo que dice `horaTardia` de un contrato: `{ monto, sinMonto }`. ÚNICO lugar
+ * que lo interpreta — el cobro (`lineasSalida`) y el detalle del contrato
+ * (pantallas/contratos.js) preguntan aquí y ninguno vuelve a mirar el campo.
+ *
+ * `horaTardia` es un MONTO en quetzales desde que se recuperó el cobro que el
+ * Excel traía en la celda «HORA TARDIA» y que el sistema había convertido en
+ * una casilla de sí/no (ver §7b del diseño). Pero todo contrato guardado antes
+ * de ese cambio lo trae como verdadero o falso, y ahí está la trampa: con
+ * `q()` a secas, un `true` vale 1 y cada contrato viejo ganaba Q1.00 en
+ * silencio, moviendo el saldo de un contrato que ya se cobró y se cerró.
+ *
+ *   número  -> es el monto, tal cual (`q`).
+ *   true    -> hubo hora tardía y nadie anotó cuánto. NO se sabe, así que
+ *              vale 0 en el cobro y `sinMonto` lo deja decir la verdad en el
+ *              detalle; nunca se le inventa una cifra.
+ *   false, ausente o cualquier otra cosa -> nada.
+ */
+export function horaTardiaDe(c) {
+  const v = c?.horaTardia;
+  if (typeof v === 'number') return { monto: q(v), sinMonto: false };
+  return { monto: 0, sinMonto: v === true };
 }
 
 /** Lo que se cobra al salir el carro. */
@@ -33,6 +58,16 @@ export function lineasSalida(c) {
   const extra = suma(porDia * dias, c?.deducibleBajo);
   if (extra) {
     lineas.push({ concepto: 'Seguros extra', detalle: 'menores, PAI, deducible bajo', monto: extra });
+  }
+
+  // Se cobra al salir porque es de la salida: la hora tardía se anota en el
+  // formulario de «Sacar carro» (junto a la hora de salida) y sale impresa en
+  // el contrato que se entrega, igual que la carta poder. Como ella, la línea
+  // existe solo si el monto no es cero — y un contrato viejo con `true` no
+  // tiene monto (ver horaTardiaDe).
+  const horaTardia = horaTardiaDe(c).monto;
+  if (horaTardia) {
+    lineas.push({ concepto: 'Hora tardía', detalle: '', monto: horaTardia });
   }
 
   if (q(c?.cartaPoderPrecio)) {

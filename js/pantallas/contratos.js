@@ -17,7 +17,9 @@
 // Sin cálculos nuevos: todo el dinero que se ve aquí sale de lineasSalida,
 // lineasDevolucion y resumen (nucleo/contrato.js) — esta pantalla solo
 // pregunta y formatea, nunca suma ni resta por su cuenta.
-import { lineasSalida, lineasDevolucion, resumen } from '../nucleo/contrato.js';
+import {
+  lineasSalida, lineasDevolucion, resumen, horaTardiaDe,
+} from '../nucleo/contrato.js';
 import { estadoContrato, pendientesDe, garantiaPorLiberar } from '../nucleo/estados.js';
 import { filtrar, textoDeContrato } from '../nucleo/busqueda.js';
 import { textoDosDecimales, textoEntero } from '../nucleo/dinero.js';
@@ -133,6 +135,20 @@ export function textoCuenta(c) {
 export function numeroEnmascarado(valor) {
   const digitos = String(valor ?? '').replace(/\D/g, '').slice(-4);
   return digitos ? `•••• ${digitos}` : '••••';
+}
+
+/**
+ * Lo que dice el detalle de la hora tardía cuando NO hay un monto que mostrar
+ * como cobro: `''` casi siempre, y «Sí, sin monto registrado» en un contrato
+ * viejo que trae `horaTardia: true` (una casilla marcada, sin cifra). Es un
+ * dato, dicho tal cual: no lleva aviso ni color, porque el precio lo pone el
+ * dueño y nada aquí le pide que lo ponga. Un contrato con monto no pasa por
+ * aquí: su cobro ya sale como línea «Hora tardía» en «Cobro al salir».
+ * Pregunta a `horaTardiaDe` (nucleo/contrato.js), que es quien sabe leer las
+ * dos formas del campo.
+ */
+export function textoHoraTardia(c) {
+  return horaTardiaDe(c).sinMonto ? 'Sí, sin monto registrado' : '';
 }
 
 /** 'Saldo' o 'A favor del cliente', con el monto ya en positivo — mismo criterio que recibirCarro.js (textoSaldo). */
@@ -360,6 +376,7 @@ function seccionSalida(c) {
         ${campoSoloLectura('Precio por día', c?.precioDia != null ? dinero(c.precioDia) : '')}
         ${campoSoloLectura('Kilometraje de salida', c?.kmSalida != null ? textoEntero(c.kmSalida) : '')}
         ${campoSoloLectura('Combustible de salida', c?.combustibleSalida)}
+        ${textoHoraTardia(c) ? campoSoloLectura('Hora tardía', textoHoraTardia(c)) : ''}
         ${camposCarroAjeno(c)}
         ${campoSoloLectura('Devolución prevista', fecha(c?.devolucionPrevista))}
         ${campoSoloLectura('Quién lo rentó', c?.rentadoPor)}
