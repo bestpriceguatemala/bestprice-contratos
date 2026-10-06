@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs';
 import {
   armarComprobante, htmlComprobante, pintarComprobante, MEMBRETE,
 } from '../js/pantallas/comprobante.js';
-import { cuentaDeDueno } from '../js/nucleo/liquidacion.js';
+import { cuentaDeDueno, totalSeleccionado } from '../js/nucleo/liquidacion.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { comisionDe } from '../js/nucleo/comision.js';
@@ -749,7 +749,8 @@ test('el modelo solo tiene las llaves permitidas: una llave nueva (comision, uti
     '.numero', '.fecha', '.hoy', '.rentasSinCosto', '.rentasSinCosto.anotar', '.rentasSinCosto.leer',
     '.dueno', '.dueno.nombre', '.dueno.telefono', '.dueno.nit',
     '.pagado', '.pagado.filas', '.pagado.total', '.pagado.forma', '.pagado.cambiaron',
-    '.pendiente', '.pendiente.filas', '.pendiente.total', '.pendiente.incompleto',
+    '.pagado.anteriores', '.pagado.acumulado',
+    '.pendiente', '.pendiente.filas', '.pendiente.diferencias', '.pendiente.total', '.pendiente.incompleto',
     ...['pagado', 'pendiente'].flatMap((t) => ['fecha', 'placas', 'cliente', 'dias', 'diasAtraso', 'costoDia', 'monto', 'sinCosto']
       .map((k) => `.${t}.filas[].${k}`)),
   ].sort();
@@ -882,4 +883,238 @@ test('el membrete es solo de Best Price y sin imágenes: texto, para abrir al in
   const html = htmlComprobante(armarComprobante(entrada()));
   assert.ok(!/<img|url\(|<svg/i.test(html));
   assert.ok(html.includes(MEMBRETE.nombre));
+});
+
+// ---------------------------------------------------------------------------
+// Una renta ya pagada cuyo monto CRECE después (revisión final, hallazgo 1).
+//
+// El papel que sale de la empresa no puede decir «No queda nada pendiente» con
+// una deuda abierta, ni mostrar el pago de una diferencia como si fuera un pago
+// de menos. Aquí los dos casos, con el costo de ctr-a2 corregido DESPUÉS del
+// pago N° 7 (de Q250 a Q400 por día: 750 → 1,200, Q450 más).
+// ---------------------------------------------------------------------------
+
+/** Las tres rentas del pago N° 7, con ctr-a2 corregida hacia arriba: hoy suman Q4,550 y se pagaron Q4,100. */
+const RENTAS_DEL_7 = ['ctr-a1', 'ctr-a2', 'ctr-am'];
+const CRECIDAS = conCostoCorregido('ctr-a2', 400);
+const SOLO_LAS_DEL_7 = CRECIDAS.filter((c) => RENTAS_DEL_7.includes(c.id));
+
+/** El pago de la diferencia, armado como lo arma la pantalla: marcando la diferencia en la cuenta. */
+function pagoDeLaDiferencia() {
+  const { diferencias } = cuentaDeDueno({ contratos: CRECIDAS.filter((c) => c.duenoId === 'd1'), pagos: [PAGO_5, PAGO_7] });
+  assert.equal(diferencias.length, 1, 'el escenario: hay una diferencia');
+  return pagoDuenoParaGuardar(
+    construirPagoDueno({
+      duenoId: 'd1',
+      fecha: '2026-10-01',
+      forma: 'efectivo',
+      contratos: CRECIDAS,
+      pagos: [PAGO_5, PAGO_7],
+      idsMarcados: [diferencias[0].clave],
+      costoSinLeer: [],
+    }),
+    { id: 'p9', numero: 9, ahora: AHORA },
+  );
+}
+
+test('la diferencia de una renta que creció sale en «Queda pendiente», con de dónde viene, y suma al total', () => {
+  const m = armarComprobante(entrada({ contratos: CRECIDAS }));
+  assert.equal(m.pendiente.diferencias.length, 1);
+  assert.deepEqual(m.pendiente.diferencias[0], {
+    comprobantes: [7], placas: ['P-111AAA', 'P-222BBB', 'P-333CCC'], pagado: 4100, ahora: 4550, monto: 450, sinCosto: null,
+  });
+  assert.equal(m.pendiente.total, 3600 + 450, 'las rentas por pagar más la diferencia: la misma cifra que la ficha');
+  assert.equal(m.pendiente.incompleto, false);
+
+  const html = htmlComprobante(m);
+  assert.ok(html.includes('Diferencia de rentas ya pagadas en el comprobante N° 7'));
+  assert.ok(html.includes(`Se pagaron ${dinero(4100)} y hoy esas rentas suman ${dinero(4550)}`));
+  assert.match(html, /Total pendiente[^]*?Q4,050\.00/);
+});
+
+test('con una diferencia por pagar el papel NUNCA dice «No queda nada pendiente»', () => {
+  // Sin ninguna renta por pagar: solo las tres del pago N° 7, una de ellas crecida.
+  const m = armarComprobante(entrada({ contratos: SOLO_LAS_DEL_7 }));
+  assert.deepEqual(m.pendiente.filas, []);
+  assert.equal(m.pendiente.diferencias.length, 1);
+  assert.equal(m.pendiente.total, 450);
+  const html = htmlComprobante(m);
+  assert.ok(!html.includes('No queda nada pendiente'), 'una deuda abierta no se escribe como saldada');
+  assert.ok(html.includes(dinero(450)));
+
+  // Y sin la diferencia (nada cambió) sí lo dice, como siempre.
+  const sinCambio = armarComprobante(entrada({ contratos: CONTRATOS.filter((c) => RENTAS_DEL_7.includes(c.id)) }));
+  assert.deepEqual(sinCambio.pendiente.diferencias, []);
+  assert.ok(htmlComprobante(sinCambio).includes('No queda nada pendiente'));
+});
+
+test('el comprobante del pago de la diferencia dice que completa el N° 7, y no que las rentas «cambiaron»', () => {
+  const p9 = pagoDeLaDiferencia();
+  assert.equal(p9.monto, 450);
+  assert.deepEqual(p9.contratos.sort(), [...RENTAS_DEL_7].sort(), 'cubre las mismas rentas que el pago original');
+
+  const m = armarComprobante(entrada({ pago: p9, contratos: CRECIDAS, pagos: [PAGO_5, PAGO_7, p9] }));
+  assert.equal(m.numero, 9);
+  assert.equal(m.pagado.total, 450, 'lo pagado en ESTE comprobante');
+  assert.deepEqual(m.pagado.anteriores, [{ numero: 7, monto: 4100 }]);
+  assert.equal(m.pagado.acumulado, 4550, 'lo que lleva recibido por esas rentas: 4,100 + 450');
+  assert.equal(m.pagado.cambiaron, false, 'no es un «cambió»: es la diferencia, y tiene su propia nota');
+  assert.deepEqual(m.pendiente.diferencias, [], 'pagada: el grupo vuelve a cuadrar');
+  assert.equal(m.pendiente.total, 3600);
+
+  const html = htmlComprobante(m);
+  assert.ok(html.includes(`este pago completa el comprobante N° 7 (${dinero(4100)})`));
+  assert.ok(html.includes(`se le han pagado ${dinero(4550)}`));
+  assert.ok(!html.includes('cambiaron después del pago'), 'no la nota genérica, que diría que el detalle no suma y nada más');
+  assert.ok(html.indexOf('Le pagué') < html.indexOf('este pago completa'));
+  assert.ok(html.indexOf('este pago completa') < html.indexOf('Queda pendiente'));
+});
+
+test('el comprobante ORIGINAL, reimpreso después de pagar la diferencia, conserva su total y su nota', () => {
+  const p9 = pagoDeLaDiferencia();
+  const m = armarComprobante(entrada({ contratos: CRECIDAS, pagos: [PAGO_5, PAGO_7, p9] }));
+  assert.equal(m.pagado.total, 4100, 'lo que dice el papel que el dueño del carro ya tiene');
+  assert.deepEqual(m.pagado.anteriores, [], 'es el primero: no completa ninguno');
+  assert.equal(m.pagado.cambiaron, true);
+  assert.deepEqual(m.pendiente.diferencias, []);
+  assert.ok(htmlComprobante(m).includes('cambiaron después del pago'));
+});
+
+/**
+ * La cadena de verdad de tres pagos sobre las mismas rentas: el N° 7 paga las
+ * rentas como estaban; ctr-a2 sube y el N° 9 paga esos Q450; después ctr-am sube
+ * otra vez (310 → 330 por día, 5 días: Q100 más) y el N° 10 paga ESA diferencia.
+ * El pago final sale de marcar la diferencia en la cuenta, igual que en la pantalla,
+ * y no de un monto escrito a mano: así las rentas cuestan hoy lo mismo que lo
+ * pagado en total, que es lo único que hace que el papel pueda decir «completa».
+ */
+function cadenaDeTresPagos() {
+  const p9 = pagoDeLaDiferencia();
+  const SEGUNDA_SUBIDA = CRECIDAS.map((c) => (
+    c.id === 'ctr-am' ? { ...c, subarriendo: { ...c.subarriendo, costoDia: 330 } } : c
+  ));
+  const { diferencias } = cuentaDeDueno({
+    contratos: SEGUNDA_SUBIDA.filter((c) => c.duenoId === 'd1'), pagos: [PAGO_5, PAGO_7, p9],
+  });
+  assert.equal(diferencias.length, 1, 'el escenario: la segunda subida deja una diferencia');
+  assert.equal(diferencias[0].diferencia, 100);
+  const p10 = pagoDuenoParaGuardar(
+    construirPagoDueno({
+      duenoId: 'd1',
+      fecha: '2026-10-02',
+      forma: 'efectivo',
+      contratos: SEGUNDA_SUBIDA,
+      pagos: [PAGO_5, PAGO_7, p9],
+      idsMarcados: [diferencias[0].clave],
+      costoSinLeer: [],
+    }),
+    { id: 'p10', numero: 10, ahora: AHORA },
+  );
+  return { p9, p10, contratos: SEGUNDA_SUBIDA, pagos: [PAGO_5, PAGO_7, p9, p10] };
+}
+
+test('con tres pagos sobre las mismas rentas, el último los nombra a los dos anteriores', () => {
+  const { p10, contratos, pagos } = cadenaDeTresPagos();
+  assert.equal(p10.monto, 100);
+  const m = armarComprobante(entrada({ pago: p10, contratos, pagos }));
+  assert.deepEqual(m.pagado.anteriores, [{ numero: 7, monto: 4100 }, { numero: 9, monto: 450 }]);
+  assert.equal(m.pagado.acumulado, 4650);
+  assert.equal(m.pagado.cambiaron, false);
+  // Lo recibido en total es lo que esas rentas cuestan hoy: el papel no se contradice.
+  assert.equal(m.pagado.acumulado, totalSeleccionado(contratos, RENTAS_DEL_7));
+  assert.deepEqual(m.pendiente.diferencias, [], 'con el N° 10 el grupo vuelve a cuadrar');
+  assert.ok(htmlComprobante(m).includes(`los comprobantes N° 7 (${dinero(4100)}) y N° 9 (${dinero(450)})`));
+});
+
+test('en esa cadena, el N° 9 reimpreso después del N° 10 sigue nombrando solo al N° 7', () => {
+  const { p9, contratos, pagos } = cadenaDeTresPagos();
+  const m = armarComprobante(entrada({ pago: p9, contratos, pagos }));
+  assert.deepEqual(m.pagado.anteriores, [{ numero: 7, monto: 4100 }]);
+  assert.equal(m.pagado.acumulado, 4550, 'lo que llevaba recibido al emitirse el N° 9, no lo que lleva hoy');
+});
+
+test('un tercer pago de más (las rentas NO volvieron a subir) no se imprime como «completa»: es un pago de más', () => {
+  // Las mismas rentas de la prueba anterior, pero sin la segunda subida: cuestan Q4,550 y
+  // con un pago de Q100 detrás del N° 9 ya se han pagado Q4,650. Nadie «completó» nada: hay
+  // Q100 de más, y decir que el papel completa los comprobantes N° 7 y N° 9 enseñaría una
+  // tabla de Q4,550 junto a una frase que dice que se le pagó Q4,650.
+  const p9 = pagoDeLaDiferencia();
+  const deMas = pagoDuenoParaGuardar(
+    { duenoId: 'd1', fecha: '2026-10-02', forma: 'efectivo', monto: 100, contratos: [...RENTAS_DEL_7] },
+    { id: 'p10', numero: 10, ahora: AHORA },
+  );
+  const m = armarComprobante(entrada({ pago: deMas, contratos: CRECIDAS, pagos: [PAGO_5, PAGO_7, p9, deMas] }));
+  assert.deepEqual(m.pagado.anteriores, []);
+  assert.equal(m.pagado.acumulado, 100, 'solo lo que se pagó en este comprobante');
+  assert.ok(!htmlComprobante(m).includes('este pago completa'));
+});
+
+test('el mismo pago registrado dos veces NO se imprime como «completa el anterior»: las rentas no cambiaron, es un pago de más', () => {
+  // Dos pestañas pagando lo mismo (el riesgo que el sistema ya conoce y no cubre). El
+  // segundo comprobante cubre las mismas rentas por la misma cifra: decir que «cambiaron
+  // de monto» sería falso, y el papel no debe inventar una explicación.
+  const repetido = pagoDuenoParaGuardar(
+    { duenoId: 'd1', fecha: '2026-09-21', forma: 'transferencia', monto: PAGO_7.monto, contratos: [...PAGO_7.contratos] },
+    { id: 'p8', numero: 8, ahora: AHORA },
+  );
+  const m = armarComprobante(entrada({ pago: repetido, pagos: [PAGO_5, PAGO_7, repetido] }));
+  assert.deepEqual(m.pagado.anteriores, []);
+  assert.equal(m.pagado.cambiaron, false, 'sus filas suman lo que dice su total');
+  assert.equal(m.pagado.acumulado, 4100, 'solo lo que se pagó en este comprobante');
+  const html = htmlComprobante(m);
+  assert.ok(!html.includes('este pago completa'));
+  assert.ok(!html.includes('cambiaron'));
+});
+
+test('una diferencia cuyo costo no se pudo leer sale sin cifra y hace incompleto el total pendiente', () => {
+  const m = armarComprobante(entrada({ contratos: CRECIDAS, costoSinLeer: ['ctr-a2'] }));
+  const [dif] = m.pendiente.diferencias;
+  assert.equal(dif.sinCosto, 'leer');
+  assert.equal(dif.monto, null);
+  assert.equal(dif.ahora, null);
+  assert.equal(dif.pagado, 4100, 'lo que se pagó sí se sabe');
+  assert.equal(m.pendiente.incompleto, true);
+  assert.equal(m.pendiente.total, null, 'no se da un total sumando lo que sí se sabe');
+  const html = htmlComprobante(m);
+  assert.ok(html.includes('No se pudo leer el costo'));
+  assert.ok(html.includes('No se puede dar el total'));
+  assert.ok(!html.includes(dinero(450)));
+  assert.equal(m.rentasSinCosto.leer, 2, 'la renta pagada y la diferencia: las dos salen sin cifra');
+});
+
+test('con diferencias el modelo sigue teniendo solo las llaves permitidas, y el papel ni una cifra del negocio', () => {
+  const llaves = (valor, ruta = '') => {
+    if (Array.isArray(valor)) return valor.flatMap((v) => llaves(v, `${ruta}[]`));
+    if (valor && typeof valor === 'object') {
+      return Object.entries(valor).flatMap(([k, v]) => [`${ruta}.${k}`, ...llaves(v, `${ruta}.${k}`)]);
+    }
+    return [];
+  };
+  const p9 = pagoDeLaDiferencia();
+  const original = armarComprobante(entrada({ contratos: CRECIDAS }));
+  const complemento = armarComprobante(entrada({ pago: p9, contratos: CRECIDAS, pagos: [PAGO_5, PAGO_7, p9] }));
+  const nuevas = (modelo) => [...new Set(llaves(modelo))].filter((k) => /anteriores|acumulado|diferencias/.test(k)).sort();
+  assert.deepEqual(nuevas(original), [
+    '.pagado.acumulado', '.pagado.anteriores', '.pendiente.diferencias',
+    '.pendiente.diferencias[].ahora', '.pendiente.diferencias[].comprobantes', '.pendiente.diferencias[].monto',
+    '.pendiente.diferencias[].pagado', '.pendiente.diferencias[].placas', '.pendiente.diferencias[].sinCosto',
+  ]);
+  assert.deepEqual(nuevas(complemento), [
+    '.pagado.acumulado', '.pagado.anteriores', '.pagado.anteriores[].monto', '.pagado.anteriores[].numero',
+    '.pendiente.diferencias',
+  ]);
+
+  // Nada del negocio de Best Price en el papel de la diferencia, ni en su versión en pantalla.
+  for (const extra of [{ contratos: CRECIDAS }, { pago: p9, contratos: CRECIDAS, pagos: [PAGO_5, PAGO_7, p9] }]) {
+    const { html, pantalla, json } = salidasDe(extra);
+    for (const palabra of PALABRAS_PROHIBIDAS) {
+      assert.ok(!palabra.test(html), `el HTML dice ${palabra}`);
+      assert.ok(!palabra.test(pantalla), `la pantalla dice ${palabra}`);
+    }
+    for (const x of [...TEXTOS_PROHIBIDOS, '4,686', '3,136', '288.75']) {
+      assert.ok(!html.includes(x) && !json.includes(x), `se coló ${x}`);
+    }
+    assert.ok(!/data-contrato|data-id|data-json/i.test(html));
+    for (const c of CONTRATOS) assert.ok(!html.includes(c.id) && !pantalla.includes(c.id), `lleva el id ${c.id}`);
+  }
 });

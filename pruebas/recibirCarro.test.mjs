@@ -7,10 +7,11 @@
 // verdad cobrar un abono parcial con tarjeta.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   conKmSalidaNormalizado, textoBotonPago, textoAvisoRecibido, textoSaldo, totalDeEstaCobranza,
   leerParametroRuta, textoAvisoCobro, valoresIniciales, textoCorreccion,
-  textoEstadoPago, textoAvisoSobrecobro, montoInicialPago,
+  textoEstadoPago, textoAvisoSobrecobro, montoInicialPago, leerCamposDelCierre,
 } from '../js/pantallas/recibirCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { agregarPago } from '../js/datos.js';
@@ -251,4 +252,50 @@ test('montoInicialPago: el modo de solo cobro SÍ prellena el saldo, aunque el c
 test('montoInicialPago: sin saldo pendiente, siempre da 0 sin importar el modo', () => {
   assert.equal(montoInicialPago(0, { enCorreccion: false, soloCobro: false }), 0);
   assert.equal(montoInicialPago(-50, { enCorreccion: false, soloCobro: true }), 0);
+});
+
+// ---------------------------------------------------------------------------
+// La hora real de entrada se normaliza al LEER el cierre, no solo al salir del
+// campo (revisión final, hallazgo 4). Antes el cierre leía el campo en crudo y
+// dependía de que el oyente de `change` hubiera corrido.
+// ---------------------------------------------------------------------------
+
+/** Lectores de campos de mentira: un id que nadie llenó es un campo vacío, como en la pantalla. */
+const lectoresDe = (valores = {}) => ({
+  texto: (id) => String(valores[id] ?? '').trim(),
+  num: (id) => Number(valores[id] ?? 0) || 0,
+});
+
+test('el cierre lee la hora real ya normalizada: "1345" es 13:45 aunque ningún oyente haya corrido', () => {
+  assert.equal(leerCamposDelCierre(lectoresDe({ 'rc-hora-real': '1345' })).horaReal, '13:45');
+  assert.equal(leerCamposDelCierre(lectoresDe({ 'rc-hora-real': '9:5' })).horaReal, '09:05');
+  assert.equal(leerCamposDelCierre(lectoresDe({ 'rc-hora-real': '1:30 pm' })).horaReal, '13:30');
+});
+
+test('el cierre lee una hora real a medias ("9:") como vacía, no como las 09:00', () => {
+  for (const aMedias of ['9:', '13:', ':30']) {
+    assert.equal(leerCamposDelCierre(lectoresDe({ 'rc-hora-real': aMedias })).horaReal, '', aMedias);
+  }
+});
+
+test('leerCamposDelCierre trae los mismos campos de siempre, y la fecha real vacía se queda vacía (no se rellena con hoy)', () => {
+  const campos = leerCamposDelCierre(lectoresDe({
+    'rc-fecha-real': '', 'rc-lugar-entrada': ' Oficina ', 'rc-km-entrada': '45100', 'rc-danos': '200',
+  }));
+  assert.deepEqual(Object.keys(campos).sort(), [
+    'combustible', 'danos', 'danosDetalle', 'descuento', 'fechaReal', 'horaReal', 'kmEntrada', 'lugarEntrada', 'varios', 'variosDetalle',
+  ]);
+  assert.equal(campos.fechaReal, '', 'problemasDelCierre necesita ver ese vacío para avisar que falta');
+  assert.equal(campos.lugarEntrada, 'Oficina');
+  assert.equal(campos.kmEntrada, 45100);
+  assert.equal(campos.danos, 200);
+});
+
+test('todos los ids que lee el cierre existen en la plantilla de la pantalla (un id mal escrito se leería vacío sin avisar)', () => {
+  const pedidos = new Set();
+  leerCamposDelCierre({ texto: (id) => { pedidos.add(id); return ''; }, num: (id) => { pedidos.add(id); return 0; } });
+  const fuente = readFileSync(new URL('../js/pantallas/recibirCarro.js', import.meta.url), 'utf8');
+  const plantilla = fuente.slice(fuente.indexOf('function plantilla'));
+  assert.ok(plantilla.length > 1000, 'se encontró la plantilla');
+  for (const id of pedidos) assert.ok(plantilla.includes(`'${id}'`) || plantilla.includes(`id="${id}"`), `${id} no está en la plantilla`);
 });

@@ -27,7 +27,8 @@
 // lista blanca para que agregar una falle fuerte.
 //
 // Sin cálculos propios: el costo de cada renta es `costoDelSubarriendo`, la
-// deuda pendiente es `cuentaDeDueno(...).totalPorPagar`, y lo que las rentas de
+// deuda pendiente es `cuentaDeDueno(...).totalPorPagar` (que ya incluye las
+// diferencias de rentas pagadas cuyo monto creció), y lo que las rentas de
 // «Le pagué» suman HOY es `totalSeleccionado` (las tres de
 // nucleo/liquidacion.js); lo pagado es el `monto` que quedó guardado en el
 // pago, y es lo que el papel dice siempre. Si aquí se sumara algo por cuenta propia, un día el papel contradiría la
@@ -38,7 +39,7 @@
 // que no sea ella.
 import { costoDelSubarriendo, agruparPorDueno, totalSeleccionado } from '../nucleo/liquidacion.js';
 import { atrasoDe } from '../nucleo/contrato.js';
-import { q } from '../nucleo/dinero.js';
+import { q, suma } from '../nucleo/dinero.js';
 import { diasEntre, sumarDias } from '../nucleo/fechas.js';
 import { dinero, fecha } from '../ui.js';
 
@@ -124,6 +125,27 @@ function filaDeRenta(c, { sinAnotar, sinLeer }) {
     diasAtraso: atrasoDe(c),
     costoDia: sinCosto ? null : q(c.subarriendo?.costoDia),
     monto: sinCosto ? null : costoDelSubarriendo(c),
+    sinCosto,
+  };
+}
+
+/**
+ * Una diferencia pendiente, tal como aparece en el papel: lo que se le debe de
+ * más por rentas que YA se le pagaron y cuyo monto creció después. Solo lleva los
+ * comprobantes de donde viene, las placas de sus carros y tres cifras suyas: lo
+ * que se le pagó, lo que esas rentas cuestan hoy y lo que falta. Con una renta
+ * sin costo confiable, `ahora` y `monto` son `null` (igual que en una fila): lo
+ * que se le pagó sí se sabe, lo que cuestan hoy no.
+ */
+function filaDeDiferencia(d, { sinAnotar, sinLeer }) {
+  const sinCosto = d.contratos.some((c) => sinLeer.has(c.id)) ? 'leer'
+    : (d.contratos.some((c) => sinAnotar.has(c.id)) ? 'anotar' : null);
+  return {
+    comprobantes: d.pagos.map((p) => p.numero),
+    placas: d.contratos.map((c) => c.carroPlacas ?? ''),
+    pagado: d.pagado,
+    ahora: sinCosto ? null : d.ahora,
+    monto: sinCosto ? null : d.diferencia,
     sinCosto,
   };
 }
@@ -221,7 +243,27 @@ export function armarComprobante({
   const marcas = { sinAnotar: new Set(grupo.cuenta.sinCostoAnotado), sinLeer: new Set(costoSinLeer) };
   const filasPagadas = delPago.map((c) => filaDeRenta(c, marcas)).sort(porFechaYPlacas);
   const filasPendientes = grupo.cuenta.porPagar.map((c) => filaDeRenta(c, marcas)).sort(porFechaYPlacas);
-  const pendienteIncompleto = filasPendientes.some((f) => f.sinCosto);
+  // Lo que se le debe de más por rentas ya pagadas que crecieron (ver `cuentaDeDueno`):
+  // sin esto, el papel diría «No queda nada pendiente» con una deuda abierta.
+  const diferencias = grupo.cuenta.diferencias.map((d) => filaDeDiferencia(d, marcas));
+  const pendienteIncompleto = filasPendientes.some((f) => f.sinCosto) || diferencias.some((d) => d.sinCosto);
+
+  // Los pagos anteriores sobre las mismas rentas. Un pago que viene detrás de otro
+  // sobre las mismas rentas es el de una diferencia (ver `gruposDePago`): ya no es
+  // «lo que cuestan estas rentas», es lo que completa un comprobante anterior, y el
+  // papel lo dice así en vez de mostrar una tabla que parece pagada de menos.
+  //
+  // Solo si lo pagado hasta este comprobante todavía cabe en lo que esas rentas
+  // cuestan hoy. Si lo pasa, no es una diferencia que se completa sino un pago de
+  // más (el mismo pago registrado dos veces desde dos pestañas): decir que «las
+  // rentas cambiaron de monto» sería falso, y se imprime como un pago normal.
+  const esEste = (p) => p === pago || (pago.id && p?.id === pago.id);
+  const delGrupo = grupo.cuenta.gruposDePago.find((g) => g.pagos.some(esEste));
+  const lugar = delGrupo ? delGrupo.pagos.findIndex(esEste) : -1;
+  const hastaAqui = lugar > 0 ? suma(...delGrupo.pagos.slice(0, lugar + 1).map((p) => p.monto)) : q(pago.monto);
+  const anteriores = lugar > 0 && hastaAqui <= delGrupo.ahora
+    ? delGrupo.pagos.slice(0, lugar).map((p) => ({ numero: p.numero, monto: q(p.monto) }))
+    : [];
 
   // ¿Las rentas de «Le pagué» todavía suman lo que se pagó? Se le pregunta al
   // núcleo (`totalSeleccionado`, la misma suma que la pantalla enseña al marcar
@@ -233,7 +275,8 @@ export function armarComprobante({
   // Con un costo que no se pudo leer no hay cifra confiable con qué comparar:
   // la fila ya dice que falta, y comparar contra un 0 inventado daría un aviso falso.
   const costosLegibles = !filasPagadas.some((f) => f.sinCosto === 'leer');
-  const cambiaron = costosLegibles
+  // El pago de una diferencia no es un «cambió»: tiene su propia nota (ver `anteriores`).
+  const cambiaron = costosLegibles && anteriores.length === 0
     && totalSeleccionado(delPago, delPago.map((c) => c.id)) !== q(pago.monto);
 
   return {
@@ -252,17 +295,22 @@ export function armarComprobante({
       total: q(pago.monto),
       forma: String(pago.forma ?? ''),
       cambiaron,
+      // Los comprobantes anteriores que este completa (vacío si es un pago normal) y
+      // lo que suman junto con este: lo que el dueño del carro lleva recibido por esas rentas.
+      anteriores,
+      acumulado: anteriores.length ? hastaAqui : q(pago.monto),
     },
     pendiente: {
       filas: filasPendientes,
+      diferencias,
       // Con una renta sin cifra el total no se puede dar: sumar las demás y
       // llamarlo «total» diría que se debe menos de lo que se debe.
       total: pendienteIncompleto ? null : grupo.cuenta.totalPorPagar,
       incompleto: pendienteIncompleto,
     },
     rentasSinCosto: {
-      anotar: cuantas([...filasPagadas, ...filasPendientes], 'anotar'),
-      leer: cuantas([...filasPagadas, ...filasPendientes], 'leer'),
+      anotar: cuantas([...filasPagadas, ...filasPendientes, ...diferencias], 'anotar'),
+      leer: cuantas([...filasPagadas, ...filasPendientes, ...diferencias], 'leer'),
     },
   };
 }
@@ -290,8 +338,11 @@ function filaHtml(f) {
       </tr>`;
 }
 
-/** La tabla de rentas. `pie` es la fila del total, ya armada, porque cada tabla lo dice distinto. */
-function tablaHtml(filas, pie) {
+/**
+ * La tabla de rentas. `pie` es la fila del total, ya armada, porque cada tabla lo
+ * dice distinto. `extra` son filas que van después de las rentas (las diferencias).
+ */
+function tablaHtml(filas, pie, extra = '') {
   return `<table class="comp-tabla">
       <thead>
         <tr>
@@ -304,7 +355,7 @@ function tablaHtml(filas, pie) {
         </tr>
       </thead>
       <tbody>
-      ${filas.map(filaHtml).join('\n      ')}
+      ${filas.map(filaHtml).join('\n      ')}${extra}
       </tbody>
       <tfoot>
         ${pie}
@@ -321,19 +372,56 @@ function notaDeCambio(totalPagado) {
   return `<p class="comp-nota-cambio">Nota: lo pagado fue ${dinero(totalPagado)}. Las rentas de esta lista cambiaron después del pago, por eso su detalle ya no suma esa cifra.</p>`;
 }
 
+/**
+ * Qué comprobantes completa un pago: «el comprobante N° 7 (Q1,500.00)», «los
+ * comprobantes N° 7 (Q1,500.00) y N° 9 (Q600.00)».
+ */
+function textoDeAnteriores(anteriores) {
+  const cada = anteriores.map((a) => `N° ${esc(a.numero)} (${dinero(a.monto)})`);
+  return cada.length === 1
+    ? `el comprobante ${cada[0]}`
+    : `los comprobantes ${cada.slice(0, -1).join(', ')} y ${cada[cada.length - 1]}`;
+}
+
+/**
+ * La nota de un pago que es la diferencia de uno anterior. La tabla de arriba
+ * trae las rentas con su monto de hoy, y el total de abajo es solo lo que se
+ * pagó en este comprobante: sin esta nota, el papel diría «la renta vale Q2,100
+ * y se te pagaron Q600», que se lee como una deuda. Dice qué se pagó antes y
+ * cuánto suma todo junto.
+ */
+function notaDeComplemento(p) {
+  return `<p class="comp-nota-cambio">Nota: este pago completa ${textoDeAnteriores(p.anteriores)}. Las rentas de esta lista cambiaron de monto después de ese pago, y esto es la diferencia. En total, por estas rentas se le han pagado ${dinero(p.acumulado)}.</p>`;
+}
+
+/** Una diferencia pendiente: una fila que dice de dónde viene y cuánto falta. */
+function filaDeDiferenciaHtml(d) {
+  const comprobantes = d.comprobantes.length === 1
+    ? `el comprobante N° ${esc(d.comprobantes[0])}`
+    : `los comprobantes ${d.comprobantes.slice(0, -1).map((n) => `N° ${esc(n)}`).join(', ')} y N° ${esc(d.comprobantes[d.comprobantes.length - 1])}`;
+  const detalle = d.sinCosto
+    ? `<span class="comp-falta">${TEXTO_SIN_COSTO[d.sinCosto]}</span>`
+    : `Se pagaron ${dinero(d.pagado)} y hoy esas rentas suman ${dinero(d.ahora)}.`;
+  return `<tr>
+        <td colspan="5">Diferencia de rentas ya pagadas en ${comprobantes} (${d.placas.map(algo).join(', ')}). ${detalle}</td>
+        <td class="num">${d.sinCosto ? RAYA : dinero(d.monto)}</td>
+      </tr>`;
+}
+
 function seccionPendiente(p, hoy) {
   const alDia = `al ${esc(fecha(hoy))}`;
-  if (p.filas.length === 0) {
+  if (p.filas.length === 0 && p.diferencias.length === 0) {
     // Nada pendiente se dice con palabras: una tabla vacía parece un error.
     return `<p class="comp-sin-pendiente">No queda nada pendiente <span class="comp-al-dia">${alDia}</span></p>`;
   }
+  const sinCosto = [...p.filas, ...p.diferencias].filter((f) => f.sinCosto).length;
   const total = p.incompleto
     ? `<th scope="row" colspan="3">Total pendiente</th>
-        <td colspan="3" class="comp-falta">No se puede dar el total: falta el costo de ${pluralRentas(p.filas.filter((f) => f.sinCosto).length)}.</td>`
+        <td colspan="3" class="comp-falta">No se puede dar el total: falta el costo de ${pluralRentas(sinCosto)}.</td>`
     : `<th scope="row" colspan="5">Total pendiente</th>
         <td class="num">${dinero(p.total)}</td>`;
   return `<p class="comp-al-dia">Rentas ya cerradas que aún se le deben, ${alDia}.</p>
-    ${tablaHtml(p.filas, `<tr>${total}</tr>`)}`;
+    ${tablaHtml(p.filas, `<tr>${total}</tr>`, p.diferencias.map(filaDeDiferenciaHtml).join('\n      '))}`;
 }
 
 /**
@@ -381,7 +469,7 @@ export function htmlComprobante(m) {
           <td class="num">${dinero(m.pagado.total)}</td>
         </tr>`)}
     <p class="comp-forma">Forma de pago: <strong>${esc(textoDeForma(m.pagado.forma))}</strong></p>
-    ${m.pagado.cambiaron ? notaDeCambio(m.pagado.total) : ''}
+    ${m.pagado.anteriores.length ? notaDeComplemento(m.pagado) : (m.pagado.cambiaron ? notaDeCambio(m.pagado.total) : '')}
   </section>
 
   <section class="comp-seccion comp-pendiente">

@@ -55,37 +55,59 @@ export function aviso(texto, tipo = 'info') {
  * Por eso el campo pasa a ser de texto y el formato lo decide este archivo.
  *
  * Acepta lo que el mostrador teclea de verdad con el cliente enfrente —
- * "1345", "13:45", "9:5", "0945" — y devuelve siempre 'HH:MM'. Lo que no sea
- * una hora válida devuelve '' en vez de inventar una: una hora a medio
- * escribir no es una hora, y guardar "9:" como si fuera algo sería peor que
- * dejarlo vacío.
+ * "1345", "13:45", "9:5", "0945", "13.45", y también "1:30 pm", que es como se
+ * dice la hora en Guatemala — y devuelve siempre 'HH:MM'. Con «am» o «pm» la
+ * hora es de 1 a 12 y se pasa a 24 horas (12 am es 00:00; 12 pm, 12:00): es una
+ * hora completa y sin ambigüedad, así que se entiende en vez de borrarse.
+ *
+ * Lo que NO es una hora completa devuelve '' en vez de inventar una. Una hora a
+ * medio escribir no es una hora: "9:" (lo interrumpió el cliente) no es las 9:00,
+ * y ":30" no es las 00:30; guardarlas como si lo fueran pondría en el contrato
+ * impreso una hora de aspecto firme que él nunca escribió. Por eso cada parte
+ * tiene que estar escrita: la hora, y — si hay dos puntos — los minutos también.
+ * Solo se completa lo que no dice nada nuevo: los ceros de la izquierda ("9:5" es
+ * 09:05) y los minutos cuando se escribe una hora sola ("8" es 08:00).
+ *
+ * Esta función es la que decide, y se llama también al LEER el formulario, no solo
+ * al salir del campo: lo que se guarda no puede depender de que un evento del
+ * navegador haya alcanzado a correr (Enter dentro del campo, según el navegador).
  */
 export function hora24(texto) {
-  const limpio = String(texto ?? '').trim();
-  if (!limpio) return '';
+  let cuerpo = String(texto ?? '').trim().toLowerCase();
+  if (!cuerpo) return '';
 
-  const soloNumeros = limpio.replace(/\D/g, '');
+  // «am» / «pm», también como «a.m.» o «p. m.».
+  let meridiano = null;
+  const sufijo = /^(.*?)\s*([ap])\s*\.?\s*m\s*\.?$/.exec(cuerpo);
+  if (sufijo) {
+    cuerpo = sufijo[1].trim();
+    [, , meridiano] = sufijo;
+  }
+
   let h;
   let m;
-
-  if (limpio.includes(':')) {
-    const [hh, mm] = limpio.split(':');
-    h = Number(hh);
-    m = Number(mm);
-  } else if (soloNumeros.length === 4) {
-    h = Number(soloNumeros.slice(0, 2));
-    m = Number(soloNumeros.slice(2));
-  } else if (soloNumeros.length === 3) {
-    h = Number(soloNumeros.slice(0, 1));
-    m = Number(soloNumeros.slice(1));
-  } else if (soloNumeros.length <= 2 && soloNumeros.length > 0) {
-    h = Number(soloNumeros);
+  const conSeparador = /^(\d{1,2})\s*[:.h\s]\s*(\d{1,2})$/.exec(cuerpo);
+  if (conSeparador) {
+    h = Number(conSeparador[1]);
+    m = Number(conSeparador[2]);
+  } else if (/^\d{4}$/.test(cuerpo)) {
+    h = Number(cuerpo.slice(0, 2));
+    m = Number(cuerpo.slice(2));
+  } else if (/^\d{3}$/.test(cuerpo)) {
+    h = Number(cuerpo.slice(0, 1));
+    m = Number(cuerpo.slice(1));
+  } else if (/^\d{1,2}$/.test(cuerpo)) {
+    h = Number(cuerpo);
     m = 0;
   } else {
     return '';
   }
 
-  if (!Number.isInteger(h) || !Number.isInteger(m)) return '';
-  if (h < 0 || h > 23 || m < 0 || m > 59) return '';
+  if (m < 0 || m > 59) return '';
+  if (meridiano) {
+    if (h < 1 || h > 12) return '';
+    h = (h % 12) + (meridiano === 'p' ? 12 : 0);
+  }
+  if (h < 0 || h > 23) return '';
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }

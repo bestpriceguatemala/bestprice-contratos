@@ -1042,3 +1042,32 @@ test('volver a guardar un contrato viejo (pagos, cierre, garantía) deja `horaTa
   assert.equal(guardado.estado, 'rentado');
   assert.equal(resumen(guardado).totalSalida, 3150, 'y el total que ya tenía');
 });
+
+// ---------------------------------------------------------------------------
+// La hora de salida se normaliza al LEER el formulario, no solo al salir del campo
+// (revisión final, hallazgo 4). Antes dependía del oyente de `change`: si el
+// navegador no alcanzaba a correrlo (Enter dentro del campo), lo que se guardaba
+// era «1345», o «9:» tal cual. Estas pruebas corren el camino real —campo →
+// lectura → contrato—, sin pasar por ningún oyente.
+// ---------------------------------------------------------------------------
+
+test('la hora de salida tecleada de corrido ("1345") se guarda como 13:45 sin que el campo la haya normalizado', () => {
+  const { datos, guardado } = contratoDeLosCampos(formularioDeCarroAjeno({ 'sc-hora-salida': '1345' }));
+  assert.equal(datos.horaSalida, '13:45', 'ya desde la lectura del formulario');
+  assert.equal(guardado.horaSalida, '13:45');
+});
+
+test('una hora de salida a medias ("9:") se guarda VACÍA: no es un 09:00 que nadie escribió', () => {
+  for (const aMedias of ['9:', '13:', ':30', '1:2:3']) {
+    const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno({ 'sc-hora-salida': aMedias }));
+    assert.equal(guardado.horaSalida, '', `con «${aMedias}»`);
+  }
+});
+
+test('«1:30 pm» en la hora de salida se guarda como 13:30', () => {
+  assert.equal(contratoDeLosCampos(formularioDeCarroAjeno({ 'sc-hora-salida': '1:30 pm' })).guardado.horaSalida, '13:30');
+});
+
+test('sin hora de salida el contrato se guarda igual, con la hora vacía', () => {
+  assert.equal(contratoDeLosCampos(formularioDeCarroAjeno()).guardado.horaSalida, '');
+});

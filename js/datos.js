@@ -13,7 +13,7 @@ import { mezclar, guardarLocal, leerLocal, idsQueSobran, borrarLocales, depurarL
 import { filtrar, textoDeCliente } from './nucleo/busqueda.js';
 import { textoDeDueno } from './nucleo/dueno.js';
 import { estadoContrato } from './nucleo/estados.js';
-import { cuentaDeDueno, totalSeleccionado } from './nucleo/liquidacion.js';
+import { cuentaDeDueno, elegirParaPago } from './nucleo/liquidacion.js';
 import { estadoReserva } from './nucleo/reserva.js';
 import { resumen } from './nucleo/contrato.js';
 import { q, textoDosDecimales } from './nucleo/dinero.js';
@@ -1533,18 +1533,22 @@ function mensajeDeRentasSinCosto(contratos, sinLeer) {
  * `contratos` nacen: los dos salen de la misma lista, así que no pueden
  * contradecirse.
  *
- * Esa lista es `cuentaDeDueno(...).porPagar` — cerrados, de carro ajeno y todavía
- * sin pagar — recortada a lo marcado. Un contrato que no está ahí nunca entra,
+ * Esa lista es lo que `elegirParaPago` toma de `cuentaDeDueno(...)`: las rentas
+ * de `porPagar` — cerradas, de carro ajeno y todavía sin pagar — y las
+ * `diferencias` (rentas ya pagadas cuyo monto creció, que se marcan por su
+ * `clave` «dif:…»), recortadas a lo marcado. Lo que no está ahí nunca entra,
  * ni con su dinero ni con su id, aunque su casilla siga marcada: una pantalla
  * que quedó atrás (el contrato se reabrió, o otra pestaña ya lo pagó) no puede
  * mover un contrato todavía abierto al bloque de «pagado» sin dinero de por
  * medio, ni cobrar dos veces uno ya pagado. Si `monto` y `contratos` se armaran
- * cada uno por su lado, esa asimetría sería posible: `totalSeleccionado` filtra
- * por si el contrato se puede pagar, y una lista de ids tomada directo de las
- * casillas no.
+ * cada uno por su lado, esa asimetría sería posible.
  *
- * `monto` sale de `totalSeleccionado`, la misma suma que la pantalla enseña
- * mientras se marcan casillas: lo que él ve a la vista es, exacto, lo que se guarda.
+ * El pago de una diferencia cubre las MISMAS rentas que el pago original (las de
+ * su grupo): no se le agrega nada al comprobante que el dueño del carro ya
+ * tiene, y al sumar los dos pagos las rentas vuelven a cuadrar.
+ *
+ * `monto` sale de la misma cuenta que la pantalla enseña mientras se marcan
+ * casillas: lo que él ve a la vista es, exacto, lo que se guarda.
  *
  * LANZA si `contratos` o `pagos` no son listas (lo hace `cuentaDeDueno`, y aquí
  * no se ablanda): una lectura fallida de `pagosDueno` no se puede tomar por «nada
@@ -1576,20 +1580,22 @@ export function construirPagoDueno({
   duenoId, fecha, forma, contratos, pagos, idsMarcados, costoSinLeer,
 } = {}) {
   // `cuentaDeDueno` cuenta cada contrato una sola vez (M3 de la revisión de las Tareas 6 y 7).
-  const { porPagar, sinCostoAnotado } = cuentaDeDueno({ contratos, pagos });
-  const marcados = new Set(idsMarcados ?? []);
-  const elegidos = porPagar.filter((c) => c?.id && marcados.has(c.id));
-  const sinAnotar = new Set(sinCostoAnotado);
+  const cuenta = cuentaDeDueno({ contratos, pagos });
+  const { rentas, diferencias, contratos: ids, monto } = elegirParaPago(cuenta, idsMarcados);
+  const sinAnotar = new Set(cuenta.sinCostoAnotado);
   const sinLeer = new Set(costoSinLeer ?? []);
-  const sinCosto = elegidos.filter((c) => sinAnotar.has(c.id) || sinLeer.has(c.id));
+  // Las rentas que se van a pagar, y las de cada diferencia: cualquiera con un costo
+  // dudoso detiene el pago, porque el monto sale de ese costo.
+  const dePago = [...rentas, ...diferencias.flatMap((d) => d.contratos)];
+  const sinCosto = [...new Map(dePago.map((c) => [c.id, c])).values()]
+    .filter((c) => sinAnotar.has(c.id) || sinLeer.has(c.id));
   if (sinCosto.length) throw new Error(mensajeDeRentasSinCosto(sinCosto, sinLeer));
-  const ids = elegidos.map((c) => c.id);
   return {
     duenoId: duenoId ?? null,
     fecha,
     forma,
-    // De `elegidos` y con los ids de `elegidos`: la misma lista que `contratos`.
-    monto: totalSeleccionado(elegidos, ids),
+    // `monto` y `contratos` salen de la misma elección: no pueden contradecirse.
+    monto,
     contratos: ids,
   };
 }

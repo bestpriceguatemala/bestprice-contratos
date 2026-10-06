@@ -1339,6 +1339,11 @@ body {
   margin: 0 0 12px;
 }
 
+/* Una explicación que va dentro de una celda: sin el espacio de abajo de un párrafo suelto. */
+.dn-explica-chica.dn-sin-margen {
+  margin: 4px 0 0;
+}
+
 .dn-datos-dueno {
   margin: 0 0 20px;
   color: var(--gris);
@@ -1373,6 +1378,14 @@ body {
 
 .tabla-carros.dn-tabla-gris {
   color: var(--gris);
+}
+
+/* El pie de la lista de dueños: lo que se debe a todos juntos. */
+.tabla-carros tfoot .dn-fila-total td {
+  border-top: 2px solid var(--navy);
+  background: var(--fondo);
+  font-weight: 600;
+  font-size: 15px;
 }
 
 .carro-seccion.dn-seccion-migracion {

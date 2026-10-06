@@ -254,6 +254,36 @@ export function totalDeEstaCobranza(contratoConCierre, { monto, forma, porcentaj
   return { total, recargo: q(total - montoNum) };
 }
 
+/**
+ * Lo que el formulario del cierre dice, leído con `texto` y `num` (los lectores
+ * de campos de la pantalla). Es pura para poder probar el camino real: campo →
+ * lectura → cierre, no solo la plantilla.
+ *
+ * La hora pasa por `hora24` AL LEER, y no solo al salir del campo (el evento
+ * `change`): lo que se guarda en el cierre no puede depender de que ese evento
+ * haya alcanzado a correr (Enter dentro del campo, según el navegador), y una
+ * hora a medias ("9:") queda vacía en vez de volverse las 09:00.
+ *
+ * `fechaReal` NO se rellena con hoyISO() si el mostrador la borra a propósito:
+ * problemasDelCierre necesita ver ese vacío tal cual para avisar «Falta la fecha
+ * en que se recibió el carro.» Rellenarla aquí escondería justo el problema que
+ * esa validación existe para mostrar.
+ */
+export function leerCamposDelCierre({ texto, num }) {
+  return {
+    fechaReal: texto('rc-fecha-real'),
+    horaReal: hora24(texto('rc-hora-real')),
+    lugarEntrada: texto('rc-lugar-entrada'),
+    kmEntrada: num('rc-km-entrada'),
+    combustible: num('rc-combustible'),
+    danos: num('rc-danos'),
+    danosDetalle: texto('rc-danos-detalle'),
+    varios: num('rc-varios'),
+    variosDetalle: texto('rc-varios-detalle'),
+    descuento: num('rc-descuento'),
+  };
+}
+
 // ---------- La plantilla (se arma una sola vez, con el contrato ya cargado) ----------
 
 function campo(id, etiqueta, opciones = {}) {
@@ -443,22 +473,7 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
   const texto = (id) => val(id).trim();
 
   function leerCampos() {
-    // fechaReal NO se rellena con hoyISO() si el mostrador la borra a
-    // propósito: problemasDelCierre necesita ver ese vacío tal cual para
-    // avisar "Falta la fecha en que se recibió el carro." Rellenarla aquí
-    // escondería justo el problema que esa validación existe para mostrar.
-    return {
-      fechaReal: texto('rc-fecha-real'),
-      horaReal: texto('rc-hora-real'),
-      lugarEntrada: texto('rc-lugar-entrada'),
-      kmEntrada: num('rc-km-entrada'),
-      combustible: num('rc-combustible'),
-      danos: num('rc-danos'),
-      danosDetalle: texto('rc-danos-detalle'),
-      varios: num('rc-varios'),
-      variosDetalle: texto('rc-varios-detalle'),
-      descuento: num('rc-descuento'),
-    };
+    return leerCamposDelCierre({ texto, num });
   }
 
   function recalcular() {

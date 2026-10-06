@@ -31,7 +31,7 @@
 //    puede calcular pero quedó corto (rentas sin costo, o con el costo sin leer),
 //    se dice en pantalla, junto al total, que está corto.
 import {
-  agruparPorDueno, cuentaDeDueno, costoDelSubarriendo, totalSeleccionado,
+  agruparPorDueno, cuentaDeDueno, costoDelSubarriendo, elegirParaPago, esPagableAlDueno, totalGeneral,
 } from '../nucleo/liquidacion.js';
 import { estadoContrato, pendientesDe } from '../nucleo/estados.js';
 import { atrasoDe } from '../nucleo/contrato.js';
@@ -395,6 +395,12 @@ export function armarVista({ contratos, pagos, duenos } = {}) {
     registros,
     costoSinLeer: contratos.costoSinLeer,
     falloDuenos: Boolean(duenos?.fallo),
+    // Lo que se le debe a TODOS junto, y las frases que lo dejan en su sitio si
+    // está corto: es la pregunta con la que se abre esta pantalla («¿cuánto
+    // debo?»), y no se contesta sumando renglones a ojo. La suma la hace el
+    // núcleo; aquí solo se junta lo que cada cuenta ya dice.
+    total: totalGeneral(entradas.map((e) => e.cuenta)),
+    notasDelTotal: notasDelTotalGeneral({ entradas, costoSinLeer: contratos.costoSinLeer }),
   };
 }
 
@@ -413,47 +419,111 @@ export function estadoDeCosto(contrato, cuenta, costoSinLeer) {
 }
 
 /**
- * Lo que hay que decir al lado del total de una cuenta cuando está CORTO: rentas
- * por pagar sin costo anotado (cuentan como Q0.00) o con el costo sin leer. Es
- * una lista de frases, vacía cuando el total es completo.
- *
- * Solo cuentan las rentas por pagar, que son las que suma el total. Una renta
- * que todavía no cierra y no tiene costo se señala en su propia fila, pero no
- * hace corto un total que no la incluye ni debe incluirla.
+ * Las rentas cuyo costo SUMA en el total de una cuenta: las cerradas por pagar y
+ * las de sus diferencias (una renta ya pagada cuyo monto creció también se cuenta
+ * por su costo). Cada una una sola vez.
  */
-export function notasDeTotal(entrada, costoSinLeer) {
+function rentasDelTotal(cuenta) {
+  const vistas = new Map();
+  for (const c of [...cuenta.porPagar, ...cuenta.diferencias.flatMap((d) => d.contratos)]) {
+    if (c?.id) vistas.set(c.id, c);
+  }
+  return [...vistas.values()];
+}
+
+/**
+ * Cuántas rentas de las que suma el total de una cuenta no tienen un costo en el
+ * que confiar: `sinAnotar` (el costo por día es 0 o nunca se anotó: cuentan como
+ * Q0.00) y `sinLeer` (la nube no contestó). Una renta sin leer no cuenta también
+ * como sin anotar: son dos motivos y se dicen por separado.
+ *
+ * Solo cuentan las que suma el total. Una renta que todavía no cierra y no tiene
+ * costo se señala en su propia fila, pero no hace corto un total que no la
+ * incluye ni debe incluirla.
+ */
+export function rentasCortas(entrada, costoSinLeer) {
   const sinLeer = new Set(costoSinLeer ?? []);
   const sinAnotar = new Set(entrada.cuenta.sinCostoAnotado);
-  const porPagar = entrada.cuenta.porPagar;
-  const nSinLeer = porPagar.filter((c) => sinLeer.has(c.id)).length;
-  const nSinAnotar = porPagar.filter((c) => sinAnotar.has(c.id) && !sinLeer.has(c.id)).length;
+  const delTotal = rentasDelTotal(entrada.cuenta);
+  return {
+    sinAnotar: delTotal.filter((c) => sinAnotar.has(c.id) && !sinLeer.has(c.id)).length,
+    sinLeer: delTotal.filter((c) => sinLeer.has(c.id)).length,
+  };
+}
+
+const palabraRentas = (n) => (n === 1 ? 'renta' : 'rentas');
+
+/** Las frases que dicen que un total está corto, según cuántas rentas lo dejan así. */
+function frasesDeTotalCorto({ sinAnotar, sinLeer }) {
   const notas = [];
-  if (nSinAnotar) {
-    notas.push(`Falta anotar el costo de ${nSinAnotar} ${nSinAnotar === 1 ? 'renta' : 'rentas'}: este total es menor al real.`);
+  if (sinAnotar) {
+    notas.push(`Falta anotar el costo de ${sinAnotar} ${palabraRentas(sinAnotar)}: este total es menor al real.`);
   }
-  if (nSinLeer) {
-    notas.push(`No se pudo leer el costo de ${nSinLeer} ${nSinLeer === 1 ? 'renta' : 'rentas'}: este total puede no ser el real.`);
+  if (sinLeer) {
+    notas.push(`No se pudo leer el costo de ${sinLeer} ${palabraRentas(sinLeer)}: este total puede no ser el real.`);
   }
   return notas;
 }
 
 /**
- * Lo que está marcado y de verdad se puede pagar: los ids, cuántos son y cuánto
- * suman. El total sale de `totalSeleccionado` —la MISMA suma con la que
- * `construirPagoDueno` arma el monto—, así que lo que se ve abajo antes de
- * registrar es exactamente lo que se guarda.
+ * Lo que hay que decir al lado del total de una cuenta cuando está CORTO: rentas
+ * sin costo anotado (cuentan como Q0.00) o con el costo sin leer. Es una lista de
+ * frases, vacía cuando el total es completo.
+ */
+export function notasDeTotal(entrada, costoSinLeer) {
+  return frasesDeTotalCorto(rentasCortas(entrada, costoSinLeer));
+}
+
+/**
+ * Lo mismo para el total de TODOS los dueños, con las mismas frases y la misma
+ * regla de qué rentas cuentan (la de `notasDeTotal`): si el total de un solo
+ * dueño está corto, el de todos también lo está, y un total general limpio que
+ * está mal es peor que uno con una nota que lo dice. Cuenta las rentas de todos
+ * los dueños juntas, no dueño por dueño.
+ */
+export function notasDelTotalGeneral({ entradas, costoSinLeer }) {
+  const junto = { sinAnotar: 0, sinLeer: 0 };
+  for (const entrada of entradas ?? []) {
+    const corto = rentasCortas(entrada, costoSinLeer);
+    junto.sinAnotar += corto.sinAnotar;
+    junto.sinLeer += corto.sinLeer;
+  }
+  return frasesDeTotalCorto(junto);
+}
+
+/**
+ * ¿Esta diferencia tiene alguna renta sin costo en el que confiar? Entonces su
+ * monto sale de una cifra dudosa y no se puede pagar todavía, igual que una renta.
+ */
+export function diferenciaBloqueada(diferencia, cuenta, costoSinLeer) {
+  const bloqueadas = rentasSinCostoLegible(cuenta, costoSinLeer);
+  return diferencia.contratos.some((c) => bloqueadas.has(c.id));
+}
+
+/**
+ * Lo que está marcado y de verdad se puede pagar: los ids (de rentas, y las
+ * claves de las diferencias), cuántos son y cuánto suman. El total sale de
+ * `elegirParaPago` —la MISMA cuenta con la que `construirPagoDueno` arma el
+ * monto—, así que lo que se ve abajo antes de registrar es exactamente lo que se
+ * guarda.
  *
  * Una renta sin costo legible no entra aunque su casilla siga marcada (la casilla
  * ni se deja marcar, pero esto no depende de eso): pagarla borraría una deuda
- * real por Q0.00.
+ * real por Q0.00. Con una diferencia pasa lo mismo si alguna de sus rentas no
+ * tiene costo legible.
  */
 export function resumenDeMarcadas(entrada, marcados, costoSinLeer) {
   const bloqueadas = rentasSinCostoLegible(entrada.cuenta, costoSinLeer);
   const elegidos = marcados ?? new Set();
-  const ids = entrada.cuenta.porPagar
-    .filter((c) => c?.id && elegidos.has(c.id) && !bloqueadas.has(c.id))
-    .map((c) => c.id);
-  return { ids, cuantas: ids.length, total: totalSeleccionado(entrada.cuenta.porPagar, ids) };
+  const ids = [
+    ...entrada.cuenta.porPagar
+      .filter((c) => c?.id && elegidos.has(c.id) && !bloqueadas.has(c.id))
+      .map((c) => c.id),
+    ...entrada.cuenta.diferencias
+      .filter((d) => elegidos.has(d.clave) && !d.contratos.some((c) => bloqueadas.has(c.id)))
+      .map((d) => d.clave),
+  ];
+  return { ids, cuantas: ids.length, total: elegirParaPago(entrada.cuenta, ids).monto };
 }
 
 /**
@@ -510,7 +580,9 @@ export function pagosDeLaCuenta(entrada, pagos) {
  * 3. Si lo marcado ya no está por pagar (otra pestaña, o un intento anterior
  *    con otras casillas), o suma otra cosa que lo que él vio, NO se registra
  *    una versión recortada o distinta en silencio —él vio un monto y se
- *    guardaría otro—: se devuelve `cambio`.
+ *    guardaría otro—: se devuelve `cambio`. Lo marcado puede ser rentas por
+ *    pagar y diferencias de rentas ya pagadas (sus claves «dif:…»): las dos se
+ *    comparan igual.
  * 4. Arma el pago con `construirPagoDueno` sobre lo leído AHORA, que se niega
  *    con su propia frase si alguna renta marcada no tiene costo legible (el
  *    «sin leer» también es el de ahora, no el de cuando se abrió).
@@ -534,8 +606,9 @@ export async function registrarElPago({
   const yaGuardado = enCurso?.id ? frescos.datos.find((p) => p?.id === enCurso.id) : null;
   if (yaGuardado) return { tipo: 'ya-guardado', pago: yaGuardado, pagos: frescos.datos };
 
-  // Lo que él vio: la suma de lo marcado sobre la cuenta que tenía en pantalla.
-  const montoVisto = totalSeleccionado(entrada.cuenta.porPagar, idsMarcados);
+  // Lo que él vio: lo marcado sobre la cuenta que tenía en pantalla, con la misma
+  // cuenta con la que se arma el pago (`elegirParaPago`).
+  const visto = elegirParaPago(entrada.cuenta, idsMarcados);
 
   // La lectura que falle (o lance) NO se vuelve «ninguna renta»: se dice que no se pudo comprobar.
   const rentas = await Promise.resolve().then(() => leerContratos()).catch(() => null);
@@ -554,9 +627,13 @@ export async function registrarElPago({
     idsMarcados,
     costoSinLeer: rentas.costoSinLeer,
   });
-  const igual = pago.contratos.length === idsMarcados.length
-    && idsMarcados.every((id) => pago.contratos.includes(id))
-    && pago.monto === montoVisto;
+  // Cada casilla marcada tiene que haber sido algo de la cuenta que él vio (una
+  // renta por pagar o una diferencia), y el pago de ahora tiene que cubrir lo mismo
+  // y sumar lo mismo.
+  const igual = visto.rentas.length + visto.diferencias.length === idsMarcados.length
+    && pago.contratos.length === visto.contratos.length
+    && visto.contratos.every((id) => pago.contratos.includes(id))
+    && pago.monto === visto.monto;
   if (!igual) return { tipo: 'cambio', pagos: frescos.datos, contratos: rentas };
 
   // Una vez por intención de pagar, y se conservan aunque este intento falle.
@@ -635,24 +712,62 @@ export function htmlFallo(vista) {
     </div>`;
 }
 
-const pluralRentas = (n) => `${n} ${n === 1 ? 'renta' : 'rentas'}`;
+/**
+ * Qué comprobantes cubrieron una diferencia: «el comprobante N.° 7», «los
+ * comprobantes N.° 7 y N.° 9». Es lo que le dice a él de dónde viene el monto.
+ */
+export function textoDeComprobantes(pagos) {
+  const numeros = pagos.map((p) => `N.° ${p.numero ?? '—'}`);
+  if (numeros.length <= 1) return `el comprobante ${numeros[0] ?? ''}`.trim();
+  return `los comprobantes ${numeros.slice(0, -1).join(', ')} y ${numeros[numeros.length - 1]}`;
+}
 
 function filaDeLista(entrada, costoSinLeer) {
   const { cuenta } = entrada;
-  const apagada = cuenta.porPagar.length === 0;
+  // Una cuenta con solo una diferencia por pagar no es una cuenta apagada: se le debe.
+  const filasPorPagar = cuenta.porPagar.length + cuenta.diferencias.length;
+  const apagada = filasPorPagar === 0;
   const notas = notasDeTotal(entrada, costoSinLeer);
   const etiquetas = [
     entrada.sinEnlazar ? '<span class="etiqueta-estado" title="El nombre se escribió a mano en el contrato">Sin enlazar</span>' : '',
     entrada.sinRegistro ? '<span class="etiqueta-estado">No está en la lista de dueños</span>' : '',
   ].join('');
   const notasHtml = notas.map((n) => `<div class="dn-alerta dn-nota">${esc(n)}</div>`).join('');
+  // Sin esto, «0 rentas por pagar» junto a una cifra se leería como un error de cuentas.
+  const explicaDiferencia = cuenta.diferencias.length
+    ? `<div class="dn-gris dn-nota">Incluye ${esc(dinero(cuenta.totalDiferencias))} de rentas ya pagadas cuyo monto cambió después del pago.</div>`
+    : '';
   return `
     <tr class="${apagada ? 'es-fuera' : ''}" data-dn-clave="${esc(entrada.clave)}">
-      <td><a href="${esc(rutaDeCuenta(entrada.clave))}">${esc(entrada.nombre)}</a> ${etiquetas}${notasHtml}</td>
-      <td>${cuenta.porPagar.length}</td>
+      <td><a href="${esc(rutaDeCuenta(entrada.clave))}">${esc(entrada.nombre)}</a> ${etiquetas}${explicaDiferencia}${notasHtml}</td>
+      <td>${filasPorPagar}</td>
       <td class="dn-derecha"><strong>${esc(dinero(cuenta.totalPorPagar))}</strong>${
   notas.length ? '<div class="dn-alerta dn-nota-mini">incompleto</div>' : ''}</td>
     </tr>`;
+}
+
+/**
+ * El pie de la lista: lo que se le debe a TODOS los dueños junto. Es lo que él
+ * viene a preguntar al abrir esta pantalla, y suma también los grupos «sin
+ * enlazar», que de otro modo se le pasarían de largo como una fila más.
+ *
+ * Si algún dueño tiene el total corto (una renta sin costo anotado, o con el
+ * costo sin leer), este también lo está, y lo dice con las mismas palabras y la
+ * misma marca de «incompleto» que ya usa cada fila: un total general limpio que
+ * está mal es peor que uno con una nota que lo dice.
+ */
+function htmlTotalGeneral(vista) {
+  const notas = vista.notasDelTotal.map((n) => `<div class="dn-alerta dn-nota">${esc(n)}</div>`).join('');
+  const rentas = vista.entradas.reduce((t, e) => t + e.cuenta.porPagar.length + e.cuenta.diferencias.length, 0);
+  return `
+        <tfoot>
+          <tr class="dn-fila-total">
+            <td>Lo que debes a todos los dueños${notas}</td>
+            <td>${rentas}</td>
+            <td class="dn-derecha"><strong id="dn-total-general">${esc(dinero(vista.total))}</strong>${
+  vista.notasDelTotal.length ? '<div class="dn-alerta dn-nota-mini">incompleto</div>' : ''}</td>
+          </tr>
+        </tfoot>`;
 }
 
 /**
@@ -676,7 +791,7 @@ export function htmlLista(vista, { migracion = '' } = {}) {
         <thead>
           <tr><th>Dueño</th><th>Rentas cerradas por pagar</th><th class="dn-derecha">Se le debe</th></tr>
         </thead>
-        <tbody>${filas}</tbody>
+        <tbody>${filas}</tbody>${vista.entradas.length ? htmlTotalGeneral(vista) : ''}
       </table>
       <section class="carro-seccion dn-seccion-migracion">
         <h2>Mover el costo de los dueños</h2>
@@ -726,6 +841,39 @@ function htmlCostoDia(contrato, costo, ui) {
     <button type="button" class="btn dn-boton-mini" data-dn="anotar-costo" data-id="${esc(contrato.id)}">Anotar costo</button>`;
 }
 
+/** Las rentas de una diferencia, una por línea, como las de «Ya pagado». */
+function htmlRentasDeDiferencia(d) {
+  return `<ul class="dn-pago-rentas">${d.contratos.map((c) => (
+    `<li>${esc(fecha(c.fechaSalida))} · ${esc(c.carroPlacas || '—')} · ${esc(c.clienteNombre || '—')} · ${htmlDeDias(c)}</li>`
+  )).join('')}</ul>`;
+}
+
+/**
+ * Lo que se explica de una diferencia: de dónde viene (qué comprobantes) y por
+ * qué hay un monto. NO es una renta más: la renta ya está pagada, y el
+ * comprobante que el dueño del carro tiene sigue diciendo lo que dijo. Esto es lo
+ * que se le debe además de eso.
+ */
+function htmlExplicacionDeDiferencia(d) {
+  return `<strong>Diferencia de rentas ya pagadas</strong>
+        <div class="dn-explica-chica dn-sin-margen">Se pagaron ${esc(dinero(d.pagado))} en ${esc(textoDeComprobantes(d.pagos))}, y hoy esas rentas suman ${esc(dinero(d.ahora))}.</div>
+        ${htmlRentasDeDiferencia(d)}`;
+}
+
+/** Una diferencia por pagar: una fila con su casilla, igual que una renta. */
+function htmlFilaDiferencia(d, ctx) {
+  const bloqueada = diferenciaBloqueada(d, ctx.entrada.cuenta, ctx.vista.costoSinLeer);
+  const marcada = !bloqueada && ctx.ui.marcados.has(d.clave);
+  const titulo = bloqueada ? ' title="No se puede marcar hasta tener el costo por día"' : '';
+  return `
+    <tr class="dn-sin-clic" data-id="${esc(d.clave)}">
+      <td><input type="checkbox" data-dn="marcar" data-id="${esc(d.clave)}" ${marcada ? 'checked' : ''} ${bloqueada ? 'disabled' : ''}${titulo}
+        aria-label="Marcar la diferencia de las rentas ya pagadas para pagarla"></td>
+      <td colspan="5">${htmlExplicacionDeDiferencia(d)}</td>
+      <td class="dn-derecha"><strong>${esc(dinero(d.diferencia))}</strong></td>
+    </tr>`;
+}
+
 function htmlFilaPorPagar(contrato, ctx) {
   const costo = estadoDeCosto(contrato, ctx.entrada.cuenta, ctx.vista.costoSinLeer);
   const bloqueada = costo !== 'leido';
@@ -749,8 +897,13 @@ function htmlBloquePorPagar(ctx) {
   const { cuenta } = entrada;
   const notas = notasDeTotal(entrada, vista.costoSinLeer);
   const marcadas = resumenDeMarcadas(entrada, ui.marcados, vista.costoSinLeer);
-  const filas = cuenta.porPagar.length
-    ? cuenta.porPagar.map((c) => htmlFilaPorPagar(c, ctx)).join('')
+  // Las diferencias van en la misma tabla que las rentas: son deuda por pagar, y
+  // «No hay rentas cerradas por pagar» junto a una cifra que sí se debe sería mentira.
+  const filas = cuenta.porPagar.length || cuenta.diferencias.length
+    ? [
+      ...cuenta.porPagar.map((c) => htmlFilaPorPagar(c, ctx)),
+      ...cuenta.diferencias.map((d) => htmlFilaDiferencia(d, ctx)),
+    ].join('')
     : '<tr><td colspan="7" class="pendiente dn-vacio dn-sin-clic">No hay rentas cerradas por pagar.</td></tr>';
 
   const formulario = ui.pagando ? `
@@ -784,7 +937,7 @@ function htmlBloquePorPagar(ctx) {
       </table>
       <div class="dn-caja dn-resumen">
         <div>Por pagar en total<br><strong class="dn-total">${esc(dinero(cuenta.totalPorPagar))}</strong>${notas.length ? '<br><span class="dn-alerta dn-nota">incompleto</span>' : ''}</div>
-        <div id="dn-marcado" class="dn-marcado">Marcado: <strong id="dn-marcadas">${marcadas.cuantas}</strong> ${marcadas.cuantas === 1 ? 'renta' : 'rentas'}<br>
+        <div id="dn-marcado" class="dn-marcado">Marcado: <strong id="dn-marcadas">${marcadas.cuantas}</strong> <span id="dn-marcadas-palabra">${palabraRentas(marcadas.cuantas)}</span><br>
           <span class="dn-rotulo">Total marcado</span> <strong id="dn-total-marcado" class="dn-total-marcado">${esc(dinero(marcadas.total))}</strong></div>
         <button type="button" class="btn btn-primario dn-boton-suelto" id="dn-registrar" data-dn="registrar" ${marcadas.cuantas === 0 || ui.pagando ? 'disabled' : ''}>Registrar pago</button>
       </div>
@@ -795,7 +948,19 @@ function htmlBloquePorPagar(ctx) {
 function htmlBloqueAunNoCierra(ctx) {
   const { entrada, vista, ui } = ctx;
   const { cuenta } = entrada;
-  const filas = cuenta.aunNoCierra.length
+  const diferenciasSinCerrar = cuenta.diferenciasSinCerrar.map((d) => {
+    // Por qué no cierra el grupo: lo dice cada renta que no cerró, con las mismas
+    // palabras que una renta cualquiera de esta tabla.
+    const razones = d.contratos.filter((c) => !esPagableAlDueno(c))
+      .map((c) => `${esc(c.carroPlacas || '—')}: ${esc(razonDeNoCierre(c))}`).join('<br>');
+    return `
+    <tr class="es-fuera dn-sin-clic" data-id="${esc(d.clave)}">
+      <td colspan="5">${htmlExplicacionDeDiferencia(d)}
+        <div class="dn-explica-chica dn-sin-margen">Faltan ${esc(dinero(d.diferencia))} por pagarle, cuando cierre.</div></td>
+      <td>${razones}</td>
+    </tr>`;
+  });
+  const filas = cuenta.aunNoCierra.length || diferenciasSinCerrar.length
     ? cuenta.aunNoCierra.map((c) => {
       const costo = estadoDeCosto(c, cuenta, vista.costoSinLeer);
       return `
@@ -807,7 +972,7 @@ function htmlBloqueAunNoCierra(ctx) {
       <td>${htmlCostoDia(c, costo, ui)}</td>
       <td>${esc(razonDeNoCierre(c))}</td>
     </tr>`;
-    }).join('')
+    }).concat(diferenciasSinCerrar).join('')
     : '<tr><td colspan="6" class="pendiente dn-vacio dn-sin-clic">Ninguna renta de este dueño está esperando cerrar.</td></tr>';
   return `
     <section class="carro-seccion">
@@ -899,6 +1064,29 @@ export function htmlFicha(ctx) {
       ${htmlBloqueAunNoCierra(ctx)}
       ${htmlBloqueYaPagado(ctx)}
     </div>`;
+}
+
+/**
+ * Pone en la ficha YA DIBUJADA lo que dice lo marcado, sin redibujarla: la cuenta
+ * («Marcado: N renta/rentas»), el total y los botones. Es lo que él ve al marcar
+ * una casilla, y es un parche sobre la página: la plantilla (`htmlBloquePorPagar`)
+ * dice lo mismo con los mismos datos, pero son dos caminos distintos y los dos
+ * tienen que dar la misma frase.
+ *
+ * Se parchea la PALABRA igual que el número, con la misma `palabraRentas` que usa
+ * la plantilla: antes solo se cambiaba el número, y marcar una casilla dejaba
+ * «Marcado: 1 rentas». `raiz` es cualquier cosa con `querySelector`.
+ */
+export function parchearMarcado(raiz, resumenMarcado, { pagando = false } = {}) {
+  const poner = (id, texto) => { const nodo = raiz.querySelector(id); if (nodo) nodo.textContent = texto; };
+  poner('#dn-marcadas', String(resumenMarcado.cuantas));
+  poner('#dn-marcadas-palabra', palabraRentas(resumenMarcado.cuantas));
+  poner('#dn-total-marcado', dinero(resumenMarcado.total));
+  poner('#dn-guardar-pago', `Guardar pago de ${dinero(resumenMarcado.total)}`);
+  const guardar = raiz.querySelector('#dn-guardar-pago');
+  if (guardar) guardar.disabled = resumenMarcado.cuantas === 0;
+  const registrar = raiz.querySelector('#dn-registrar');
+  if (registrar) registrar.disabled = resumenMarcado.cuantas === 0 || pagando;
 }
 
 // ---------------------------------------------------------------------------
@@ -1122,7 +1310,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
       return;
     }
     // Lo marcado que ya no se puede pagar (porque se pagó, o cambió) se desmarca.
-    const pagables = new Set(entrada.cuenta.porPagar.map((c) => c.id));
+    const pagables = new Set([...entrada.cuenta.porPagar.map((c) => c.id), ...entrada.cuenta.diferencias.map((d) => d.clave)]);
     for (const id of [...ui.marcados]) if (!pagables.has(id)) ui.marcados.delete(id);
     raiz.innerHTML = htmlFicha({ entrada, vista, ui, lectura: lector.actual, hoy });
     if (ui.anotando) raiz.querySelector('#dn-costo-input')?.focus();
@@ -1166,15 +1354,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
   // ----- Marcar rentas: solo se mueve el total, no se redibuja nada -----
   function actualizarMarcado() {
     if (!entrada) return;
-    const r = resumenDeMarcadas(entrada, ui.marcados, vista.costoSinLeer);
-    const poner = (id, texto) => { const nodo = raiz.querySelector(id); if (nodo) nodo.textContent = texto; };
-    poner('#dn-marcadas', String(r.cuantas));
-    poner('#dn-total-marcado', dinero(r.total));
-    poner('#dn-guardar-pago', `Guardar pago de ${dinero(r.total)}`);
-    const guardar = raiz.querySelector('#dn-guardar-pago');
-    if (guardar) guardar.disabled = r.cuantas === 0;
-    const registrar = raiz.querySelector('#dn-registrar');
-    if (registrar) registrar.disabled = r.cuantas === 0 || ui.pagando;
+    parchearMarcado(raiz, resumenDeMarcadas(entrada, ui.marcados, vista.costoSinLeer), { pagando: ui.pagando });
   }
 
   // ----- Anotar el costo de una renta sin costo -----

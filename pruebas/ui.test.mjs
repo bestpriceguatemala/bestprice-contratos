@@ -66,3 +66,79 @@ test('hora24: lo que no es una hora devuelve vacío, no una hora inventada', () 
   assert.equal(hora24(null), '');
   assert.equal(hora24(undefined), '');
 });
+
+// ---------------------------------------------------------------------------
+// Revisión final, hallazgo 4: «9:» se guardaba como 09:00.
+//
+// El comentario de hora24, el mensaje del commit y los comentarios de las dos
+// pantallas decían lo mismo: una hora a medio escribir queda VACÍA, no inventada.
+// El código hacía lo contrario (`Number('')` es 0, que es entero y está en rango),
+// y la prueba de arriba comentaba la promesa sin probarla: nunca preguntó por «9:».
+// Lo que está en juego es una hora de aspecto firme, que él nunca escribió, en un
+// contrato impreso.
+// ---------------------------------------------------------------------------
+
+test('hora24: una hora a medio escribir queda vacía, no se completa con ceros ("9:" no son las 09:00)', () => {
+  assert.equal(hora24('9:'), '', 'la hora sin minutos después de los dos puntos');
+  assert.equal(hora24('13:'), '');
+  assert.equal(hora24('0:'), '', 'ni siquiera medianoche: el cero tampoco se inventa');
+  assert.equal(hora24(':30'), '', 'los minutos sin hora no son las 00:30');
+  assert.equal(hora24(':'), '');
+  assert.equal(hora24('9: '), '');
+});
+
+test('hora24: lo que trae más de dos partes o signos no es una hora', () => {
+  assert.equal(hora24('1:2:3'), '', 'no es 01:02');
+  assert.equal(hora24('-5'), '', 'no es 05:00: el signo no se descarta en silencio');
+  assert.equal(hora24('1::30'), '');
+  assert.equal(hora24('9:305'), '', 'minutos de tres cifras');
+  assert.equal(hora24('12345'), '', 'cinco dígitos de corrido');
+  assert.equal(hora24('ab:cd'), '');
+  assert.equal(hora24('9a'), '');
+});
+
+test('hora24: «1:30 pm» es como se dice la hora en Guatemala: se entiende, no se borra sin avisar', () => {
+  assert.equal(hora24('1:30 pm'), '13:30');
+  assert.equal(hora24('01:58 PM'), '13:58', 'el caso que reprodujo la revisión: sin PM salía vacío');
+  assert.equal(hora24('9:30 am'), '09:30');
+  assert.equal(hora24('5pm'), '17:00', 'sin espacio y sin minutos');
+  assert.equal(hora24('9:30 a.m.'), '09:30');
+  assert.equal(hora24('9 p. m.'), '21:00');
+  assert.equal(hora24('130 pm'), '13:30', 'de corrido, como las demás');
+  assert.equal(hora24('11:59 PM'), '23:59');
+});
+
+test('hora24: las 12 de la mañana son las 00:00 y las 12 del día las 12:00', () => {
+  assert.equal(hora24('12:00 am'), '00:00');
+  assert.equal(hora24('12:30 am'), '00:30');
+  assert.equal(hora24('12 pm'), '12:00');
+  assert.equal(hora24('12:15 pm'), '12:15');
+});
+
+test('hora24: «am» o «pm» con una hora que no existe en 12 horas vacía, no adivina', () => {
+  assert.equal(hora24('13:30 pm'), '', 'las 13 ya son de 24 horas: contradice el pm');
+  assert.equal(hora24('0:30 pm'), '');
+  assert.equal(hora24('1:60 pm'), '');
+  assert.equal(hora24('pm'), '', 'sin hora');
+  assert.equal(hora24('1: pm'), '', 'ni «a medias» con pm');
+});
+
+test('hora24: otros separadores que el mostrador teclea de verdad (13.45, 13h45, 9 45)', () => {
+  assert.equal(hora24('13.45'), '13:45');
+  assert.equal(hora24('13h45'), '13:45');
+  assert.equal(hora24('9 45'), '09:45');
+});
+
+test('hora24: lo que ya estaba bien sigue igual (el arreglo no endurece lo que funcionaba)', () => {
+  for (const [entrada, esperado] of [
+    ['13:45', '13:45'], ['1345', '13:45'], ['945', '09:45'], ['9:5', '09:05'], ['8', '08:00'], ['13', '13:00'],
+    [' 13:45 ', '13:45'], ['00:00', '00:00'], ['0', '00:00'], ['23:59', '23:59'],
+  ]) assert.equal(hora24(entrada), esperado, entrada);
+});
+
+test('hora24 siempre devuelve «HH:MM» o vacío, para cualquier cosa que se le tire', () => {
+  const basura = ['', ' ', '9:', ':', '::', '1:2:3', '-5', '+5', '1e3', '٣:٣٠', '9\n', 'abc', '24:00', '99:99', '0:0', '12:5', '1 2', null, undefined, 5, 13.45];
+  for (const x of basura) {
+    assert.match(String(hora24(x)), /^(\d{2}:\d{2})?$/, `con ${JSON.stringify(x)}`);
+  }
+});

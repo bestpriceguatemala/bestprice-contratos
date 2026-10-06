@@ -159,17 +159,122 @@ export function sinIdsRepetidos(contratos) {
 }
 
 /**
- * La cuenta con un dueño: tres listas y el total, ya separadas para que la
+ * Los pagos de una cuenta, juntos por las rentas que comparten, y lo que sus
+ * rentas suman HOY contra lo que esos pagos suman. Es la pregunta que el
+ * comprobante ya se hacía por su cuenta (`totalSeleccionado(rentas) !== pago.monto`),
+ * hecha aquí una sola vez para que la ficha, la lista y el papel la contesten igual.
+ *
+ * Un pago normal es un grupo de un solo pago. Un grupo tiene más de uno cuando
+ * se pagó una diferencia (ver `cuentaDeDueno`): ese segundo pago cubre las mismas
+ * rentas que el primero, así que los dos son UNA misma deuda que se fue pagando
+ * en dos partes, y se comparan juntos contra lo que esas rentas cuestan ahora.
+ * Comparar cada pago por separado haría que el primero siguiera «debiendo» para
+ * siempre aunque la diferencia ya se hubiera pagado.
+ *
+ * Cada grupo es `{ contratos, pagos, pagado, ahora, cierra, diferencia }`:
+ * - `contratos`: las rentas de ESTA cuenta que esos pagos cubren.
+ * - `pagos`: del más antiguo al más nuevo (por número de comprobante).
+ * - `pagado`: lo que suman los `monto` guardados.
+ * - `ahora`: lo que esas rentas cuestan hoy, con `costoDelSubarriendo` — la
+ *   misma fórmula de siempre — y SIN preguntar si están cerradas. Si una renta
+ *   se reabrió porque se corrigió su cierre y el cliente todavía no paga los
+ *   días de más, el dueño del carro ya tiene derecho a ellos: no verlos hasta
+ *   que el cliente pague sería leer como cero una deuda que ya existe.
+ * - `cierra`: si TODAS esas rentas están cerradas (`esPagableAlDueno`). De esto
+ *   depende solo si la diferencia se puede pagar ya, igual que una renta
+ *   cualquiera: solo se paga lo cerrado.
+ * - `diferencia`: `ahora - pagado`. Positiva es deuda nueva con el dueño del
+ *   carro; negativa, que se le pagó de más, y eso no es una deuda.
+ *
+ * Un pago que llega repetido (misma `id`) cuenta una sola vez: si contara dos,
+ * `pagado` se inflaría y una deuda real se leería como saldada.
+ */
+function gruposDePago(contratos, pagos) {
+  const porId = new Map(contratos.filter((c) => c?.id).map((c) => [c.id, c]));
+  const padre = new Map();
+  const raiz = (id) => {
+    let r = id;
+    while (padre.get(r) !== r) r = padre.get(r);
+    return r;
+  };
+  const relevantes = [];
+  for (const pago of sinIdsRepetidos(pagos)) {
+    const ids = [...new Set(pago.contratos)].filter((id) => porId.has(id));
+    if (ids.length === 0) continue;
+    relevantes.push({ pago, ids });
+    for (const id of ids) if (!padre.has(id)) padre.set(id, id);
+    for (const id of ids.slice(1)) padre.set(raiz(id), raiz(ids[0]));
+  }
+
+  const grupos = new Map();
+  for (const { pago, ids } of relevantes) {
+    const clave = raiz(ids[0]);
+    if (!grupos.has(clave)) grupos.set(clave, { ids: new Set(), pagos: [] });
+    const grupo = grupos.get(clave);
+    for (const id of ids) grupo.ids.add(id);
+    grupo.pagos.push(pago);
+  }
+
+  return [...grupos.values()].map((g) => {
+    const enGrupo = contratos.filter((c) => c?.id && g.ids.has(c.id));
+    const ordenados = [...g.pagos].sort((a, b) => (
+      (Number(a.numero) || 0) - (Number(b.numero) || 0) || porCodigo(String(a.id ?? ''), String(b.id ?? ''))
+    ));
+    const pagado = suma(...ordenados.map((p) => p.monto));
+    const ahora = suma(...enGrupo.map(costoDelSubarriendo));
+    return {
+      contratos: enGrupo,
+      pagos: ordenados,
+      pagado,
+      ahora,
+      cierra: enGrupo.every(esPagableAlDueno),
+      diferencia: suma(ahora, -pagado),
+    };
+  }).sort((a, b) => (
+    (Number(a.pagos[0].numero) || 0) - (Number(b.pagos[0].numero) || 0)
+    || porCodigo(a.contratos[0].id, b.contratos[0].id)
+  ));
+}
+
+/**
+ * La cuenta con un dueño: las listas y el total, ya separadas para que la
  * pantalla solo las dibuje.
  *
- * - `porPagar`: cerrados y todavía no cubiertos por un pago. Son los únicos que
- *   suman al total.
+ * - `porPagar`: cerrados y todavía no cubiertos por un pago. Suman al total.
  * - `aunNoCierra`: del dueño, sin pagar, pero todavía no cerrados (el carro
  *   sigue afuera, o falta cobrar el saldo, o liberar la garantía). Se ven,
  *   pero no se pueden marcar ni suman.
  * - `pagados`: cubiertos por un pago (`pagos[].contratos` guarda sus ids).
  *   Se revisan primero: un contrato ya pagado sigue pagado aunque después
- *   cambie de estado, y nunca debe volver a sumar.
+ *   cambie de estado, y nunca debe volver a pagarse completo.
+ * - `diferencias`: lo que se le debe de más por rentas YA PAGADAS cuyo monto
+ *   creció después del pago (se corrigió el cierre y el carro estuvo más días
+ *   afuera). Una por grupo de pagos (ver `gruposDePago`):
+ *   `{ clave, contratos, pagos, pagado, ahora, diferencia }`, con `diferencia`
+ *   siempre positiva. Suman al total y se pueden marcar para pagarlas.
+ *
+ *   NO se doblan dentro del pago original: el comprobante de ese pago ya está
+ *   en manos del dueño del carro y dice otra cifra, y cambiarlo a escondidas
+ *   no le diría a nadie que hay algo nuevo. La diferencia es una deuda aparte,
+ *   que se paga con su propio pago (y su propio comprobante) sobre las mismas
+ *   rentas, y entonces el grupo vuelve a cuadrar.
+ *
+ *   Esta es la dirección peligrosa: un monto que BAJA después de pagado no le
+ *   debe nada a nadie (se pagó de más), pero uno que SUBE se leía como Q0.00 —
+ *   una deuda real que nadie ve, porque «estás a mano» es una buena noticia y
+ *   las buenas noticias nadie las audita. Solo las que suben aparecen aquí.
+ * - `diferenciasSinCerrar`: lo mismo, cuando alguna de las rentas del grupo no
+ *   está cerrada (se corrigió el cierre y el cliente todavía debe los días de
+ *   más). Se ven, pero no se pueden marcar ni suman al total, igual que
+ *   `aunNoCierra`: todavía puede cambiar de monto.
+ * - `totalDiferencias`: lo que suman `diferencias`, para quien tenga que decir
+ *   cuánto de `totalPorPagar` viene de ahí y no lo sume por su cuenta.
+ * - `gruposDePago`: todos los grupos de pagos de la cuenta, con o sin
+ *   diferencia, para quien necesite saber qué otros pagos comparten rentas con
+ *   uno (el comprobante).
+ * - `totalPorPagar`: lo que se le debe AHORA: las rentas por pagar más las
+ *   diferencias. Una sola cifra, para que ninguna pantalla se olvide de sumar
+ *   la mitad.
  * - `sinCostoAnotado`: ids de los contratos (de cualquiera de las tres
  *   listas, en el orden en que llegaron) cuyo costo por día del dueño es 0.
  *   El campo de costo no es obligatorio: vacío queda en 0, y la fila diría
@@ -192,9 +297,11 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
   const aunNoCierra = [];
   const pagados = [];
   const sinCostoAnotado = [];
+  const ajenos = [];
 
   for (const c of sinIdsRepetidos(exigirContratos(contratos))) {
     if (!esDeCarroAjeno(c)) continue;
+    ajenos.push(c);
     // Se pregunta por el costo ya calculado, no por `subarriendo.costoDia`:
     // así, cuando el costo se mueva a `privado/dinero` (ADR-002), esta marca
     // lo sigue sin que nadie la toque.
@@ -204,11 +311,32 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
     else aunNoCierra.push(c);
   }
 
+  const grupos = gruposDePago(ajenos, pagos);
+  // Con los ids de las rentas en la clave, y no con los de los pagos: no cambia
+  // cuando se paga una parte, y no se parece a ningún id de contrato (para marcarla
+  // en la misma lista que las rentas).
+  const comoDiferencia = (g) => ({
+    clave: `dif:${g.contratos.map((c) => c.id).sort(porCodigo).join('+')}`,
+    contratos: g.contratos,
+    pagos: g.pagos,
+    pagado: g.pagado,
+    ahora: g.ahora,
+    diferencia: g.diferencia,
+  });
+  const crecidos = grupos.filter((g) => g.diferencia > 0);
+  const diferencias = crecidos.filter((g) => g.cierra).map(comoDiferencia);
+  const diferenciasSinCerrar = crecidos.filter((g) => !g.cierra).map(comoDiferencia);
+  const totalDiferencias = suma(...diferencias.map((d) => d.diferencia));
+
   return {
     porPagar,
     aunNoCierra,
     pagados,
-    totalPorPagar: suma(...porPagar.map(costoDelSubarriendo)),
+    diferencias,
+    diferenciasSinCerrar,
+    gruposDePago: grupos,
+    totalDiferencias,
+    totalPorPagar: suma(...porPagar.map(costoDelSubarriendo), totalDiferencias),
     sinCostoAnotado,
   };
 }
@@ -314,4 +442,55 @@ export function totalSeleccionado(contratos, idsMarcados) {
   const elegidos = sinIdsRepetidos(Array.isArray(contratos) ? contratos : [])
     .filter((c) => c?.id && marcados.has(c.id) && esPagableAlDueno(c));
   return suma(...elegidos.map(costoDelSubarriendo));
+}
+
+/**
+ * Lo que de verdad entra a un pago cuando se marcan casillas: las rentas
+ * cerradas por pagar y las diferencias (por su `clave`), con los ids de contrato
+ * que el pago va a cubrir y lo que suma. `cuenta` es la de `cuentaDeDueno`.
+ *
+ * Es el único lugar que decide qué cubre un pago y cuánto vale: lo que la
+ * pantalla enseña antes de registrar, lo que `construirPagoDueno` guarda y lo
+ * que `registrarElPago` compara contra lo que él vio salen de aquí, así que no
+ * pueden contradecirse. Una casilla que ya no corresponde a nada (se pagó, o
+ * dejó de ser pagable) simplemente no entra: ni con su dinero ni con su id.
+ *
+ * `contratos` sale sin repetidos, y para una diferencia trae los ids de TODAS
+ * las rentas de su grupo: el pago de la diferencia cubre las mismas rentas que el
+ * pago original, y por eso el grupo vuelve a cuadrar (ver `gruposDePago`).
+ * `monto` pasa por `suma`, que redondea con `q()`.
+ */
+export function elegirParaPago(cuenta, idsMarcados) {
+  const marcados = new Set(idsMarcados ?? []);
+  const rentas = (cuenta?.porPagar ?? []).filter((c) => c?.id && marcados.has(c.id));
+  const diferencias = (cuenta?.diferencias ?? []).filter((d) => marcados.has(d.clave));
+  const contratos = [...new Set([
+    ...rentas.map((c) => c.id),
+    ...diferencias.flatMap((d) => d.contratos.map((c) => c.id)),
+  ])];
+  return {
+    rentas,
+    diferencias,
+    contratos,
+    monto: suma(totalSeleccionado(rentas, rentas.map((c) => c.id)), ...diferencias.map((d) => d.diferencia)),
+  };
+}
+
+/**
+ * Lo que se le debe a TODOS los dueños junto: la suma de lo que dice cada cuenta
+ * (`totalPorPagar`), sin volver a decidir qué cuenta. Recibe las cuentas de
+ * `cuentaDeDueno`, no los contratos: un solo lugar sabe qué se debe, y este
+ * total no puede salir distinto de la suma de los renglones que se ven.
+ *
+ * LANZA si `cuentas` no es una lista: igual que el resto de este archivo, no
+ * convierte «no llegó» en «no se debe nada». Una lista vacía de verdad da 0.
+ */
+export function totalGeneral(cuentas) {
+  if (!Array.isArray(cuentas)) {
+    throw new TypeError(
+      `liquidacion: «cuentas» debe ser una lista y llegó ${queLlego(cuentas)}. Sin ella no se sabe qué se le debe `
+      + 'a nadie, y un total en cero diría «no le debes nada» cuando quizá sí.',
+    );
+  }
+  return suma(...cuentas.map((c) => c?.totalPorPagar));
 }

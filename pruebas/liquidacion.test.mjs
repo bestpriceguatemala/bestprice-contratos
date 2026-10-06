@@ -17,6 +17,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   costoDelSubarriendo, esPagableAlDueno, cuentaDeDueno, agruparPorDueno, totalSeleccionado,
+  elegirParaPago, totalGeneral,
 } from '../js/nucleo/liquidacion.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
 import { resumen } from '../js/nucleo/contrato.js';
@@ -361,7 +362,15 @@ test('cuentaDeDueno: un pago que cubre varias rentas las saca todas de lo pendie
 
 test('cuentaDeDueno: sin contratos y con una lista de pagos vacía todo queda en cero, no falla', () => {
   assert.deepEqual(cuentaDeDueno({ contratos: [], pagos: [] }), {
-    porPagar: [], aunNoCierra: [], pagados: [], totalPorPagar: 0, sinCostoAnotado: [],
+    porPagar: [],
+    aunNoCierra: [],
+    pagados: [],
+    diferencias: [],
+    diferenciasSinCerrar: [],
+    gruposDePago: [],
+    totalDiferencias: 0,
+    totalPorPagar: 0,
+    sinCostoAnotado: [],
   });
 });
 
@@ -943,4 +952,254 @@ test('totalSeleccionado: un contrato repetido en la lista suma una sola vez', ()
   const c2 = enlazado(cerradoConAtraso('c2'), 'd1');
   assert.equal(totalSeleccionado([c1, c2, c1], ['c1']), 1200, 'no Q2,400');
   assert.equal(totalSeleccionado([c1, c2, c1], new Set(['c1', 'c2'])), 3000);
+});
+
+// ---------------------------------------------------------------------------
+// Una renta ya pagada cuyo monto CRECE después (revisión final, hallazgo 1).
+//
+// La renta 41 se cierra con 1 día de atraso: al dueño del carro se le deben
+// Q300 × 5 = Q1,500 y se le pagan. Una semana después se corrige el cierre —el
+// carro volvió dos días más tarde— y son 7 días: Q2,100. Antes de este arreglo
+// la cuenta decía «Por pagar en total Q0.00»: la renta ya estaba pagada, y la
+// cuenta solo miraba si estaba pagada, no si seguía valiendo lo mismo. La
+// diferencia (Q600) no aparecía en ninguna parte. Un monto que baja después de
+// pagado no le debe nada a nadie; uno que sube es deuda real, y es la que se
+// leía como cero.
+//
+// Los contratos se arman con los mismos constructores de siempre y se CORRIGE su
+// cierre con `construirCierre`, que es lo que hace «Guardar correcciones» en
+// Recibir carro.
+// ---------------------------------------------------------------------------
+
+/** Cerrado con `atraso` días de atraso, y el cliente ya pagó lo que debía. */
+const cerradoConDias = (id, atraso, opciones = {}) => guardado(saldado(recibido(salida({ id, ...opciones }), atraso)));
+
+/**
+ * El mismo contrato después de corregir su cierre: primero se cerró con `antes`
+ * días de atraso y luego se corrigió a `despues`. Con `clientePaga: false` el
+ * cliente todavía no paga los días de más, y el contrato queda devuelto con saldo.
+ */
+function corregido(id, { antes = 1, despues = 3, clientePaga = true, ...opciones } = {}) {
+  const yaCerrado = saldado(recibido(salida({ id, ...opciones }), antes));
+  const enmendado = recibido(yaCerrado, despues);
+  return guardado(clientePaga ? saldado(enmendado) : enmendado);
+}
+
+test('la renta 41 de la revisión: cerrada con 1 día de atraso se paga Q1,500 y no queda nada', () => {
+  const antes = cerradoConDias('r41', 1);
+  assert.equal(costoDelSubarriendo(antes), 1500);
+  const pagos = [pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 })];
+  const cuenta = cuentaDeDueno({ contratos: [antes], pagos });
+  assert.equal(cuenta.totalPorPagar, 0);
+  assert.deepEqual(cuenta.diferencias, [], 'lo pagado cuadra con lo que cuesta: ninguna diferencia');
+  assert.deepEqual(cuenta.diferenciasSinCerrar, []);
+});
+
+test('la renta 41 de la revisión: corregida a 3 días de atraso se le deben Q600 más, y la cuenta lo dice', () => {
+  const despues = corregido('r41');
+  assert.equal(estadoContrato(despues), 'cerrado', 'el cliente pagó los días de más: cerrada otra vez');
+  assert.equal(costoDelSubarriendo(despues), 2100, '7 días a Q300');
+  const pagos = [pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 })];
+
+  const cuenta = cuentaDeDueno({ contratos: [despues], pagos });
+
+  assert.equal(cuenta.totalPorPagar, 600, 'antes del arreglo: Q0.00, y la ficha decía «no hay nada por pagar»');
+  assert.deepEqual(ids(cuenta.pagados), ['r41'], 'sigue pagada: no se puede volver a pagar completa');
+  assert.deepEqual(ids(cuenta.porPagar), [], 'y no reaparece como renta por pagar: su comprobante N.° 7 sigue siendo cierto');
+  assert.equal(cuenta.diferencias.length, 1);
+  const [dif] = cuenta.diferencias;
+  assert.equal(dif.diferencia, 600);
+  assert.equal(dif.pagado, 1500);
+  assert.equal(dif.ahora, 2100);
+  assert.deepEqual(ids(dif.contratos), ['r41']);
+  assert.deepEqual(dif.pagos.map((p) => p.numero), [7], 'dice de cuál comprobante viene');
+  assert.match(dif.clave, /^dif:/, 'su clave no puede confundirse con el id de un contrato');
+  assert.ok(!ids(cuenta.pagados).includes(dif.clave));
+});
+
+test('una diferencia no se dobla dentro del pago original: el pago guardado conserva su monto', () => {
+  const pagos = [pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 })];
+  cuentaDeDueno({ contratos: [corregido('r41')], pagos });
+  assert.equal(pagos[0].monto, 1500, 'el papel que el dueño del carro ya tiene dice Q1,500');
+});
+
+test('corregida pero el cliente aún no paga los días de más: la diferencia se ve, pero no suma ni se paga todavía', () => {
+  const despues = corregido('r41', { clientePaga: false });
+  assert.equal(estadoContrato(despues), 'devuelto');
+  assert.equal(costoDelSubarriendo(despues), 2100, 'el dueño del carro ya tiene derecho a esos días');
+  const pagos = [pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 })];
+
+  const cuenta = cuentaDeDueno({ contratos: [despues], pagos });
+
+  assert.equal(cuenta.diferenciasSinCerrar.length, 1, 'no se lee como cero una deuda que ya existe');
+  assert.equal(cuenta.diferenciasSinCerrar[0].diferencia, 600);
+  assert.deepEqual(cuenta.diferencias, [], 'pero solo se paga lo cerrado');
+  assert.equal(cuenta.totalPorPagar, 0, 'igual que una renta que aún no cierra: se ve, no suma');
+});
+
+test('una renta cuyo monto BAJA después de pagada no es una deuda: se pagó de más, y no se inventa una diferencia', () => {
+  const baja = cerradoConDias('r41', 1);
+  const pagos = [pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 2100, numero: 7 })];
+  const cuenta = cuentaDeDueno({ contratos: [baja], pagos });
+  assert.deepEqual(cuenta.diferencias, []);
+  assert.deepEqual(cuenta.diferenciasSinCerrar, []);
+  assert.equal(cuenta.totalPorPagar, 0);
+  assert.equal(cuenta.gruposDePago[0].diferencia, -600, 'el grupo sí lo sabe, por si alguien lo necesita');
+});
+
+test('pagar la diferencia: un segundo pago sobre las mismas rentas cuadra el grupo y la diferencia desaparece', () => {
+  const despues = corregido('r41');
+  const complemento = pagoADueno({ id: 'p9', duenoId: 'd1', contratos: ['r41'], monto: 600, numero: 9 });
+  const pagos = [pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 }), complemento];
+
+  const cuenta = cuentaDeDueno({ contratos: [despues], pagos });
+
+  assert.deepEqual(cuenta.diferencias, []);
+  assert.equal(cuenta.totalPorPagar, 0, 'a mano de verdad');
+  assert.equal(cuenta.gruposDePago.length, 1, 'los dos pagos son una misma deuda pagada en dos partes');
+  assert.deepEqual(cuenta.gruposDePago[0].pagos.map((p) => p.numero), [7, 9], 'del más antiguo al más nuevo');
+  assert.equal(cuenta.gruposDePago[0].pagado, 2100);
+});
+
+test('una renta nueva pagada JUNTO con una diferencia: los dos pagos son un solo grupo y la diferencia queda saldada', () => {
+  // Marcar una renta por pagar y la diferencia de la 41 en el mismo pago. El pago cubre
+  // [c1, r41] (primero la renta nueva): su primera renta ya no es la del pago N.° 7, y aun
+  // así los dos pagos comparten r41 y son la misma deuda. Si no se juntaran, el pago N.° 7
+  // seguiría «debiendo» sus Q600 aunque ya se pagaron, y se pagarían dos veces.
+  const nueva = cerrado('c1'); // Q1,200
+  const crecida = corregido('r41'); // Q2,100
+  const p7 = pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 });
+  const antes = cuentaDeDueno({ contratos: [crecida, nueva], pagos: [p7] });
+  const elegido = elegirParaPago(antes, ['c1', antes.diferencias[0].clave]);
+  assert.deepEqual(elegido.contratos, ['c1', 'r41'], 'el escenario: la renta nueva va primero');
+  assert.equal(elegido.monto, 1800);
+  const p8 = pagoADueno({ id: 'p8', duenoId: 'd1', contratos: elegido.contratos, monto: elegido.monto, numero: 8 });
+
+  const cuenta = cuentaDeDueno({ contratos: [crecida, nueva], pagos: [p7, p8] });
+
+  assert.equal(cuenta.totalPorPagar, 0, 'no queda nada: ni la renta nueva ni la diferencia');
+  assert.deepEqual(cuenta.diferencias, [], 'la diferencia no reaparece después de pagada');
+  assert.deepEqual(cuenta.porPagar, []);
+  assert.equal(cuenta.gruposDePago.length, 1);
+  assert.deepEqual(cuenta.gruposDePago[0].pagos.map((p) => p.numero), [7, 8]);
+  assert.equal(cuenta.gruposDePago[0].pagado, 3300);
+  assert.equal(cuenta.gruposDePago[0].ahora, 3300);
+});
+
+test('pagar solo una parte de la diferencia deja lo que falta', () => {
+  const pagos = [
+    pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 }),
+    pagoADueno({ id: 'p9', duenoId: 'd1', contratos: ['r41'], monto: 400, numero: 9 }),
+  ];
+  const cuenta = cuentaDeDueno({ contratos: [corregido('r41')], pagos });
+  assert.equal(cuenta.diferencias[0].diferencia, 200);
+  assert.equal(cuenta.totalPorPagar, 200);
+});
+
+test('si después de pagar la diferencia el monto vuelve a crecer, aparece otra diferencia por lo nuevo', () => {
+  const otraVez = corregido('r41', { despues: 4 }); // 8 días a Q300 = Q2,400
+  const pagos = [
+    pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 }),
+    pagoADueno({ id: 'p9', duenoId: 'd1', contratos: ['r41'], monto: 600, numero: 9 }),
+  ];
+  const cuenta = cuentaDeDueno({ contratos: [otraVez], pagos });
+  assert.equal(cuenta.diferencias[0].diferencia, 300, 'solo lo que falta: Q2,400 menos los Q2,100 ya pagados');
+});
+
+test('un pago de varias rentas: si una crece, la diferencia es del grupo y las otras no se tocan', () => {
+  // Un solo pago de Q2,700 por a (Q1,200) y b (Q1,500); después b se corrige a 3 días de atraso (Q2,100).
+  const a = cerrado('a'); // 1,200
+  const b = corregido('b'); // ahora 2,100
+  const pagos = [pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['a', 'b'], monto: 2700, numero: 7 })];
+  const cuenta = cuentaDeDueno({ contratos: [a, b], pagos });
+  assert.equal(cuenta.diferencias.length, 1);
+  assert.equal(cuenta.diferencias[0].diferencia, 600);
+  assert.deepEqual(ids(cuenta.diferencias[0].contratos), ['a', 'b'], 'se paga sobre las mismas rentas del pago, que son las que cubrió');
+  assert.equal(cuenta.totalPorPagar, 600);
+});
+
+test('el mismo pago leído dos veces no esconde una diferencia: no se suma doble lo pagado', () => {
+  const p7 = pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 });
+  const cuenta = cuentaDeDueno({ contratos: [corregido('r41')], pagos: [p7, { ...p7 }] });
+  assert.equal(cuenta.totalPorPagar, 600, 'con Q3,000 «pagados» la diferencia se vería como un pago de más');
+});
+
+test('rentas sin pagos no tienen diferencias, y las diferencias de un dueño no se mezclan con las de otro', () => {
+  const sinPagar = cuentaDeDueno({ contratos: [cerrado('c1')], pagos: [] });
+  assert.deepEqual(sinPagar.diferencias, []);
+  assert.deepEqual(sinPagar.gruposDePago, []);
+
+  const mario = enlazado(corregido('r41'), 'd1');
+  const ana = enlazado(cerrado('r50'), 'd2');
+  const pagos = [
+    pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 }),
+    pagoADueno({ id: 'p8', duenoId: 'd2', contratos: ['r50'], monto: 1200, numero: 8 }),
+  ];
+  const grupos = agruparPorDueno([mario, ana], pagos);
+  const deMario = grupos.find((g) => g.duenoId === 'd1');
+  const deAna = grupos.find((g) => g.duenoId === 'd2');
+  assert.equal(deMario.cuenta.totalPorPagar, 600);
+  assert.equal(deAna.cuenta.totalPorPagar, 0);
+  assert.equal(grupos[0].duenoId, 'd1', 'la lista se ordena por lo que más se debe: ahora Mario va primero');
+});
+
+test('la diferencia de una renta es de la cuenta que tiene la renta: una cuenta ajena no la ve', () => {
+  const pagos = [pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 })];
+  const ajena = cuentaDeDueno({ contratos: [cerrado('r50')], pagos });
+  assert.deepEqual(ajena.diferencias, []);
+  assert.equal(ajena.totalPorPagar, 1200);
+});
+
+test('elegirParaPago: una renta y una diferencia marcadas juntas suman las dos y cubren las rentas de las dos', () => {
+  const pagos = [pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 })];
+  const cuenta = cuentaDeDueno({ contratos: [corregido('r41'), cerrado('c1')], pagos });
+  const clave = cuenta.diferencias[0].clave;
+
+  const solo = elegirParaPago(cuenta, ['c1']);
+  assert.deepEqual(solo.contratos, ['c1']);
+  assert.equal(solo.monto, 1200);
+
+  const juntas = elegirParaPago(cuenta, ['c1', clave]);
+  assert.deepEqual(juntas.contratos.sort(), ['c1', 'r41']);
+  assert.equal(juntas.monto, 1800, 'Q1,200 + Q600');
+  assert.equal(juntas.diferencias.length, 1);
+
+  const soloDif = elegirParaPago(cuenta, new Set([clave]));
+  assert.deepEqual(soloDif.contratos, ['r41']);
+  assert.equal(soloDif.monto, 600);
+});
+
+test('elegirParaPago: una casilla que ya no corresponde a nada no entra, ni con su dinero ni con su id', () => {
+  const cuenta = cuentaDeDueno({ contratos: [cerrado('c1')], pagos: [] });
+  const nada = elegirParaPago(cuenta, ['dif:fantasma', 'no-existe', 'c1-otro']);
+  assert.deepEqual(nada, { rentas: [], diferencias: [], contratos: [], monto: 0 });
+  assert.deepEqual(elegirParaPago(cuenta, undefined).contratos, []);
+});
+
+test('elegirParaPago: una diferencia que todavía no cierra no se puede escoger aunque alguien marque su clave', () => {
+  const pagos = [pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 })];
+  const cuenta = cuentaDeDueno({ contratos: [corregido('r41', { clientePaga: false })], pagos });
+  const clave = cuenta.diferenciasSinCerrar[0].clave;
+  assert.deepEqual(elegirParaPago(cuenta, [clave]), { rentas: [], diferencias: [], contratos: [], monto: 0 });
+});
+
+test('elegirParaPago: el monto pasa por q(), sin arrastrar el error de los decimales', () => {
+  const cuenta = cuentaDeDueno({
+    contratos: [cerrado('c1', { costoDia: 0.1 }), cerrado('c2', { costoDia: 0.2 })], pagos: [],
+  });
+  assert.equal(elegirParaPago(cuenta, ['c1', 'c2']).monto, 1.2, '0.4 + 0.8, no 1.2000000000000002');
+});
+
+test('totalGeneral: suma lo que dice cada cuenta, diferencias incluidas', () => {
+  const pagos = [pagoADueno({ id: 'p7', duenoId: 'd1', contratos: ['r41'], monto: 1500, numero: 7 })];
+  const mario = cuentaDeDueno({ contratos: [corregido('r41'), cerrado('c1')], pagos }); // 600 + 1,200
+  const ana = cuentaDeDueno({ contratos: [cerradoConAtraso('c2')], pagos: [] }); // 1,800
+  assert.equal(totalGeneral([mario, ana]), 3600);
+  assert.equal(totalGeneral([]), 0, 'una lista vacía de verdad sí es cero');
+});
+
+test('totalGeneral: si las cuentas no llegaron, lanza en vez de decir que no se debe nada', () => {
+  for (const mala of [undefined, null, 'x', 5, {}]) {
+    assert.throws(() => totalGeneral(mala), TypeError, `con ${String(mala)}`);
+  }
 });

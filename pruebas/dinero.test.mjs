@@ -16,6 +16,7 @@ import {
   MENSAJE_FALLO_CONTRATOS, MENSAJE_FALLO_PAGOS, MENSAJE_FALLO_DATOS, MENSAJE_FALLO_DUENOS, MENSAJE_PAGO_FALLO,
   MENSAJE_INACTIVIDAD, enElAreaDeDinero, claveDeEntrada, rutaDeCuenta, armarVista, rentasSinCostoLegible,
   estadoDeCosto, notasDeTotal, resumenDeMarcadas, razonDeNoCierre, pagosDeLaCuenta, registrarElPago,
+  parchearMarcado, notasDelTotalGeneral, textoDeComprobantes, diferenciaBloqueada, rentasCortas,
   cerrarElDinero, cerrarElDineroOReiniciar, salirDelSistema, crearVigilante, crearLector, mensajeSeguro,
   htmlEntrada, htmlFallo, htmlLista, htmlFicha, htmlMigracion, entradaDelComprobante,
 } from '../js/pantallas/dinero.js';
@@ -1837,6 +1838,7 @@ function todoElHtmlDeDinero() {
     .flatMap((nombre) => [fichaDe(nombre, { vista, lectura }), fichaDe(nombre, { vista, lectura, ui })]);
   const vacia = armarVista(lecturaOk({ contratos: { datos: [], fallo: false, costoSinLeer: [] }, pagos: { datos: [], fallo: false }, duenos: { datos: [], fallo: false } }));
   return [
+    ...htmlConDiferencias(),
     htmlEntrada(), htmlEntrada({ mensaje: MENSAJE_INACTIVIDAD }),
     htmlFallo({ problemas: ['contratos', 'pagos', 'datos'] }),
     htmlLista(vista), htmlLista(vista, { migracion: htmlMigracion({ mensaje: 'Se movieron 3 contratos.', problema: false }) }),
@@ -1872,4 +1874,434 @@ test('ninguna clase dn-* del CSS sobra: todas las definidas se usan en las panta
   for (const clase of definidas) {
     assert.match(fuente, new RegExp(`class="[^"]*(?<![\\w-])${clase}(?![\\w-])`), `.${clase} está en el CSS y ninguna pantalla la usa`);
   }
+});
+
+// ===========================================================================
+// Revisión final, hallazgo 1: una renta ya pagada cuyo monto CRECE después
+// ===========================================================================
+//
+// La renta 41 de Mario López se cerró con 1 día de atraso (Q300 × 5 = Q1,500) y
+// se le pagó con el comprobante N.° 7. Después se corrigió el cierre a 3 días de
+// atraso: ahora son Q300 × 7 = Q2,100. La ficha decía «No hay rentas cerradas por
+// pagar. Por pagar en total Q0.00» y Mario se quedaba sin sus Q600: una deuda real
+// leída como cero. Aquí se prueba lo que se VE y lo que se PAGA, no solo el núcleo.
+
+const CIERRE_VIEJO = saldado(recibido(salida({ id: 'r41', numero: 41, placas: 'P-222CCC', costoDia: 300, cliente: ROSA }), 1));
+const R41_PAGADA = alLeer(CIERRE_VIEJO); // 1,500, cerrada
+/** La misma renta con el cierre corregido a 3 días de atraso. Con `clientePaga: false`, el cliente todavía no paga lo de más. */
+const r41Corregida = ({ clientePaga = true } = {}) => {
+  const enmendada = recibido(CIERRE_VIEJO, 3);
+  return alLeer(clientePaga ? saldado(enmendada) : enmendada);
+};
+const R41_CRECIDA = r41Corregida();
+const PAGO_7 = pagoDuenoParaGuardar(
+  construirPagoDueno({
+    duenoId: 'd1', fecha: '2026-09-20', forma: 'transferencia', contratos: [R41_PAGADA], pagos: [], idsMarcados: ['r41'],
+  }),
+  { id: 'pg-41', numero: 7, ahora: AHORA },
+);
+
+/** Las tres lecturas de la nube con solo la renta 41 de Mario (y las que se pidan). */
+const lecturaDe41 = ({
+  contratos = [R41_CRECIDA], pagos = [PAGO_7], costoSinLeer = [],
+} = {}) => ({
+  contratos: { datos: contratos, fallo: false, costoSinLeer },
+  pagos: { datos: pagos, fallo: false },
+  duenos: { datos: DUENOS, fallo: false },
+});
+const MARIO_41 = 'Mario López Alvarado';
+/** La etiqueta <input> de la casilla de una fila (renta o diferencia), o null si la ficha no la dibuja. */
+const casilla = (html, id) => new RegExp(`<input[^>]*data-dn="marcar"[^>]*data-id="${id}"[^>]*>`).exec(html)?.[0] ?? null;
+const marioDe = (lectura) => entradaDe(armarVista(lectura), MARIO_41);
+
+/** Lo que dibujan las pantallas con una diferencia por pagar y con una que aún no cierra (para el chequeo de clases CSS). */
+function htmlConDiferencias() {
+  const sinCerrar = lecturaDe41({ contratos: [r41Corregida({ clientePaga: false })] });
+  const lectura = lecturaDe41();
+  const ui = uiVacia({ marcados: new Set(['dif:r41']), pagando: true });
+  return [
+    htmlLista(armarVista(lectura)),
+    fichaDe(MARIO_41, { vista: armarVista(lectura), lectura }),
+    fichaDe(MARIO_41, { vista: armarVista(lectura), lectura, ui }),
+    fichaDe(MARIO_41, { vista: armarVista(sinCerrar), lectura: sinCerrar }),
+  ];
+}
+
+test('el escenario de la renta 41: cerrada paga Q1,500; corregida son Q2,100 y sigue cerrada', () => {
+  assert.equal(estadoContrato(R41_PAGADA), 'cerrado');
+  assert.equal(resumen(R41_PAGADA).costoSubarriendo, 1500);
+  assert.equal(PAGO_7.monto, 1500);
+  assert.equal(estadoContrato(R41_CRECIDA), 'cerrado');
+  assert.equal(resumen(R41_CRECIDA).costoSubarriendo, 2100);
+  assert.equal(estadoContrato(r41Corregida({ clientePaga: false })), 'devuelto');
+});
+
+test('la ficha de Mario NO dice «No hay rentas cerradas por pagar»: dice que se le deben Q600.00 de diferencia', () => {
+  const lectura = lecturaDe41();
+  const ficha = fichaDe(MARIO_41, { vista: armarVista(lectura), lectura });
+  const porPagar = entre(ficha, '<h2>Por pagar</h2>', '<h2>Aún no cierra</h2>');
+  assert.ok(!porPagar.includes('No hay rentas cerradas por pagar'), 'antes del arreglo decía esto, con Q0.00');
+  assert.ok(porPagar.includes('Diferencia de rentas ya pagadas'));
+  assert.ok(porPagar.includes('Se pagaron Q1,500.00 en el comprobante N.° 7, y hoy esas rentas suman Q2,100.00'));
+  assert.match(porPagar, /class="dn-total">Q600\.00</, 'Por pagar en total Q600.00');
+  // La renta sigue en «Ya pagado» con su monto de entonces: el comprobante N.° 7 sigue siendo cierto.
+  const yaPagado = entre(ficha, '<h2>Ya pagado</h2>');
+  assert.ok(yaPagado.includes('Comprobante N.° 7') && yaPagado.includes('Q1,500.00'));
+});
+
+test('la diferencia tiene su casilla: se puede marcar, suma lo que falta, y se paga con su propio pago', async () => {
+  const lectura = lecturaDe41();
+  const entrada = marioDe(lectura);
+  assert.equal(entrada.cuenta.totalPorPagar, 600);
+  assert.deepEqual(entrada.cuenta.porPagar, [], 'la renta no vuelve a «por pagar»: ya se le pagó, no se le paga otra vez completa');
+
+  const clave = entrada.cuenta.diferencias[0].clave;
+  const ficha = fichaDe(MARIO_41, { vista: armarVista(lectura), lectura });
+  assert.ok(casilla(ficha, clave), 'tiene su casilla, como una renta');
+  assert.doesNotMatch(casilla(ficha, clave), /checked|disabled/, 'sin marcar y se puede marcar');
+  const marcada = fichaDe(MARIO_41, { vista: armarVista(lectura), lectura, ui: uiVacia({ marcados: new Set([clave]) }) });
+  assert.match(casilla(marcada, clave), /checked/);
+  assert.match(marcada, /id="dn-total-marcado"[^>]*>Q600\.00</);
+
+  assert.deepEqual(resumenDeMarcadas(entrada, new Set([clave]), []), { ids: [clave], cuantas: 1, total: 600 });
+  assert.deepEqual(resumenDeMarcadas(entrada, new Set(), []), { ids: [], cuantas: 0, total: 0 });
+
+  const deps = depsDePago({ pagos: [PAGO_7], contratos: [R41_CRECIDA] });
+  const r = await registrarElPago({
+    entrada, idsMarcados: [clave], forma: 'transferencia', fecha: HOY, enCurso: {}, ...deps,
+  });
+  assert.equal(r.tipo, 'guardado');
+  assert.equal(r.pago.monto, 600, 'solo la diferencia, no los Q2,100');
+  assert.deepEqual(r.pago.contratos, ['r41'], 'sobre la misma renta, para que el grupo vuelva a cuadrar');
+  assert.equal(r.pago.duenoId, 'd1');
+  assert.deepEqual(r.pagos.map((p) => p.numero), [7, 101], 'el pago N.° 7 sigue ahí, intacto');
+  assert.equal(r.pagos[0].monto, 1500, 'y no se tocó');
+
+  // Con el pago ya hecho, la cuenta de Mario cuadra: nada que pagar.
+  const despues = marioDe(lecturaDe41({ pagos: r.pagos }));
+  assert.equal(despues.cuenta.totalPorPagar, 0);
+  assert.deepEqual(despues.cuenta.diferencias, []);
+  const fichaDespues = fichaDe(MARIO_41, { vista: armarVista(lecturaDe41({ pagos: r.pagos })), lectura: lecturaDe41({ pagos: r.pagos }) });
+  assert.ok(entre(fichaDespues, '<h2>Por pagar</h2>', '<h2>Aún no cierra</h2>').includes('No hay rentas cerradas por pagar'));
+  assert.equal((fichaDespues.match(/Comprobante N\.° /g) || []).length, 2, 'los dos comprobantes en «Ya pagado»');
+});
+
+test('una renta por pagar y una diferencia se pagan juntas: el pago suma las dos y cubre las rentas de las dos', async () => {
+  const otra = cerrado('r50', { numero: 50, placas: 'P-050AAA', costoDia: 300 }); // Q1,200
+  const lectura = lecturaDe41({ contratos: [R41_CRECIDA, otra] });
+  const entrada = marioDe(lectura);
+  const clave = entrada.cuenta.diferencias[0].clave;
+  assert.equal(entrada.cuenta.totalPorPagar, 1800, 'Q1,200 + Q600');
+  const marcadas = resumenDeMarcadas(entrada, new Set(['r50', clave]), []);
+  assert.deepEqual(marcadas, { ids: ['r50', clave], cuantas: 2, total: 1800 });
+  const r = await registrarElPago({
+    entrada, idsMarcados: marcadas.ids, forma: 'efectivo', fecha: HOY, enCurso: {},
+    ...depsDePago({ pagos: [PAGO_7], contratos: [R41_CRECIDA, otra] }),
+  });
+  assert.equal(r.tipo, 'guardado', 'lo marcado y lo que cubre el pago son lo mismo');
+  assert.equal(r.pago.monto, 1800);
+  assert.deepEqual(r.pago.contratos.sort(), ['r41', 'r50']);
+  // Y después de pagarlas juntas no queda nada: la diferencia no reaparece para pagarse dos veces.
+  const despues = marioDe(lecturaDe41({ contratos: [R41_CRECIDA, otra], pagos: r.pagos }));
+  assert.equal(despues.cuenta.totalPorPagar, 0);
+  assert.deepEqual(despues.cuenta.diferencias, []);
+});
+
+test('una diferencia cuyo costo no se pudo leer no se puede marcar ni pagar: igual que una renta', async () => {
+  const lectura = lecturaDe41({ costoSinLeer: ['r41'] });
+  const vista = armarVista(lectura);
+  const entrada = marioDe(lectura);
+  const [dif] = entrada.cuenta.diferencias;
+  assert.equal(diferenciaBloqueada(dif, entrada.cuenta, ['r41']), true);
+  assert.equal(diferenciaBloqueada(dif, entrada.cuenta, []), false);
+  assert.deepEqual(resumenDeMarcadas(entrada, new Set([dif.clave]), ['r41']), { ids: [], cuantas: 0, total: 0 });
+  const ficha = fichaDe(MARIO_41, { vista, lectura, ui: uiVacia({ marcados: new Set([dif.clave]) }) });
+  assert.match(casilla(ficha, dif.clave), /disabled/);
+  assert.doesNotMatch(casilla(ficha, dif.clave), /checked/, 'ni marcada aunque estuviera en la memoria');
+  // Y el total se dice corto, con las mismas palabras de siempre.
+  assert.deepEqual(notasDeTotal(entrada, vista.costoSinLeer), ['No se pudo leer el costo de 1 renta: este total puede no ser el real.']);
+  // Pagarla a la fuerza (otra pestaña, o una casilla vieja) se niega con su propia frase.
+  await assert.rejects(
+    registrarElPago({
+      entrada, idsMarcados: [dif.clave], forma: 'efectivo', fecha: HOY, enCurso: {},
+      ...depsDePago({ pagos: [PAGO_7], contratos: [R41_CRECIDA], costoSinLeer: ['r41'] }),
+    }),
+    /No se pudo leer el costo del contrato N° 41/,
+  );
+});
+
+test('si otra pestaña ya pagó esa diferencia, NO se registra otra vez: se avisa y la lista vuelve al día', async () => {
+  const lectura = lecturaDe41();
+  const entrada = marioDe(lectura);
+  const clave = entrada.cuenta.diferencias[0].clave;
+  const deOtraPestana = pagoDuenoParaGuardar(
+    { duenoId: 'd1', fecha: HOY, forma: 'efectivo', monto: 600, contratos: ['r41'] },
+    { id: 'otra', numero: 9, ahora: AHORA },
+  );
+  const deps = depsDePago({ pagos: [PAGO_7, deOtraPestana], contratos: [R41_CRECIDA] });
+  const r = await registrarElPago({
+    entrada, idsMarcados: [clave], forma: 'efectivo', fecha: HOY, enCurso: {}, ...deps,
+  });
+  assert.equal(r.tipo, 'cambio', 'doble pago evitado');
+  assert.deepEqual(deps.orden, ['leer', 'leerContratos'], 'no se gastó ni un id ni un número, ni se guardó nada');
+});
+
+test('si la diferencia CRECIÓ mientras él armaba el pago, tampoco se registra: vio un monto y se guardaría otro', async () => {
+  const lectura = lecturaDe41();
+  const entrada = marioDe(lectura);
+  const clave = entrada.cuenta.diferencias[0].clave;
+  // La misma renta, que otra pestaña corrigió a 4 días de atraso: Q2,400.
+  const todavia = alLeer(saldado(recibido(CIERRE_VIEJO, 4)));
+  assert.equal(resumen(todavia).costoSubarriendo, 2400);
+  const r = await registrarElPago({
+    entrada, idsMarcados: [clave], forma: 'efectivo', fecha: HOY, enCurso: {},
+    ...depsDePago({ pagos: [PAGO_7], contratos: [todavia] }),
+  });
+  assert.equal(r.tipo, 'cambio');
+});
+
+test('una diferencia que todavía no cierra se ve en «Aún no cierra», no se puede marcar y no suma al total', () => {
+  const lectura = lecturaDe41({ contratos: [r41Corregida({ clientePaga: false })] });
+  const vista = armarVista(lectura);
+  const entrada = marioDe(lectura);
+  assert.equal(entrada.cuenta.totalPorPagar, 0, 'igual que una renta que no cierra: se ve, no suma');
+  assert.equal(entrada.cuenta.diferenciasSinCerrar.length, 1);
+  const ficha = fichaDe(MARIO_41, { vista, lectura });
+  const aunNoCierra = entre(ficha, '<h2>Aún no cierra</h2>', '<h2>Ya pagado</h2>');
+  assert.ok(aunNoCierra.includes('Diferencia de rentas ya pagadas'));
+  assert.ok(aunNoCierra.includes('Faltan Q600.00 por pagarle, cuando cierre'));
+  assert.ok(aunNoCierra.includes('Saldo pendiente'), 'y por qué no cierra, con las palabras de siempre');
+  assert.ok(!aunNoCierra.includes('Ninguna renta de este dueño está esperando cerrar'));
+  assert.ok(!aunNoCierra.includes('type="checkbox"'), 'sin casilla');
+  assert.deepEqual(resumenDeMarcadas(entrada, new Set(['dif:r41']), []), { ids: [], cuantas: 0, total: 0 });
+});
+
+test('la lista de dueños: Mario sale con Q600.00, no apagado, y dice por qué una cuenta sin rentas por pagar debe algo', () => {
+  const lectura = lecturaDe41();
+  const lista = htmlLista(armarVista(lectura));
+  const fila = entre(lista, `>${MARIO_41}</a>`, '</tr>');
+  assert.ok(fila.includes('Q600.00'));
+  assert.ok(fila.includes('Incluye Q600.00 de rentas ya pagadas cuyo monto cambió después del pago'));
+  const inicio = lista.lastIndexOf('<tr', lista.indexOf(`>${MARIO_41}</a>`));
+  assert.doesNotMatch(lista.slice(inicio, lista.indexOf('>', inicio)), /es-fuera/, 'no se ve apagado: se le debe');
+  // Una cuenta sin diferencias no lleva esa línea: no se le tiran avisos que no pidió.
+  const sana = htmlLista(armarVista(lecturaOk()));
+  assert.ok(!sana.includes('Incluye'));
+});
+
+test('textoDeComprobantes: uno, dos o tres, en palabras', () => {
+  assert.equal(textoDeComprobantes([{ numero: 7 }]), 'el comprobante N.° 7');
+  assert.equal(textoDeComprobantes([{ numero: 7 }, { numero: 9 }]), 'los comprobantes N.° 7 y N.° 9');
+  assert.equal(textoDeComprobantes([{ numero: 7 }, { numero: 9 }, { numero: 12 }]), 'los comprobantes N.° 7, N.° 9 y N.° 12');
+});
+
+test('el comprobante de la diferencia sale de la misma pantalla: entradaDelComprobante lo arma y dice que completa el N.° 7', async () => {
+  const lectura = lecturaDe41();
+  const entrada = marioDe(lectura);
+  const clave = entrada.cuenta.diferencias[0].clave;
+  const r = await registrarElPago({
+    entrada, idsMarcados: [clave], forma: 'efectivo', fecha: HOY, enCurso: {},
+    ...depsDePago({ pagos: [PAGO_7], contratos: [R41_CRECIDA] }),
+  });
+  const leida = lecturaDe41({ pagos: r.pagos });
+  const modelo = armarComprobante(entradaDelComprobante({ entrada, pago: r.pago, lectura: leida, hoy: HOY }));
+  assert.equal(modelo.pagado.total, 600);
+  assert.deepEqual(modelo.pagado.anteriores, [{ numero: 7, monto: 1500 }]);
+  assert.equal(modelo.pagado.acumulado, 2100);
+  assert.deepEqual(modelo.pendiente.diferencias, []);
+});
+
+// ===========================================================================
+// Revisión final, hallazgo 3: «Marcado: 1 rentas»
+// ===========================================================================
+//
+// La plantilla (htmlBloquePorPagar) pluralizaba bien, pero al marcar una casilla
+// la pantalla NO la redibuja: parchea el número (`parchearMarcado`) y la palabra
+// que va detrás se quedaba como estaba. Las pruebas miraban la plantilla; él mira
+// la página ya parcheada. Aquí se parchea lo que la plantilla dibujó, con un
+// navegador mínimo, y se compara con lo que la plantilla habría dibujado de cero.
+
+/**
+ * Un «navegador» mínimo, sin DOM: de lo que la plantilla dibujó toma los elementos
+ * con `id` que el parche pida, les deja `textContent` y `disabled`, y `visible()`
+ * devuelve el texto de TODA la página como quedaría con esos cambios puestos.
+ */
+function paginaFalsa(html) {
+  const nodos = new Map();
+  const raiz = {
+    querySelector(selector) {
+      const id = selector.replace(/^#/, '');
+      if (!nodos.has(id)) {
+        const hallado = new RegExp(`<(\\w+)([^>]*?\\bid="${id}"[^>]*)>([^]*?)</\\1>`).exec(html);
+        if (!hallado) return null;
+        nodos.set(id, {
+          original: hallado[0], textContent: hallado[3].replace(/<[^>]+>/g, ''), disabled: /\bdisabled\b/.test(hallado[2]),
+        });
+      }
+      return nodos.get(id);
+    },
+  };
+  const visible = () => {
+    let pagina = html;
+    for (const nodo of nodos.values()) pagina = pagina.replace(nodo.original, nodo.textContent);
+    return pagina.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  };
+  return { raiz, visible };
+}
+
+/** El texto visible de la ficha de Mario con lo marcado dado, dibujada de cero por la plantilla. */
+const textoDeLaPlantilla = (marcados, pagando) => paginaFalsa(fichaDe('Mario López Alvarado', {
+  ui: uiVacia({ marcados: new Set(marcados), pagando }),
+})).visible();
+
+/** El texto visible de la ficha de Mario dibujada con `antes` marcado y parcheada a `despues`, como hace la pantalla al marcar. */
+function textoDelParche(antes, despues, pagando) {
+  const vista = armarVista(lecturaOk());
+  const entrada = entradaDe(vista, 'Mario López Alvarado');
+  const pagina = paginaFalsa(fichaDe('Mario López Alvarado', { ui: uiVacia({ marcados: new Set(antes), pagando }) }));
+  parchearMarcado(pagina.raiz, resumenDeMarcadas(entrada, new Set(despues), vista.costoSinLeer), { pagando });
+  return { texto: pagina.visible(), pagina };
+}
+
+test('MARCAR UNA casilla deja «Marcado: 1 renta», no «1 rentas» (lo que reprodujo la revisión)', () => {
+  const { texto } = textoDelParche([], ['m1'], false);
+  assert.ok(texto.includes('Marcado: 1 renta '), texto.slice(texto.indexOf('Marcado')));
+  assert.ok(!texto.includes('Marcado: 1 rentas'));
+  assert.ok(texto.includes('Total marcado Q1,200.00'));
+});
+
+test('el parche dice la misma frase que la plantilla, con 0, 1 y 2 marcadas, venga de donde venga', () => {
+  const casos = [[], ['m1'], ['m1', 'm2']];
+  for (const pagando of [false, true]) {
+    for (const antes of casos) {
+      for (const despues of casos) {
+        assert.equal(
+          textoDelParche(antes, despues, pagando).texto,
+          textoDeLaPlantilla(despues, pagando),
+          `de ${antes.length} a ${despues.length} marcadas, con el formulario ${pagando ? 'abierto' : 'cerrado'}`,
+        );
+      }
+    }
+  }
+});
+
+test('«2 renta» al pasar de 1 a 2 tampoco: la palabra se parchea en las dos direcciones', () => {
+  assert.ok(textoDelParche(['m1'], ['m1', 'm2'], false).texto.includes('Marcado: 2 rentas '));
+  assert.ok(textoDelParche(['m1', 'm2'], ['m1'], false).texto.includes('Marcado: 1 renta '));
+  assert.ok(textoDelParche(['m1'], [], false).texto.includes('Marcado: 0 rentas '), 'y cero es plural');
+});
+
+test('el parche también mueve lo que hay debajo: el total, el botón de guardar y el de registrar', () => {
+  const { pagina } = textoDelParche([], ['m1', 'm2'], true);
+  assert.equal(pagina.raiz.querySelector('#dn-total-marcado').textContent, 'Q3,000.00');
+  assert.equal(pagina.raiz.querySelector('#dn-guardar-pago').textContent, 'Guardar pago de Q3,000.00');
+  assert.equal(pagina.raiz.querySelector('#dn-guardar-pago').disabled, false);
+  assert.equal(pagina.raiz.querySelector('#dn-registrar').disabled, true, 'con el formulario abierto, «Registrar pago» sigue apagado');
+  const vacia = textoDelParche(['m1'], [], true).pagina;
+  assert.equal(vacia.raiz.querySelector('#dn-guardar-pago').disabled, true, 'sin nada marcado no se guarda');
+  const cerrada = textoDelParche([], ['m1'], false).pagina;
+  assert.equal(cerrada.raiz.querySelector('#dn-registrar').disabled, false, 'con algo marcado y sin formulario, sí se puede registrar');
+});
+
+test('parchearMarcado no revienta si la página no trae algo (la ficha sin formulario no tiene «Guardar pago»)', () => {
+  assert.doesNotThrow(() => parchearMarcado({ querySelector: () => null }, { cuantas: 1, total: 1200 }));
+});
+
+test('la plantilla y el parche usan el mismo elemento para la palabra: sin él, el parche no tiene dónde escribirla', () => {
+  assert.match(fichaDe('Mario López Alvarado'), /<span id="dn-marcadas-palabra">rentas<\/span>/);
+  assert.match(PANTALLA, /dn-marcadas-palabra/);
+});
+
+// ===========================================================================
+// Revisión final, hallazgo 4: «¿cuánto debo?» — el total de todo lo que se debe
+// ===========================================================================
+
+test('la lista da el total de lo que se debe a todos los dueños: la suma de las cuentas, sin enlazar incluidos', () => {
+  const vista = armarVista(lecturaOk());
+  // Mario Q3,000 + Lucía Q750 + «Don Mario» Q400 + «Doña Pura» Q300 (los dos últimos, sin enlazar).
+  assert.equal(vista.total, 4450);
+  assert.equal(vista.total, vista.entradas.reduce((t, e) => t + e.cuenta.totalPorPagar, 0), 'es lo que suman los renglones que se ven');
+  const lista = htmlLista(vista);
+  const pie = entre(lista, '<tfoot>', '</tfoot>');
+  assert.ok(pie.includes('Lo que debes a todos los dueños'));
+  assert.match(pie, /id="dn-total-general">Q4,450\.00</);
+  assert.ok(lista.indexOf('</tbody>') < lista.indexOf('<tfoot>'), 'debajo de las filas');
+  assert.ok(lista.indexOf('<tfoot>') < lista.indexOf('Mover el costo de los dueños'));
+});
+
+test('el total general lleva las diferencias de rentas ya pagadas: Mario con Q600.00 y nada más suma Q600.00, no Q0.00', () => {
+  const vista = armarVista(lecturaDe41());
+  assert.equal(vista.total, 600);
+  assert.match(htmlLista(vista), /id="dn-total-general">Q600\.00</);
+});
+
+test('si el total de algún dueño está corto, el total general lo dice con las mismas palabras y la misma marca «incompleto»', () => {
+  const vista = armarVista(lecturaOk()); // m5: cerrada y SIN costo anotado
+  assert.deepEqual(vista.notasDelTotal, ['Falta anotar el costo de 1 renta: este total es menor al real.']);
+  const pie = entre(htmlLista(vista), '<tfoot>', '</tfoot>');
+  assert.ok(pie.includes('Falta anotar el costo de 1 renta: este total es menor al real.'));
+  assert.ok(pie.includes('incompleto'));
+
+  const sinLeer = armarVista(lecturaOk({ contratos: { datos: TODOS, fallo: false, costoSinLeer: ['m1', 'm2', 'l1'] } }));
+  assert.deepEqual(sinLeer.notasDelTotal, [
+    'Falta anotar el costo de 1 renta: este total es menor al real.',
+    'No se pudo leer el costo de 3 rentas: este total puede no ser el real.',
+  ], 'cuenta las rentas de TODOS los dueños juntas (m1 y m2 de Mario, l1 de Lucía)');
+  assert.ok(entre(htmlLista(sinLeer), '<tfoot>', '</tfoot>').includes('No se pudo leer el costo de 3 rentas'));
+});
+
+test('con todos los totales completos el total general no lleva ninguna advertencia: no se tiran avisos que no se pidieron', () => {
+  const sana = lecturaOk({ contratos: { datos: [M1, M2, L1, T1, T2], fallo: false, costoSinLeer: [] } });
+  const vista = armarVista(sana);
+  assert.deepEqual(vista.notasDelTotal, []);
+  const pie = entre(htmlLista(vista), '<tfoot>', '</tfoot>');
+  assert.ok(!pie.includes('incompleto') && !pie.includes('Falta') && !pie.includes('No se pudo'));
+  assert.match(pie, /id="dn-total-general">Q4,450\.00</);
+});
+
+test('el total general nunca es más limpio que los de cada dueño: si una cuenta dice «incompleto», el general también', () => {
+  for (const costoSinLeer of [[], ['m1'], ['l1'], ['t1'], ['m1', 'l1', 't1']]) {
+    const vista = armarVista(lecturaOk({ contratos: { datos: TODOS, fallo: false, costoSinLeer } }));
+    const algunaCorta = vista.entradas.some((e) => notasDeTotal(e, vista.costoSinLeer).length > 0);
+    assert.equal(vista.notasDelTotal.length > 0, algunaCorta, `costoSinLeer ${JSON.stringify(costoSinLeer)}`);
+    // Y cuenta exactamente las mismas rentas que las filas: ni una más, ni una menos.
+    const dePorDueno = vista.entradas.reduce((t, e) => t + rentasCortas(e, vista.costoSinLeer).sinLeer, 0);
+    const frase = vista.notasDelTotal.find((n) => n.startsWith('No se pudo leer'));
+    assert.equal(frase ? Number(frase.match(/de (\d+) renta/)[1]) : 0, dePorDueno);
+  }
+});
+
+test('notasDelTotalGeneral con nada que decir devuelve una lista vacía, y sin entradas tampoco revienta', () => {
+  assert.deepEqual(notasDelTotalGeneral({ entradas: [], costoSinLeer: [] }), []);
+  assert.deepEqual(notasDelTotalGeneral({}), []);
+});
+
+test('con lecturas que fallaron NO hay total: ningún «Q0.00» limpio sobre datos que no se leyeron', () => {
+  for (const cambios of [
+    { contratos: { datos: null, fallo: true, costoSinLeer: null } },
+    { pagos: { datos: null, fallo: true } },
+  ]) {
+    const vista = armarVista(lecturaOk(cambios));
+    assert.equal(vista.ok, false);
+    assert.equal('total' in vista, false, 'ni el campo');
+    const html = htmlLista(vista);
+    assert.ok(!html.includes('dn-total-general') && !html.includes('<tfoot>') && !html.includes('Lo que debes'));
+  }
+});
+
+test('con la lista vacía de verdad (ningún dueño, ninguna renta) no se dibuja un total: el vacío ya lo dice con palabras', () => {
+  const vacia = armarVista(lecturaOk({
+    contratos: { datos: [], fallo: false, costoSinLeer: [] }, pagos: { datos: [], fallo: false }, duenos: { datos: [], fallo: false },
+  }));
+  assert.equal(vacia.ok, true);
+  assert.equal(vacia.total, 0);
+  const html = htmlLista(vacia);
+  assert.ok(html.includes('Todavía no hay rentas de carros ajenos ni dueños en la lista'));
+  assert.ok(!html.includes('<tfoot>'));
+});
+
+test('con todos los dueños en cero, el total general dice Q0.00 de verdad (sí hay cuentas y se leyeron)', () => {
+  const vista = armarVista(lecturaOk({ contratos: { datos: [L3], fallo: false, costoSinLeer: [] } }));
+  assert.equal(vista.total, 0);
+  assert.match(htmlLista(vista), /id="dn-total-general">Q0\.00</);
 });

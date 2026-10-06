@@ -309,7 +309,10 @@ export function leerFormularioDe({ texto, num, marcado }, estado, numero) {
     } : null,
     duenoId: ajeno ? dueno.duenoId : null,
     fechaSalida: texto('sc-fecha-salida') || hoyISO(),
-    horaSalida: texto('sc-hora-salida'),
+    // Pasa por hora24 también al LEER, y no solo al salir del campo: lo que se guarda
+    // no puede depender de que el evento `change` alcance a correr (Enter dentro
+    // del campo, según el navegador). Una hora a medias queda vacía, no inventada.
+    horaSalida: hora24(texto('sc-hora-salida')),
     lugar: texto('sc-lugar'),
     dias: num('sc-dias'),
     precioDia: num('sc-precio-dia'),
