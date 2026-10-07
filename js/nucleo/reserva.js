@@ -124,6 +124,56 @@ export function faltaAlgoEnReserva(r) {
   return falta;
 }
 
+// Lo que «Sacar carro» lee de la reservación GUARDADA (sacarCarro.js:aplicarReserva y
+// conAnticipoComoPago): la fecha, los días, el precio, el cliente y, sobre todo, el
+// anticipo — de ahí salen el descuento del monto a cobrar y un pago de verdad. El carro
+// no está aquí a propósito: «Sacar el carro» toma el que está elegido en la ficha AHORA.
+// El orden es el de la ficha.
+const CAMPOS_QUE_LLEGAN_A_SACAR = [
+  ['fechaSalida', 'fecha de salida'],
+  ['dias', 'días'],
+  ['precioDia', 'precio por día'],
+  ['anticipo', 'anticipo'],
+  ['anticipoPagado', 'si el anticipo ya se pagó'],
+  ['clienteId', 'cliente'],
+  ['clienteNombre', 'nombre del cliente'],
+];
+
+/** El valor de un campo comparable: lo mismo que el formulario devuelve como texto y lo que se guardó como número. */
+function valorParaComparar(reserva, campo) {
+  const v = reserva?.[campo];
+  if (campo === 'dias' || campo === 'precioDia' || campo === 'anticipo') return q(v);
+  if (campo === 'anticipoPagado') return Boolean(v);
+  if (campo === 'clienteId') return v ?? null;
+  return String(v ?? '').trim();
+}
+
+/**
+ * Qué cambió en la ficha de una reservación (`borrador`, lo que el formulario dice
+ * ahora) contra lo que está guardado (`guardada`) en los campos que «Sacar carro»
+ * lee. Vacío si nada. Función pura.
+ *
+ * Por qué existe: «Sacar el carro» está en la misma ficha que «Guardar reservación» y
+ * navega con solo el id de la reservación — la salida lee lo GUARDADO. En la prueba del
+ * sistema el dueño desmarcó «Ya pagó el anticipo» (de Q400) y apretó «Sacar el carro»
+ * sin guardar: la salida abrió con «anticipo ya pagado», descontado del monto, y al
+ * guardar el contrato habría registrado un pago de Q400 que nadie hizo. Cuando hay
+ * cambios sin guardar, la pantalla se niega y lo dice, en vez de usar en silencio una
+ * cifra distinta de la que está viendo.
+ */
+export function cambiosSinGuardar(guardada, borrador) {
+  return CAMPOS_QUE_LLEGAN_A_SACAR
+    .filter(([campo]) => valorParaComparar(guardada, campo) !== valorParaComparar(borrador, campo))
+    .map(([, etiqueta]) => etiqueta);
+}
+
+/** La frase que lee el dueño cuando hay cambios sin guardar (vacía si no hay). */
+export function textoCambiosSinGuardar(cambios) {
+  if (!cambios?.length) return '';
+  return `Hay cambios sin guardar en la reservación: ${cambios.join(', ')}. `
+    + 'Guárdalos antes de sacar el carro: la salida usa lo que está guardado, no lo que ves ahora.';
+}
+
 /** El anticipo en una línea, para la lista y la ficha de la reservación. */
 export function textoAnticipo(r) {
   const anticipo = q(r?.anticipo);

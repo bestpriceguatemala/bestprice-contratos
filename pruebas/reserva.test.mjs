@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   construirReserva, estadoReserva, seCruzan, seCruzanConContrato, faltaAlgoEnReserva, textoAnticipo, choquesDeReserva,
+  cambiosSinGuardar, textoCambiosSinGuardar,
 } from '../js/nucleo/reserva.js';
 import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
 import { sumarDias } from '../js/nucleo/fechas.js';
@@ -328,4 +329,76 @@ test('la pantalla de reservaciones le da `hoy` a choquesDeReserva (sin eso el at
   const llamada = /choquesDeReserva\(\{([^}]*)\}\)/.exec(fuente);
   assert.ok(llamada, 'se encontró la llamada');
   assert.match(llamada[1], /hoy: hoyISO\(\)/, 'hoy se recibe en el borde de la pantalla, no se lee dentro de la regla');
+});
+
+// ---------------------------------------------------------------------------
+// «Sacar el carro» desde la ficha usa lo GUARDADO, no lo que se ve en pantalla
+//
+// Prueba del sistema (7 oct 2026): en la ficha de una reservación con anticipo de
+// Q400 pagado, el dueño desmarcó «Ya pagó el anticipo» (la pantalla ya decía «falta
+// que me lo pague») y cambió el precio, y apretó «Sacar el carro» sin guardar. La
+// salida abrió con el precio viejo y con «anticipo ya pagado: Q400.00», descontado del
+// monto — y al guardar el contrato habría registrado un pago de Q400 que nadie hizo.
+// ---------------------------------------------------------------------------
+
+const guardada = () => construirReserva({ id: 'r1', clienteId: 'k1' }, {
+  clienteNombre: 'Ana López', telefono: '5555-1234', fechaSalida: '2026-10-31', dias: 2,
+  tipoVehiculo: 'Sedán', carroId: 'v1', precioDia: 700, anticipo: 400, anticipoPagado: true, nota: '',
+});
+
+test('cambiosSinGuardar: la ficha tal como se abrió no tiene cambios', () => {
+  assert.deepEqual(cambiosSinGuardar(guardada(), construirReserva(guardada(), {})), []);
+});
+
+test('cambiosSinGuardar: lo que el formulario devuelve como texto no cuenta como cambio', () => {
+  // Los campos de la pantalla llegan como texto («2», «700», «400») y construirReserva los
+  // normaliza; una reservación vieja puede ni traer anticipoPagado ni clienteId.
+  const g = guardada();
+  const delFormulario = construirReserva(g, { dias: '2', precioDia: '700', anticipo: '400', anticipoPagado: true });
+  assert.deepEqual(cambiosSinGuardar(g, delFormulario), []);
+  const vieja = { id: 'r0', clienteNombre: 'Ana', fechaSalida: '2026-10-31', dias: 2, precioDia: 700, anticipo: 0 };
+  const abierta = construirReserva(vieja, { clienteId: null, anticipoPagado: false, dias: '2', precioDia: '700', anticipo: '0' });
+  assert.deepEqual(cambiosSinGuardar(vieja, abierta), [], 'null y false son lo mismo que «no está»');
+});
+
+test('cambiosSinGuardar: el anticipo desmarcado y el precio cambiado, sin guardar, se nombran', () => {
+  const g = guardada();
+  const enPantalla = construirReserva(g, { anticipoPagado: false, precioDia: '800' });
+  assert.deepEqual(cambiosSinGuardar(g, enPantalla), ['precio por día', 'si el anticipo ya se pagó']);
+});
+
+test('cambiosSinGuardar: cada campo que «Sacar carro» lee de lo guardado se vigila', () => {
+  const g = guardada();
+  const cambia = (campos) => cambiosSinGuardar(g, construirReserva(g, campos));
+  assert.deepEqual(cambia({ fechaSalida: '2026-11-01' }), ['fecha de salida']);
+  assert.deepEqual(cambia({ dias: '3' }), ['días']);
+  assert.deepEqual(cambia({ precioDia: '701' }), ['precio por día']);
+  assert.deepEqual(cambia({ anticipo: '0' }), ['anticipo']);
+  assert.deepEqual(cambia({ anticipoPagado: false }), ['si el anticipo ya se pagó']);
+  assert.deepEqual(cambia({ clienteId: 'k2' }), ['cliente']);
+  assert.deepEqual(cambia({ clienteNombre: 'Otra Persona' }), ['nombre del cliente']);
+});
+
+test('cambiosSinGuardar: el carro y la nota no cuentan: el carro se toma a propósito del formulario', () => {
+  // «Sacar el carro» usa el carro que está elegido AHORA (así una reservación por tipo escoge su unidad
+  // ahí mismo); la nota no llega a la salida.
+  const g = guardada();
+  assert.deepEqual(cambiosSinGuardar(g, construirReserva(g, { carroId: 'v3', carroPlacas: 'P-300CCC', nota: 'otra' })), []);
+});
+
+test('textoCambiosSinGuardar: dice qué cambió y qué hacer, y no inventa nada si no hay cambios', () => {
+  assert.equal(textoCambiosSinGuardar([]), '');
+  assert.equal(
+    textoCambiosSinGuardar(['precio por día', 'si el anticipo ya se pagó']),
+    'Hay cambios sin guardar en la reservación: precio por día, si el anticipo ya se pagó. '
+    + 'Guárdalos antes de sacar el carro: la salida usa lo que está guardado, no lo que ves ahora.',
+  );
+});
+
+test('la ficha de la reservación no deja sacar el carro con cambios sin guardar', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/reservas.js', import.meta.url), 'utf8');
+  const cuerpo = /function sacarCarroDesdeFicha\(\) \{([\s\S]*?)\n  \}/.exec(fuente);
+  assert.ok(cuerpo, 'se encontró sacarCarroDesdeFicha');
+  assert.match(cuerpo[1], /cambiosSinGuardar\(reserva,/, 'compara el formulario contra lo guardado');
+  assert.ok(cuerpo[1].indexOf('cambiosSinGuardar') < cuerpo[1].indexOf('location.hash'), 'y lo hace ANTES de navegar');
 });

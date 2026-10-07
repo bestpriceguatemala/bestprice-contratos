@@ -18,6 +18,7 @@
 // con esas funciones, y pinta lo que contestan.
 import {
   construirReserva, estadoReserva, choquesDeReserva, faltaAlgoEnReserva, textoAnticipo,
+  cambiosSinGuardar, textoCambiosSinGuardar,
 } from '../nucleo/reserva.js';
 import { nombreCompleto } from '../nucleo/cliente.js';
 import { hoyISO } from '../nucleo/fechas.js';
@@ -576,6 +577,14 @@ async function dibujarFicha(
     const carroId = val('rs-carro');
     if (!carroId) {
       aviso('Elige un carro exacto (arriba, en "Vehículo") antes de sacar el carro.', 'error');
+      return;
+    }
+    // La salida lee la reservación GUARDADA, no este formulario. Si el dueño cambió el
+    // anticipo o el precio aquí y no guardó, la salida abriría con las cifras viejas — y
+    // un anticipo ya pagado que dejó de serlo se registraría como un pago que nadie hizo.
+    const sinGuardar = cambiosSinGuardar(reserva, construirReserva(reserva || {}, leerFormulario()));
+    if (sinGuardar.length) {
+      aviso(textoCambiosSinGuardar(sinGuardar), 'error');
       return;
     }
     location.hash = `#/sacar/${carroId}?reserva=${reserva.id}`;
