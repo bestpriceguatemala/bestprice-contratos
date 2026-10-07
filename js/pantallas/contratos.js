@@ -22,7 +22,9 @@ import {
 } from '../nucleo/contrato.js';
 import { estadoContrato, pendientesDe, garantiaPorLiberar } from '../nucleo/estados.js';
 import { filtrar, textoDeContrato } from '../nucleo/busqueda.js';
-import { textoDosDecimales, textoEntero } from '../nucleo/dinero.js';
+import {
+  q, textoDosDecimales, textoEntero, conTarjeta,
+} from '../nucleo/dinero.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
   cargarContratos, cargarContrato, anularPago, guardarContrato,
@@ -469,28 +471,46 @@ function filaPago(p, indice) {
       <td>${esc(formaDePago(p))}</td>
       <td>${dinero(p?.monto)}${etiquetaAnulado}</td>
       <td>${p?.porcentajeTarjeta ? `${textoDosDecimales(p.porcentajeTarjeta)}%` : '—'}</td>
+      <td class="cobrado">${dinero(conTarjeta(p?.monto, p?.porcentajeTarjeta))}</td>
       <td>${boton}</td>
     </tr>`;
 }
 
-function seccionPagos(c) {
+// «Cobrado» es lo que de verdad pasó por la caja o la terminal: el monto con su recargo de
+// tarjeta (conTarjeta, la misma cuenta que hace resumen() para el «Total cobrado»). Sin esta
+// columna las filas decían Q3,150.00 y Q730.00 (3,880 en total) y arriba «Total cobrado
+// Q4,345.60»: el lector tenía que sacar el 12 % de cabeza para que cuadrara (prueba del
+// sistema, 7 oct 2026). Un pago anulado conserva su cifra, tachada: no suma al total.
+export function seccionPagos(c) {
   const pagos = Array.isArray(c?.pagos) ? c.pagos : [];
   const filas = pagos.length
     ? pagos.map(filaPago).join('')
-    : '<tr><td colspan="5" class="pendiente">Todavía no hay pagos registrados.</td></tr>';
+    : '<tr><td colspan="6" class="pendiente">Todavía no hay pagos registrados.</td></tr>';
 
   return `
     <section class="carro-seccion">
       <h2>Pagos</h2>
       <table class="tabla-carros">
-        <thead><tr><th>Fecha</th><th>Forma</th><th>Monto</th><th>% de tarjeta</th><th></th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Forma</th><th>Monto</th><th>% de tarjeta</th><th>Cobrado</th><th></th></tr></thead>
         <tbody>${filas}</tbody>
       </table>
     </section>`;
 }
 
+/**
+ * El estado de la garantía, tal como se lee en el detalle: «Sin garantía» si la renta no
+ * dejó tarjeta (nunca hubo nada que liberar), «Sin liberar» mientras siga bloqueada y
+ * «Liberada el …» después. Antes toda renta pagada en efectivo decía «Estado: Liberada»,
+ * incluso con el carro todavía afuera (prueba del sistema, 7 oct 2026). Pregunta a
+ * `pendientesDe` si queda algo por liberar; no repite esa regla.
+ */
+export function textoEstadoGarantia(c) {
+  if (!(q(c?.garantiaMonto) > 0)) return 'Sin garantía';
+  if (pendientesDe(c).garantia) return 'Sin liberar';
+  return `Liberada${c?.garantiaLiberadaEn ? ` el ${fecha(c.garantiaLiberadaEn)}` : ''}`;
+}
+
 function seccionGarantia(c) {
-  const pend = pendientesDe(c);
   const tarjetas = Array.isArray(c?.tarjetas) ? c.tarjetas : [];
   const filasTarjetas = tarjetas.length
     ? tarjetas.map((t) => `
@@ -502,9 +522,7 @@ function seccionGarantia(c) {
           <td>${dinero(t?.montoAutorizado)}</td>
         </tr>`).join('')
     : '<tr><td colspan="5" class="pendiente">Sin tarjetas registradas.</td></tr>';
-  const estadoGarantia = pend.garantia
-    ? 'Sin liberar'
-    : `Liberada${c?.garantiaLiberadaEn ? ` el ${esc(fecha(c.garantiaLiberadaEn))}` : ''}`;
+  const estadoGarantia = esc(textoEstadoGarantia(c));
 
   return `
     <section class="carro-seccion">

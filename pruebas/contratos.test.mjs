@@ -13,6 +13,7 @@ import { garantiaPorLiberar } from '../js/nucleo/estados.js';
 import {
   primerDiaMes, ultimoDiaMes, filtrarPorEstado, contratosVisibles,
   claseFilaContrato, textoCuenta, numeroEnmascarado, textoConfirmarAnular, textoHoraTardia,
+  textoEstadoGarantia, seccionPagos,
 } from '../js/pantallas/contratos.js';
 import { lineasSalida, lineasDevolucion, resumen } from '../js/nucleo/contrato.js';
 import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
@@ -363,4 +364,53 @@ test('el detalle de un contrato con Q150 de hora tardía al recibir la muestra e
   assert.equal(r.totalDevolucion, 150, 'Total al recibir');
   assert.equal(r.saldo, 150, 'sin pagar la hora tardía, es justo lo que falta');
   assert.equal(textoHoraTardia(recibido), '');
+});
+
+// ---------------------------------------------------------------------------
+// Prueba del sistema (7 oct 2026): dos cosas del detalle de un contrato que decían
+// algo distinto de lo que pasó.
+// ---------------------------------------------------------------------------
+
+test('textoEstadoGarantia: una renta sin tarjeta no dice «Liberada»: nunca hubo nada que liberar', () => {
+  // Toda renta en efectivo (la mayoría) mostraba «Monto bloqueado Q0.00 · Estado: Liberada»,
+  // incluso con el carro todavía afuera.
+  assert.equal(textoEstadoGarantia({ garantiaMonto: 0, garantiaLiberada: false, tarjetas: [] }), 'Sin garantía');
+  assert.equal(textoEstadoGarantia({ garantiaMonto: 0, garantiaLiberada: false, cierre: { fechaReal: '2026-10-20' } }), 'Sin garantía');
+  assert.equal(textoEstadoGarantia({}), 'Sin garantía');
+});
+
+test('textoEstadoGarantia: con tarjeta, «Sin liberar» hasta soltarla y «Liberada el …» después', () => {
+  const conTarjeta = { garantiaMonto: 5000, tarjetas: [{ ultimos4: '1111', montoAutorizado: 5000 }] };
+  assert.equal(textoEstadoGarantia({ ...conTarjeta, garantiaLiberada: false }), 'Sin liberar');
+  assert.equal(
+    textoEstadoGarantia({ ...conTarjeta, garantiaLiberada: true, garantiaLiberadaEn: '2026-10-17', cierre: { fechaReal: '2026-10-17' }, pagos: [] }),
+    'Liberada el 17 oct 2026',
+  );
+  assert.equal(textoEstadoGarantia({ ...conTarjeta, garantiaLiberada: true, cierre: { fechaReal: '2026-10-17' }, pagos: [] }), 'Liberada');
+});
+
+test('seccionPagos: cada fila dice lo que de verdad se cobró, y las filas suman el «Total cobrado»', () => {
+  // Con el ejemplo de la §5 el detalle decía «Monto Q3,150.00» y «Monto Q730.00» (sin el 12 %) y arriba
+  // «Total cobrado Q4,345.60»: 3,150 + 730 = 3,880, y nada en la tabla explicaba los otros Q465.60.
+  const c = ejemplo();
+  const html = seccionPagos(c);
+  const celdas = [...html.matchAll(/<td class="cobrado">([^<]*)<\/td>/g)].map((m) => m[1]);
+  assert.deepEqual(celdas, ['Q3,528.00', 'Q817.60']);
+  assert.equal(resumen(c).totalCobrado, 4345.6);
+  assert.match(html, /<th>Cobrado<\/th>/);
+  assert.match(html, /Q3,150\.00/, 'y el monto sin recargo sigue a la vista');
+});
+
+test('seccionPagos: un pago en efectivo cobra lo mismo que su monto, y uno anulado no suma pero se sigue viendo', () => {
+  const c = {
+    ...ejemplo(),
+    pagos: [
+      { monto: 1000, forma: 'efectivo', porcentajeTarjeta: 0, fecha: '2026-08-21' },
+      { monto: 500, forma: 'efectivo', porcentajeTarjeta: 0, fecha: '2026-08-22', anulado: true, anuladoEn: '2026-08-23' },
+    ],
+  };
+  const html = seccionPagos(c);
+  const celdas = [...html.matchAll(/<td class="cobrado">([^<]*)<\/td>/g)].map((m) => m[1]);
+  assert.deepEqual(celdas, ['Q1,000.00', 'Q500.00'], 'el anulado sale tachado en su fila, con su cifra');
+  assert.match(html, /class="fila-anulada"/);
 });
