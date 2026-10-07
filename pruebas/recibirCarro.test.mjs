@@ -416,3 +416,12 @@ test('un contrato guardado con la hora tardía en la salida, al recibirlo, conse
   assert.equal(r.totalDevolucion, 730);
   assert.equal(r.subtotal, 4030);
 });
+
+// Enter dentro de un campo no puede recibir el carro y cobrar el saldo (prueba del sistema,
+// 7 oct 2026): la pantalla no tiene arnés de DOM en esta suite, así que lo que se fija aquí es
+// el cableado — que el formulario del cierre se conecta al bloqueo y el de solo cobro no.
+test('el formulario del cierre bloquea Enter; el de solo cobro, que existe para cobrar, no', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/recibirCarro.js', import.meta.url), 'utf8');
+  assert.match(fuente, /import\s*\{[^}]*bloquearEnterEnElFormulario[^}]*\}\s*from '\.\.\/ui\.js'/, 'se importa del lugar donde se prueba');
+  assert.match(fuente, /if \(!soloCobro\) bloquearEnterEnElFormulario\(el\('rc-form'\)\);/, 'se conecta al formulario del cierre, no al de solo cobro');
+});

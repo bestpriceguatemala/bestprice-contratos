@@ -111,3 +111,35 @@ export function hora24(texto) {
   if (h < 0 || h > 23) return '';
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
+
+// Los tipos de <input> que NO envían el formulario al apretar Enter: en un botón,
+// Enter es apretar ESE botón, y eso es lo que el mostrador quiere cuando lo hace.
+const TIPOS_QUE_NO_ENVIAN = new Set(['button', 'submit', 'reset', 'image']);
+
+/**
+ * ¿Esta tecla, apretada en este campo, enviaría el formulario entero sin que nadie
+ * haya apretado el botón? Enter dentro de un <input> lo hace; en un cuadro de texto
+ * largo (<textarea>) es un salto de línea y no envía nada.
+ *
+ * Por qué importa: en «Recibir carro» enviar el formulario RECIBE el carro y COBRA
+ * el saldo, que arranca prellenado en el campo de monto. En una hoja de cálculo
+ * Enter es «pasa al campo siguiente»; aquí era un cobro que nadie hizo (prueba del
+ * sistema, 7 oct 2026: escribir el lugar de entrada y apretar Enter registró un
+ * pago en efectivo de todo el saldo). Función pura, para probarla sin navegador.
+ */
+export function enterEnviariaElFormulario(ev) {
+  if (ev?.key !== 'Enter') return false;
+  const campo = ev.target;
+  return campo?.tagName === 'INPUT' && !TIPOS_QUE_NO_ENVIAN.has(campo.type);
+}
+
+/**
+ * Hace que Enter dentro de un campo de `formulario` no lo envíe: para enviarlo hay
+ * que apretar el botón. El botón, el Tab y el salto de línea de un texto largo
+ * siguen igual. Solo se conecta al `keydown`; no toca nada más del formulario.
+ */
+export function bloquearEnterEnElFormulario(formulario) {
+  formulario.addEventListener('keydown', (ev) => {
+    if (enterEnviariaElFormulario(ev)) ev.preventDefault();
+  });
+}

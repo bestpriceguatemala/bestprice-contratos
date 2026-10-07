@@ -29,7 +29,9 @@ import { hoyISO } from '../nucleo/fechas.js';
 import {
   cargarContrato, agregarPago, guardarContrato, cargarAjustes,
 } from '../datos.js';
-import { dinero, fecha, aviso, hora24 } from '../ui.js';
+import {
+  dinero, fecha, aviso, hora24, bloquearEnterEnElFormulario,
+} from '../ui.js';
 
 // Mismo respaldo que PORCENTAJE_TARJETA_DEFECTO en sacarCarro.js: el campo
 // del % de tarjeta arranca en este valor fijo por si cargarAjustes()
@@ -706,6 +708,13 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
     recalcular();
   });
   el('rc-form').addEventListener('submit', guardar);
+  // Enter dentro de un campo envía el formulario, y aquí enviarlo RECIBE el carro y
+  // COBRA el saldo, que arranca prellenado en el monto: apretar Enter para pasar al
+  // campo siguiente —como en una hoja de cálculo— registraba un pago que nadie hizo
+  // (prueba del sistema, 7 oct 2026). Para recibir hay que apretar el botón.
+  // En el modo de solo cobro no hace falta: esa pantalla existe para cobrar, el monto
+  // es lo único que se escribe y Enter ahí es la forma de confirmarlo a propósito.
+  if (!soloCobro) bloquearEnterEnElFormulario(el('rc-form'));
 
   recalcular();
 

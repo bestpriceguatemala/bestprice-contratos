@@ -3,7 +3,9 @@
 // corre en Node sin navegador.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dinero, fecha, hora24 } from '../js/ui.js';
+import {
+  dinero, fecha, hora24, enterEnviariaElFormulario, bloquearEnterEnElFormulario,
+} from '../js/ui.js';
 
 test('dinero() da separador de miles y dos decimales', () => {
   assert.equal(dinero(1234.5), 'Q1,234.50');
@@ -141,4 +143,49 @@ test('hora24 siempre devuelve «HH:MM» o vacío, para cualquier cosa que se le 
   for (const x of basura) {
     assert.match(String(hora24(x)), /^(\d{2}:\d{2})?$/, `con ${JSON.stringify(x)}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Enter dentro de un campo no puede RECIBIR el carro y COBRAR el saldo
+//
+// Prueba del sistema (7 oct 2026), en el navegador con una tecla Enter de verdad:
+// en «Recibir carro», con la pantalla recién abierta, escribir el lugar de entrada y
+// apretar Enter —lo que se hace en una hoja de cálculo para pasar al campo
+// siguiente— guardó el cierre Y registró un pago en efectivo por TODO el saldo
+// (Q1,000.00), porque el monto a cobrar arranca prellenado con el saldo y Enter
+// aprieta el botón «Recibir y cobrar». Un pago que nadie hizo.
+// ---------------------------------------------------------------------------
+
+const tecla = (key, tagName, type = 'text') => ({ key, target: { tagName, type } });
+
+test('enterEnviariaElFormulario: Enter en un campo de texto o de número envía el formulario', () => {
+  assert.equal(enterEnviariaElFormulario(tecla('Enter', 'INPUT', 'text')), true);
+  assert.equal(enterEnviariaElFormulario(tecla('Enter', 'INPUT', 'number')), true);
+  assert.equal(enterEnviariaElFormulario(tecla('Enter', 'INPUT', 'date')), true);
+});
+
+test('enterEnviariaElFormulario: otra tecla, un botón o un cuadro de texto largo no cuentan', () => {
+  assert.equal(enterEnviariaElFormulario(tecla('Tab', 'INPUT')), false, 'solo Enter');
+  assert.equal(enterEnviariaElFormulario(tecla('a', 'INPUT')), false);
+  assert.equal(enterEnviariaElFormulario(tecla('Enter', 'BUTTON', 'submit')), false, 'Enter sobre el botón ES apretar el botón: eso es a propósito');
+  assert.equal(enterEnviariaElFormulario(tecla('Enter', 'INPUT', 'submit')), false);
+  assert.equal(enterEnviariaElFormulario(tecla('Enter', 'TEXTAREA', 'textarea')), false, 'en un cuadro largo Enter es un salto de línea');
+  assert.equal(enterEnviariaElFormulario(undefined), false);
+  assert.equal(enterEnviariaElFormulario({}), false);
+});
+
+test('bloquearEnterEnElFormulario: cancela el Enter que enviaría, y deja pasar todo lo demás', () => {
+  let oyente = null;
+  const formulario = { addEventListener: (tipo, fn) => { assert.equal(tipo, 'keydown'); oyente = fn; } };
+  bloquearEnterEnElFormulario(formulario);
+  assert.equal(typeof oyente, 'function', 'se conectó al keydown del formulario');
+
+  const cancelados = [];
+  const evento = (key, tagName, type) => ({ ...tecla(key, tagName, type), preventDefault: () => cancelados.push(`${key}:${tagName}`) });
+  oyente(evento('Enter', 'INPUT', 'text'));
+  oyente(evento('Enter', 'INPUT', 'number'));
+  oyente(evento('Enter', 'BUTTON', 'submit'));
+  oyente(evento('Enter', 'TEXTAREA', 'textarea'));
+  oyente(evento('Tab', 'INPUT', 'text'));
+  assert.deepEqual(cancelados, ['Enter:INPUT', 'Enter:INPUT'], 'solo los dos Enter de campos; el botón, el texto largo y Tab pasan');
 });
