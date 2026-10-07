@@ -270,6 +270,25 @@ export function avisosConSobrecobro(avisos, debeHoy, montoSinRecargo) {
 }
 
 /**
+ * El anticipo YA PAGADO de la reservación pasa de lo que cuesta la salida: el monto que se
+ * sugiere cobrar hoy queda en Q0.00 (`montoSalidaConAnticipo` no baja de cero) y la pantalla
+ * seguía callada, pero el contrato se guarda con un pago por el anticipo ENTERO — Q3,600 a
+ * favor del cliente en una renta de Q1,400 con un anticipo de Q5,000 (un cero de más en la
+ * reservación, con «Ya pagó» marcado: un pago que nadie hizo). Es la misma clase de error
+ * que avisa `avisosConSobrecobro`, con la misma frase, para el dinero que no se escribe aquí
+ * sino que viene de la reservación. Un aviso, no un candado. Sin total todavía (días o
+ * precio sin llenar) no dice nada: no hay con qué comparar.
+ */
+export function avisoAnticipoDeMas(totalSalida, reserva) {
+  if (!reserva?.anticipoPagado) return null;
+  const total = q(totalSalida);
+  const anticipo = q(reserva.anticipo);
+  if (!(total > 0) || !(anticipo > total)) return null;
+  return `El anticipo ya pagado (${dinero(anticipo)}) es más de lo que cuesta la salida (${dinero(total)}). `
+    + `Van a quedar ${dinero(q(anticipo - total))} a favor del cliente.`;
+}
+
+/**
  * Lo que dice el cuadro del carro cuando no está en la flota: «no se encontró» solo si la
  * flota se leyó bien. Con la lectura caída decía lo mismo —«no se encontró este carro, o ya no
  * está disponible, marca carro ajeno»— y empujaba a rentar como ajeno un carro propio, que
@@ -1230,6 +1249,9 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       reservasDelCarro,
       hoy: hoyISO(),
     });
+    // avisosDeSalida arma una lista nueva en cada llamada, así que agregarle aquí no toca nada ajeno.
+    const delAnticipo = avisoAnticipoDeMas(totalSalida, reservaOrigen);
+    if (delAnticipo) avisos.unshift({ nivel: 'alto', mensaje: delAnticipo });
     el('sc-avisos').innerHTML = avisosConSobrecobro(avisos, montoSugerido, montoSinRecargo).map(lineaAviso).join('');
   }
 

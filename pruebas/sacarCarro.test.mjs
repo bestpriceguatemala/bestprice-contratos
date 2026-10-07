@@ -10,9 +10,10 @@ import {
   construirContrato, ultimos4Digitos, leerParametroRuta, montoSalidaConAnticipo, conAnticipoComoPago,
   resultadosDeLista, avisoDeLista, conAltasDeHoy,
   vistaDeBuscador, crearListaDeSesion, duenoDelContrato, lectorDeCampos, leerFormularioDe, plantilla, motivoParaNoGuardar,
-  textoCarroPropioNoEncontrado, avisosConSobrecobro,
+  textoCarroPropioNoEncontrado, avisosConSobrecobro, avisoAnticipoDeMas,
 } from '../js/pantallas/sacarCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
+import { construirReserva } from '../js/nucleo/reserva.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
 import { agruparPorDueno } from '../js/nucleo/liquidacion.js';
 import { resultadoLectura, contratoParaGuardar } from '../js/datos.js';
@@ -1176,4 +1177,27 @@ test('avisosConSobrecobro: cobrar lo justo, de menos o nada, no agrega nada (ni 
 test('la pantalla de la salida compara el monto contra lo que se debe hoy (el sugerido, que ya descuenta el anticipo)', () => {
   const fuente = readFileSync(new URL('../js/pantallas/sacarCarro.js', import.meta.url), 'utf8');
   assert.match(fuente, /avisosConSobrecobro\(avisos, montoSugerido, montoSinRecargo\)/);
+});
+
+// Prueba del sistema (7 oct 2026): una reservación de 2 días a Q700 con un anticipo de Q5,000 «ya
+// pagado» (un cero de más). La salida lo descontaba, dejaba el monto en Q0.00 y no decía nada; el
+// contrato quedaba con un pago de Q5,000 y Q3,600 a favor del cliente. La reservación es la que
+// guarda reservas.js (construirReserva), no un objeto con las llaves a mano.
+const reservaDeDosDias = (anticipo, anticipoPagado) => construirReserva({}, {
+  clienteNombre: 'Ana López', fechaSalida: '2026-11-02', dias: 2, precioDia: 700, anticipo, anticipoPagado,
+});
+
+test('avisoAnticipoDeMas: un anticipo pagado mayor que la salida avisa cuánto queda a favor del cliente', () => {
+  assert.equal(
+    avisoAnticipoDeMas(1400, reservaDeDosDias(5000, true)),
+    'El anticipo ya pagado (Q5,000.00) es más de lo que cuesta la salida (Q1,400.00). Van a quedar Q3,600.00 a favor del cliente.',
+  );
+});
+
+test('avisoAnticipoDeMas: no avisa si el anticipo cabe en la salida, si está pendiente, si no hay reservación o si aún no hay total', () => {
+  assert.equal(avisoAnticipoDeMas(1400, reservaDeDosDias(1400, true)), null, 'justo lo que cuesta: nada a favor');
+  assert.equal(avisoAnticipoDeMas(1400, reservaDeDosDias(500, true)), null);
+  assert.equal(avisoAnticipoDeMas(1400, reservaDeDosDias(5000, false)), null, 'pendiente: nunca se pagó, no se descuenta');
+  assert.equal(avisoAnticipoDeMas(1400, null), null);
+  assert.equal(avisoAnticipoDeMas(0, reservaDeDosDias(5000, true)), null, 'sin días o sin precio todavía no hay con qué comparar');
 });
