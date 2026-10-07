@@ -7,9 +7,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
 import {
   estaVencido, contratosDe, saldoPendienteDe, vecesTarde, alertasDe, clienteParaFormulario,
-  mensajesDeFalloDeClientes, htmlListaVacia, textoClienteNoEncontrado,
+  mensajesDeFalloDeClientes, htmlListaVacia, textoClienteNoEncontrado, seccionHistorial,
 } from '../js/pantallas/clientes.js';
 
 const HOY = '2026-09-25';
@@ -187,4 +188,20 @@ test('la pantalla de clientes pasa los fallos al dibujar la lista y la ficha', (
   const fuente = readFileSync(new URL('../js/pantallas/clientes.js', import.meta.url), 'utf8');
   assert.match(fuente, /dibujarLista\(contenedor, clientes, contratos, hoy, \{ falloClientes, falloContratos \}\)/);
   assert.match(fuente, /r\.fallo/, 'el aviso de que la sincronía de atrás falló también llega');
+});
+
+// Prueba del sistema (7 oct 2026): una clienta con cuatro rentas (dos cerradas, una atrasada) veía
+// «Historial de rentas» con UNA fila: la ficha solo carga los contratos abiertos. El título prometía
+// el historial completo; la lista no puede cumplirlo todavía, así que dice lo que es.
+test('seccionHistorial: se llama «Rentas abiertas» y dice dónde están las ya cerradas, en vez de prometer un historial completo', () => {
+  const abierta = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 9 });
+  const html = seccionHistorial([abierta]);
+  assert.match(html, /<h2>Rentas abiertas<\/h2>/);
+  assert.match(html, /están en Contratos/);
+  assert.doesNotMatch(html, /Historial de rentas/);
+  assert.match(html, /P-111AAA/, 'la fila de la renta abierta sigue saliendo');
+});
+
+test('seccionHistorial: sin rentas abiertas lo dice igual que antes', () => {
+  assert.match(seccionHistorial([]), /Todavía no tiene rentas abiertas\./);
 });

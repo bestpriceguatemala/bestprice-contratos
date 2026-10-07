@@ -332,7 +332,7 @@ function filaHistorial(c) {
 // Los ya cerrados todavía no se traen aquí — eso es lo que agrega la Tarea 8
 // (historial de contratos, con su propio cargarContratos) — así que por ahora
 // esta lista puede no traer una renta ya cobrada y cerrada hace tiempo.
-function seccionHistorial(contratosCliente) {
+export function seccionHistorial(contratosCliente) {
   const ordenados = [...contratosCliente].sort(
     (a, b) => String(b?.fechaSalida || '').localeCompare(String(a?.fechaSalida || '')),
   );
@@ -342,7 +342,8 @@ function seccionHistorial(contratosCliente) {
 
   return `
     <section class="carro-seccion">
-      <h2>Historial de rentas</h2>
+      <h2>Rentas abiertas</h2>
+      <p class="sc-nota">Aquí salen solo las rentas que siguen abiertas (con el carro afuera, o con saldo o garantía por resolver). Las que ya se cobraron y cerraron están en Contratos.</p>
       <table class="tabla-carros">
         <thead>
           <tr><th>N.°</th><th>Carro</th><th>Fechas</th><th>Días</th><th>Puntualidad</th><th>Cuenta</th></tr>
