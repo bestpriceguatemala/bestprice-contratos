@@ -10,6 +10,7 @@ import {
   construirContrato, ultimos4Digitos, leerParametroRuta, montoSalidaConAnticipo, conAnticipoComoPago,
   resultadosDeLista, avisoDeLista, conAltasDeHoy,
   vistaDeBuscador, crearListaDeSesion, duenoDelContrato, lectorDeCampos, leerFormularioDe, plantilla, motivoParaNoGuardar,
+  textoCarroPropioNoEncontrado,
 } from '../js/pantallas/sacarCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
@@ -1123,4 +1124,27 @@ test('guardar() de «Sacar carro» le pregunta a motivoParaNoGuardar, no repite 
   const guardar = fuente.slice(fuente.indexOf('async function guardar(ev)'));
   assert.match(guardar.slice(0, 1500), /motivoParaNoGuardar\(\{/);
   assert.ok(!/Faltan los días o el precio/.test(guardar), 'el texto vive en un solo lugar');
+});
+
+// Prueba del sistema (7 oct 2026): con internet caído y sin copia local de la flota, «Sacar carro»
+// decía «No se encontró este carro, o ya no está disponible. Marca "carro ajeno" si es de otra
+// persona» — como si el carro hubiera desaparecido, y empujando a rentarlo como ajeno (sin carroId,
+// así que la flota nunca se enteraría de que salió). Lo que pasó es que no se pudo leer la flota.
+test('textoCarroPropioNoEncontrado: «no está» solo si la flota se leyó bien', () => {
+  assert.equal(
+    textoCarroPropioNoEncontrado(false),
+    'No se encontró este carro, o ya no está disponible. Marca "carro ajeno" si es de otra persona.',
+  );
+  const noLeida = textoCarroPropioNoEncontrado(true);
+  assert.match(noLeida, /No se pudo leer la flota/);
+  assert.ok(!/carro ajeno/.test(noLeida), 'no sugiere rentar como ajeno un carro que quizá es de la flota');
+});
+
+test('motivoParaNoGuardar: sin carro de la flota por un fallo de lectura, el motivo es el fallo, no «ya no está disponible»', () => {
+  const motivo = motivoParaNoGuardar({ ...salidaLista(), hayCarroPropio: false, falloFlota: true });
+  assert.match(motivo, /No se pudo leer la flota/);
+  assert.equal(
+    motivoParaNoGuardar({ ...salidaLista(), hayCarroPropio: false, falloFlota: false }),
+    'Este carro ya no está disponible. Vuelve a la flota e intenta de nuevo.',
+  );
 });

@@ -256,6 +256,18 @@ export function duenoDelContrato({ escogido, buscado = '', nuevo = '' }) {
 }
 
 /**
+ * Lo que dice el cuadro del carro cuando no está en la flota: «no se encontró» solo si la
+ * flota se leyó bien. Con la lectura caída decía lo mismo —«no se encontró este carro, o ya no
+ * está disponible, marca carro ajeno»— y empujaba a rentar como ajeno un carro propio, que
+ * quedaría sin `carroId` y la flota nunca se enteraría de que salió (prueba del sistema, 7 oct 2026).
+ */
+export function textoCarroPropioNoEncontrado(falloFlota) {
+  return falloFlota
+    ? 'No se pudo leer la flota, así que no se sabe si este carro está disponible. Revisa tu conexión e intenta de nuevo.'
+    : 'No se encontró este carro, o ya no está disponible. Marca "carro ajeno" si es de otra persona.';
+}
+
+/**
  * Lo que impide guardar la salida, o `null` si se puede guardar. Función pura: antes
  * estas reglas estaban sueltas dentro de `guardar()`, donde ninguna prueba las veía.
  * El orden es el de siempre (cliente, carro, placas, días y precio, quién lo rentó); la
@@ -269,10 +281,14 @@ export function duenoDelContrato({ escogido, buscado = '', nuevo = '' }) {
  *   precio de «-700» se guardaban con un total negativo.
  */
 export function motivoParaNoGuardar({
-  hayCliente, ajeno, hayCarroPropio, placasAjeno, fechaSalida, dias, precioDia, rentadoPor,
+  hayCliente, ajeno, hayCarroPropio, falloFlota = false, placasAjeno, fechaSalida, dias, precioDia, rentadoPor,
 }) {
   if (!hayCliente) return 'Elige o da de alta un cliente antes de guardar.';
-  if (!ajeno && !hayCarroPropio) return 'Este carro ya no está disponible. Vuelve a la flota e intenta de nuevo.';
+  if (!ajeno && !hayCarroPropio) {
+    return falloFlota
+      ? 'No se pudo leer la flota, así que no se sabe si este carro está disponible. Revisa tu conexión e intenta de nuevo.'
+      : 'Este carro ya no está disponible. Vuelve a la flota e intenta de nuevo.';
+  }
   if (ajeno && !placasAjeno) return 'Completa al menos las placas del carro ajeno.';
   if (fechaSalida && !esFechaISO(fechaSalida)) return 'La fecha de salida no es válida. Revisa el año.';
   if (!dias || !precioDia) return 'Faltan los días o el precio por día.';
@@ -1019,6 +1035,9 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // empezó a escribir: la reservación se aplica UNA sola vez.
   let reservaOrigen = null;
   let reservaAplicada = false;
+  // La flota no se pudo leer (nube caída y sin copia local): el carro «no se encuentra»
+  // por eso, no porque ya no exista (ver textoCarroPropioNoEncontrado).
+  let falloFlota = false;
   // El id y el número de este alquiler se deciden una sola vez, la primera
   // vez que se intenta guardar (ver guardar() más abajo), y se quedan fijos
   // para cualquier reintento: si el internet se pone lento y hay que
@@ -1087,7 +1106,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     const carro = carroPropio();
     if (!carro) {
       caja.className = 'sc-carro-info sc-carro-aviso';
-      caja.textContent = 'No se encontró este carro, o ya no está disponible. Marca "carro ajeno" si es de otra persona.';
+      caja.textContent = textoCarroPropioNoEncontrado(falloFlota);
       return;
     }
     caja.className = 'sc-carro-info';
@@ -1528,6 +1547,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       hayCliente: Boolean(clienteSeleccionado),
       ajeno,
       hayCarroPropio: Boolean(carroPropio()),
+      falloFlota,
       placasAjeno: texto('sc-ajeno-placas'),
       fechaSalida: texto('sc-fecha-salida'),
       dias: num('sc-dias'),
@@ -1678,14 +1698,16 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // flota.js), así que por ahora solo toma `datos`, que nunca inventa un
   // arreglo vacío: cae a la copia local si la nube falló, así que un fallo
   // de red nunca se ve aquí como "no hay reservaciones" cuando sí las hay.
-  // Las únicas lecturas de esta pantalla que SÍ dicen cuando fallan son las de
-  // los buscadores de cliente y de dueño (ver crearBuscador): ahí un "no hay"
-  // falso empuja a dar de alta a alguien que ya existe.
+  // Las lecturas de esta pantalla que SÍ dicen cuando fallan son las de los
+  // buscadores de cliente y de dueño (ver crearBuscador) — ahí un "no hay" falso
+  // empuja a dar de alta a alguien que ya existe — y la de la flota, solo para el
+  // cuadro del carro: "no se encontró, marca carro ajeno" con la flota sin leer
+  // empujaba a rentar como ajeno un carro propio (ver textoCarroPropioNoEncontrado).
   // cargarAjustes() tampoco rechaza (se queda con los valores del dueño si
   // la nube falla o el documento no existe todavía), así que tampoco hace
   // falta un try/catch.
   const [rFlota, rContratos, rReservas, ajustesCargados] = await Promise.all([
-    cargarFlota((r) => { flota = r.datos; if (sigoVigente()) refrescarCarro(); }),
+    cargarFlota((r) => { flota = r.datos; falloFlota = r.fallo; if (sigoVigente()) refrescarCarro(); }),
     cargarContratosAbiertos((r) => { contratosAbiertos = r.datos; if (sigoVigente()) recalcular(); }),
     // Tarea 9: cada sincronía de reservas es también una oportunidad de
     // encontrar la reservación de origen (`reservaId`) si la primera lectura
@@ -1700,6 +1722,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     cargarAjustes(),
   ]);
   flota = rFlota.datos;
+  falloFlota = rFlota.fallo;
   contratosAbiertos = rContratos.datos;
   reservas = rReservas.datos;
   ajustes = ajustesCargados;
