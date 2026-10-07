@@ -219,3 +219,25 @@ test('con el kilometraje de entrada sin escribir, el aviso dice que FALTA, no qu
 test('un kilometraje igual al de salida (el carro no se movió) no es problema', () => {
   assert.deepEqual(problemasDelCierre(contrato(), { ...campos, kmEntrada: 45000 }), []);
 });
+
+// Prueba del sistema (7 oct 2026): «2062» por «2026» en la fecha de entrada daba 13,149 días de
+// atraso y un «Falta cobrar Q8,546,850.00» ya escrito en el monto, que «Recibir y cobrar» registraba
+// como pagado. Un carro no se recibe mañana: la fecha de entrada no puede ser posterior a hoy.
+test('una fecha de entrada posterior a hoy no se puede guardar, y dice cuál es', () => {
+  for (const fechaReal of ['2026-08-26', '2026-09-30', '2062-08-25']) {
+    const p = problemasDelCierre(contrato(), { ...campos, fechaReal }, '2026-08-25');
+    assert.equal(p.length, 1, fechaReal);
+    assert.match(p[0], /todavía no llega/);
+    assert.match(p[0], /Revisa la fecha/);
+  }
+  assert.match(problemasDelCierre(contrato(), { ...campos, fechaReal: '2062-08-25' }, '2026-08-25')[0], /25 ago 2062/);
+});
+
+test('recibir hoy, o en un día pasado (se olvidó anotarlo), no es ningún problema', () => {
+  assert.deepEqual(problemasDelCierre(contrato(), { ...campos, fechaReal: '2026-08-25' }, '2026-08-25'), []);
+  assert.deepEqual(problemasDelCierre(contrato(), { ...campos, fechaReal: '2026-08-24' }, '2026-08-25'), []);
+});
+
+test('sin decir qué día es hoy no se revisa el futuro: el cálculo del cierre no depende del reloj', () => {
+  assert.deepEqual(problemasDelCierre(contrato(), { ...campos, fechaReal: '2062-08-25' }), []);
+});

@@ -626,7 +626,7 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
     // Los problemas de problemasDelCierre (nucleo/cierre.js) van en rojo,
     // justo arriba del botón, y mientras haya alguno el botón no guarda. El
     // aviso de sobrecobro se ve en el mismo lugar pero nunca se suma a ellos.
-    const problemas = problemasDelCierre(contrato, campos);
+    const problemas = problemasDelCierre(contrato, campos, hoyISO());
     el('rc-problemas').innerHTML = [
       ...problemas.map((m) => `<li class="nivel-alto">${esc(m)}</li>`),
       ...avisoSobrecobroHTML,
@@ -676,7 +676,7 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
     }
 
     const campos = leerCampos();
-    if (problemasDelCierre(contrato, campos).length) {
+    if (problemasDelCierre(contrato, campos, hoyISO()).length) {
       // El botón ya debería estar deshabilitado en este caso; esto es solo
       // el segundo candado, por si algo lo dejó pasar (Enter en un campo,
       // por ejemplo).

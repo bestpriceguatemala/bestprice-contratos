@@ -462,3 +462,13 @@ test('textoNotaDeSoloCobro: con el carro todavía afuera NO dice que hay un cier
   assert.doesNotMatch(texto, /cierre de este contrato ya está hecho/);
   assert.match(texto, /todavía no se ha recibido/);
 });
+
+// La pantalla es la que sabe qué día es hoy: las DOS veces que pregunta qué impide guardar el cierre
+// (al repintar y al guardar) le pasa hoyISO(). Sin eso el candado de «un carro no se recibe mañana»
+// existiría en el núcleo y nunca se prendería.
+test('recibirCarro.js le pasa el día de hoy a problemasDelCierre en sus dos llamadas', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/recibirCarro.js', import.meta.url), 'utf8');
+  const llamadas = fuente.match(/problemasDelCierre\(contrato, campos[^)]*\)/g) ?? [];
+  assert.equal(llamadas.length, 2);
+  assert.ok(llamadas.every((l) => l.includes('hoyISO()')), llamadas.join(' | '));
+});

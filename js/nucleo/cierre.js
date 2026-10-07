@@ -50,7 +50,7 @@ export function construirCierre(contrato, campos) {
  * 3. El kilometraje retrocede
  * 4. El descuento deja el cobro en negativo
  */
-export function problemasDelCierre(contrato, cierre) {
+export function problemasDelCierre(contrato, cierre, hoy) {
   const problemas = [];
 
   // Falta la fecha real
@@ -65,6 +65,18 @@ export function problemasDelCierre(contrato, cierre) {
   // de días de atraso, o ninguno. Mismo corte que arriba, y por la misma razón.
   if (!esFechaISO(cierre.fechaReal)) {
     problemas.push('La fecha en que se recibió el carro no es válida. Revisa el año.');
+    return problemas;
+  }
+
+  // Un carro no se recibe mañana. Con el año mal tecleado («2062» por «2026») la pantalla
+  // calculaba 13,149 días de atraso, ofrecía cobrar Q8,546,850.00 ya escritos en «Monto» y
+  // «Recibir y cobrar» los registraba como un pago hecho: dinero que nadie recibió (prueba
+  // del sistema, 7 oct 2026). Solo se revisa si quien llama dice qué día es `hoy`; un cierre
+  // ya guardado con una fecha futura se puede corregir, que es justo lo que se le pide.
+  if (hoy && diasEntre(hoy, cierre.fechaReal) > 0) {
+    problemas.push(
+      `La fecha en que se recibió el carro (${textoFecha(cierre.fechaReal)}) todavía no llega. Revisa la fecha.`,
+    );
     return problemas;
   }
 
