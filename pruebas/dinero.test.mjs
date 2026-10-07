@@ -2326,10 +2326,18 @@ test('problemaDeLaFechaDelPago: vacía pide escribirla; el año de cinco dígito
   assert.equal(problemaDeLaFechaDelPago('2026-02-30'), 'La fecha del pago no es válida. Revisa el año.');
 });
 
+test('problemaDeLaFechaDelPago: un pago no es de mañana; hoy y los días pasados están bien, y sin «hoy» no se revisa', () => {
+  assert.equal(problemaDeLaFechaDelPago('2062-11-02', '2026-11-02'), 'La fecha del pago todavía no llega. Revisa la fecha.');
+  assert.equal(problemaDeLaFechaDelPago('2026-11-03', '2026-11-02'), 'La fecha del pago todavía no llega. Revisa la fecha.');
+  assert.equal(problemaDeLaFechaDelPago('2026-11-02', '2026-11-02'), null);
+  assert.equal(problemaDeLaFechaDelPago('2026-10-20', '2026-11-02'), null, 'un pago de días atrás que se anota hoy es normal');
+  assert.equal(problemaDeLaFechaDelPago('2062-11-02'), null);
+});
+
 test('guardarPago() le pregunta a problemaDeLaFechaDelPago antes de gastar un número de comprobante', () => {
   const fuente = readFileSync(new URL('../js/pantallas/dinero.js', import.meta.url), 'utf8');
   const cuerpo = fuente.slice(fuente.indexOf('async function guardarPago()'));
-  const pregunta = cuerpo.indexOf('problemaDeLaFechaDelPago(ui.fecha)');
+  const pregunta = cuerpo.indexOf('problemaDeLaFechaDelPago(ui.fecha, hoyISO())');
   const registra = cuerpo.indexOf('registrarElPago(');
   assert.ok(pregunta > 0, 'se pregunta por la fecha');
   assert.ok(registra > pregunta, 'y se pregunta ANTES de registrar el pago');

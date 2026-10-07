@@ -36,7 +36,7 @@ import {
 import { estadoContrato, pendientesDe } from '../nucleo/estados.js';
 import { atrasoDe } from '../nucleo/contrato.js';
 import { construirDueno } from '../nucleo/dueno.js';
-import { hoyISO, esFechaISO } from '../nucleo/fechas.js';
+import { hoyISO, esFechaISO, diasEntre } from '../nucleo/fechas.js';
 import { entrarADinero, salirDeDinero, sesionDeDinero } from '../dinero-sesion.js';
 import {
   cargarContratosParaDinero, cargarPagosDueno, cargarDuenos, guardarDueno, nuevoIdPagoDueno,
@@ -113,9 +113,13 @@ export const MENSAJE_PAGO_CAMBIO = 'Mientras tanto cambió la cuenta de este due
  * número de comprobante y el papel nunca se podía armar («no trae una fecha válida»), y no
  * hay dónde corregir un pago ya guardado (prueba del sistema, 7 oct 2026).
  */
-export function problemaDeLaFechaDelPago(fechaDelPago) {
+export function problemaDeLaFechaDelPago(fechaDelPago, hoy) {
   if (!fechaDelPago) return 'Escribe la fecha del pago.';
   if (!esFechaISO(fechaDelPago)) return 'La fecha del pago no es válida. Revisa el año.';
+  // Un pago que se registra ya se hizo: no puede ser de mañana. Con «2062» por «2026» el comprobante salía
+  // fechado en 2062 y, como no hay dónde corregir un pago ya guardado, se quedaba así. Solo se revisa si quien
+  // llama dice qué día es hoy.
+  if (hoy && diasEntre(hoy, fechaDelPago) > 0) return 'La fecha del pago todavía no llega. Revisa la fecha.';
   return null;
 }
 
@@ -1401,7 +1405,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     const campoFecha = raiz.querySelector('#dn-fecha');
     ui.fecha = campoFecha?.value || ui.fecha;
     ui.forma = raiz.querySelector('#dn-forma')?.value || ui.forma;
-    const problemaDeFecha = problemaDeLaFechaDelPago(ui.fecha);
+    const problemaDeFecha = problemaDeLaFechaDelPago(ui.fecha, hoyISO());
     if (problemaDeFecha) { ui.mensajePago = problemaDeFecha; dibujar(); return; }
     ui.ocupado = true;
     const boton = raiz.querySelector('#dn-guardar-pago');
