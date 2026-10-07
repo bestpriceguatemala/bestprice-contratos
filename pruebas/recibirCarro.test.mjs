@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   conKmSalidaNormalizado, textoBotonPago, textoAvisoRecibido, textoSaldo, totalDeEstaCobranza,
-  leerParametroRuta, textoAvisoCobro, valoresIniciales, textoCorreccion, textoNotaDeSoloCobro,
+  leerParametroRuta, textoAvisoCobro, valoresIniciales, textoCorreccion, textoNotaDeSoloCobro, fechaDelCobro,
   textoEstadoPago, textoAvisoSobrecobro, montoInicialPago, leerCamposDelCierre, plantilla, textoFalloAlGuardarElCierre,
 } from '../js/pantallas/recibirCarro.js';
 import { resumen, lineasDevolucion, saldoConTarjeta } from '../js/nucleo/contrato.js';
@@ -471,4 +471,21 @@ test('recibirCarro.js le pasa el día de hoy a problemasDelCierre en sus dos lla
   const llamadas = fuente.match(/problemasDelCierre\(contrato, campos[^)]*\)/g) ?? [];
   assert.equal(llamadas.length, 2);
   assert.ok(llamadas.every((l) => l.includes('hoyISO()')), llamadas.join(' | '));
+});
+
+// Prueba del sistema (7 oct 2026): al corregir el cierre de una renta ya guardada se cobraron Q1,400 hoy
+// y el pago quedó fechado el 22 de octubre —la fecha que se había tecleado en el campo de entrada—,
+// un día que todavía no llegaba. El dinero entra el día que entra.
+test('fechaDelCobro: al recibir por primera vez, la fecha de entrada; al corregir o en solo cobro, hoy', () => {
+  const base = { fechaReal: '2026-10-22', hoy: '2026-11-02' };
+  assert.equal(fechaDelCobro({ ...base, soloCobro: false, enCorreccion: false }), '2026-10-22');
+  assert.equal(fechaDelCobro({ ...base, soloCobro: false, enCorreccion: true }), '2026-11-02');
+  assert.equal(fechaDelCobro({ ...base, soloCobro: true, enCorreccion: true }), '2026-11-02');
+  assert.equal(fechaDelCobro({ ...base, soloCobro: true, enCorreccion: false }), '2026-11-02');
+});
+
+test('recibirCarro.js usa fechaDelCobro en el total que muestra y en el pago que guarda (si no, la pantalla dice una fecha y guarda otra)', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/recibirCarro.js', import.meta.url), 'utf8');
+  assert.equal((fuente.match(/fecha: fechaDelCobro\(/g) ?? []).length, 2);
+  assert.ok(!/fecha: campos\.fechaReal/.test(fuente), 'ya no se fecha un cobro con la fecha de entrada tecleada a secas');
 });

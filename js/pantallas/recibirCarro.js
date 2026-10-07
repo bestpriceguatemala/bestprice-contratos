@@ -216,6 +216,21 @@ export function textoFalloAlGuardarElCierre(error) {
 }
 
 /**
+ * La fecha con que se anota un cobro hecho desde esta pantalla: el día en que el dinero entra.
+ *
+ * - Al recibir el carro por primera vez, la fecha de entrada (así se anota desde el principio,
+ *   y un carro recibido «tarde» en el sistema conserva el día en que de verdad volvió).
+ * - Al CORREGIR un cierre que ya estaba guardado, hoy: lo que se cobra en esa corrección entra
+ *   ahora y no el día que dice el campo de fecha, que puede ser cualquiera —corregirla es justo
+ *   el motivo de abrir la pantalla—. En la prueba del sistema (7 oct 2026) un cobro de Q1,400
+ *   hecho hoy quedó fechado el 22 de octubre, un día que ni había llegado.
+ * - En el modo de solo cobro, hoy.
+ */
+export function fechaDelCobro({ soloCobro, enCorreccion, fechaReal, hoy }) {
+  return soloCobro || enCorreccion ? hoy : fechaReal;
+}
+
+/**
  * El renglón de "Pendientes de cobro" (flota.js) abre esta misma pantalla
  * pero en modo de solo cobro, agregando "?cobro=1" al final del id en el
  * enlace — el enrutador (router.js) empareja rutas por pedazos separados con
@@ -586,7 +601,7 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
       monto: montoField,
       forma: formaPago,
       porcentajeTarjeta: formaPago === 'tarjeta' ? pctTarjeta : 0,
-      fecha: soloCobro ? hoyISO() : campos.fechaReal,
+      fecha: fechaDelCobro({ soloCobro, enCorreccion, fechaReal: campos.fechaReal, hoy: hoyISO() }),
     });
 
     const hayCobroAhora = montoField > 0;
@@ -706,7 +721,7 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
           monto: montoField,
           forma: formaPago,
           porcentajeTarjeta: formaPago === 'tarjeta' ? pctTarjeta : 0,
-          fecha: campos.fechaReal,
+          fecha: fechaDelCobro({ soloCobro: false, enCorreccion, fechaReal: campos.fechaReal, hoy: hoyISO() }),
         })
         : contratoConCierre;
 
