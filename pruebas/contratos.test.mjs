@@ -15,7 +15,7 @@ import { garantiaPorLiberar } from '../js/nucleo/estados.js';
 import {
   primerDiaMes, ultimoDiaMes, filtrarPorEstado, contratosVisibles,
   claseFilaContrato, textoCuenta, numeroEnmascarado, textoConfirmarAnular, textoHoraTardia,
-  textoEstadoGarantia, seccionPagos, textoFalloAlAnular,
+  textoEstadoGarantia, seccionPagos, textoFalloAlAnular, textoSinResultados,
 } from '../js/pantallas/contratos.js';
 import { lineasSalida, lineasDevolucion, resumen } from '../js/nucleo/contrato.js';
 import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
@@ -437,4 +437,18 @@ test('textoFalloAlAnular: el rechazo por garantía ya liberada dice por qué, no
 test('anularDesdeLaFicha usa textoFalloAlAnular en su catch', () => {
   const fuente = readFileSync(new URL('../js/pantallas/contratos.js', import.meta.url), 'utf8');
   assert.match(fuente, /aviso\(textoFalloAlAnular\(error\), 'error'\)/);
+});
+
+// La lista solo trae las rentas cuya SALIDA cae en el rango (abre con el mes en curso). El 2 de noviembre,
+// buscar a un cliente que salió en octubre y sigue afuera contestaba «Sin resultados.» como si no existiera.
+test('textoSinResultados: dice el rango de salida que se está mirando y qué cambiar para buscar en otro mes', () => {
+  assert.equal(
+    textoSinResultados({ desde: primerDiaMes('2026-11-02'), hasta: ultimoDiaMes('2026-11-02') }),
+    'Sin resultados con salida del 1 nov 2026 al 30 nov 2026. Si buscas una renta de otro mes, cambia «Desde» y «Hasta».',
+  );
+});
+
+test('textoSinResultados: sin rango conocido no inventa fechas, pero sigue diciendo qué cambiar', () => {
+  assert.equal(textoSinResultados(), 'Sin resultados. Si buscas una renta de otro mes, cambia «Desde» y «Hasta».');
+  assert.equal(textoSinResultados({ desde: '2026-11-01' }), 'Sin resultados. Si buscas una renta de otro mes, cambia «Desde» y «Hasta».');
 });

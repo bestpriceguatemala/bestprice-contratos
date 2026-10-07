@@ -243,8 +243,20 @@ function filaContrato(c) {
     </tr>`;
 }
 
-function filasCuerpo(contratos) {
-  if (!contratos.length) return '<tr><td colspan="6" class="pendiente">Sin resultados.</td></tr>';
+/**
+ * Lo que dice la lista cuando no hay filas. La lista solo trae las rentas CUYA SALIDA cae en el
+ * rango de fechas (abre con el mes en curso), y «Sin resultados.» a secas no lo dice: el primer
+ * día del mes, la renta de un cliente que salió el mes pasado y sigue afuera —justo la que él
+ * busca— no aparecía, y el buscador contestaba como si no existiera (prueba del sistema, 7 oct
+ * 2026). Se le dice el rango y qué cambiar. Función pura.
+ */
+export function textoSinResultados({ desde, hasta } = {}) {
+  const rango = desde && hasta ? ` con salida del ${fecha(desde)} al ${fecha(hasta)}` : '';
+  return `Sin resultados${rango}. Si buscas una renta de otro mes, cambia «Desde» y «Hasta».`;
+}
+
+function filasCuerpo(contratos, rango) {
+  if (!contratos.length) return `<tr><td colspan="6" class="pendiente">${esc(textoSinResultados(rango))}</td></tr>`;
   return contratos.map(filaContrato).join('');
 }
 
@@ -278,7 +290,7 @@ async function dibujarListaEntrada(contenedor, sigoVigente) {
   function repintarFilas() {
     const cuerpo = el('ct-filas');
     if (!cuerpo) return;
-    cuerpo.innerHTML = filasCuerpo(contratosVisibles(ordenarPorSalida(contratos), { filtro, consulta }));
+    cuerpo.innerHTML = filasCuerpo(contratosVisibles(ordenarPorSalida(contratos), { filtro, consulta }), { desde, hasta });
     cablearFilas();
   }
 
@@ -317,7 +329,7 @@ async function dibujarListaEntrada(contenedor, sigoVigente) {
           <thead>
             <tr><th>N.°</th><th>Cliente</th><th>Carro</th><th>Fechas</th><th>Estado</th><th>Cuenta</th></tr>
           </thead>
-          <tbody id="ct-filas">${filasCuerpo(contratosVisibles(ordenarPorSalida(contratos), { filtro, consulta }))}</tbody>
+          <tbody id="ct-filas">${filasCuerpo(contratosVisibles(ordenarPorSalida(contratos), { filtro, consulta }), { desde, hasta })}</tbody>
         </table>
       </div>`;
 
