@@ -45,10 +45,11 @@ export function construirCierre(contrato, campos) {
  * Lo que impide guardar el cierre.
  * Retorna una lista de mensajes de error en español, o vacía si todo está bien.
  * Los mensajes van en este orden:
- * 1. Falta la fecha real
- * 2. La fecha real es anterior a la de salida
- * 3. El kilometraje retrocede
- * 4. El descuento deja el cobro en negativo
+ * 1. Falta la fecha real (y las fechas que no existen o que todavía no llegan)
+ * 2. Un monto negativo (combustible, daños, hora tardía, varios o descuento)
+ * 3. La fecha real es anterior a la de salida
+ * 4. El kilometraje retrocede
+ * 5. El descuento deja el cobro en negativo
  */
 export function problemasDelCierre(contrato, cierre, hoy) {
   const problemas = [];
@@ -79,6 +80,16 @@ export function problemasDelCierre(contrato, cierre, hoy) {
     );
     return problemas;
   }
+
+  // Combustible, daños, hora tardía, varios y descuento declaran mínimo 0 en el formulario, pero la
+  // pantalla no deja que el navegador lo exija. Un «Daños -300» bajaba la cuenta sin decir por qué, y un
+  // «Descuento -100» salía como una línea «Descuento Q100.00» en positivo que COBRABA de más (prueba
+  // del sistema, 7 oct 2026). Para bajar la cuenta existe el descuento; para subirla, los varios.
+  const negativos = [
+    ['Combustible', cierre.combustible], ['Daños', cierre.danos], ['Hora tardía', cierre.horaTardia],
+    ['Varios', cierre.varios], ['Descuento', cierre.descuento],
+  ].filter(([, monto]) => q(monto) < 0).map(([nombre]) => nombre);
+  if (negativos.length) problemas.push(`No pueden ser negativos: ${negativos.join(', ')}.`);
 
   // La fecha real es anterior a la de salida
   //

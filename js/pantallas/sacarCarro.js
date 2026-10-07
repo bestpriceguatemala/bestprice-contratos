@@ -315,6 +315,7 @@ export function textoCarroPropioNoEncontrado(falloFlota) {
  */
 export function motivoParaNoGuardar({
   hayCliente, ajeno, hayCarroPropio, falloFlota = false, placasAjeno, fechaSalida, dias, precioDia, rentadoPor,
+  cobrosExtra = {},
 }) {
   if (!hayCliente) return 'Elige o da de alta un cliente antes de guardar.';
   if (!ajeno && !hayCarroPropio) {
@@ -326,9 +327,29 @@ export function motivoParaNoGuardar({
   if (fechaSalida && !esFechaISO(fechaSalida)) return 'La fecha de salida no es válida. Revisa el año.';
   if (!dias || !precioDia) return 'Faltan los días o el precio por día.';
   if (dias < 0 || precioDia < 0) return 'Los días y el precio por día no pueden ser negativos.';
+  // El campo de días declara paso 1 y mínimo 1, pero la pantalla no deja que el navegador lo exija
+  // (novalidate). «2.5 días» cobraba 2.5 × el precio y calculaba la devolución con 2: el dinero y la
+  // fecha contaban días distintos (prueba del sistema, 7 oct 2026).
+  if (!Number.isInteger(dias)) return 'Los días tienen que ser un número entero, sin decimales.';
+  // Los cobros extra declaran mínimo 0 y tampoco se exigía: un «Varios -200» era un descuento escondido
+  // en una línea de cobro.
+  const negativos = Object.entries(ETIQUETAS_COBROS_EXTRA).filter(([campo]) => cobrosExtra[campo] < 0).map(([, etiqueta]) => etiqueta);
+  if (negativos.length) return `No pueden ser negativos: ${negativos.join(', ')}.`;
   if (!rentadoPor) return 'Falta quién lo rentó.';
   return null;
 }
+
+/** Los cobros extra de la salida, con el nombre que lee el dueño en el formulario. */
+const ETIQUETAS_COBROS_EXTRA = {
+  seguroDia: 'Seguro',
+  seguroTercerosDia: 'Seguro de terceros',
+  seguroMenoresDia: 'Seguro de menores',
+  seguroPaiDia: 'Seguro PAI',
+  deducible: 'Deducible',
+  deducibleBajo: 'Deducible bajo',
+  cartaPoderPrecio: 'Carta poder — precio',
+  variosPrecio: 'Varios — precio',
+};
 
 /**
  * Los lectores de campos del formulario: `val` (texto crudo), `texto` (sin
@@ -1589,6 +1610,16 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       dias: num('sc-dias'),
       precioDia: num('sc-precio-dia'),
       rentadoPor: texto('sc-rentado-por'),
+      cobrosExtra: {
+        seguroDia: num('sc-seguro-dia'),
+        seguroTercerosDia: num('sc-seguro-terceros-dia'),
+        seguroMenoresDia: num('sc-seguro-menores-dia'),
+        seguroPaiDia: num('sc-seguro-pai-dia'),
+        deducible: num('sc-deducible'),
+        deducibleBajo: num('sc-deducible-bajo'),
+        cartaPoderPrecio: num('sc-carta-poder-precio'),
+        variosPrecio: num('sc-varios-precio'),
+      },
     });
     if (motivo) {
       aviso(motivo, 'error');

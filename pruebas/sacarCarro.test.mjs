@@ -1201,3 +1201,32 @@ test('avisoAnticipoDeMas: no avisa si el anticipo cabe en la salida, si está pe
   assert.equal(avisoAnticipoDeMas(1400, null), null);
   assert.equal(avisoAnticipoDeMas(0, reservaDeDosDias(5000, true)), null, 'sin días o sin precio todavía no hay con qué comparar');
 });
+
+// Prueba del sistema (7 oct 2026): «2.5 días» cobraba 2.5 × el precio y la devolución prevista contaba 2: el
+// dinero y la fecha de la misma renta contaban días distintos. El campo declara paso 1 y mínimo 1 (la pantalla
+// no deja que el navegador lo exija); los cobros extra declaran mínimo 0, y un «Varios -200» era un descuento
+// escondido en una línea de cobro.
+test('motivoParaNoGuardar: los días tienen que ser enteros', () => {
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), dias: 2.5 }), 'Los días tienen que ser un número entero, sin decimales.');
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), dias: 0.5 }), 'Los días tienen que ser un número entero, sin decimales.');
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), dias: 30 }), null);
+});
+
+test('motivoParaNoGuardar: un cobro extra negativo no se guarda, y dice cuáles', () => {
+  assert.equal(
+    motivoParaNoGuardar({ ...salidaLista(), cobrosExtra: { variosPrecio: -200 } }),
+    'No pueden ser negativos: Varios — precio.',
+  );
+  assert.equal(
+    motivoParaNoGuardar({ ...salidaLista(), cobrosExtra: { seguroPaiDia: -5, cartaPoderPrecio: -350, deducibleBajo: 100 } }),
+    'No pueden ser negativos: Seguro PAI, Carta poder — precio.',
+  );
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), cobrosExtra: { variosPrecio: 0, cartaPoderPrecio: 350 } }), null);
+});
+
+test('la pantalla de la salida le pasa a motivoParaNoGuardar los ocho cobros extra (si no, la regla existiría y no se prendería)', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/sacarCarro.js', import.meta.url), 'utf8');
+  for (const id of ['sc-seguro-dia', 'sc-seguro-terceros-dia', 'sc-seguro-menores-dia', 'sc-seguro-pai-dia', 'sc-deducible', 'sc-deducible-bajo', 'sc-carta-poder-precio', 'sc-varios-precio']) {
+    assert.match(fuente, new RegExp(`cobrosExtra: \\{[^}]*num\\('${id}'\\)`), id);
+  }
+});

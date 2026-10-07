@@ -241,3 +241,25 @@ test('recibir hoy, o en un día pasado (se olvidó anotarlo), no es ningún prob
 test('sin decir qué día es hoy no se revisa el futuro: el cálculo del cierre no depende del reloj', () => {
   assert.deepEqual(problemasDelCierre(contrato(), { ...campos, fechaReal: '2062-08-25' }), []);
 });
+
+// Prueba del sistema (7 oct 2026): en «Recibir carro» se aceptaron montos negativos. «Daños -300» bajaba la
+// cuenta sin decir por qué, y «Descuento -100» salía como una línea «Descuento Q100.00» en positivo que
+// COBRABA de más. Los campos declaran mínimo 0; ahora el cierre lo exige.
+test('un monto negativo en combustible, daños, hora tardía, varios o descuento no se puede guardar, y dice cuáles', () => {
+  for (const [campo, nombre] of [
+    ['combustible', 'Combustible'], ['danos', 'Daños'], ['horaTardia', 'Hora tardía'], ['varios', 'Varios'], ['descuento', 'Descuento'],
+  ]) {
+    const p = problemasDelCierre(contrato(), { ...campos, [campo]: -50 });
+    assert.ok(p.includes(`No pueden ser negativos: ${nombre}.`), `${campo}: ${p.join(' | ')}`);
+  }
+  assert.deepEqual(
+    problemasDelCierre(contrato(), { ...campos, danos: -300, descuento: -100 }).filter((m) => m.startsWith('No pueden')),
+    ['No pueden ser negativos: Daños, Descuento.'],
+    'varios a la vez, en un solo mensaje y en el orden del formulario',
+  );
+});
+
+test('cero y vacío en esos montos no son negativos: el cierre del ejemplo sigue sin problemas', () => {
+  assert.deepEqual(problemasDelCierre(contrato(), { ...campos, danos: 0, combustible: 0, varios: 0, descuento: 0, horaTardia: 0 }), []);
+  assert.deepEqual(problemasDelCierre(contrato(), campos), []);
+});
