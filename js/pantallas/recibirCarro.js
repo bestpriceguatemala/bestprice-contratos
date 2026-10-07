@@ -185,11 +185,18 @@ export function textoAvisoSobrecobro(saldo, monto) {
   return `Estás cobrando ${dinero(m)} y solo te debe ${dinero(s)}. Van a quedar ${dinero(q(m - s))} a favor del cliente.`;
 }
 
-/** El aviso final, con el número de contrato y lo que haya quedado pendiente. */
+/**
+ * El aviso final, con el número de contrato y lo que haya quedado pendiente.
+ *
+ * Con el saldo en negativo el cliente pagó de más (o una corrección le bajó la cuenta):
+ * decir «recibido y cobrado» contradecía a la pantalla, que un instante antes decía «Este
+ * contrato quedó con Q1,400.00 a favor del cliente». Se dice igual que ella (prueba del
+ * sistema, 7 oct 2026).
+ */
 export function textoAvisoRecibido(numero, saldoRestante) {
-  return saldoRestante > 0
-    ? `Contrato ${numero} recibido. Falta cobrar ${dinero(saldoRestante)}.`
-    : `Contrato ${numero} recibido y cobrado.`;
+  if (saldoRestante > 0) return `Contrato ${numero} recibido. Falta cobrar ${dinero(saldoRestante)}.`;
+  if (saldoRestante < 0) return `Contrato ${numero} recibido. Quedaron ${dinero(-saldoRestante)} a favor del cliente.`;
+  return `Contrato ${numero} recibido y cobrado.`;
 }
 
 /**
@@ -222,11 +229,24 @@ export function leerParametroRuta(parametroRuta) {
   return { contratoId, soloCobro };
 }
 
+/**
+ * La nota del modo de solo cobro. «El cierre ya está hecho» solo es cierto si el carro
+ * ya volvió: «Pendientes de cobro» (flota.js) también ofrece «Cobrar» en una renta que
+ * sigue afuera con un saldo (la salida se pagó a medias), y ahí la pantalla afirmaba un
+ * cierre que no existe (prueba del sistema, 7 oct 2026). Función pura.
+ */
+export function textoNotaDeSoloCobro(contrato) {
+  return contrato?.cierre?.fechaReal
+    ? 'El cierre de este contrato ya está hecho: aquí solo se registra el abono.'
+    : 'Este carro todavía no se ha recibido: aquí solo se registra el abono. El cierre se hace al recibirlo.';
+}
+
 /** El aviso final del modo de solo cobro: nunca dice "recibido", el carro no se tocó aquí. */
 export function textoAvisoCobro(numero, saldoRestante) {
-  return saldoRestante > 0
-    ? `Abono registrado en el contrato ${numero}. Falta cobrar ${dinero(saldoRestante)}.`
-    : `Contrato ${numero} cobrado por completo.`;
+  if (saldoRestante > 0) return `Abono registrado en el contrato ${numero}. Falta cobrar ${dinero(saldoRestante)}.`;
+  // Cobrar de más ya avisó en rojo antes de guardar; el aviso final no lo borra con un «por completo».
+  if (saldoRestante < 0) return `Abono registrado en el contrato ${numero}. Quedaron ${dinero(-saldoRestante)} a favor del cliente.`;
+  return `Contrato ${numero} cobrado por completo.`;
 }
 
 /**
@@ -385,7 +405,7 @@ export function plantilla(contrato, soloCobro) {
             Kilometraje de salida: ${esc(textoEntero(contrato.kmSalida))}<br>
             Pagado hasta ahora: ${esc(dinero(pagadoSalida))}
           </div>
-          ${soloCobro ? '<p class="sc-nota">El cierre de este contrato ya está hecho: aquí solo se registra el abono.</p>' : ''}
+          ${soloCobro ? `<p class="sc-nota">${esc(textoNotaDeSoloCobro(contrato))}</p>` : ''}
         </section>
 ${bloqueCierre}
       </div>
@@ -636,7 +656,7 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
       });
       const guardado = await guardarContrato(contratoConPago);
       const saldoRestante = resumen(guardado).saldo;
-      aviso(textoAvisoCobro(guardado.numero, saldoRestante), saldoRestante > 0 ? 'info' : 'exito');
+      aviso(textoAvisoCobro(guardado.numero, saldoRestante), saldoRestante === 0 ? 'exito' : 'info');
       location.hash = '#/flota';
     } catch {
       aviso('No se pudo registrar el abono. Intenta de nuevo.', 'error');
@@ -696,7 +716,7 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
       // pero "recibido, falta cobrar Qxxx" no lo es del todo — el carro ya
       // volvió, pero todavía queda una deuda abierta. Un nivel más plano
       // ('info') evita que un pendiente se vea celebrado en verde.
-      aviso(textoAvisoRecibido(guardado.numero, saldoRestante), saldoRestante > 0 ? 'info' : 'exito');
+      aviso(textoAvisoRecibido(guardado.numero, saldoRestante), saldoRestante === 0 ? 'exito' : 'info');
       location.hash = '#/flota';
     } catch (error) {
       aviso(textoFalloAlGuardarElCierre(error), 'error');

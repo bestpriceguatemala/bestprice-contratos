@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   conKmSalidaNormalizado, textoBotonPago, textoAvisoRecibido, textoSaldo, totalDeEstaCobranza,
-  leerParametroRuta, textoAvisoCobro, valoresIniciales, textoCorreccion,
+  leerParametroRuta, textoAvisoCobro, valoresIniciales, textoCorreccion, textoNotaDeSoloCobro,
   textoEstadoPago, textoAvisoSobrecobro, montoInicialPago, leerCamposDelCierre, plantilla, textoFalloAlGuardarElCierre,
 } from '../js/pantallas/recibirCarro.js';
 import { resumen, lineasDevolucion, saldoConTarjeta } from '../js/nucleo/contrato.js';
@@ -18,6 +18,7 @@ import { construirCierre } from '../js/nucleo/cierre.js';
 import { agregarPago, CODIGO_GARANTIA_LIBERADA_CON_SALDO } from '../js/datos.js';
 import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
 import { contratoGuardadoConHoraTardiaAlSalir } from './fixtures/contratoGuardadoConHoraTardiaAlSalir.mjs';
+import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
 
 test('conKmSalidaNormalizado: compatibilidad con contratos guardados antes del cambio de nombre (kilometrajeSalida -> kmSalida)', () => {
   const contrato = { id: 'c1', kilometrajeSalida: 45000 };
@@ -65,8 +66,8 @@ test('textoAvisoRecibido: sin saldo, dice que ya se cobró', () => {
   assert.equal(textoAvisoRecibido(14, 0), 'Contrato 14 recibido y cobrado.');
 });
 
-test('textoAvisoRecibido: con saldo a favor del cliente, tampoco falta cobrar', () => {
-  assert.equal(textoAvisoRecibido(14, -50), 'Contrato 14 recibido y cobrado.');
+test('textoAvisoRecibido: con saldo a favor del cliente, no dice «cobrado»: dice cuánto queda a su favor', () => {
+  assert.equal(textoAvisoRecibido(14, -50), 'Contrato 14 recibido. Quedaron Q50.00 a favor del cliente.');
 });
 
 test('textoSaldo: positivo se rotula "Saldo"', () => {
@@ -150,8 +151,8 @@ test('textoAvisoCobro: saldo en cero, dice que se cobró por completo', () => {
   assert.equal(textoAvisoCobro(14, 0), 'Contrato 14 cobrado por completo.');
 });
 
-test('textoAvisoCobro: saldo a favor del cliente, tampoco falta cobrar', () => {
-  assert.equal(textoAvisoCobro(14, -50), 'Contrato 14 cobrado por completo.');
+test('textoAvisoCobro: saldo a favor del cliente, no dice «por completo»: dice cuánto queda a su favor', () => {
+  assert.equal(textoAvisoCobro(14, -50), 'Abono registrado en el contrato 14. Quedaron Q50.00 a favor del cliente.');
 });
 
 // CRÍTICO de la revisión final: el botón "atrás" del navegador reabría un
@@ -446,4 +447,18 @@ test('textoFalloAlGuardarElCierre: el rechazo por garantía ya liberada dice por
 test('guardar() del cierre usa textoFalloAlGuardarElCierre en su catch', () => {
   const fuente = readFileSync(new URL('../js/pantallas/recibirCarro.js', import.meta.url), 'utf8');
   assert.match(fuente, /aviso\(textoFalloAlGuardarElCierre\(error\), 'error'\)/);
+});
+
+// «Pendientes de cobro» (flota.js) ofrece «Cobrar» en cualquier renta con saldo, haya vuelto el
+// carro o no. La nota de la pantalla de solo cobro decía siempre «El cierre ya está hecho».
+test('textoNotaDeSoloCobro: con el carro recibido dice que el cierre ya está hecho', () => {
+  const recibido = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 9, recibidoEl: '2026-10-06' });
+  assert.match(textoNotaDeSoloCobro(recibido), /El cierre de este contrato ya está hecho/);
+});
+
+test('textoNotaDeSoloCobro: con el carro todavía afuera NO dice que hay un cierre, y dice lo que falta', () => {
+  const afuera = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 9 });
+  const texto = textoNotaDeSoloCobro(afuera);
+  assert.doesNotMatch(texto, /cierre de este contrato ya está hecho/);
+  assert.match(texto, /todavía no se ha recibido/);
 });
