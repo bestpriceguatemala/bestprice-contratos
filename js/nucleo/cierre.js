@@ -8,7 +8,9 @@
 // Nunca ajustar una cifra para que cuadre. Si el descuento es mayor que lo que
 // hay que cobrar, se lo decimos tal como es.
 
-import { q, textoDosDecimales, textoConQ } from './dinero.js';
+import {
+  q, textoDosDecimales, textoConQ, textoEntero,
+} from './dinero.js';
 import { diasEntre, textoFecha, esFechaISO } from './fechas.js';
 import { resumen, horaTardiaDe } from './contrato.js';
 
@@ -84,11 +86,13 @@ export function problemasDelCierre(contrato, cierre) {
   const kmSalida = q(contrato.kmSalida);
   const kmEntrada = q(cierre.kmEntrada);
   if (kmSalida && kmEntrada < kmSalida) {
-    const kmSalidaTexto = textoDosDecimales(kmSalida);
-    const kmEntradaTexto = textoDosDecimales(kmEntrada);
-    problemas.push(
-      `El kilometraje de entrada (${kmEntradaTexto}) es menor que el de salida (${kmSalidaTexto}).`,
-    );
+    // Kilómetros enteros, no con centavos (textoEntero, igual que el encabezado de la pantalla:
+    // «80,000», no «80,000.00»). Y sin escribir todavía no es «0.00 es menor»: el campo está
+    // vacío, y lo que falta es escribirlo (este aviso salía en rojo apenas se abría la pantalla).
+    const kmSalidaTexto = textoEntero(kmSalida);
+    problemas.push(kmEntrada > 0
+      ? `El kilometraje de entrada (${textoEntero(kmEntrada)}) es menor que el de salida (${kmSalidaTexto}).`
+      : `Falta el kilometraje de entrada: el carro salió con ${kmSalidaTexto}.`);
   }
 
   // El descuento deja el subtotal en negativo

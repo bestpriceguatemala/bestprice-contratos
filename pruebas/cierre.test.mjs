@@ -198,3 +198,24 @@ test('una fecha de entrada buena sigue sin problemas, y la vacía sigue diciendo
   assert.deepEqual(problemasDelCierre(contrato(), { ...campos, fechaReal: '2026-08-25' }), []);
   assert.deepEqual(problemasDelCierre(contrato(), { ...campos, fechaReal: '' }), ['Falta la fecha en que se recibió el carro.']);
 });
+
+// Prueba del sistema (7 oct 2026): al abrir «Recibir carro» de un carro que salió con 80,000 km,
+// ANTES de escribir nada, el cierre ya decía en rojo «El kilometraje de entrada (0.00) es menor
+// que el de salida (80,000.00)»: kilómetros con centavos (en el encabezado de la misma pantalla
+// salen como «80,000»), y un «0.00» que el mostrador nunca escribió.
+test('el aviso del kilometraje habla en kilómetros enteros, sin centavos', () => {
+  const [mensaje] = problemasDelCierre(contrato(), { ...campos, kmEntrada: 44000 });
+  assert.equal(mensaje, 'El kilometraje de entrada (44,000) es menor que el de salida (45,000).');
+  assert.ok(!/\.00/.test(mensaje));
+});
+
+test('con el kilometraje de entrada sin escribir, el aviso dice que FALTA, no que retrocede a «0.00»', () => {
+  for (const kmEntrada of [0, '', undefined]) {
+    const problemas = problemasDelCierre(contrato(), { ...campos, kmEntrada });
+    assert.deepEqual(problemas, ['Falta el kilometraje de entrada: el carro salió con 45,000.'], String(kmEntrada));
+  }
+});
+
+test('un kilometraje igual al de salida (el carro no se movió) no es problema', () => {
+  assert.deepEqual(problemasDelCierre(contrato(), { ...campos, kmEntrada: 45000 }), []);
+});
