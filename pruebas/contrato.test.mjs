@@ -472,3 +472,22 @@ test('ese contrato, cuando el mostrador anota además una hora tardía al recibi
   assert.equal(r.totalDevolucion, 930, '730 + 200 que se escribió al recibir');
   assert.equal(r.subtotal, 4230);
 });
+
+// Prueba del sistema (7 oct 2026): una renta de un solo día decía «1 días × Q500.00» en el detalle de
+// la salida, en el contrato y en el cierre — y el recargo de seguros por atraso «1 día(s)». Las rentas
+// de un día son de las más comunes.
+test('el detalle de la renta concuerda en singular y en plural: «1 día», «4 días»', () => {
+  const detalle = (dias) => lineasSalida({ dias, precioDia: 500 }).find((l) => l.concepto === 'Renta').detalle;
+  assert.equal(detalle(1), '1 día × Q500.00');
+  assert.equal(detalle(4), '4 días × Q500.00');
+});
+
+test('los seguros extra por atraso dicen «1 día de atraso» o «2 días de atraso», sin «(s)»', () => {
+  const c = (atraso) => ({
+    dias: 3, precioDia: 500, seguroMenoresDia: 40, seguroPaiDia: 30, devolucionPrevista: '2026-10-10',
+    cierre: { fechaReal: `2026-10-${10 + atraso}` },
+  });
+  const detalle = (atraso) => lineasDevolucion(c(atraso)).find((l) => l.concepto === 'Seguros extra').detalle;
+  assert.equal(detalle(1), 'por 1 día de atraso');
+  assert.equal(detalle(2), 'por 2 días de atraso');
+});

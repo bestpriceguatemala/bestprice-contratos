@@ -70,7 +70,7 @@ export function lineasSalida(c) {
   const lineas = [];
 
   if (dias && precio) {
-    lineas.push({ concepto: 'Renta', detalle: `${dias} días × Q${textoDosDecimales(precio)}`, monto: q(dias * precio) });
+    lineas.push({ concepto: 'Renta', detalle: `${dias} ${dias === 1 ? 'día' : 'días'} × Q${textoDosDecimales(precio)}`, monto: q(dias * precio) });
   }
 
   const porDia = suma(c?.seguroMenoresDia, c?.seguroPaiDia);
@@ -113,7 +113,7 @@ export function lineasDevolucion(c) {
   const porDia = suma(c?.seguroMenoresDia, c?.seguroPaiDia);
   const extraAtraso = q(porDia * atraso);
   if (extraAtraso) {
-    lineas.push({ concepto: 'Seguros extra', detalle: `por ${atraso} día(s) de atraso`, monto: extraAtraso });
+    lineas.push({ concepto: 'Seguros extra', detalle: `por ${atraso} ${atraso === 1 ? 'día' : 'días'} de atraso`, monto: extraAtraso });
   }
 
   if (q(c.cierre.danos)) lineas.push({ concepto: 'Daños', detalle: c.cierre.danosDetalle || '', monto: q(c.cierre.danos) });
