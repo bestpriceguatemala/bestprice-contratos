@@ -226,8 +226,11 @@ export function textoFalloAlGuardarElCierre(error) {
  *   hecho hoy quedó fechado el 22 de octubre, un día que ni había llegado.
  * - En el modo de solo cobro, hoy.
  */
-export function fechaDelCobro({ soloCobro, enCorreccion, fechaReal, hoy }) {
-  return soloCobro || enCorreccion ? hoy : fechaReal;
+export function fechaDelCobro({ soloCobro, enCorreccion, campos, hoy }) {
+  // En solo cobro la pantalla no dibuja el bloque del cierre y `campos` es null: la fecha de entrada
+  // no se lee ni se necesita (un primer intento de esta función leía campos.fechaReal siempre y
+  // reventaba el «Cobrar» de «Pendientes de cobro»: la pantalla dejaba de responder).
+  return soloCobro || enCorreccion ? hoy : campos?.fechaReal;
 }
 
 /**
@@ -601,7 +604,7 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
       monto: montoField,
       forma: formaPago,
       porcentajeTarjeta: formaPago === 'tarjeta' ? pctTarjeta : 0,
-      fecha: fechaDelCobro({ soloCobro, enCorreccion, fechaReal: campos.fechaReal, hoy: hoyISO() }),
+      fecha: fechaDelCobro({ soloCobro, enCorreccion, campos, hoy: hoyISO() }),
     });
 
     const hayCobroAhora = montoField > 0;
@@ -721,7 +724,7 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
           monto: montoField,
           forma: formaPago,
           porcentajeTarjeta: formaPago === 'tarjeta' ? pctTarjeta : 0,
-          fecha: fechaDelCobro({ soloCobro: false, enCorreccion, fechaReal: campos.fechaReal, hoy: hoyISO() }),
+          fecha: fechaDelCobro({ soloCobro: false, enCorreccion, campos, hoy: hoyISO() }),
         })
         : contratoConCierre;
 

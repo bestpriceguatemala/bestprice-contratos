@@ -477,15 +477,23 @@ test('recibirCarro.js le pasa el día de hoy a problemasDelCierre en sus dos lla
 // y el pago quedó fechado el 22 de octubre —la fecha que se había tecleado en el campo de entrada—,
 // un día que todavía no llegaba. El dinero entra el día que entra.
 test('fechaDelCobro: al recibir por primera vez, la fecha de entrada; al corregir o en solo cobro, hoy', () => {
-  const base = { fechaReal: '2026-10-22', hoy: '2026-11-02' };
+  const base = { campos: { fechaReal: '2026-10-22' }, hoy: '2026-11-02' };
   assert.equal(fechaDelCobro({ ...base, soloCobro: false, enCorreccion: false }), '2026-10-22');
   assert.equal(fechaDelCobro({ ...base, soloCobro: false, enCorreccion: true }), '2026-11-02');
   assert.equal(fechaDelCobro({ ...base, soloCobro: true, enCorreccion: true }), '2026-11-02');
   assert.equal(fechaDelCobro({ ...base, soloCobro: true, enCorreccion: false }), '2026-11-02');
 });
 
+// El «Cobrar» de «Pendientes de cobro» (modo de solo cobro) no dibuja el bloque del cierre: `campos` es null.
+// Una primera versión de fechaDelCobro leía campos.fechaReal siempre y la pantalla se quedaba sin responder.
+test('fechaDelCobro: en solo cobro `campos` es null y no se toca', () => {
+  assert.equal(fechaDelCobro({ soloCobro: true, enCorreccion: true, campos: null, hoy: '2026-11-02' }), '2026-11-02');
+  assert.equal(fechaDelCobro({ soloCobro: true, enCorreccion: false, campos: null, hoy: '2026-11-02' }), '2026-11-02');
+});
+
 test('recibirCarro.js usa fechaDelCobro en el total que muestra y en el pago que guarda (si no, la pantalla dice una fecha y guarda otra)', () => {
   const fuente = readFileSync(new URL('../js/pantallas/recibirCarro.js', import.meta.url), 'utf8');
   assert.equal((fuente.match(/fecha: fechaDelCobro\(/g) ?? []).length, 2);
   assert.ok(!/fecha: campos\.fechaReal/.test(fuente), 'ya no se fecha un cobro con la fecha de entrada tecleada a secas');
+  assert.ok(!/fechaDelCobro\([^)]*campos\.fechaReal/.test(fuente), 'la pantalla no lee campos.fechaReal por su cuenta: en solo cobro campos es null');
 });
