@@ -90,13 +90,24 @@ function cifraResumen({
 }
 
 /**
+ * A dónde lleva la cifra «Atrasados»: el calendario de hoy, que lista TODOS los atrasados
+ * (la misma lista que se cuenta) cada uno con su «Recibir carro». Antes bajaba a los
+ * cuadros de esta pantalla, y ahí un carro ajeno no tiene cuadro: con dos carros ajenos
+ * vencidos el resumen decía «2 Atrasados» y el detalle mostraba cuatro carros
+ * «Disponible» (prueba del sistema, 7 oct 2026). Una cifra tiene que llevar a lo que cuenta.
+ */
+export function rutaDeAtrasados(hoy) {
+  return `#/calendario/${hoy}`;
+}
+
+/**
  * El bloque completo, arriba de la flota (brief: "un preview con la
- * información necesaria pero no detallada"). Salen y regresan van al día de
- * hoy en el calendario (`#/calendario/:fecha`, la ruta que registra esa
- * pantalla); atrasados y garantías apuntan a lo que ya existe más abajo en
- * esta misma pantalla — el grupo de tarjetas y la lista de "Garantías por
- * liberar" — así que viajan con un data-accion que el manejador de clics de
- * pintarFlota resuelve haciendo scroll, en vez de inventar una ruta nueva.
+ * información necesaria pero no detallada"). Salen, regresan y atrasados van al día de
+ * hoy en el calendario (`#/calendario/:fecha`, la ruta que registra esa pantalla);
+ * las garantías apuntan a lo que ya existe más abajo en esta misma pantalla — la
+ * lista de "Garantías por liberar", que sí lista contratos, ajenos incluidos — así que
+ * viajan con un data-accion que el manejador de clics de pintarFlota resuelve haciendo
+ * scroll, en vez de inventar una ruta nueva.
  *
  * "regresan" se rotula "Por regresar hoy", no "Regresan hoy": son citas de
  * HOY que TODAVÍA no volvieron (movimientosDelDia ya saca del conteo el
@@ -117,8 +128,7 @@ function seccionResumen(numeros, hoy, { falloReservas = false, falloContratos = 
     cifraResumen({
       etiqueta: 'Atrasados',
       valor: numeros.atrasados,
-      href: '#/flota',
-      dataAccion: 'ver-atrasados',
+      href: rutaDeAtrasados(hoy),
       esAtrasados: true,
       incompleto: falloContratos,
     }),
@@ -371,21 +381,20 @@ export async function pintarFlota(contenedor) {
 
   // Único manejador de clics para los botones que viven dentro de las listas
   // de pendientes (por ahora solo "Liberar garantía": "Cobrar" es un enlace
-  // normal, el enrutador ya lo resuelve solo) y para las dos cifras del
-  // resumen que no van al calendario ("Atrasados" y "Garantías por liberar"):
-  // esas apuntan a algo que ya existe más abajo en esta misma pantalla
-  // (brief, Paso 2), así que el clic no navega — solo hace scroll hasta ahí.
+  // normal, el enrutador ya lo resuelve solo) y para la cifra del resumen que
+  // no va al calendario ("Garantías por liberar"): apunta a una lista que ya
+  // existe más abajo en esta misma pantalla (brief, Paso 2), así que el clic
+  // no navega — solo hace scroll hasta ahí.
   // Se asigna con `onclick`, no `addEventListener`: el router reutiliza
   // siempre el mismo <main id="pantalla">, así que un `addEventListener` aquí
   // se iría acumulando cada vez que se vuelve a entrar a esta pantalla en la
   // misma sesión, y un solo clic terminaría llamando a `liberarGarantia`
   // varias veces (o repitiendo el scroll varias veces).
   contenedor.onclick = (ev) => {
-    const salto = ev.target.closest('[data-accion="ver-atrasados"], [data-accion="ver-garantias"]');
+    const salto = ev.target.closest('[data-accion="ver-garantias"]');
     if (salto) {
       ev.preventDefault();
-      const destino = salto.dataset.accion === 'ver-atrasados' ? 'flota-cuadros' : 'pendientes-garantia';
-      document.getElementById(destino)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.getElementById('pendientes-garantia')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
     const boton = ev.target.closest('[data-accion="liberar"]');

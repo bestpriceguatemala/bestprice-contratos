@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  textoConfirmarLiberar, textoAvisoGarantiaLiberada, estiloCifraResumen,
+  textoConfirmarLiberar, textoAvisoGarantiaLiberada, estiloCifraResumen, rutaDeAtrasados,
 } from '../js/pantallas/flota.js';
 
 test('textoConfirmarLiberar: nombra al cliente y el monto, y avisa que no se deshace', () => {
@@ -57,4 +57,11 @@ test('estiloCifraResumen: atrasados en positivo es alerta (rojo)', () => {
 test('estiloCifraResumen: cualquier otra cifra en positivo es normal, nunca alerta', () => {
   assert.equal(estiloCifraResumen(3, false), 'normal');
   assert.equal(estiloCifraResumen(1, false), 'normal');
+});
+
+// El número «Atrasados» del resumen cuenta contratos, ajenos incluidos; los cuadros de esta pantalla
+// son solo de la flota propia. Tiene que llevar a la lista que sí los trae.
+test('rutaDeAtrasados: lleva al calendario de hoy (que lista todos los atrasados), no a los cuadros de la flota', () => {
+  assert.equal(rutaDeAtrasados('2026-10-20'), '#/calendario/2026-10-20');
+  assert.notEqual(rutaDeAtrasados('2026-10-20'), '#/flota');
 });
