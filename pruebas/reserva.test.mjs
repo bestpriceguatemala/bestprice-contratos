@@ -439,3 +439,26 @@ test('faltaAlgoEnReserva: una fecha de salida que no existe (año de cinco dígi
   assert.deepEqual(faltaAlgoEnReserva({ ...buena, fechaSalida: '20261-10-15' }), ['Fecha de salida (el año no es válido)']);
   assert.deepEqual(faltaAlgoEnReserva({ ...buena, fechaSalida: '' }), ['Fecha de salida'], 'vacía sigue siendo «falta»');
 });
+
+// Prueba del sistema (7 oct 2026): una reservación de -3 días a -Q500 con -Q100 de anticipo se guardó, con la
+// devolución prevista antes de la salida. Se arma con construirReserva (lo que guarda reservas.js).
+test('una reservación con días, precio o anticipo negativos no se puede guardar, y dice cuál', () => {
+  const buena = { clienteNombre: 'Ana', fechaSalida: '2026-12-10', dias: 3, precioDia: 500, anticipo: 100 };
+  assert.deepEqual(faltaAlgoEnReserva(construirReserva({}, buena)), []);
+  assert.deepEqual(faltaAlgoEnReserva(construirReserva({}, { ...buena, dias: -3 })), ['Días (no pueden ser negativos)']);
+  assert.deepEqual(faltaAlgoEnReserva(construirReserva({}, { ...buena, precioDia: -500 })), ['Precio por día (no puede ser negativo)']);
+  assert.deepEqual(faltaAlgoEnReserva(construirReserva({}, { ...buena, anticipo: -100 })), ['Anticipo (no puede ser negativo)']);
+  assert.deepEqual(
+    faltaAlgoEnReserva(construirReserva({}, { ...buena, dias: -3, precioDia: -500, anticipo: -100 })),
+    ['Días (no pueden ser negativos)', 'Precio por día (no puede ser negativo)', 'Anticipo (no puede ser negativo)'],
+  );
+});
+
+test('una reservación con días con decimales no se puede guardar: la devolución prevista cuenta días enteros', () => {
+  const r = construirReserva({}, { clienteNombre: 'Ana', fechaSalida: '2026-12-10', dias: 2.5 });
+  assert.deepEqual(faltaAlgoEnReserva(r), ['Días (tienen que ser un número entero)']);
+});
+
+test('sin precio ni anticipo (cero o vacío) una reservación sigue siendo válida: se apartó, el precio se habla después', () => {
+  assert.deepEqual(faltaAlgoEnReserva(construirReserva({}, { clienteNombre: 'Ana', fechaSalida: '2026-12-10', dias: 3 })), []);
+});

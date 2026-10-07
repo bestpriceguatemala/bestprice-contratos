@@ -124,7 +124,14 @@ export function faltaAlgoEnReserva(r) {
   // fecha, y una reservación con ella queda fuera del calendario y de los choques.
   else if (!esFechaISO(fechaSalida)) falta.push('Fecha de salida (el año no es válido)');
 
+  // Los campos declaran días enteros desde 1, y precio y anticipo desde 0, pero el formulario no deja que el
+  // navegador lo exija. Una reservación de -3 días a -Q500 con -Q100 de anticipo se guardó con la devolución
+  // ANTES de la salida (prueba del sistema, 7 oct 2026). Falta algo, y se dice qué tiene que ser.
   if (!r?.dias) falta.push('Días');
+  else if (r.dias < 0) falta.push('Días (no pueden ser negativos)');
+  else if (!Number.isInteger(r.dias)) falta.push('Días (tienen que ser un número entero)');
+  if (q(r?.precioDia) < 0) falta.push('Precio por día (no puede ser negativo)');
+  if (q(r?.anticipo) < 0) falta.push('Anticipo (no puede ser negativo)');
 
   return falta;
 }
