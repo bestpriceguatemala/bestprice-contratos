@@ -18,7 +18,7 @@ import {
   estadoDeCosto, notasDeTotal, resumenDeMarcadas, razonDeNoCierre, pagosDeLaCuenta, registrarElPago,
   parchearMarcado, notasDelTotalGeneral, textoDeComprobantes, diferenciaBloqueada, rentasCortas,
   cerrarElDinero, cerrarElDineroOReiniciar, salirDelSistema, crearVigilante, crearLector, mensajeSeguro,
-  htmlEntrada, htmlFallo, htmlLista, htmlFicha, htmlMigracion, entradaDelComprobante,
+  htmlEntrada, htmlFallo, htmlLista, htmlFicha, htmlMigracion, entradaDelComprobante, problemaDeLaFechaDelPago,
 } from '../js/pantallas/dinero.js';
 import { armarComprobante } from '../js/pantallas/comprobante.js';
 import { htmlListaDeDuenos, htmlFormularioDeDueno } from '../js/pantallas/duenos.js';
@@ -2304,4 +2304,33 @@ test('con todos los dueños en cero, el total general dice Q0.00 de verdad (sí 
   const vista = armarVista(lecturaOk({ contratos: { datos: [L3], fallo: false, costoSinLeer: [] } }));
   assert.equal(vista.total, 0);
   assert.match(htmlLista(vista), /id="dn-total-general">Q0\.00</);
+});
+
+// ---------------------------------------------------------------------------
+// La fecha del pago a un dueño tiene que ser una fecha de verdad
+//
+// Prueba del sistema (7 oct 2026): con «20261-10-21» en la fecha del pago (el campo del
+// navegador deja teclear el año con cinco dígitos) el pago se guardó, gastó el número de
+// comprobante N.° 3 y el papel NUNCA se pudo armar: «El pago N° 3 no trae una fecha válida».
+// Un pago hecho, pagado y sin comprobante, y sin pantalla donde corregir su fecha.
+// ---------------------------------------------------------------------------
+
+test('problemaDeLaFechaDelPago: una fecha buena no tiene problema', () => {
+  assert.equal(problemaDeLaFechaDelPago('2026-10-21'), null);
+});
+
+test('problemaDeLaFechaDelPago: vacía pide escribirla; el año de cinco dígitos o un día imposible piden revisarla', () => {
+  assert.equal(problemaDeLaFechaDelPago(''), 'Escribe la fecha del pago.');
+  assert.equal(problemaDeLaFechaDelPago(undefined), 'Escribe la fecha del pago.');
+  assert.equal(problemaDeLaFechaDelPago('20261-10-21'), 'La fecha del pago no es válida. Revisa el año.');
+  assert.equal(problemaDeLaFechaDelPago('2026-02-30'), 'La fecha del pago no es válida. Revisa el año.');
+});
+
+test('guardarPago() le pregunta a problemaDeLaFechaDelPago antes de gastar un número de comprobante', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/dinero.js', import.meta.url), 'utf8');
+  const cuerpo = fuente.slice(fuente.indexOf('async function guardarPago()'));
+  const pregunta = cuerpo.indexOf('problemaDeLaFechaDelPago(ui.fecha)');
+  const registra = cuerpo.indexOf('registrarElPago(');
+  assert.ok(pregunta > 0, 'se pregunta por la fecha');
+  assert.ok(registra > pregunta, 'y se pregunta ANTES de registrar el pago');
 });

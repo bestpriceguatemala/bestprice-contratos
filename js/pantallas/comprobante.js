@@ -40,7 +40,7 @@
 import { costoDelSubarriendo, agruparPorDueno, totalSeleccionado } from '../nucleo/liquidacion.js';
 import { atrasoDe } from '../nucleo/contrato.js';
 import { q, suma } from '../nucleo/dinero.js';
-import { diasEntre, sumarDias } from '../nucleo/fechas.js';
+import { diasEntre, esFechaISO } from '../nucleo/fechas.js';
 import { dinero, fecha } from '../ui.js';
 
 /**
@@ -74,15 +74,6 @@ function esc(texto) {
 /** Lo que se escribe donde no hay dato: una raya, no un hueco que parezca un error. */
 const RAYA = '—';
 const algo = (texto) => (String(texto ?? '').trim() ? esc(String(texto).trim()) : RAYA);
-
-/**
- * ¿Es una fecha ISO real? 'sumarDias(x, 0)' devuelve la misma fecha si lo es,
- * y otra cosa si no ('2026-13-45' rueda a otro día, un texto raro da ''). Es
- * la validación que ya tiene el núcleo de fechas, no una expresión regular más.
- * El texto vacío se descarta aparte: `sumarDias('', 0)` también devuelve '', y
- * «'' === ''» lo daría por buena (la prueba de «sin fecha» lo cazó).
- */
-const esFechaISO = (x) => typeof x === 'string' && x !== '' && sumarDias(x, 0) === x;
 
 /** Qué se imprime en lugar de la cifra cuando el costo no es confiable, según el motivo. */
 const TEXTO_SIN_COSTO = {

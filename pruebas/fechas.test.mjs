@@ -9,7 +9,7 @@ process.env.TZ = 'America/Guatemala';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  sumarDias, diasEntre, devolucionPrevista, diasAtraso, hoyISO, textoFecha,
+  sumarDias, diasEntre, devolucionPrevista, diasAtraso, hoyISO, textoFecha, esFechaISO,
 } from '../js/nucleo/fechas.js';
 
 test('suma días cruzando fin de mes y fin de año', () => {
@@ -55,4 +55,32 @@ test('textoFecha da el formato que lee el dueño, igual que fecha() en ui.js', (
   assert.equal(textoFecha('2026-08-25'), '25 ago 2026');
   assert.equal(textoFecha(''), '');
   assert.equal(textoFecha(undefined), '');
+});
+
+// Prueba del sistema (7 oct 2026): el campo de fecha del navegador deja teclear el año con
+// CINCO dígitos (20261 en vez de 2026) y devuelve «20261-10-21». Sin nadie que lo revisara,
+// «Sacar carro» guardó un contrato con devolución prevista «+020261-10» (cobrado, y fuera de
+// la lista del mes), y «Registrar pago» guardó un pago con un comprobante que nunca se pudo
+// armar. Una fecha buena es la que sobrevive a un viaje de ida y vuelta por el calendario.
+test('esFechaISO: una fecha de calendario de verdad, con cuatro dígitos de año', () => {
+  assert.equal(esFechaISO('2026-10-21'), true);
+  assert.equal(esFechaISO('2028-02-29'), true, 'bisiesto');
+  assert.equal(esFechaISO('2026-12-31'), true);
+});
+
+test('esFechaISO: el año con cinco dígitos, un día que no existe o una fecha a medias no lo son', () => {
+  assert.equal(esFechaISO('20261-10-21'), false, 'el desliz de teclear un dígito de más en el año');
+  assert.equal(esFechaISO('2026-02-30'), false);
+  assert.equal(esFechaISO('2027-02-29'), false, 'no es bisiesto');
+  assert.equal(esFechaISO('2026-13-01'), false);
+  assert.equal(esFechaISO('2026-1-5'), false, 'los campos de fecha siempre traen ceros');
+  assert.equal(esFechaISO('0026-10-21'), false, 'el año 26 el calendario lo toma por 1926');
+  assert.equal(esFechaISO('21/10/2026'), false);
+});
+
+test('esFechaISO: lo vacío o lo que no es texto no es una fecha', () => {
+  assert.equal(esFechaISO(''), false);
+  assert.equal(esFechaISO(undefined), false);
+  assert.equal(esFechaISO(null), false);
+  assert.equal(esFechaISO(20261021), false);
 });

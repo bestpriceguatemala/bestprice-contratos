@@ -6,7 +6,9 @@
 // planes cambian a última hora — "me gustaría poder cambiar la unidad en dado
 // caso cambie el plan" — así que cambiar de carro tiene que ser un campo más
 // que se sobrescribe, nunca una reservación nueva.
-import { devolucionPrevista as calcularDevolucionPrevista, diasEntre, textoFecha } from './fechas.js';
+import {
+  devolucionPrevista as calcularDevolucionPrevista, diasEntre, textoFecha, esFechaISO,
+} from './fechas.js';
 import { q, textoDosDecimales } from './dinero.js';
 import { estadoContrato, estaAtrasado, finDelContrato } from './estados.js';
 
@@ -118,6 +120,9 @@ export function faltaAlgoEnReserva(r) {
 
   const fechaSalida = (r?.fechaSalida || '').trim();
   if (!fechaSalida) falta.push('Fecha de salida');
+  // El campo de fecha deja teclear el año con cinco dígitos: «20261-10-15» no es una
+  // fecha, y una reservación con ella queda fuera del calendario y de los choques.
+  else if (!esFechaISO(fechaSalida)) falta.push('Fecha de salida (el año no es válido)');
 
   if (!r?.dias) falta.push('Días');
 

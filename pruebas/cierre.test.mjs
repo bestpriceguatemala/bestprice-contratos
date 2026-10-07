@@ -180,3 +180,21 @@ test('el aviso del descuento cuenta la hora tardía: el cobro en negativo se cal
   // Con Q150 de hora tardía el cobro queda en +30: ya no hay nada que avisar.
   assert.deepEqual(problemasDelCierre(contrato(), { ...campos, descuento: 4300, horaTardia: 150 }), []);
 });
+
+// Prueba del sistema (7 oct 2026): un año con cinco dígitos («20261-10-21») en la fecha de
+// entrada se habría cobrado como millones de días de atraso, o con una fecha que ningún
+// calendario entiende. Se avisa, y el botón de guardar queda apagado como con cualquier otro
+// problema del cierre.
+test('una fecha de entrada que no existe (año de cinco dígitos, día imposible) no se puede guardar', () => {
+  for (const fechaReal of ['20261-10-21', '2026-02-30', '2026-13-01']) {
+    const p = problemasDelCierre(contrato(), { ...campos, fechaReal });
+    assert.equal(p.length, 1, fechaReal);
+    assert.match(p[0], /fecha/i);
+    assert.match(p[0], /no es válida/i);
+  }
+});
+
+test('una fecha de entrada buena sigue sin problemas, y la vacía sigue diciendo que falta', () => {
+  assert.deepEqual(problemasDelCierre(contrato(), { ...campos, fechaReal: '2026-08-25' }), []);
+  assert.deepEqual(problemasDelCierre(contrato(), { ...campos, fechaReal: '' }), ['Falta la fecha en que se recibió el carro.']);
+});

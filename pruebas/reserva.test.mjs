@@ -402,3 +402,10 @@ test('la ficha de la reservación no deja sacar el carro con cambios sin guardar
   assert.match(cuerpo[1], /cambiosSinGuardar\(reserva,/, 'compara el formulario contra lo guardado');
   assert.ok(cuerpo[1].indexOf('cambiosSinGuardar') < cuerpo[1].indexOf('location.hash'), 'y lo hace ANTES de navegar');
 });
+
+test('faltaAlgoEnReserva: una fecha de salida que no existe (año de cinco dígitos) se señala, la buena no', () => {
+  const buena = { clienteNombre: 'Ana', fechaSalida: '2026-10-15', dias: 3 };
+  assert.deepEqual(faltaAlgoEnReserva(buena), []);
+  assert.deepEqual(faltaAlgoEnReserva({ ...buena, fechaSalida: '20261-10-15' }), ['Fecha de salida (el año no es válido)']);
+  assert.deepEqual(faltaAlgoEnReserva({ ...buena, fechaSalida: '' }), ['Fecha de salida'], 'vacía sigue siendo «falta»');
+});

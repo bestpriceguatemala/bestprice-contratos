@@ -9,7 +9,7 @@
 // hay que cobrar, se lo decimos tal como es.
 
 import { q, textoDosDecimales, textoConQ } from './dinero.js';
-import { diasEntre, textoFecha } from './fechas.js';
+import { diasEntre, textoFecha, esFechaISO } from './fechas.js';
 import { resumen, horaTardiaDe } from './contrato.js';
 
 /**
@@ -55,6 +55,14 @@ export function problemasDelCierre(contrato, cierre) {
   if (!cierre.fechaReal || cierre.fechaReal.trim() === '') {
     problemas.push('Falta la fecha en que se recibió el carro.');
     // Si no hay fecha real, no puedo validar el resto (evito comparaciones con undefined)
+    return problemas;
+  }
+
+  // Una fecha que ningún calendario entiende (el año con cinco dígitos, un 30 de
+  // febrero) tampoco se puede comparar con nada: contra la prevista daría millones
+  // de días de atraso, o ninguno. Mismo corte que arriba, y por la misma razón.
+  if (!esFechaISO(cierre.fechaReal)) {
+    problemas.push('La fecha en que se recibió el carro no es válida. Revisa el año.');
     return problemas;
   }
 

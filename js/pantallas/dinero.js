@@ -36,7 +36,7 @@ import {
 import { estadoContrato, pendientesDe } from '../nucleo/estados.js';
 import { atrasoDe } from '../nucleo/contrato.js';
 import { construirDueno } from '../nucleo/dueno.js';
-import { hoyISO } from '../nucleo/fechas.js';
+import { hoyISO, esFechaISO } from '../nucleo/fechas.js';
 import { entrarADinero, salirDeDinero, sesionDeDinero } from '../dinero-sesion.js';
 import {
   cargarContratosParaDinero, cargarPagosDueno, cargarDuenos, guardarDueno, nuevoIdPagoDueno,
@@ -106,6 +106,19 @@ export const MENSAJE_FALLO_DUENOS = 'No se pudo leer la lista de dueños. Los no
 export const MENSAJE_SIN_COMPROBAR = 'No se pudo comprobar si estas rentas ya tienen un pago registrado, y registrar sin saberlo podría pagarlas dos veces. Revisa tu internet e intenta de nuevo.';
 export const MENSAJE_SIN_COMPROBAR_RENTAS = 'No se pudo comprobar si estas rentas siguen cerradas y con el mismo monto, y registrar sin saberlo podría pagar una renta que ya cambió. Revisa tu internet e intenta de nuevo.';
 export const MENSAJE_PAGO_CAMBIO = 'Mientras tanto cambió la cuenta de este dueño: alguna de las rentas marcadas ya no se puede pagar o cambió de monto (por ejemplo, ya tiene un pago registrado, o se corrigió su cierre). No se registró nada; la lista ya está al día, revisa y vuelve a marcar.';
+/**
+ * Qué está mal con la fecha del pago, o `null` si está bien. Una fecha vacía se pide;
+ * una que no existe —el año con cinco dígitos que el campo de fecha deja teclear, un 30 de
+ * febrero— se manda a revisar. Función pura. Sin esto el pago se guardaba, gastaba su
+ * número de comprobante y el papel nunca se podía armar («no trae una fecha válida»), y no
+ * hay dónde corregir un pago ya guardado (prueba del sistema, 7 oct 2026).
+ */
+export function problemaDeLaFechaDelPago(fechaDelPago) {
+  if (!fechaDelPago) return 'Escribe la fecha del pago.';
+  if (!esFechaISO(fechaDelPago)) return 'La fecha del pago no es válida. Revisa el año.';
+  return null;
+}
+
 export const MENSAJE_PAGO_FALLO = 'No se pudo registrar el pago. Revisa tu internet y vuelve a apretar «Guardar pago»: si ya había quedado guardado, no se duplica. '
   + 'Si sigue sin conectar, recarga la página y revisa «Ya pagado» antes de intentarlo otra vez.';
 export const MENSAJE_COSTO_FALLO = 'No se pudo guardar el costo. Revisa tu internet e intenta de nuevo.';
@@ -1388,7 +1401,8 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     const campoFecha = raiz.querySelector('#dn-fecha');
     ui.fecha = campoFecha?.value || ui.fecha;
     ui.forma = raiz.querySelector('#dn-forma')?.value || ui.forma;
-    if (!ui.fecha) { ui.mensajePago = 'Escribe la fecha del pago.'; dibujar(); return; }
+    const problemaDeFecha = problemaDeLaFechaDelPago(ui.fecha);
+    if (problemaDeFecha) { ui.mensajePago = problemaDeFecha; dibujar(); return; }
     ui.ocupado = true;
     const boton = raiz.querySelector('#dn-guardar-pago');
     if (boton) boton.disabled = true;

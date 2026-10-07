@@ -18,7 +18,7 @@
 import { lineasSalida, resumen } from '../nucleo/contrato.js';
 import { avisosDeSalida } from '../nucleo/avisos.js';
 import { estadoReserva } from '../nucleo/reserva.js';
-import { devolucionPrevista, hoyISO } from '../nucleo/fechas.js';
+import { devolucionPrevista, hoyISO, esFechaISO } from '../nucleo/fechas.js';
 import { q, suma, recargoTarjeta } from '../nucleo/dinero.js';
 import {
   cargarFlota, cargarContratosAbiertos, cargarReservas, cargarAjustes, cargarClientes,
@@ -253,6 +253,32 @@ export function construirContrato(datos) {
 export function duenoDelContrato({ escogido, buscado = '', nuevo = '' }) {
   if (escogido) return { duenoId: escogido.id ?? null, dueno: escogido.nombre ?? '' };
   return { duenoId: null, dueno: String(buscado ?? '').trim() || String(nuevo ?? '').trim() };
+}
+
+/**
+ * Lo que impide guardar la salida, o `null` si se puede guardar. Función pura: antes
+ * estas reglas estaban sueltas dentro de `guardar()`, donde ninguna prueba las veía.
+ * El orden es el de siempre (cliente, carro, placas, días y precio, quién lo rentó); la
+ * fecha y los negativos son lo que faltaba (prueba del sistema, 7 oct 2026):
+ *
+ * - Una fecha de salida que no existe, como el año con cinco dígitos que el campo de
+ *   fecha deja teclear («20261-10-21»), se guardaba tal cual: contrato cobrado, con
+ *   devolución prevista «+020261-10», fuera de la lista del mes y de la flota.
+ *   Vacía NO es un error: sin fecha se usa la de hoy.
+ * - «Faltan los días o el precio» solo miraba el cero, así que «-3 días × Q700» o un
+ *   precio de «-700» se guardaban con un total negativo.
+ */
+export function motivoParaNoGuardar({
+  hayCliente, ajeno, hayCarroPropio, placasAjeno, fechaSalida, dias, precioDia, rentadoPor,
+}) {
+  if (!hayCliente) return 'Elige o da de alta un cliente antes de guardar.';
+  if (!ajeno && !hayCarroPropio) return 'Este carro ya no está disponible. Vuelve a la flota e intenta de nuevo.';
+  if (ajeno && !placasAjeno) return 'Completa al menos las placas del carro ajeno.';
+  if (fechaSalida && !esFechaISO(fechaSalida)) return 'La fecha de salida no es válida. Revisa el año.';
+  if (!dias || !precioDia) return 'Faltan los días o el precio por día.';
+  if (dias < 0 || precioDia < 0) return 'Los días y el precio por día no pueden ser negativos.';
+  if (!rentadoPor) return 'Falta quién lo rentó.';
+  return null;
 }
 
 /**
@@ -1497,25 +1523,19 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     ev.preventDefault();
     if (guardando) return;
 
-    if (!clienteSeleccionado) {
-      aviso('Elige o da de alta un cliente antes de guardar.', 'error');
-      return;
-    }
     const ajeno = marcado('sc-ajeno');
-    if (!ajeno && !carroPropio()) {
-      aviso('Este carro ya no está disponible. Vuelve a la flota e intenta de nuevo.', 'error');
-      return;
-    }
-    if (ajeno && !texto('sc-ajeno-placas')) {
-      aviso('Completa al menos las placas del carro ajeno.', 'error');
-      return;
-    }
-    if (!num('sc-dias') || !num('sc-precio-dia')) {
-      aviso('Faltan los días o el precio por día.', 'error');
-      return;
-    }
-    if (!texto('sc-rentado-por')) {
-      aviso('Falta quién lo rentó.', 'error');
+    const motivo = motivoParaNoGuardar({
+      hayCliente: Boolean(clienteSeleccionado),
+      ajeno,
+      hayCarroPropio: Boolean(carroPropio()),
+      placasAjeno: texto('sc-ajeno-placas'),
+      fechaSalida: texto('sc-fecha-salida'),
+      dias: num('sc-dias'),
+      precioDia: num('sc-precio-dia'),
+      rentadoPor: texto('sc-rentado-por'),
+    });
+    if (motivo) {
+      aviso(motivo, 'error');
       return;
     }
 

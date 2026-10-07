@@ -45,6 +45,22 @@ export function diasEntre(desde, hasta) {
   return Math.round((b - a) / MS_DIA);
 }
 
+/**
+ * ¿Es esto una fecha de calendario de verdad, en el formato 'YYYY-MM-DD' con
+ * ceros y cuatro dígitos de año? Se comprueba dando el viaje de ida y vuelta por
+ * el calendario: lo que no sobrevive a sumarle cero días no es una fecha.
+ *
+ * Existe porque el campo de fecha del navegador deja teclear el año con cinco
+ * dígitos («20261-10-21») y entonces devuelve eso. Sin esta revisión, esa fecha
+ * entraba a «Sacar carro» y producía una devolución prevista «+020261-10», o a
+ * «Registrar pago» y dejaba un comprobante que nunca se pudo armar (prueba del
+ * sistema, 7 oct 2026). Atrapa también el 30 de febrero y el año 26 (que el
+ * calendario toma por 1926).
+ */
+export function esFechaISO(x) {
+  return typeof x === 'string' && x !== '' && sumarDias(x, 0) === x;
+}
+
 /** Cuándo debería regresar el carro. */
 export function devolucionPrevista(fechaSalida, dias) {
   return sumarDias(fechaSalida, dias);

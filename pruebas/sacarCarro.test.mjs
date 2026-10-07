@@ -5,10 +5,11 @@
 // quien llama ya le pasa solo los últimos 4 dígitos.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   construirContrato, ultimos4Digitos, leerParametroRuta, montoSalidaConAnticipo, conAnticipoComoPago,
   resultadosDeLista, avisoDeLista, conAltasDeHoy,
-  vistaDeBuscador, crearListaDeSesion, duenoDelContrato, lectorDeCampos, leerFormularioDe, plantilla,
+  vistaDeBuscador, crearListaDeSesion, duenoDelContrato, lectorDeCampos, leerFormularioDe, plantilla, motivoParaNoGuardar,
 } from '../js/pantallas/sacarCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
@@ -1070,4 +1071,56 @@ test('«1:30 pm» en la hora de salida se guarda como 13:30', () => {
 
 test('sin hora de salida el contrato se guarda igual, con la hora vacía', () => {
   assert.equal(contratoDeLosCampos(formularioDeCarroAjeno()).guardado.horaSalida, '');
+});
+
+// ---------------------------------------------------------------------------
+// Lo que impide guardar una salida (antes estaba suelto dentro de guardar())
+//
+// Prueba del sistema (7 oct 2026): con un año de cinco dígitos en la fecha de salida
+// («20261-10-21») el contrato se guardó, cobrado, con devolución prevista «+020261-10»,
+// fuera de la lista del mes y sin tarjeta en la flota. Y con días o precio NEGATIVOS
+// también: «Faltan los días o el precio» solo miraba el cero, así que «-3 días ×
+// Q700 = -Q2,100.00» se guardaba tal cual.
+// ---------------------------------------------------------------------------
+
+const salidaLista = () => ({
+  hayCliente: true, ajeno: false, hayCarroPropio: true, placasAjeno: '',
+  fechaSalida: '2026-10-21', dias: 3, precioDia: 700, rentadoPor: 'Ana',
+});
+
+test('motivoParaNoGuardar: una salida completa no tiene motivo', () => {
+  assert.equal(motivoParaNoGuardar(salidaLista()), null);
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), fechaSalida: '' }), null, 'sin fecha se usa la de hoy: no es un error');
+});
+
+test('motivoParaNoGuardar: conserva, palabra por palabra, los cinco avisos de siempre', () => {
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), hayCliente: false }), 'Elige o da de alta un cliente antes de guardar.');
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), hayCarroPropio: false }), 'Este carro ya no está disponible. Vuelve a la flota e intenta de nuevo.');
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), ajeno: true, hayCarroPropio: false, placasAjeno: '' }), 'Completa al menos las placas del carro ajeno.');
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), dias: 0 }), 'Faltan los días o el precio por día.');
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), precioDia: 0 }), 'Faltan los días o el precio por día.');
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), rentadoPor: '' }), 'Falta quién lo rentó.');
+});
+
+test('motivoParaNoGuardar: un carro ajeno con placas no necesita carro de la flota', () => {
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), ajeno: true, hayCarroPropio: false, placasAjeno: 'P-ABC123' }), null);
+});
+
+test('motivoParaNoGuardar: una fecha de salida que no existe no se guarda', () => {
+  for (const fechaSalida of ['20261-10-21', '2026-02-30']) {
+    assert.equal(motivoParaNoGuardar({ ...salidaLista(), fechaSalida }), 'La fecha de salida no es válida. Revisa el año.', fechaSalida);
+  }
+});
+
+test('motivoParaNoGuardar: días o precio negativos no se guardan', () => {
+  const texto = 'Los días y el precio por día no pueden ser negativos.';
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), dias: -3 }), texto);
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), precioDia: -700 }), texto);
+});
+
+test('guardar() de «Sacar carro» le pregunta a motivoParaNoGuardar, no repite las reglas', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/sacarCarro.js', import.meta.url), 'utf8');
+  const guardar = fuente.slice(fuente.indexOf('async function guardar(ev)'));
+  assert.match(guardar.slice(0, 1500), /motivoParaNoGuardar\(\{/);
+  assert.ok(!/Faltan los días o el precio/.test(guardar), 'el texto vive en un solo lugar');
 });
