@@ -26,6 +26,7 @@ import {
   cargarDuenos, guardarDueno,
 } from '../datos.js';
 import { dinero, fecha, aviso, hora24 } from '../ui.js';
+import { textoAvisoSobrecobro } from './recibirCarro.js';
 import { filtrar, textoDeCliente } from '../nucleo/busqueda.js';
 // El alta rápida de aquí y la ficha de clientes.js tienen que pedir
 // exactamente los mismos campos (Tarea 7) — por eso esta pantalla ya no
@@ -253,6 +254,19 @@ export function construirContrato(datos) {
 export function duenoDelContrato({ escogido, buscado = '', nuevo = '' }) {
   if (escogido) return { duenoId: escogido.id ?? null, dueno: escogido.nombre ?? '' };
   return { duenoId: null, dueno: String(buscado ?? '').trim() || String(nuevo ?? '').trim() };
+}
+
+/**
+ * Los avisos de la salida más, si lo escrito en «Monto» pasa de lo que se debe hoy
+ * (`debeHoy`: el total de la salida, menos el anticipo ya pagado), el de cobrar de más,
+ * al principio y en rojo. Es la misma frase que ya da «Recibir carro»
+ * (`textoAvisoSobrecobro`): un aviso, no un candado — a veces se cobra de más a propósito.
+ * En la prueba del sistema (7 oct 2026) se escribió Q28,000 en una renta de Q2,800 y nada lo
+ * dijo: el contrato quedó con Q25,200 a favor del cliente.
+ */
+export function avisosConSobrecobro(avisos, debeHoy, montoSinRecargo) {
+  const texto = textoAvisoSobrecobro(debeHoy, montoSinRecargo);
+  return texto ? [{ nivel: 'alto', mensaje: texto }, ...avisos] : avisos;
 }
 
 /**
@@ -1216,7 +1230,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       reservasDelCarro,
       hoy: hoyISO(),
     });
-    el('sc-avisos').innerHTML = avisos.map(lineaAviso).join('');
+    el('sc-avisos').innerHTML = avisosConSobrecobro(avisos, montoSugerido, montoSinRecargo).map(lineaAviso).join('');
   }
 
   // ---------- Tarea 9: entrar con una reservación ----------

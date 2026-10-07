@@ -10,7 +10,7 @@ import {
   construirContrato, ultimos4Digitos, leerParametroRuta, montoSalidaConAnticipo, conAnticipoComoPago,
   resultadosDeLista, avisoDeLista, conAltasDeHoy,
   vistaDeBuscador, crearListaDeSesion, duenoDelContrato, lectorDeCampos, leerFormularioDe, plantilla, motivoParaNoGuardar,
-  textoCarroPropioNoEncontrado,
+  textoCarroPropioNoEncontrado, avisosConSobrecobro,
 } from '../js/pantallas/sacarCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
@@ -1147,4 +1147,33 @@ test('motivoParaNoGuardar: sin carro de la flota por un fallo de lectura, el mot
     motivoParaNoGuardar({ ...salidaLista(), hayCarroPropio: false, falloFlota: false }),
     'Este carro ya no está disponible. Vuelve a la flota e intenta de nuevo.',
   );
+});
+
+// Prueba del sistema (7 oct 2026): en «Sacar carro» se escribió Q28,000 de monto en una renta de
+// Q2,800 (un cero de más) y la pantalla no dijo nada: el contrato quedó con «A favor del cliente
+// Q25,200.00». «Recibir carro» ya avisa de esto («Estás cobrando … y solo te debe …», nacido de un
+// crédito de Q4,800 que nadie vio); la salida, el momento donde más dinero se escribe, no.
+test('avisosConSobrecobro: cobrar más de lo que se debe hoy pone el aviso al principio, en rojo', () => {
+  const otros = [{ nivel: 'alto', mensaje: 'La licencia del cliente venció.' }, { nivel: 'medio', mensaje: 'Devolvió tarde.' }];
+  const r = avisosConSobrecobro(otros, 2800, 28000);
+  assert.equal(r.length, 3);
+  assert.equal(r[0].nivel, 'alto');
+  assert.equal(r[0].mensaje, 'Estás cobrando Q28,000.00 y solo te debe Q2,800.00. Van a quedar Q25,200.00 a favor del cliente.');
+  assert.deepEqual(r.slice(1), otros, 'los demás avisos quedan como estaban');
+});
+
+test('avisosConSobrecobro: cobrar lo justo, de menos o nada, no agrega nada (ni inventa un aviso con el anticipo)', () => {
+  const otros = [{ nivel: 'medio', mensaje: 'Devolvió tarde.' }];
+  assert.deepEqual(avisosConSobrecobro(otros, 2800, 2800), otros);
+  assert.deepEqual(avisosConSobrecobro(otros, 2800, 300), otros, 'cobrar menos deja saldo pendiente, no es sobrecobro');
+  assert.deepEqual(avisosConSobrecobro(otros, 2800, 0), otros);
+  assert.deepEqual(avisosConSobrecobro([], 0, 0), []);
+  // Con un anticipo ya pagado de Q500 en una renta de Q3,500 lo que se debe hoy es Q3,000: cobrar Q3,000 está bien.
+  assert.deepEqual(avisosConSobrecobro([], montoSalidaConAnticipo(3500, { anticipoPagado: true, anticipo: 500 }), 3000), []);
+  assert.equal(avisosConSobrecobro([], montoSalidaConAnticipo(3500, { anticipoPagado: true, anticipo: 500 }), 3500).length, 1, 'cobrar los Q3,500 completos otra vez SÍ es cobrar de más');
+});
+
+test('la pantalla de la salida compara el monto contra lo que se debe hoy (el sugerido, que ya descuenta el anticipo)', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/sacarCarro.js', import.meta.url), 'utf8');
+  assert.match(fuente, /avisosConSobrecobro\(avisos, montoSugerido, montoSinRecargo\)/);
 });
