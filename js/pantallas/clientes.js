@@ -147,6 +147,40 @@ function filaCliente(cliente, alertas) {
     </tr>`;
 }
 
+/**
+ * Las frases en rojo de arriba de la lista cuando una lectura falló. «Sigue como
+ * estaba» (la copia local) no basta para decirlo: con internet caído y sin copia local la
+ * lista salía vacía y decía «Todavía no hay clientes. Agregar el primero» — la invitación a
+ * dar de alta a quien ya existe, que parte su historia en dos (prueba del sistema, 7 oct
+ * 2026). Mismo patrón y mismas palabras que flota.js y reservas.js. Función pura.
+ */
+export function mensajesDeFalloDeClientes({ falloClientes = false, falloContratos = false } = {}) {
+  const mensajes = [];
+  if (falloClientes) {
+    mensajes.push('No se pudieron leer los clientes. Puede que falten o que la lista esté incompleta.');
+  }
+  if (falloContratos) {
+    mensajes.push('No se pudieron leer los contratos. Las alertas de saldo pendiente y de devoluciones tardías pueden estar incompletas.');
+  }
+  return mensajes;
+}
+
+/** La fila de la tabla cuando no hay clientes que mostrar: «no hay» y «no se pudo leer» se dicen distinto. */
+export function htmlListaVacia({ falloClientes = false } = {}) {
+  if (falloClientes) {
+    return '<tr><td colspan="4" class="pendiente">No se pudieron leer los clientes. Intenta de nuevo o revisa la conexión.</td></tr>';
+  }
+  return '<tr><td colspan="4" class="pendiente">Todavía no hay clientes.<br>'
+    + '<a href="#/clientes/nuevo" class="btn btn-primario">Agregar el primero</a></td></tr>';
+}
+
+/** Lo que dice la ficha cuando el cliente no está en la lista: «no existe» solo si la lista se leyó bien. */
+export function textoClienteNoEncontrado(falloClientes) {
+  return falloClientes
+    ? 'No se pudo leer la lista de clientes, así que no se sabe si este cliente existe. Revisa tu conexión e intenta de nuevo.'
+    : 'No se encontró este cliente.';
+}
+
 function filasCuerpo(clientes, contratos, hoy) {
   if (!clientes.length) return '<tr><td colspan="4" class="pendiente">Sin resultados.</td></tr>';
   return clientes
@@ -154,7 +188,7 @@ function filasCuerpo(clientes, contratos, hoy) {
     .join('');
 }
 
-function dibujarLista(contenedor, clientes, contratos, hoy) {
+function dibujarLista(contenedor, clientes, contratos, hoy, fallos = {}) {
   // Orden alfabético por nombre: es como se busca a alguien a simple vista en
   // una lista larga, igual que en el Excel del dueño.
   const ordenados = [...clientes].sort(
@@ -167,6 +201,7 @@ function dibujarLista(contenedor, clientes, contratos, hoy) {
         <h1>Clientes</h1>
         <a href="#/clientes/nuevo" class="btn btn-primario">Agregar cliente</a>
       </div>
+      ${barraAlertas(mensajesDeFalloDeClientes(fallos).map((texto) => ({ texto })))}
       ${ordenados.length ? `
         <label class="carro-campo">Buscar por nombre, documento, licencia, teléfono o correo
           <input type="search" id="cli-buscar" placeholder="Escribe para buscar...">
@@ -178,8 +213,7 @@ function dibujarLista(contenedor, clientes, contratos, hoy) {
         <tbody id="cli-filas">${
           ordenados.length
             ? filasCuerpo(ordenados, contratos, hoy)
-            : '<tr><td colspan="4" class="pendiente">Todavía no hay clientes.<br>'
-              + '<a href="#/clientes/nuevo" class="btn btn-primario">Agregar el primero</a></td></tr>'
+            : htmlListaVacia(fallos)
         }</tbody>
       </table>
     </div>`;
@@ -318,14 +352,14 @@ function seccionHistorial(contratosCliente) {
     </section>`;
 }
 
-async function dibujarFicha(contenedor, clienteId, clientes, contratos, hoy) {
+async function dibujarFicha(contenedor, clienteId, clientes, contratos, hoy, falloClientes = false) {
   const esNuevo = clienteId === 'nuevo';
   let cliente = null;
 
   if (!esNuevo) {
     cliente = clientes.find((c) => c.id === clienteId);
     if (!cliente) {
-      contenedor.innerHTML = '<p class="pendiente">No se encontró este cliente.</p>';
+      contenedor.innerHTML = `<p class="pendiente">${esc(textoClienteNoEncontrado(falloClientes))}</p>`;
       return;
     }
   }
@@ -417,33 +451,41 @@ export async function pintarClientes(contenedor, clienteId) {
   let clientes = [];
   let contratos = [];
 
+  // Si una lectura falló, la lista lo dice (barra roja y, vacía, ni «no hay» ni «agregar el
+  // primero»): ver mensajesDeFalloDeClientes. `r.fallo` llega también del aviso de la
+  // sincronía de atrás, que puede fallar DESPUÉS de haber dibujado con la copia local.
+  let falloClientes = false;
+  let falloContratos = false;
+
   const repintar = () => {
     if (!sigoVigente()) return;
     // Solo la lista se redibuja sola cuando llega algo nuevo por detrás; una
     // ficha abierta a medio editar no se pisa con un repintado de fondo,
     // igual que en carros.js.
     if (hash === '#/clientes') {
-      dibujarLista(contenedor, clientes, contratos, hoy);
+      dibujarLista(contenedor, clientes, contratos, hoy, { falloClientes, falloContratos });
     }
   };
 
   // cargarClientes/cargarContratosAbiertos (datos.js) devuelven { datos,
-  // fallo } (T9): esta pantalla, igual que carros.js, todavía no tiene una
-  // barra de error propia — un fallo de nube se ve como "sigue como estaba",
-  // nunca como "se vació la lista", porque `datos` cae a la copia local en
-  // vez de a un arreglo vacío inventado.
+  // fallo } (T9): `datos` cae a la copia local en vez de a un arreglo vacío
+  // inventado, y `fallo` dice que la nube no contestó — se muestra (barra roja),
+  // porque «sigue como estaba» en silencio, con la copia local VACÍA, se leía como
+  // «todavía no hay clientes».
   const [rClientes, rContratos] = await Promise.all([
-    cargarClientes((r) => { clientes = r.datos; repintar(); }),
-    cargarContratosAbiertos((r) => { contratos = r.datos; repintar(); }),
+    cargarClientes((r) => { clientes = r.datos; falloClientes = r.fallo; repintar(); }),
+    cargarContratosAbiertos((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); }),
   ]);
   clientes = rClientes.datos;
   contratos = rContratos.datos;
+  falloClientes = rClientes.fallo;
+  falloContratos = rContratos.fallo;
 
   if (!sigoVigente()) return;
 
   if (hash === '#/clientes') {
-    dibujarLista(contenedor, clientes, contratos, hoy);
+    dibujarLista(contenedor, clientes, contratos, hoy, { falloClientes, falloContratos });
   } else if (clienteId) {
-    await dibujarFicha(contenedor, clienteId, clientes, contratos, hoy);
+    await dibujarFicha(contenedor, clienteId, clientes, contratos, hoy, falloClientes);
   }
 }

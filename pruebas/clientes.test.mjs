@@ -6,8 +6,10 @@
 // resumen(), nunca una cifra propia) y cuántas veces devolvió tarde.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   estaVencido, contratosDe, saldoPendienteDe, vecesTarde, alertasDe, clienteParaFormulario,
+  mensajesDeFalloDeClientes, htmlListaVacia, textoClienteNoEncontrado,
 } from '../js/pantallas/clientes.js';
 
 const HOY = '2026-09-25';
@@ -135,4 +137,54 @@ test('alertasDe: pueden salir varias alertas juntas, cada una con su tipo', () =
   const alertas = alertasDe(cliente, contratosDe(cliente, contratos), HOY);
   const tipos = alertas.map((a) => a.tipo).sort();
   assert.deepEqual(tipos, ['Licencia vencida', 'Saldo pendiente'].sort());
+});
+
+// ---------------------------------------------------------------------------
+// «No hay clientes» y «no se pudo leer los clientes» no son lo mismo
+//
+// Prueba del sistema (7 oct 2026): con el internet caído y sin copia local de los clientes
+// (una computadora nueva, o con los datos del navegador borrados), la lista decía «Todavía no
+// hay clientes. Agregar el primero», sin ninguna barra roja — flota, reservaciones, calendario
+// y contratos sí la tenían. Es la invitación a dar de alta a alguien que ya existe, y a partir
+// la historia de esa persona en dos.
+// ---------------------------------------------------------------------------
+
+test('mensajesDeFalloDeClientes: sin fallos no hay nada que decir', () => {
+  assert.deepEqual(mensajesDeFalloDeClientes({}), []);
+  assert.deepEqual(mensajesDeFalloDeClientes({ falloClientes: false, falloContratos: false }), []);
+  assert.deepEqual(mensajesDeFalloDeClientes(), []);
+});
+
+test('mensajesDeFalloDeClientes: cada lectura que falló se nombra, con lo que eso hace dudar', () => {
+  assert.deepEqual(mensajesDeFalloDeClientes({ falloClientes: true }), [
+    'No se pudieron leer los clientes. Puede que falten o que la lista esté incompleta.',
+  ]);
+  assert.deepEqual(mensajesDeFalloDeClientes({ falloContratos: true }), [
+    'No se pudieron leer los contratos. Las alertas de saldo pendiente y de devoluciones tardías pueden estar incompletas.',
+  ]);
+  assert.equal(mensajesDeFalloDeClientes({ falloClientes: true, falloContratos: true }).length, 2);
+});
+
+test('htmlListaVacia: sin clientes de verdad invita a agregar el primero', () => {
+  const html = htmlListaVacia({ falloClientes: false });
+  assert.match(html, /Todavía no hay clientes\./);
+  assert.match(html, /Agregar el primero/);
+});
+
+test('htmlListaVacia: si la lectura falló NO dice que no hay clientes ni invita a dar de alta a nadie', () => {
+  const html = htmlListaVacia({ falloClientes: true });
+  assert.match(html, /No se pudieron leer los clientes\. Intenta de nuevo o revisa la conexión\./);
+  assert.ok(!/Todavía no hay clientes/.test(html));
+  assert.ok(!/Agregar el primero/.test(html));
+});
+
+test('textoClienteNoEncontrado: «no se encontró» solo si la lectura salió bien', () => {
+  assert.equal(textoClienteNoEncontrado(false), 'No se encontró este cliente.');
+  assert.equal(textoClienteNoEncontrado(true), 'No se pudo leer la lista de clientes, así que no se sabe si este cliente existe. Revisa tu conexión e intenta de nuevo.');
+});
+
+test('la pantalla de clientes pasa los fallos al dibujar la lista y la ficha', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/clientes.js', import.meta.url), 'utf8');
+  assert.match(fuente, /dibujarLista\(contenedor, clientes, contratos, hoy, \{ falloClientes, falloContratos \}\)/);
+  assert.match(fuente, /r\.fallo/, 'el aviso de que la sincronía de atrás falló también llega');
 });

@@ -1,7 +1,10 @@
 // Tests para la pantalla de carros: construirVehiculo() y casos críticos.
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { construirVehiculo } from '../js/pantallas/carros.js';
+import { readFileSync } from 'node:fs';
+import {
+  construirVehiculo, mensajesDeFalloDeCarros, htmlListaVaciaDeCarros, textoCarroNoEncontrado,
+} from '../js/pantallas/carros.js';
 
 test('construirVehiculo: un carro nuevo tiene propiedad Propio y sin fuera de servicio', () => {
   const campos = {
@@ -86,4 +89,39 @@ test('construirVehiculo: siempre fuerza propiedad a Propio', () => {
 
   const vehiculo = construirVehiculo(carroExistente, campos);
   assert.equal(vehiculo.propiedad, 'Propio');
+});
+
+// «No hay carros» y «no se pudo leer la flota» no son lo mismo (prueba del sistema, 7 oct 2026):
+// con el internet caído y sin copia local, esta lista decía «Todavía no hay carros en la flota.
+// Agregar el primer carro» sin ninguna barra roja; la pantalla principal sí la tiene.
+test('mensajesDeFalloDeCarros: sin fallos no hay nada que decir; cada lectura caída se nombra', () => {
+  assert.deepEqual(mensajesDeFalloDeCarros({}), []);
+  assert.deepEqual(mensajesDeFalloDeCarros({ falloFlota: true }), [
+    'No se pudo leer la flota. Puede que falten carros o que la lista esté incompleta.',
+  ]);
+  assert.deepEqual(mensajesDeFalloDeCarros({ falloContratos: true }), [
+    'No se pudieron leer los contratos. Los estados que ves pueden estar equivocados.',
+  ]);
+  assert.equal(mensajesDeFalloDeCarros({ falloFlota: true, falloContratos: true }).length, 2);
+});
+
+test('htmlListaVaciaDeCarros: sin carros de verdad invita a agregar el primero; si falló la lectura, no', () => {
+  const vacia = htmlListaVaciaDeCarros({ falloFlota: false });
+  assert.match(vacia, /Todavía no hay carros en la flota\./);
+  assert.match(vacia, /Agregar el primer carro/);
+  const fallo = htmlListaVaciaDeCarros({ falloFlota: true });
+  assert.match(fallo, /No se pudo leer la flota\. Intenta de nuevo o revisa la conexión\./);
+  assert.ok(!/Todavía no hay carros/.test(fallo));
+  assert.ok(!/Agregar el primer carro/.test(fallo));
+});
+
+test('textoCarroNoEncontrado: «no se encontró» solo si la lectura salió bien', () => {
+  assert.equal(textoCarroNoEncontrado(false), 'No se encontró este carro.');
+  assert.equal(textoCarroNoEncontrado(true), 'No se pudo leer la flota, así que no se sabe si este carro existe. Revisa tu conexión e intenta de nuevo.');
+});
+
+test('la pantalla de carros pasa los fallos al dibujar la lista', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/carros.js', import.meta.url), 'utf8');
+  assert.match(fuente, /dibujarLista\(contenedor, flota, contratos, hoy, \{ falloFlota, falloContratos \}\)/);
+  assert.match(fuente, /r\.fallo/);
 });

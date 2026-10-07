@@ -80,12 +80,52 @@ function filaCarro(carro, info) {
     </tr>`;
 }
 
-function dibujarLista(contenedor, flota, contratos, hoy) {
+/**
+ * Las frases en rojo de arriba de la lista cuando una lectura falló: las mismas de la
+ * pantalla principal (flota.js). «Sigue como estaba» en silencio no bastaba: sin copia
+ * local y con internet caído la lista salía vacía y decía «Todavía no hay carros en la
+ * flota. Agregar el primer carro» (prueba del sistema, 7 oct 2026). Función pura.
+ */
+export function mensajesDeFalloDeCarros({ falloFlota = false, falloContratos = false } = {}) {
+  const mensajes = [];
+  if (falloFlota) {
+    mensajes.push('No se pudo leer la flota. Puede que falten carros o que la lista esté incompleta.');
+  }
+  if (falloContratos) {
+    mensajes.push('No se pudieron leer los contratos. Los estados que ves pueden estar equivocados.');
+  }
+  return mensajes;
+}
+
+const barraDeFallo = (fallos) => {
+  const mensajes = mensajesDeFalloDeCarros(fallos);
+  return mensajes.length
+    ? `<div class="barra-lectura-fallida">${mensajes.map((m) => `<p>${esc(m)}</p>`).join('')}</div>`
+    : '';
+};
+
+/** Lo que dice la pantalla cuando no hay carros que mostrar: «no hay» y «no se pudo leer» se dicen distinto. */
+export function htmlListaVaciaDeCarros({ falloFlota = false } = {}) {
+  if (falloFlota) {
+    return '<p class="pendiente">No se pudo leer la flota. Intenta de nuevo o revisa la conexión.</p>';
+  }
+  return '<p class="pendiente">Todavía no hay carros en la flota.<br>\n'
+    + '        <a href="#/carros/nuevo" class="btn btn-primario">Agregar el primer carro</a></p>';
+}
+
+/** Lo que dice el formulario cuando el carro no está en la lista: «no existe» solo si la lista se leyó bien. */
+export function textoCarroNoEncontrado(falloFlota) {
+  return falloFlota
+    ? 'No se pudo leer la flota, así que no se sabe si este carro existe. Revisa tu conexión e intenta de nuevo.'
+    : 'No se encontró este carro.';
+}
+
+function dibujarLista(contenedor, flota, contratos, hoy, fallos = {}) {
   if (!flota.length) {
     contenedor.innerHTML = `
       <div class="carros-contenido">
-        <p class="pendiente">Todavía no hay carros en la flota.<br>
-        <a href="#/carros/nuevo" class="btn btn-primario">Agregar el primer carro</a></p>
+        ${barraDeFallo(fallos)}
+        ${htmlListaVaciaDeCarros(fallos)}
       </div>`;
     return;
   }
@@ -100,6 +140,7 @@ function dibujarLista(contenedor, flota, contratos, hoy) {
         <h1>Flota de carros</h1>
         <a href="#/carros/nuevo" class="btn btn-primario">Agregar carro</a>
       </div>
+      ${barraDeFallo(fallos)}
       <table class="tabla-carros">
         <thead>
           <tr>
@@ -185,14 +226,14 @@ function formularioHTML() {
     </form>`;
 }
 
-async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy) {
+async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, falloFlota = false) {
   const esNuevo = carroId === 'nuevo';
   let carro = null;
 
   if (!esNuevo) {
     carro = flota.find((c) => c.id === carroId);
     if (!carro) {
-      contenedor.innerHTML = '<p class="pendiente">No se encontró este carro.</p>';
+      contenedor.innerHTML = `<p class="pendiente">${esc(textoCarroNoEncontrado(falloFlota))}</p>`;
       return;
     }
   }
@@ -395,33 +436,39 @@ export async function pintarCarros(contenedor, carroId) {
   // revisión final, el mismo bug que ya se había corregido en fechas.js).
   const hoy = hoyISO();
 
+  // Si una lectura falló, la lista lo dice (barra roja y, vacía, ni «no hay» ni «agregar
+  // el primer carro»): ver mensajesDeFalloDeCarros. `r.fallo` llega también del aviso de la
+  // sincronía de atrás, que puede fallar DESPUÉS de haber dibujado con la copia local.
+  let falloFlota = false;
+  let falloContratos = false;
+
   const repintar = () => {
     if (!sigoVigente()) return;
     if (hash === '#/carros') {
-      dibujarLista(contenedor, flota, contratos, hoy);
+      dibujarLista(contenedor, flota, contratos, hoy, { falloFlota, falloContratos });
     }
   };
 
-  // cargarFlota/cargarContratosAbiertos devuelven { datos, fallo } (T9,
-  // CRÍTICO 2 de la revisión final); esta pantalla todavía no tiene una barra
-  // de error como la de flota.js, así que por ahora solo toma `datos` — un
-  // fallo aquí se ve como "sigue como estaba", nunca como "se vació la
-  // flota", porque `datos` cae a la copia local en vez de a un arreglo vacío
-  // inventado.
+  // cargarFlota/cargarContratosAbiertos devuelven { datos, fallo } (T9, CRÍTICO 2 de la
+  // revisión final): `datos` cae a la copia local en vez de a un arreglo vacío inventado, y
+  // `fallo` dice que la nube no contestó — se muestra, porque «sigue como estaba» en silencio,
+  // con la copia local VACÍA, se leía como «todavía no hay carros».
   const [rFlota, rContratos] = await Promise.all([
-    cargarFlota((r) => { flota = r.datos; repintar(); }),
-    cargarContratosAbiertos((r) => { contratos = r.datos; repintar(); }),
+    cargarFlota((r) => { flota = r.datos; falloFlota = r.fallo; repintar(); }),
+    cargarContratosAbiertos((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); }),
   ]);
   flota = rFlota.datos;
   contratos = rContratos.datos;
+  falloFlota = rFlota.fallo;
+  falloContratos = rContratos.fallo;
 
   if (!sigoVigente()) return;
 
   // Decidir qué vista dibujar
   if (hash === '#/carros') {
-    dibujarLista(contenedor, flota, contratos, hoy);
+    dibujarLista(contenedor, flota, contratos, hoy, { falloFlota, falloContratos });
   } else if (carroId) {
     // Es #/carros/nuevo o #/carros/:id
-    await dibujarFormulario(contenedor, carroId, flota, contratos, hoy);
+    await dibujarFormulario(contenedor, carroId, flota, contratos, hoy, falloFlota);
   }
 }
