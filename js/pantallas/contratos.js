@@ -27,7 +27,7 @@ import {
 } from '../nucleo/dinero.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
-  cargarContratos, cargarContrato, anularPago, guardarContrato,
+  cargarContratos, cargarContrato, anularPago, guardarContrato, CODIGO_GARANTIA_LIBERADA_CON_SALDO,
 } from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
 // El puente entre kmSalida y kilometrajeSalida (contratos antiguos que
@@ -204,6 +204,20 @@ export function textoConfirmarAnular(pago, contrato) {
       + ' saldo, ya no tienes la tarjeta bloqueada para cobrarlo.';
   }
   return texto;
+}
+
+/**
+ * Lo que se le dice al mostrador cuando un pago no se pudo anular. Un fallo cualquiera se
+ * arregla intentando de nuevo; el rechazo por garantía ya liberada NO: al anular el pago la
+ * renta vuelve a deber, y `guardarContrato` se niega a guardar un contrato con la garantía
+ * ya soltada que debe — por mucho que se reintente (prueba del sistema, 7 oct 2026). Función pura.
+ */
+export function textoFalloAlAnular(error) {
+  if (error?.codigo === CODIGO_GARANTIA_LIBERADA_CON_SALDO) {
+    return 'No se pudo anular el pago: la garantía de esta renta ya se liberó y, sin este pago, quedaría debiendo. '
+      + 'El sistema no deja anularlo en ese caso.';
+  }
+  return 'No se pudo anular el pago. Intenta de nuevo.';
 }
 
 const pluralDias = (n) => `${n} día${n === 1 ? '' : 's'}`;
@@ -624,8 +638,8 @@ async function dibujarDetalleEntrada(contenedor, contratoId, sigoVigente) {
       contrato = await guardarContrato(anularPago(contrato, indice));
       aviso('Pago anulado.', 'exito');
       pintar();
-    } catch {
-      aviso('No se pudo anular el pago. Intenta de nuevo.', 'error');
+    } catch (error) {
+      aviso(textoFalloAlAnular(error), 'error');
       boton.disabled = false;
     }
   }

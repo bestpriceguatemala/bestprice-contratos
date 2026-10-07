@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   resultadoLectura, contratoParaGuardar, guardarContrato, duenoParaGuardar, guardarEnNubeYLocal,
+  CODIGO_GARANTIA_LIBERADA_CON_SALDO,
   costoDelDocumento, sinCostoDelDueno, conCostoDelDueno, cargarContratosParaDinero,
   cargarContratos, cargarContratosAbiertos, limpiarCopiaLocalDelCosto, MARCA_COPIA_SIN_COSTO,
   migrarCostosDelDueno, mensajeDeMigracion, MENSAJE_MIGRAR_SIN_DINERO,
@@ -101,6 +102,23 @@ test('CRÍTICO: guardarContrato rechaza una garantía liberada si todavía hay s
     garantiaLiberada: true, // el mismo hueco que abre CRÍTICO 2
   };
   await assert.rejects(() => guardarContrato(contrato), /todavía debe/i);
+});
+
+// Prueba del sistema (7 oct 2026): ese mismo rechazo es el que le llega a «Guardar correcciones» y a
+// «Anular» sobre una renta ya cerrada, y las dos pantallas lo trataban como un fallo cualquiera
+// («No se pudo guardar el cierre. Intenta de nuevo.»): reintentar nunca sirve. Por eso el rechazo
+// trae un código, para que la pantalla diga la razón de verdad.
+test('el rechazo de la garantía liberada trae su código, para que la pantalla diga por qué', async () => {
+  const contrato = {
+    dias: 4, precioDia: 700, devolucionPrevista: '2026-08-24',
+    cierre: { fechaReal: '2026-08-25', danos: 200, descuento: 0 }, pagos: [], garantiaLiberada: true,
+  };
+  await assert.rejects(() => guardarContrato(contrato), (error) => {
+    assert.equal(error.codigo, CODIGO_GARANTIA_LIBERADA_CON_SALDO);
+    assert.match(error.message, /todavía debe/i, 'el mensaje de siempre se conserva');
+    return true;
+  });
+  assert.equal(CODIGO_GARANTIA_LIBERADA_CON_SALDO, 'garantia-liberada-con-saldo');
 });
 
 // Los dueños de carros subarrendados. La ficha guardada tiene la forma que

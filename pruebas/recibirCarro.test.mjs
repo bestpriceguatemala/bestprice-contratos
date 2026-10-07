@@ -11,11 +11,11 @@ import { readFileSync } from 'node:fs';
 import {
   conKmSalidaNormalizado, textoBotonPago, textoAvisoRecibido, textoSaldo, totalDeEstaCobranza,
   leerParametroRuta, textoAvisoCobro, valoresIniciales, textoCorreccion,
-  textoEstadoPago, textoAvisoSobrecobro, montoInicialPago, leerCamposDelCierre, plantilla,
+  textoEstadoPago, textoAvisoSobrecobro, montoInicialPago, leerCamposDelCierre, plantilla, textoFalloAlGuardarElCierre,
 } from '../js/pantallas/recibirCarro.js';
 import { resumen, lineasDevolucion, saldoConTarjeta } from '../js/nucleo/contrato.js';
 import { construirCierre } from '../js/nucleo/cierre.js';
-import { agregarPago } from '../js/datos.js';
+import { agregarPago, CODIGO_GARANTIA_LIBERADA_CON_SALDO } from '../js/datos.js';
 import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
 import { contratoGuardadoConHoraTardiaAlSalir } from './fixtures/contratoGuardadoConHoraTardiaAlSalir.mjs';
 
@@ -424,4 +424,26 @@ test('el formulario del cierre bloquea Enter; el de solo cobro, que existe para 
   const fuente = readFileSync(new URL('../js/pantallas/recibirCarro.js', import.meta.url), 'utf8');
   assert.match(fuente, /import\s*\{[^}]*bloquearEnterEnElFormulario[^}]*\}\s*from '\.\.\/ui\.js'/, 'se importa del lugar donde se prueba');
   assert.match(fuente, /if \(!soloCobro\) bloquearEnterEnElFormulario\(el\('rc-form'\)\);/, 'se conecta al formulario del cierre, no al de solo cobro');
+});
+
+// Prueba del sistema (7 oct 2026): corregir hacia ARRIBA el cierre de una renta cuya garantía ya se
+// soltó (la fecha de entrada era un día más tarde, por ejemplo) dejaba el botón «Guardar correcciones»
+// encendido y, al apretarlo, decía «No se pudo guardar el cierre. Intenta de nuevo.» — para siempre:
+// guardarContrato se niega mientras quede saldo con la garantía ya liberada, y reintentar no cambia nada.
+test('textoFalloAlGuardarElCierre: un fallo cualquiera sigue pidiendo intentar de nuevo', () => {
+  assert.equal(textoFalloAlGuardarElCierre(new Error('La nube no respondió a tiempo.')), 'No se pudo guardar el cierre. Intenta de nuevo.');
+  assert.equal(textoFalloAlGuardarElCierre(undefined), 'No se pudo guardar el cierre. Intenta de nuevo.');
+});
+
+test('textoFalloAlGuardarElCierre: el rechazo por garantía ya liberada dice por qué y qué sí funciona, no «intenta de nuevo»', () => {
+  const texto = textoFalloAlGuardarElCierre(Object.assign(new Error('Todavía debe Q1,540.00.'), { codigo: CODIGO_GARANTIA_LIBERADA_CON_SALDO }));
+  assert.match(texto, /garantía/);
+  assert.match(texto, /liberada/);
+  assert.match(texto, /Monto sin recargo de tarjeta/, 'dice dónde escribir lo que se cobra');
+  assert.ok(!/intenta de nuevo/i.test(texto), 'reintentar no lo arregla');
+});
+
+test('guardar() del cierre usa textoFalloAlGuardarElCierre en su catch', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/recibirCarro.js', import.meta.url), 'utf8');
+  assert.match(fuente, /aviso\(textoFalloAlGuardarElCierre\(error\), 'error'\)/);
 });

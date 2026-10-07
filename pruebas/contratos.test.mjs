@@ -8,12 +8,14 @@
 // se vea bien en esta pantalla: subtotal Q3,880.00, total cobrado Q4,345.60.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { textoDeContrato } from '../js/nucleo/busqueda.js';
+import { CODIGO_GARANTIA_LIBERADA_CON_SALDO } from '../js/datos.js';
 import { garantiaPorLiberar } from '../js/nucleo/estados.js';
 import {
   primerDiaMes, ultimoDiaMes, filtrarPorEstado, contratosVisibles,
   claseFilaContrato, textoCuenta, numeroEnmascarado, textoConfirmarAnular, textoHoraTardia,
-  textoEstadoGarantia, seccionPagos,
+  textoEstadoGarantia, seccionPagos, textoFalloAlAnular,
 } from '../js/pantallas/contratos.js';
 import { lineasSalida, lineasDevolucion, resumen } from '../js/nucleo/contrato.js';
 import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
@@ -413,4 +415,26 @@ test('seccionPagos: un pago en efectivo cobra lo mismo que su monto, y uno anula
   const celdas = [...html.matchAll(/<td class="cobrado">([^<]*)<\/td>/g)].map((m) => m[1]);
   assert.deepEqual(celdas, ['Q1,000.00', 'Q500.00'], 'el anulado sale tachado en su fila, con su cifra');
   assert.match(html, /class="fila-anulada"/);
+});
+
+// Prueba del sistema (7 oct 2026): en una renta con la garantía ya liberada, «Anular» pregunta
+// «OJO: la garantía ya se liberó, así que si queda saldo, ya no tienes la tarjeta bloqueada» — como si
+// se pudiera — y al aceptar dice «No se pudo anular el pago. Intenta de nuevo.»: guardarContrato se
+// niega mientras quede saldo con la garantía soltada, y reintentar nunca cambia eso.
+test('textoFalloAlAnular: un fallo cualquiera sigue pidiendo intentar de nuevo', () => {
+  assert.equal(textoFalloAlAnular(new Error('La nube no respondió a tiempo.')), 'No se pudo anular el pago. Intenta de nuevo.');
+  assert.equal(textoFalloAlAnular(undefined), 'No se pudo anular el pago. Intenta de nuevo.');
+});
+
+test('textoFalloAlAnular: el rechazo por garantía ya liberada dice por qué, no «intenta de nuevo»', () => {
+  const texto = textoFalloAlAnular(Object.assign(new Error('Todavía debe Q500.00.'), { codigo: CODIGO_GARANTIA_LIBERADA_CON_SALDO }));
+  assert.match(texto, /garantía/);
+  assert.match(texto, /liberó/);
+  assert.match(texto, /debiendo/);
+  assert.ok(!/intenta de nuevo/i.test(texto));
+});
+
+test('anularDesdeLaFicha usa textoFalloAlAnular en su catch', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/contratos.js', import.meta.url), 'utf8');
+  assert.match(fuente, /aviso\(textoFalloAlAnular\(error\), 'error'\)/);
 });

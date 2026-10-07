@@ -697,6 +697,9 @@ async function escribirCostoDelDueno({ db, fsMod }, id, costoDia) {
   await conLimiteDeTiempo(fsMod.setDoc(ref, { costoDia }, { merge: true }));
 }
 
+/** El código del rechazo de `guardarContrato` cuando la garantía ya se soltó y el contrato todavía debe. */
+export const CODIGO_GARANTIA_LIBERADA_CON_SALDO = 'garantia-liberada-con-saldo';
+
 /**
  * Guarda un contrato ya completo en la nube y refresca la copia local. Si no
  * trae número todavía, lo toma de `siguienteNumeroContrato()`; si ya lo trae
@@ -745,7 +748,11 @@ export async function guardarContrato(contrato, {
   // nunca lea dos frases distintas para el mismo motivo.
   if (contrato?.garantiaLiberada) {
     const motivo = puedeLiberarse(contrato);
-    if (motivo) throw new Error(motivo);
+    // Con código propio: ese rechazo también le llega a «Guardar correcciones» y a «Anular»
+    // sobre una renta ya cerrada, y esas pantallas dicen «Intenta de nuevo» ante un fallo
+    // cualquiera — reintentar aquí nunca sirve (prueba del sistema, 7 oct 2026). Con el código
+    // pueden decir la razón de verdad. El mensaje no cambia.
+    if (motivo) throw Object.assign(new Error(motivo), { codigo: CODIGO_GARANTIA_LIBERADA_CON_SALDO });
   }
   const numero = contrato?.numero || (await numeroNuevo());
   let original = contrato;

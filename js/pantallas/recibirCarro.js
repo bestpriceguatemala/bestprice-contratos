@@ -27,7 +27,7 @@ import { lineasDevolucion, resumen, horaTardiaDe } from '../nucleo/contrato.js';
 import { q, textoEntero } from '../nucleo/dinero.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
-  cargarContrato, agregarPago, guardarContrato, cargarAjustes,
+  cargarContrato, agregarPago, guardarContrato, cargarAjustes, CODIGO_GARANTIA_LIBERADA_CON_SALDO,
 } from '../datos.js';
 import {
   dinero, fecha, aviso, hora24, bloquearEnterEnElFormulario,
@@ -190,6 +190,22 @@ export function textoAvisoRecibido(numero, saldoRestante) {
   return saldoRestante > 0
     ? `Contrato ${numero} recibido. Falta cobrar ${dinero(saldoRestante)}.`
     : `Contrato ${numero} recibido y cobrado.`;
+}
+
+/**
+ * Lo que se le dice al mostrador cuando el cierre no se pudo guardar. Un fallo cualquiera
+ * (la nube no contestó) se arregla intentando de nuevo. El rechazo por garantía ya liberada
+ * NO: corregir hacia arriba el cierre de una renta cuya garantía ya se soltó la deja
+ * debiendo, y `guardarContrato` se niega a guardar eso — por mucho que se reintente (prueba
+ * del sistema, 7 oct 2026). Lo que sí funciona hoy es cobrar lo que falta en el mismo
+ * guardado, así que eso es lo que se le dice. Función pura.
+ */
+export function textoFalloAlGuardarElCierre(error) {
+  if (error?.codigo === CODIGO_GARANTIA_LIBERADA_CON_SALDO) {
+    return 'La garantía de esta renta ya está liberada y, con lo que corriges, quedaría debiendo: así no se puede guardar. '
+      + 'Cobra lo que falta ahora mismo, escribiéndolo en «Monto sin recargo de tarjeta», y vuelve a guardar.';
+  }
+  return 'No se pudo guardar el cierre. Intenta de nuevo.';
 }
 
 /**
@@ -682,8 +698,8 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
       // ('info') evita que un pendiente se vea celebrado en verde.
       aviso(textoAvisoRecibido(guardado.numero, saldoRestante), saldoRestante > 0 ? 'info' : 'exito');
       location.hash = '#/flota';
-    } catch {
-      aviso('No se pudo guardar el cierre. Intenta de nuevo.', 'error');
+    } catch (error) {
+      aviso(textoFalloAlGuardarElCierre(error), 'error');
     } finally {
       guardando = false;
       recalcular();
