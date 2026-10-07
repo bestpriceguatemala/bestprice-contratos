@@ -100,6 +100,27 @@ export function movimientosDelDia(fecha, { reservas = [], contratos = [] } = {})
 }
 
 /**
+ * Lo que el calendario PINTA de un día: lo mismo que `movimientosDelDia`, salvo que
+ * un día que todavía no llega no tiene atrasados.
+ *
+ * Por qué: `movimientosDelDia` mide el atraso contra el día que se mira, y eso está
+ * bien para hoy y para un día pasado. Pero para un día futuro contesta «todo contrato
+ * abierto cuya fecha prevista ya pasó para entonces», es decir, una proyección en la
+ * que NADIE regresa nunca: con tres carros que vuelven hoy, el mes entero se llenaba
+ * de «⚠ 3» —una pastilla roja en cada día que falta— y el detalle de un día futuro
+ * decía «Atrasado 14 días» de un carro que ni siquiera ha vencido (prueba del
+ * sistema, 7 oct 2026). Esos carros ya salen en «↓ regresan» el día que les toca; el
+ * rojo es para lo que de verdad está atrasado, y un rojo que se equivoca enseña a
+ * ignorar el que acierta.
+ *
+ * `regresan` y `salen` de un día futuro sí se quedan: son citas, no atrasos.
+ */
+export function movimientosParaPintar(fecha, hoy, datos) {
+  const movimientos = movimientosDelDia(fecha, datos);
+  return diasEntre(hoy, fecha) > 0 ? { ...movimientos, atrasados: [] } : movimientos;
+}
+
+/**
  * Las cuatro cifras del encabezado, para el día `hoy`.
  *
  * Sale, regresa y atrasados se apoyan en `movimientosDelDia` — no se vuelve

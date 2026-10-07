@@ -7,7 +7,10 @@
 // esconde (un mes que empieza a media semana lo disimula).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { diasDelMes, cuadriculaDelMes, movimientosDelDia, resumenDeHoy } from '../js/nucleo/calendario.js';
+import {
+  diasDelMes, cuadriculaDelMes, movimientosDelDia, movimientosParaPintar, resumenDeHoy,
+} from '../js/nucleo/calendario.js';
+import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
 
 test('un mes de 31 días trae 31 fechas, de la primera a la última', () => {
   const fechas = diasDelMes('2026-10');
@@ -200,4 +203,36 @@ test('resumenDeHoy.garantias SÍ cuenta una garantía bloqueada una vez que el c
   };
   const resumen = resumenDeHoy('2026-01-05', { reservas: [], contratos: [carroYaDeVuelta] });
   assert.equal(resumen.garantias, 1);
+});
+
+// --- movimientosParaPintar: un día que todavía no llega no tiene atrasados --------
+//
+// Prueba del sistema (7 oct 2026): con tres carros que vuelven hoy y uno ya vencido, el
+// mes mostraba «⚠ 3» en CADA día que falta. Los contratos son los de verdad
+// (contratoDeUnCarro: lo que queda guardado), no objetos con las llaves a mano.
+
+test('movimientosParaPintar: hoy y los días pasados cuentan los atrasados de ese día, como siempre', () => {
+  // Salió el 20 oct por 3 días: debía volver el 23. Hoy es el 25 y sigue afuera.
+  const vencido = contratoDeUnCarro({ id: 'v', fechaSalida: '2026-10-20', dias: 3 });
+  assert.deepEqual(movimientosParaPintar('2026-10-25', '2026-10-25', { contratos: [vencido] }).atrasados.map((c) => c.id), ['v']);
+  assert.deepEqual(movimientosParaPintar('2026-10-24', '2026-10-25', { contratos: [vencido] }).atrasados.map((c) => c.id), ['v']);
+});
+
+test('movimientosParaPintar: un día futuro no marca atrasados, ni del que ya venció ni del que vence hoy', () => {
+  const vencido = contratoDeUnCarro({ id: 'v', carroId: 'v1', fechaSalida: '2026-10-20', dias: 3 });
+  const vuelveHoy = contratoDeUnCarro({ id: 'h', carroId: 'v2', fechaSalida: '2026-10-22', dias: 3 });
+  const manana = movimientosParaPintar('2026-10-26', '2026-10-25', { contratos: [vencido, vuelveHoy] });
+  assert.deepEqual(manana.atrasados, [], 'mañana no hay nada atrasado todavía: el rojo de hoy no se repite en cada día del mes');
+  const finDeMes = movimientosParaPintar('2026-10-31', '2026-10-25', { contratos: [vencido, vuelveHoy] });
+  assert.deepEqual(finDeMes.atrasados, []);
+  // Sin el arreglo (movimientosDelDia a secas) el mismo día daba los dos como atrasados:
+  assert.equal(movimientosDelDia('2026-10-31', { contratos: [vencido, vuelveHoy] }).atrasados.length, 2);
+});
+
+test('movimientosParaPintar: un día futuro conserva lo que sí es una cita (salen y regresan)', () => {
+  const vuelvePasado = contratoDeUnCarro({ id: 'p', fechaSalida: '2026-10-25', dias: 3 });
+  const reserva = { id: 'r', clienteNombre: 'Ana', fechaSalida: '2026-10-28' };
+  const dia28 = movimientosParaPintar('2026-10-28', '2026-10-25', { reservas: [reserva], contratos: [vuelvePasado] });
+  assert.deepEqual(dia28.salen.map((r) => r.id), ['r']);
+  assert.deepEqual(dia28.regresan.map((c) => c.id), ['p']);
 });

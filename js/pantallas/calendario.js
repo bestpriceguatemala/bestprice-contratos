@@ -7,7 +7,7 @@
 // lectura fallida, y registra su ruta con parámetro). No reinventa ninguna
 // regla del negocio: cuadriculaDelMes y movimientosDelDia (nucleo/calendario.js)
 // ya hacen todo el cálculo — esta pantalla solo pinta lo que contestan.
-import { cuadriculaDelMes, movimientosDelDia } from '../nucleo/calendario.js';
+import { cuadriculaDelMes, movimientosParaPintar } from '../nucleo/calendario.js';
 import { textoAnticipo } from '../nucleo/reserva.js';
 import { resumen } from '../nucleo/contrato.js';
 import { diasEntre, hoyISO, textoFecha } from '../nucleo/fechas.js';
@@ -288,7 +288,7 @@ function plantillaMes(estado) {
   // reusado tanto por las celdas como por el detalle de abajo.
   const movimientosPorDia = new Map();
   semanas.flat().forEach((fecha) => {
-    if (fecha) movimientosPorDia.set(fecha, movimientosDelDia(fecha, { reservas, contratos }));
+    if (fecha) movimientosPorDia.set(fecha, movimientosParaPintar(fecha, hoy, { reservas, contratos }));
   });
 
   const celdas = semanas
