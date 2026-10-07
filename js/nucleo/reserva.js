@@ -204,8 +204,14 @@ const alto = (mensaje) => ({ nivel: 'alto', mensaje });
  * ese tipo, se haya pedido por nombre o no.
  */
 function tipoComprometido(item, flota) {
-  if (item?.tipoVehiculo) return item.tipoVehiculo;
-  return flota.find((c) => c.id === item?.carroId)?.tipo;
+  // Si trae carro exacto, manda el tipo REAL de ese carro y no el que quedó escrito en
+  // `tipoVehiculo`: son dos campos del formulario que no se corrigen uno al otro. «Cambiar la
+  // unidad» (§12b) es justo escoger otro carro en la misma reservación, y el tipo se queda como
+  // estaba: una reservación de «Sedán» a la que se le puso la Ranger seguía contando contra los
+  // sedanes (un aviso falso de «ya están comprometidos») y dejaba libre la única pickup, que ya
+  // estaba apartada (prueba del sistema, 7 oct 2026). Sin carro, o con uno que ya no está en la
+  // flota, vale el tipo pedido.
+  return flota.find((c) => c.id === item?.carroId)?.tipo || item?.tipoVehiculo;
 }
 
 /**

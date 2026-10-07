@@ -167,6 +167,36 @@ test('un carro fuera de servicio no cuenta como disponible', () => {
   assert.equal(r.length, 1, 'el del taller no salva la capacidad');
 });
 
+// Prueba del sistema (7 oct 2026): «cambiar la unidad» de una reservación de Sedán a la Ranger (una
+// pickup) dejaba `tipoVehiculo: 'Sedán'` guardado junto a `carroId` de la Ranger. La capacidad por
+// tipo contaba esa reservación contra los sedanes y no contra las pickups. Lo que cuenta es el tipo
+// real del carro asignado.
+// Las reservaciones se arman con construirReserva (lo que guarda reservas.js), no a mano.
+const apartada = (id, campos) => construirReserva({ id }, {
+  clienteNombre: 'Ana', dias: 4, precioDia: 700, anticipo: 0, ...campos,
+});
+
+test('por tipo: una reservación con carro exacto cuenta como el tipo de ESE carro, aunque el tipo escrito sea otro', () => {
+  const cambiadaALaPickup = apartada('r1', { carroId: 'v3', tipoVehiculo: 'MICROBÚS', fechaSalida: '2026-10-11' });
+  // v3 es el único SEDÁN: ya está apartado, aunque la reservación diga MICROBÚS.
+  const r = choquesDeReserva({ reserva: { ...del10al14, tipoVehiculo: 'SEDÁN' }, flota, reservas: [cambiadaALaPickup], contratos: [] });
+  assert.equal(r[0]?.mensaje, 'Solo tienes 1 SEDÁN y ya está comprometido en esas fechas.');
+});
+
+test('por tipo: y no gasta la capacidad del tipo que dice el formulario si el carro es de otro', () => {
+  // Dos microbuses y una reservación «MICROBÚS» que en realidad tiene el sedán: queda libre un microbús.
+  const delSedan = apartada('r1', { carroId: 'v3', tipoVehiculo: 'MICROBÚS', fechaSalida: '2026-10-11' });
+  const otra = apartada('r2', { tipoVehiculo: 'MICROBÚS', fechaSalida: '2026-10-09' });
+  // Sin el arreglo las dos contaban como microbuses (2 de 2): un «ya están comprometidos» falso.
+  assert.deepEqual(choquesDeReserva({ reserva: { ...del10al14, tipoVehiculo: 'MICROBÚS' }, flota, reservas: [delSedan, otra], contratos: [] }), []);
+});
+
+test('por tipo: un carro exacto que ya no está en la flota cae al tipo que se pidió', () => {
+  const reservas = [apartada('r1', { carroId: 'vendido', tipoVehiculo: 'SEDÁN', fechaSalida: '2026-10-11' })];
+  const r = choquesDeReserva({ reserva: { ...del10al14, tipoVehiculo: 'SEDÁN' }, flota, reservas, contratos: [] });
+  assert.equal(r[0]?.mensaje, 'Solo tienes 1 SEDÁN y ya está comprometido en esas fechas.');
+});
+
 // reservaParaGuardar (Tarea 4, datos.js): la parte pura de guardarReserva.
 // Mismo patrón que contratoParaGuardar (pruebas/datos.test.mjs) — el campo
 // `estado` no se confía a lo que traiga la reservación, se sella con
