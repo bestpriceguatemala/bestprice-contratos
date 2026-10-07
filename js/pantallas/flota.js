@@ -16,6 +16,7 @@ import { resumenDeHoy } from '../nucleo/calendario.js';
 import { diasEntre, hoyISO } from '../nucleo/fechas.js';
 import {
   cargarFlota, cargarContratosAbiertos, cargarReservas, liberarGarantia, puedeLiberarse,
+  CODIGO_SALDO_PENDIENTE, CODIGO_GARANTIA_LIBERADA_CON_SALDO,
 } from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
 
@@ -210,6 +211,17 @@ export function textoAvisoGarantiaLiberada(contrato) {
   return puedeCerrar(contrato)
     ? `Garantía liberada. Contrato N.° ${contrato?.numero ?? '—'} cerrado.`
     : 'Garantía liberada.';
+}
+
+/**
+ * Lo que lee el dueño cuando «Liberar garantía» no se pudo. Si el rechazo es del negocio (todavía
+ * debe), el mensaje ya es la razón, con la cifra. Si fue la red o la nube, el texto crudo era
+ * «La nube no respondió a tiempo.» —sin decir qué hacer— o, con una sesión vencida, el texto en
+ * inglés del SDK (prueba del sistema, 7 oct 2026). Función pura.
+ */
+export function textoFalloAlLiberar(error) {
+  if (error?.codigo === CODIGO_SALDO_PENDIENTE || error?.codigo === CODIGO_GARANTIA_LIBERADA_CON_SALDO) return error.message;
+  return 'No se pudo liberar la garantía. Revisa tu conexión e intenta de nuevo.';
 }
 
 function filaGarantia(contrato, montoTexto, diasTexto) {
@@ -432,7 +444,7 @@ export async function pintarFlota(contenedor) {
       // liberarGarantia es el candado de verdad (por si el saldo cambió
       // entre que se pintó la lista y este clic — otro cobro desde otra
       // pestaña, por ejemplo); su mensaje ya dice cuánto debe.
-      aviso(error.message, 'error');
+      aviso(textoFalloAlLiberar(error), 'error');
       boton.disabled = false;
     }
   }

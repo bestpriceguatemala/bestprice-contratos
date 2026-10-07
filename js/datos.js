@@ -845,10 +845,13 @@ export function puedeLiberarse(contrato) {
   return null;
 }
 
+/** El código del rechazo de `liberarGarantia` cuando el cliente todavía debe: el mensaje ya es la razón, en español. */
+export const CODIGO_SALDO_PENDIENTE = 'saldo-pendiente';
+
 /** Libera la garantía de la tarjeta. Rechaza mientras `puedeLiberarse` diga que hay motivo. */
 export async function liberarGarantia(contrato) {
   const motivo = puedeLiberarse(contrato);
-  if (motivo) throw new Error(motivo);
+  if (motivo) throw Object.assign(new Error(motivo), { codigo: CODIGO_SALDO_PENDIENTE });
   return guardarContrato({ ...contrato, garantiaLiberada: true, garantiaLiberadaEn: hoyISO() });
 }
 

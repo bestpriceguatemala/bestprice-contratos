@@ -10,8 +10,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  textoConfirmarLiberar, textoAvisoGarantiaLiberada, estiloCifraResumen, rutaDeAtrasados,
+  textoConfirmarLiberar, textoAvisoGarantiaLiberada, estiloCifraResumen, rutaDeAtrasados, textoFalloAlLiberar,
 } from '../js/pantallas/flota.js';
+import { liberarGarantia } from '../js/datos.js';
+import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
 
 test('textoConfirmarLiberar: nombra al cliente y el monto, y avisa que no se deshace', () => {
   const contrato = { clienteNombre: 'Juan Pérez', garantiaMonto: 1500 };
@@ -64,4 +66,21 @@ test('estiloCifraResumen: cualquier otra cifra en positivo es normal, nunca aler
 test('rutaDeAtrasados: lleva al calendario de hoy (que lista todos los atrasados), no a los cuadros de la flota', () => {
   assert.equal(rutaDeAtrasados('2026-10-20'), '#/calendario/2026-10-20');
   assert.notEqual(rutaDeAtrasados('2026-10-20'), '#/flota');
+});
+
+// «Liberar garantía» mostraba el texto crudo del error: «La nube no respondió a tiempo.» sin decir qué
+// hacer, o el inglés del SDK con una sesión vencida. Un rechazo del negocio (todavía debe) sí es la razón.
+test('textoFalloAlLiberar: si todavía debe, el mensaje del rechazo es la razón y se deja tal cual', async () => {
+  // Una renta recibida con Q200 de daños sin cobrar: debe, y liberarGarantia se niega con su código.
+  const debe = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 9, recibidoEl: '2026-10-06' });
+  const error = await liberarGarantia(debe).then(() => null, (e) => e);
+  assert.match(error.message, /Todavía debe Q200\.00/);
+  assert.equal(textoFalloAlLiberar(error), error.message);
+});
+
+test('textoFalloAlLiberar: si fue la red o la nube, dice qué hacer en vez del texto crudo', () => {
+  const esperado = 'No se pudo liberar la garantía. Revisa tu conexión e intenta de nuevo.';
+  assert.equal(textoFalloAlLiberar(new Error('La nube no respondió a tiempo.')), esperado);
+  assert.equal(textoFalloAlLiberar(Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' })), esperado);
+  assert.equal(textoFalloAlLiberar(undefined), esperado);
 });
