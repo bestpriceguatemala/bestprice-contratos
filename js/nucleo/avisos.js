@@ -28,6 +28,16 @@ export function avisosDeSalida({
 }) {
   const avisos = [];
 
+  // Un carro fuera de servicio (taller, golpe, revisión) no tiene botón «Sacar» en la flota, pero hay
+  // otros caminos hasta esta pantalla: el «Sacar carro» de una reservación que apartó ese carro ANTES de
+  // que entrara al taller (calendario y ficha de la reservación) o la dirección escrita a mano. Por
+  // ahí se podía rentar el carro del taller sin que nada lo dijera (prueba del sistema, 7 oct 2026).
+  // Es un aviso y no un candado: él decide, pero tiene que enterarse.
+  if (carro?.fueraDeServicio) {
+    const motivo = String(carro.motivoFueraDeServicio ?? '').trim();
+    avisos.push(alto(`Este carro está fuera de servicio${motivo ? `: ${motivo}` : ''}.`));
+  }
+
   if (cliente?.licenciaExpira && diasEntre(cliente.licenciaExpira, hoy) > 0) {
     avisos.push(alto(`La licencia del cliente venció el ${textoFecha(cliente.licenciaExpira)}.`));
   }

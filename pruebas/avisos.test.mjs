@@ -349,3 +349,30 @@ test('un contrato a tiempo (el carro sigue afuera dentro de lo previsto) avisa c
   assert.equal(r.length, 1);
   assert.match(r[0].mensaje, /3 oct 2026 al 12 oct 2026/);
 });
+
+// Prueba del sistema (7 oct 2026): un carro marcado «fuera de servicio» (sin botón «Sacar» en la
+// flota) se abría igual desde el «Sacar carro» de una reservación, o escribiendo la dirección, y la
+// salida no decía nada. El carro es el que guarda carros.js al marcarlo (fueraDeServicio y
+// motivoFueraDeServicio), no un objeto con las llaves a mano.
+const carroEnElTaller = {
+  id: 'v4', codigo: 4, placas: 'P-400DDD', tipo: 'Sedán', marca: 'Kia', linea: 'Rio', color: 'Negro', modelo: '2023',
+  propiedad: 'Propio', fueraDeServicio: true, motivoFueraDeServicio: 'En el taller: cambio de frenos',
+};
+
+test('avisa, en rojo y con el motivo, si el carro está fuera de servicio', () => {
+  const r = avisosDeSalida({ ...base, carro: carroEnElTaller });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].nivel, 'alto');
+  assert.equal(r[0].mensaje, 'Este carro está fuera de servicio: En el taller: cambio de frenos.');
+});
+
+test('fuera de servicio sin motivo escrito avisa igual, sin dejar un «: » colgando', () => {
+  const r = avisosDeSalida({ ...base, carro: { ...carroEnElTaller, motivoFueraDeServicio: '  ' } });
+  assert.equal(r[0].mensaje, 'Este carro está fuera de servicio.');
+});
+
+test('un carro ya habilitado, o sin esa marca, no avisa nada (carros.js guarda fueraDeServicio: false al habilitarlo)', () => {
+  assert.deepEqual(avisosDeSalida({ ...base, carro: { ...carroEnElTaller, fueraDeServicio: false } }), []);
+  assert.deepEqual(avisosDeSalida({ ...base, carro: { ...carroEnElTaller, fueraDeServicio: false, motivoFueraDeServicio: '' } }), []);
+  assert.deepEqual(avisosDeSalida({ ...base, carro: null }), [], 'un carro ajeno no tiene ficha en la flota');
+});
