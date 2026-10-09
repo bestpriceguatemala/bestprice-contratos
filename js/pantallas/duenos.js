@@ -22,7 +22,9 @@ import {
   CAMPOS_DUENO, construirDueno, faltaAlgoEnDueno, textoDeDueno,
 } from '../nucleo/dueno.js';
 import { filtrar } from '../nucleo/busqueda.js';
-import { cargarDuenos, guardarDueno } from '../datos.js';
+import {
+  cargarDuenos, guardarDueno, altaConIdFijo, nuevoIdDueno,
+} from '../datos.js';
 import { aviso } from '../ui.js';
 import { rutaDeCuenta } from './dinero.js';
 
@@ -166,6 +168,9 @@ function dibujarFicha(contenedor, duenoId, duenos, fallo) {
   }
 
   contenedor.innerHTML = htmlFormularioDeDueno(dueno, { esNuevo });
+  // El id de un dueño NUEVO se decide una vez, antes del primer intento: un reintento tras un tiempo vencido
+  // cae en la misma ficha y no deja dos dueños, que partirían su cuenta en dos (H-2).
+  const alta = altaConIdFijo(nuevoIdDueno);
 
   function leerCampos() {
     const campos = {};
@@ -189,7 +194,8 @@ function dibujarFicha(contenedor, duenoId, duenos, fallo) {
     const boton = el('df-guardar');
     boton.disabled = true;
     try {
-      const guardado = await guardarDueno(nuevo);
+      const guardado = await guardarDueno(await alta.paraGuardar(nuevo));
+      alta.terminada();
       aviso(`${guardado.nombre || 'Dueño'} guardado.`, 'exito');
       location.hash = LISTA;
     } catch (error) {

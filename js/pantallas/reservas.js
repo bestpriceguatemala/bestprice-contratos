@@ -24,6 +24,7 @@ import { nombreCompleto } from '../nucleo/cliente.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
   cargarReservas, cargarFlota, cargarContratosAbiertos, guardarReserva, cancelarReserva, buscarClientes,
+  altaConIdFijo, nuevoIdReserva,
 } from '../datos.js';
 import { fecha, aviso } from '../ui.js';
 
@@ -428,6 +429,9 @@ async function dibujarFicha(
   }
 
   const estado = reserva ? estadoReserva(reserva) : 'pendiente';
+  // El id de una reservación NUEVA se decide una vez, antes del primer intento: si el internet se pone lento y
+  // «intenta de nuevo» repite el guardado, tiene que caer en la misma reservación y no hacer una segunda (H-2).
+  const alta = altaConIdFijo(nuevoIdReserva);
   let clienteIdElegido = reserva?.clienteId || null;
   let ultimosResultados = [];
 
@@ -535,7 +539,8 @@ async function dibujarFicha(
       // guardarReserva (datos.js) sella id/actualizado/estado — nunca se
       // escriben a mano aquí (§7b del diseño: devolucionPrevista y estado se
       // derivan, no se autorizan a mano).
-      const guardada = await guardarReserva(borrador);
+      const guardada = await guardarReserva(await alta.paraGuardar(borrador));
+      alta.terminada();
       aviso(`Reservación de ${guardada.clienteNombre || 'cliente'} guardada.`, 'exito');
       location.hash = '#/reservas';
     } catch (error) {

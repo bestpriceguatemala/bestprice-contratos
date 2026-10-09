@@ -18,7 +18,9 @@ import { filtrar, textoDeCliente } from '../nucleo/busqueda.js';
 import { resumen } from '../nucleo/contrato.js';
 import { diasEntre, hoyISO } from '../nucleo/fechas.js';
 import { suma } from '../nucleo/dinero.js';
-import { cargarClientes, cargarContratosAbiertos, guardarCliente } from '../datos.js';
+import {
+  cargarClientes, cargarContratosAbiertos, guardarCliente, altaConIdFijo, nuevoIdCliente,
+} from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
 
 // El texto libre que escribe el mostrador se escapa antes de entrar al HTML,
@@ -365,6 +367,9 @@ async function dibujarFicha(contenedor, clienteId, clientes, contratos, hoy, fal
     }
   }
 
+  // El id de un cliente NUEVO se decide una vez, antes del primer intento: un reintento tras un tiempo vencido
+  // cae en la misma ficha y no deja dos con el mismo DPI (H-2).
+  const alta = altaConIdFijo(nuevoIdCliente);
   const contratosCliente = cliente ? contratosDe(cliente, contratos) : [];
   const alertas = cliente ? alertasDe(cliente, contratosCliente, hoy) : [];
   const titulo = esNuevo ? 'Nuevo cliente' : (nombreCompleto(cliente) || 'Cliente sin nombre');
@@ -414,7 +419,8 @@ async function dibujarFicha(contenedor, clienteId, clientes, contratos, hoy, fal
     const boton = el('cli-guardar');
     boton.disabled = true;
     try {
-      const guardado = await guardarCliente(nuevo);
+      const guardado = await guardarCliente(await alta.paraGuardar(nuevo));
+      alta.terminada();
       aviso(`${nombreCompleto(guardado) || 'Cliente'} guardado.`, 'exito');
       location.hash = '#/clientes';
     } catch (error) {

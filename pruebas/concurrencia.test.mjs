@@ -17,7 +17,11 @@ import {
   guardarContrato, agregarPago, contratoParaGuardar, reservaParaGuardar,
   CODIGO_COPIA_VIEJA, MENSAJE_COPIA_VIEJA, cambioDesdeQueSeAbrio,
   CODIGO_RESERVACION_CAMBIO, MENSAJE_RESERVACION_YA_SALIO, MENSAJE_RESERVACION_CANCELADA, MENSAJE_RESERVACION_CAMBIO,
+  nuevoIdContrato, nuevoIdCliente, nuevoIdReserva, nuevoIdVehiculo, nuevoIdDueno, altaConIdFijo, MENSAJE_ALTA_SIN_ID,
+  guardarCliente, guardarDueno, guardarReserva, guardarVehiculo,
 } from '../js/datos.js';
+import { construirCliente } from '../js/nucleo/cliente.js';
+import { construirDueno } from '../js/nucleo/dueno.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { construirContrato, conAnticipoComoPago, textoFalloAlGuardarElContrato } from '../js/pantallas/sacarCarro.js';
 import { construirReserva } from '../js/nucleo/reserva.js';
@@ -472,4 +476,218 @@ test('estructura: «Sacar carro» saca el contrato y marca la reservación en UN
   assert.match(guardar, /guardarContrato\(contrato, \{ reservaDeOrigen: reservaOrigen \}\)/);
   assert.doesNotMatch(guardar, /guardarReserva\(/, 'marcarla aparte, después, es lo que dejaba el hueco');
   assert.match(guardar, /aviso\(textoFalloAlGuardarElContrato\(error\), 'error'\)/);
+});
+
+// ---------------------------------------------------------------------------
+// H-2. Un tiempo de espera vencido y luego un reintento: el reintento duplicaba el registro
+// ---------------------------------------------------------------------------
+//
+// Con internet lento la pantalla se da por vencida a los 8 s («No se pudo guardar. Intenta de nuevo.») pero la
+// primera escritura, que el SDK mantiene en cola, SÍ llega. Si el reintento acuña otro id, quedan dos
+// documentos. Los contratos (`nuevoIdContrato`) y los pagos a dueños (`nuevoIdPagoDueno`) ya lo evitaban
+// acuñando el id UNA vez, antes del primer intento; reservaciones, clientes, carros y dueños no. Es el mismo
+// patrón, con las mismas funciones `nuevoId*`, y una sola regla para cuándo se suelta el id (`altaConIdFijo`).
+
+const ALTAS = [
+  {
+    coleccion: 'clientes',
+    nuevoId: nuevoIdCliente,
+    guardar: guardarCliente,
+    registro: (nombre = 'Ana') => construirCliente({}, { nombres: nombre, apellidos: 'López', documento: '1234567890101', telefono: '5555-1111' }),
+  },
+  {
+    coleccion: 'duenos',
+    nuevoId: nuevoIdDueno,
+    guardar: guardarDueno,
+    registro: (nombre = 'MARIO LÓPEZ') => construirDueno({}, { nombre, telefono: '7777-7777', nit: '12345678-7', nota: '' }),
+  },
+  {
+    coleccion: 'reservas',
+    nuevoId: nuevoIdReserva,
+    guardar: guardarReserva,
+    registro: (nombre = 'Juan Pérez') => construirReserva({}, {
+      clienteId: 'k1', clienteNombre: nombre, telefono: '5555-5555', fechaSalida: '2026-09-01', dias: 4, carroId: 'v1',
+      carroPlacas: 'P-999TST', tipoVehiculo: '', precioDia: 700, anticipo: 400, anticipoPagado: true, nota: '',
+    }),
+  },
+  {
+    coleccion: 'vehiculos',
+    nuevoId: nuevoIdVehiculo,
+    guardar: guardarVehiculo,
+    registro: (placas = 'P-123ABC') => ({
+      placas, tipo: 'Sedán', marca: 'Toyota', linea: 'Yaris', color: 'Blanco', modelo: '2022', propiedad: 'Propio',
+    }),
+  },
+];
+
+const documentosDe = (nube, coleccion) => [...nube.docs.keys()].filter((r) => r.startsWith(`${coleccion}/`) && r.split('/').length === 2);
+
+/**
+ * La nube con el internet lento: la PRIMERA escritura de cada documento llega, pero a quien guarda le toca el
+ * tiempo de espera vencido («La nube no respondió a tiempo.»). Las siguientes salen bien.
+ */
+function nubeLenta() {
+  const nube = nubeEnMemoria({ contadores: { vehiculos: { ultimo: 3 } } });
+  const original = nube.fsMod.setDoc;
+  let primera = true;
+  nube.fsMod.setDoc = async (ref, datos, opciones) => {
+    await original(ref, datos, opciones);
+    if (primera) {
+      primera = false;
+      throw new Error('La nube no respondió a tiempo.');
+    }
+  };
+  const copia = copiaLocalEnMemoria();
+  return {
+    nube,
+    deps: { iniciar: nube.iniciar, guardarCopia: copia.guardarCopia, avisar: () => {} },
+  };
+}
+
+for (const alta of ALTAS) {
+  test(`H-2 (${alta.coleccion}): un tiempo vencido y luego el reintento dejan UN documento, no dos`, async () => {
+    const { nube, deps } = nubeLenta();
+    const intencion = altaConIdFijo(() => alta.nuevoId({ iniciar: nube.iniciar }));
+
+    await assert.rejects(alta.guardar(await intencion.paraGuardar(alta.registro()), deps), /no respondió a tiempo/);
+    assert.equal(documentosDe(nube, alta.coleccion).length, 1, 'punto de partida: el primer intento sí llegó');
+    const guardado = await alta.guardar(await intencion.paraGuardar(alta.registro()), deps); // «Intenta de nuevo»
+    intencion.terminada();
+
+    assert.equal(documentosDe(nube, alta.coleccion).length, 1, 'el reintento cayó en el mismo documento');
+    assert.deepEqual(documentosDe(nube, alta.coleccion), [`${alta.coleccion}/${guardado.id}`]);
+  });
+
+  test(`H-2 (${alta.coleccion}): sin el id decidido de antemano NO se guarda — un alta que no se puede repetir no existe`, async () => {
+    const { nube, deps } = nubeLenta();
+    await assert.rejects(alta.guardar(alta.registro(), deps), (error) => {
+      assert.equal(error.message, MENSAJE_ALTA_SIN_ID);
+      return true;
+    });
+    assert.equal(documentosDe(nube, alta.coleccion).length, 0, 'ni siquiera llegó a la nube');
+  });
+
+  test(`H-2 (${alta.coleccion}): dos altas DISTINTAS, una detrás de otra, son dos documentos — el id no se reutiliza después de un guardado bueno`, async () => {
+    const nube = nubeEnMemoria({ contadores: { vehiculos: { ultimo: 3 } } });
+    const copia = copiaLocalEnMemoria();
+    const deps = { iniciar: nube.iniciar, guardarCopia: copia.guardarCopia, avisar: () => {} };
+    const intencion = altaConIdFijo(() => alta.nuevoId({ iniciar: nube.iniciar }));
+
+    const primera = await alta.guardar(await intencion.paraGuardar(alta.registro()), deps);
+    intencion.terminada();
+    const segunda = await alta.guardar(await intencion.paraGuardar(alta.registro(alta.coleccion === 'vehiculos' ? 'P-999ZZZ' : 'Otra')), deps);
+    intencion.terminada();
+
+    assert.notEqual(primera.id, segunda.id);
+    assert.equal(documentosDe(nube, alta.coleccion).length, 2, 'la segunda alta no pisó a la primera');
+  });
+
+  test(`H-2 (${alta.coleccion}): editar un registro que ya existe sigue siendo editar — conserva su id y no gasta uno nuevo`, async () => {
+    const nube = nubeEnMemoria({ contadores: { vehiculos: { ultimo: 3 } } });
+    const copia = copiaLocalEnMemoria();
+    const deps = { iniciar: nube.iniciar, guardarCopia: copia.guardarCopia, avisar: () => {} };
+    let minteados = 0;
+    const intencion = altaConIdFijo(async () => { minteados += 1; return alta.nuevoId({ iniciar: nube.iniciar }); });
+    const existente = await alta.guardar(await intencion.paraGuardar(alta.registro()), deps);
+    intencion.terminada();
+    const antes = minteados;
+
+    const editado = await alta.guardar(await intencion.paraGuardar({ ...existente, nota: 'editado' }), deps);
+    assert.equal(editado.id, existente.id);
+    assert.equal(minteados, antes, 'una edición no pide un id nuevo');
+    assert.equal(documentosDe(nube, alta.coleccion).length, 1);
+  });
+}
+
+test('H-2: nuevoId* da un id sin escribir nada, en la colección que toca, y cada uno es distinto', async () => {
+  const nube = nubeEnMemoria();
+  const opciones = { iniciar: nube.iniciar };
+  const casos = [
+    [nuevoIdContrato, 'contratos'], [nuevoIdCliente, 'clientes'], [nuevoIdReserva, 'reservas'],
+    [nuevoIdVehiculo, 'vehiculos'], [nuevoIdDueno, 'duenos'],
+  ];
+  for (const [pedir, coleccion] of casos) {
+    const uno = await pedir(opciones);
+    const otro = await pedir(opciones);
+    assert.ok(uno && otro && uno !== otro, `${coleccion}: ids distintos`);
+    assert.ok(uno.startsWith('auto-'), `${coleccion}: lo acuñó la colección correcta (la falsa los numera)`);
+  }
+  assert.equal(nube.escrituras().length, 0, 'pedir un id no escribe nada: solo lo decide');
+  assert.equal(nube.docs.size, 0);
+});
+
+test('altaConIdFijo: el mismo id en cada reintento, aunque se pida a la vez (doble clic), y uno nuevo después de terminar', async () => {
+  let n = 0;
+  const intencion = altaConIdFijo(async () => `id-${(n += 1)}`);
+  const [a, b] = await Promise.all([intencion.paraGuardar({ nombre: 'x' }), intencion.paraGuardar({ nombre: 'x' })]);
+  assert.equal(a.id, 'id-1');
+  assert.equal(b.id, 'id-1', 'dos clics seguidos son una sola alta');
+  assert.equal((await intencion.paraGuardar({ nombre: 'x' })).id, 'id-1', 'y el reintento también');
+  assert.equal(n, 1);
+  intencion.terminada();
+  assert.equal((await intencion.paraGuardar({ nombre: 'y' })).id, 'id-2', 'terminada una alta, la siguiente es otra');
+});
+
+test('altaConIdFijo: lo que ya trae id (una edición) pasa tal cual, sin pedir nada', async () => {
+  let n = 0;
+  const intencion = altaConIdFijo(async () => `id-${(n += 1)}`);
+  const registro = { id: 'c9', nombre: 'x' };
+  assert.equal(await intencion.paraGuardar(registro), registro);
+  assert.equal(n, 0);
+});
+
+test('altaConIdFijo: si pedir el id FALLA, el siguiente intento lo vuelve a pedir — no se queda con una promesa rechazada', async () => {
+  let n = 0;
+  const intencion = altaConIdFijo(async () => {
+    n += 1;
+    if (n === 1) throw new Error('Firebase no arrancó');
+    return `id-${n}`;
+  });
+  await assert.rejects(intencion.paraGuardar({ nombre: 'x' }), /no arrancó/);
+  assert.equal((await intencion.paraGuardar({ nombre: 'x' })).id, 'id-2');
+});
+
+test('altaConIdFijo: con una clave distinta es OTRA alta (un intento fallido de un grupo no se le pega a otro)', async () => {
+  let n = 0;
+  const intencion = altaConIdFijo(async () => `id-${(n += 1)}`);
+  assert.equal((await intencion.paraGuardar({ nombre: 'a' }, 'texto:a')).id, 'id-1');
+  assert.equal((await intencion.paraGuardar({ nombre: 'a' }, 'texto:a')).id, 'id-1');
+  assert.equal((await intencion.paraGuardar({ nombre: 'b' }, 'texto:b')).id, 'id-2');
+});
+
+test('H-2: el carro nuevo reintentado cae en el mismo documento; el código correlativo deja un hueco, no un carro repetido', async () => {
+  // El código correlativo sale de una transacción; si el primer intento llegó, el reintento (mismo id) pide otro y
+  // lo sobrescribe: un hueco en la numeración, no un carro repetido. Se deja dicho para que nadie lo «arregle» mal.
+  const { nube, deps } = nubeLenta();
+  const intencion = altaConIdFijo(() => nuevoIdVehiculo({ iniciar: nube.iniciar }));
+  const vehiculo = ALTAS[3].registro();
+  await assert.rejects(guardarVehiculo(await intencion.paraGuardar(vehiculo), deps), /no respondió a tiempo/);
+  const guardado = await guardarVehiculo(await intencion.paraGuardar(vehiculo), deps);
+  assert.equal(documentosDe(nube, 'vehiculos').length, 1);
+  assert.equal(guardado.codigo, 5, 'el reintento tomó el siguiente código: el 4 quedó sin usar, un hueco que se explica');
+});
+
+test('estructura: cada pantalla que da de alta guarda con el id decidido de antemano (`altaConIdFijo`) y lo suelta al terminar', () => {
+  // [archivo, guardado, función que acuña, llamadas en total, de ellas, altas que pasan por paraGuardar()]
+  // Las que sobran son EDICIONES de algo que ya existe y ya traen su id (carros: marcar fuera de servicio, habilitar).
+  const sitios = [
+    ['reservas', 'guardarReserva', 'nuevoIdReserva', 1, 1],
+    ['clientes', 'guardarCliente', 'nuevoIdCliente', 1, 1],
+    ['duenos', 'guardarDueno', 'nuevoIdDueno', 1, 1],
+    ['carros', 'guardarVehiculo', 'nuevoIdVehiculo', 4, 1],
+    ['sacarCarro', 'guardarCliente', 'nuevoIdCliente', 1, 1],
+    ['sacarCarro', 'guardarDueno', 'nuevoIdDueno', 1, 1],
+    ['dinero', 'guardarDueno', 'nuevoIdDueno', 1, 1],
+  ];
+  for (const [pantalla, guardado, acuna, total, altas] of sitios) {
+    const codigo = leerFuente(`../js/pantallas/${pantalla}.js`).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    assert.match(codigo, new RegExp(`altaConIdFijo\\(${acuna}\\)`), `${pantalla}: acuña con ${acuna}`);
+    assert.equal([...codigo.matchAll(new RegExp(`\\b${guardado}\\(`, 'g'))].length, total, `${pantalla}: llamadas a ${guardado}`);
+    assert.equal(
+      [...codigo.matchAll(new RegExp(`\\b${guardado}\\(await [\\w.]+\\.paraGuardar\\(`, 'g'))].length,
+      altas,
+      `${pantalla}: ${guardado} debe recibir el registro de paraGuardar() en cada alta`,
+    );
+    assert.match(codigo, /\.terminada\(\)/, `${pantalla}: suelta el id cuando el alta salió bien`);
+  }
 });

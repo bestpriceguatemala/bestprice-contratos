@@ -458,9 +458,13 @@ export async function buscarClientes(consulta) {
   return filtrar(clientes, consulta, textoDeCliente);
 }
 
-/** Guarda un cliente en la nube y refresca la copia local. */
-export async function guardarCliente(cliente) {
-  const guardado = await guardarEnNubeYLocal('clientes', cliente, (id) => ({ ...cliente, id, actualizado: Date.now() }));
+/**
+ * Guarda un cliente en la nube y refresca la copia local. **El cliente trae su `id`** —un alta lo pide antes
+ * del primer intento con `nuevoIdCliente()`, ver «Un alta decide su id antes de guardar»—, o no se guarda.
+ */
+export async function guardarCliente(cliente, deps = {}) {
+  exigirId(cliente);
+  const guardado = await guardarEnNubeYLocal('clientes', cliente, (id) => ({ ...cliente, id, actualizado: Date.now() }), deps);
   // Si ya había una búsqueda de la sesión en curso, se le agrega de una vez:
   // el cliente que el mostrador acaba de dar de alta debe aparecer ya mismo.
   if (clientesListos) clientesListos = clientesListos.then((clientes) => mezclar(clientes, [guardado]));
@@ -509,9 +513,10 @@ export function duenoParaGuardar(dueno, { id, ahora = Date.now() } = {}) {
   return { ...dueno, id: id ?? dueno?.id, actualizado: ahora };
 }
 
-/** Guarda un dueño en la nube y refresca la copia local. */
-export async function guardarDueno(dueno) {
-  const guardado = await guardarEnNubeYLocal('duenos', dueno, (id) => duenoParaGuardar(dueno, { id }));
+/** Guarda un dueño en la nube y refresca la copia local. **Trae su `id`**: ver `guardarCliente`. */
+export async function guardarDueno(dueno, deps = {}) {
+  exigirId(dueno);
+  const guardado = await guardarEnNubeYLocal('duenos', dueno, (id) => duenoParaGuardar(dueno, { id }), deps);
   // Igual que con los clientes: si ya había una búsqueda de la sesión en
   // curso, el dueño recién dado de alta debe aparecer ya mismo.
   if (duenosListos) duenosListos = duenosListos.then((duenos) => mezclar(duenos, [guardado]));
@@ -1035,6 +1040,84 @@ export async function liberarGarantia(contrato) {
   return guardarContrato({ ...contrato, garantiaLiberada: true, garantiaLiberadaEn: hoyISO() });
 }
 
+// ---------- Un alta decide su id antes de guardar (prueba del sistema, 7 oct 2026: H-2) ----------
+//
+// Con internet lento la pantalla se da por vencida a los 8 s («No se pudo guardar. Intenta de nuevo.»), pero la
+// primera escritura, que el SDK mantiene en cola, SÍ llega: él aprieta otra vez porque leyó «intenta de nuevo»
+// y quedan DOS documentos (para un cliente, dos fichas con el mismo DPI). Los contratos y los pagos a dueños ya
+// lo evitaban acuñando su id UNA vez, antes del primer intento (`nuevoIdContrato`, `nuevoIdPagoDueno`): el
+// reintento cae en el mismo documento. Reservaciones, clientes, carros y dueños hacían `doc(collection(...))`
+// en cada intento. Ahora siguen el mismo patrón, con las mismas funciones, y sin una segunda forma de hacerlo:
+//
+//   - `nuevoIdCliente()`, `nuevoIdReserva()`, `nuevoIdVehiculo()` y `nuevoIdDueno()` dan el id, sin escribir nada.
+//   - El guardado correspondiente se NIEGA sin id (`MENSAJE_ALTA_SIN_ID`), como `guardarPagoDueno`: una alta que
+//     no se puede repetir sin duplicarse no se guarda, y un alta nueva en una pantalla futura que se olvide de
+//     pedirlo falla en la primera prueba en vez de duplicar en silencio una vez al año.
+//   - `altaConIdFijo` dice CUÁNDO se suelta el id: se conserva mientras el alta no haya salido bien (todos los
+//     reintentos caen en el mismo documento) y se suelta en cuanto sale bien. Esto último es lo que importa: un id
+//     que se reutilizara DESPUÉS de un guardado bueno haría que la alta siguiente pisara a la persona anterior,
+//     que es peor que un duplicado.
+
+/** Un id nuevo para un documento de `coleccion`, sin escribir nada (Firestore lo genera localmente). */
+async function idNuevoEn(coleccion, { iniciar = iniciarFirebase } = {}) {
+  const { db, fsMod } = await iniciar();
+  return fsMod.doc(fsMod.collection(db, coleccion)).id;
+}
+
+/** Lo que lee quien (programando) intenta guardar un alta sin haber decidido su id. */
+export const MENSAJE_ALTA_SIN_ID = 'Este registro nuevo no trae su identificador todavía, y sin él repetir el intento crearía un segundo. '
+  + 'Pídelo con nuevoIdCliente(), nuevoIdReserva(), nuevoIdVehiculo() o nuevoIdDueno() antes del primer intento y úsalo en todos los reintentos.';
+
+function exigirId(registro) {
+  if (!registro?.id) throw new Error(MENSAJE_ALTA_SIN_ID);
+}
+
+/** Un id nuevo para un cliente, sin escribir nada. Ver «Un alta decide su id antes de guardar». */
+export const nuevoIdCliente = (opciones) => idNuevoEn('clientes', opciones);
+/** Un id nuevo para una reservación, sin escribir nada. */
+export const nuevoIdReserva = (opciones) => idNuevoEn('reservas', opciones);
+/** Un id nuevo para un carro de la flota, sin escribir nada. */
+export const nuevoIdVehiculo = (opciones) => idNuevoEn('vehiculos', opciones);
+/** Un id nuevo para un dueño de carro, sin escribir nada. */
+export const nuevoIdDueno = (opciones) => idNuevoEn('duenos', opciones);
+
+/**
+ * Lo que una pantalla guarda para decidir el id de un alta UNA vez por intención. `nuevoId` es una de las
+ * funciones `nuevoId*`.
+ *
+ * - `paraGuardar(registro)`: el registro con su id. Uno que ya trae id (una edición) pasa tal cual. Uno nuevo
+ *   recibe el id de esta alta, el MISMO en cada reintento — y también si se pide dos veces a la vez (un doble
+ *   clic): son una sola alta. Si pedir el id falla, el siguiente intento lo vuelve a pedir (una promesa
+ *   rechazada no se guarda: el error viejo de `firebase-config.js`).
+ * - `terminada()`: el alta salió bien; la siguiente es otra y tendrá otro id. La pantalla la llama justo
+ *   después de guardar, y solo entonces.
+ * - `clave` (opcional): cuando una misma pantalla puede dar de alta cosas distintas una detrás de otra (el
+ *   grupo «sin enlazar» del área de dinero), un intento fallido de uno no puede pegarle su id al otro; con
+ *   otra clave, es otra alta.
+ *
+ * Si el alta falló y se abandona (se cierra el formulario) y después se da de alta otra cosa en la misma
+ * pantalla con la misma clave, hereda el id: pisaría un documento que, si llegó, nadie vio ni usó. Es el
+ * costo de no soltarlo antes, y es mucho menor que el de un duplicado en cada tiempo vencido.
+ */
+export function altaConIdFijo(nuevoId) {
+  let actual = null; // { clave, id: Promise<string> }
+  return {
+    async paraGuardar(registro, clave = '') {
+      if (registro?.id) return registro;
+      if (!actual || actual.clave !== clave) {
+        const id = Promise.resolve().then(nuevoId);
+        const mia = { clave, id };
+        actual = mia;
+        id.catch(() => { if (actual === mia) actual = null; });
+      }
+      return { ...registro, id: await actual.id };
+    },
+    terminada() {
+      actual = null;
+    },
+  };
+}
+
 /**
  * Un id nuevo para un contrato, sin escribir nada todavía (Firestore lo
  * genera localmente, sin ida y vuelta a la nube). "Sacar carro" lo pide una
@@ -1046,9 +1129,8 @@ export async function liberarGarantia(contrato) {
  * alquiler significarían un carro comprometido dos veces y una tarjeta
  * autorizada dos veces.
  */
-export async function nuevoIdContrato() {
-  const { db, fsMod } = await iniciarFirebase();
-  return fsMod.doc(fsMod.collection(db, 'contratos')).id;
+export async function nuevoIdContrato(opciones) {
+  return idNuevoEn('contratos', opciones);
 }
 
 /**
@@ -1057,8 +1139,8 @@ export async function nuevoIdContrato() {
  * `contadores/contratos` — el mismo mecanismo, para que dos mostradores
  * nunca den de alta dos carros con el mismo código correlativo.
  */
-export async function siguienteCodigoCarro() {
-  const { db, fsMod } = await iniciarFirebase();
+export async function siguienteCodigoCarro({ iniciar = iniciarFirebase } = {}) {
+  const { db, fsMod } = await iniciar();
   const ref = fsMod.doc(db, 'contadores', 'vehiculos');
   return conLimiteDeTiempo(fsMod.runTransaction(db, async (tx) => {
     const actual = await tx.get(ref);
@@ -1076,11 +1158,17 @@ export async function siguienteCodigoCarro() {
  * `vehiculo.id`, si viene, hace que se edite ese mismo documento en vez de
  * crear uno — así "marcar fuera de servicio" y "volver a habilitar" (que
  * llaman a esto de nuevo sobre un carro ya dado de alta) actualizan el carro
- * que ya existe.
+ * que ya existe. **Un carro nuevo trae su `id`** (`nuevoIdVehiculo()`, pedido antes
+ * del primer intento): si el primer intento vence pero sí llegó, el reintento cae en
+ * el mismo documento. El código correlativo se pide en cada intento, así que ese
+ * reintento gasta otro y deja un hueco en la numeración (se explica; un carro
+ * repetido, no).
  */
-export async function guardarVehiculo(vehiculo) {
-  const codigo = vehiculo?.codigo || (await siguienteCodigoCarro());
-  return guardarEnNubeYLocal('vehiculos', vehiculo, (id) => ({ ...vehiculo, id, codigo, actualizado: Date.now() }));
+export async function guardarVehiculo(vehiculo, deps = {}) {
+  // Antes de gastar un código: un alta sin id no se puede repetir sin duplicarse (ver `guardarCliente`).
+  exigirId(vehiculo);
+  const codigo = vehiculo?.codigo || (await siguienteCodigoCarro({ iniciar: deps.iniciar }));
+  return guardarEnNubeYLocal('vehiculos', vehiculo, (id) => ({ ...vehiculo, id, codigo, actualizado: Date.now() }), deps);
 }
 
 /**
@@ -1101,13 +1189,14 @@ export function reservaParaGuardar(reserva, { id, ahora = Date.now() } = {}) {
 
 /**
  * Guarda una reservación en la nube y refresca la copia local. Mismo patrón
- * que `guardarCliente`: si `reserva.id` ya existe se edita ese documento, si
- * no se mintea uno nuevo con `fsMod.collection(...)`; el documento que en
+ * que `guardarCliente`: `reserva.id` es el documento que se escribe (una
+ * reservación nueva lo trae de `nuevoIdReserva()`); el documento que en
  * verdad se escribe sale de `reservaParaGuardar`, igual que `guardarContrato`
  * se apoya en `contratoParaGuardar`.
  */
-export async function guardarReserva(reserva) {
-  return guardarEnNubeYLocal('reservas', reserva, (id) => reservaParaGuardar(reserva, { id }));
+export async function guardarReserva(reserva, deps = {}) {
+  exigirId(reserva);
+  return guardarEnNubeYLocal('reservas', reserva, (id) => reservaParaGuardar(reserva, { id }), deps);
 }
 
 /**

@@ -9,7 +9,9 @@
 // - #/habilitar/:id: marcar un carro como disponible de nuevo
 import { estadoCarro } from '../nucleo/estados.js';
 import { hoyISO } from '../nucleo/fechas.js';
-import { cargarFlota, cargarContratosAbiertos, guardarVehiculo } from '../datos.js';
+import {
+  cargarFlota, cargarContratosAbiertos, guardarVehiculo, altaConIdFijo, nuevoIdVehiculo,
+} from '../datos.js';
 import { aviso } from '../ui.js';
 
 /**
@@ -240,6 +242,10 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
 
   contenedor.innerHTML = formularioHTML();
 
+  // El id de un carro NUEVO se decide una vez, antes del primer intento: un reintento tras un tiempo vencido
+  // cae en el mismo carro y no deja dos con las mismas placas en la flota (H-2). Editar uno que ya existe no lo usa.
+  const alta = altaConIdFijo(nuevoIdVehiculo);
+
   // Setear valores iniciales
   if (carro) {
     el('frm-titulo').textContent = 'Editar carro';
@@ -303,7 +309,8 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
       // mandó. Antes se usaba `vehiculo.codigo`, y el primer carro que el
       // dueño daba de alta se guardaba bien pero el aviso decía "Carro
       // undefined guardado" (hallazgo importante de la revisión final).
-      const guardado = await guardarVehiculo(vehiculo);
+      const guardado = await guardarVehiculo(await alta.paraGuardar(vehiculo));
+      alta.terminada();
       aviso(`Carro ${guardado.codigo} guardado.`, 'exito');
       location.hash = '#/carros';
     } catch (error) {

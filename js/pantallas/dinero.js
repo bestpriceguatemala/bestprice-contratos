@@ -39,7 +39,7 @@ import { construirDueno } from '../nucleo/dueno.js';
 import { hoyISO, esFechaISO, diasEntre } from '../nucleo/fechas.js';
 import { entrarADinero, salirDeDinero, sesionDeDinero } from '../dinero-sesion.js';
 import {
-  cargarContratosParaDinero, cargarPagosDueno, cargarDuenos, guardarDueno, nuevoIdPagoDueno,
+  cargarContratosParaDinero, cargarPagosDueno, cargarDuenos, guardarDueno, nuevoIdPagoDueno, altaConIdFijo, nuevoIdDueno,
   siguienteNumeroComprobante, construirPagoDueno, guardarPagoDueno, anotarCostoDelDueno,
   enlazarContratosAlDueno, conCostoDelDueno, costoDelDocumento, migrarCostosDelDueno, mensajeDeMigracion,
   MENSAJE_PAGO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS, MENSAJE_PAGO_SIN_MONTO, MENSAJE_PAGO_SIN_ID,
@@ -1301,6 +1301,10 @@ async function pintarCuentas(contenedor, claveDeFicha) {
   const ui = {
     marcados: new Set(), anotando: null, pagando: false, forma: FORMAS_DE_PAGO[0].valor, fecha: hoy,
     mensajePago: '', mensajeEnlace: '', enCurso: null, ocupado: false, migracion: '',
+    // «Dar de alta como dueño y enlazar» crea un dueño: su id se decide una vez, antes del primer intento, para
+    // que un reintento tras un tiempo vencido no cree un segundo dueño con el mismo nombre (H-2). Va por grupo
+    // («sin enlazar»): un intento fallido de uno no le pega su id a otro.
+    altaDeDueno: altaConIdFijo(nuevoIdDueno),
   };
   let vista = null;
   let entrada = null;
@@ -1460,13 +1464,16 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     ui.mensajeEnlace = '';
     try {
       if (crear) {
-        const alta = await guardarDueno(construirDueno({}, { nombre: entrada.nombre }));
+        const alta = await guardarDueno(await ui.altaDeDueno.paraGuardar(construirDueno({}, { nombre: entrada.nombre }), entrada.clave));
         duenoId = alta.id;
         // El dueño recién creado ya está: si el enlace falla, el siguiente intento lo escoge de la lista.
         const antes = lector.actual;
         if (antes) antes.duenos = { ...antes.duenos, datos: [...(antes.duenos.datos ?? []), alta] };
       }
       await enlazarContratosAlDueno(entrada.contratos.map((c) => c.id), duenoId);
+      // Con el enlace hecho el alta terminó: la siguiente vez, otro dueño. Antes de aquí NO se suelta: si el enlace
+      // falla y se repite «dar de alta», cae en el mismo dueño y no crea otro.
+      ui.altaDeDueno.terminada();
       const leida = lector.actual;
       if (!leida) return;
       const enlazados = new Set(entrada.contratos.map((c) => c.id));

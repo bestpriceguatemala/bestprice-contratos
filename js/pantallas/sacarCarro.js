@@ -23,7 +23,7 @@ import { q, suma, recargoTarjeta } from '../nucleo/dinero.js';
 import {
   cargarFlota, cargarContratosAbiertos, cargarReservas, cargarAjustes, cargarClientes,
   guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato, agregarPago,
-  cargarDuenos, guardarDueno, CODIGO_RESERVACION_CAMBIO,
+  cargarDuenos, guardarDueno, CODIGO_RESERVACION_CAMBIO, altaConIdFijo, nuevoIdCliente, nuevoIdDueno,
 } from '../datos.js';
 import { dinero, fecha, aviso, hora24 } from '../ui.js';
 import { textoAvisoSobrecobro } from './recibirCarro.js';
@@ -1111,6 +1111,10 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // y una tarjeta autorizada dos veces.
   let contratoId = null;
   let numeroContrato = null;
+  // Lo mismo para las altas rápidas: el id del cliente o del dueño NUEVO se decide una vez, antes del primer
+  // intento, y un reintento tras un tiempo vencido cae en la misma ficha (H-2). Se sueltan al salir bien.
+  const altaDeCliente = altaConIdFijo(nuevoIdCliente);
+  const altaDeDueno = altaConIdFijo(nuevoIdDueno);
 
   contenedor.innerHTML = plantilla();
 
@@ -1530,7 +1534,8 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     const boton = el('sc-cliente-guardar');
     boton.disabled = true;
     try {
-      const cliente = await guardarCliente(nuevo);
+      const cliente = await guardarCliente(await altaDeCliente.paraGuardar(nuevo));
+      altaDeCliente.terminada();
       buscadorClientes.registrarAlta(cliente);
       // Si mientras se guardaba el mostrador ya salió de esta pantalla, el
       // cliente quedó guardado y no hay nada más que pintar (ver
@@ -1584,7 +1589,8 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     }
     boton.disabled = true;
     try {
-      const dueno = await guardarDueno(nuevo);
+      const dueno = await guardarDueno(await altaDeDueno.paraGuardar(nuevo));
+      altaDeDueno.terminada();
       buscadorDuenos.registrarAlta(dueno);
       // Si mientras se guardaba el mostrador ya salió de esta pantalla, el
       // dueño quedó guardado y no hay nada más que pintar: seguir aquí
