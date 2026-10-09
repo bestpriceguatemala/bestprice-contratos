@@ -12,8 +12,11 @@ import {
   conKmSalidaNormalizado, textoBotonPago, textoAvisoRecibido, textoSaldo, totalDeEstaCobranza,
   leerParametroRuta, textoAvisoCobro, valoresIniciales, textoCorreccion, textoNotaDeSoloCobro, fechaDelCobro,
   textoEstadoPago, textoAvisoSobrecobro, montoInicialPago, leerCamposDelCierre, plantilla, textoFalloAlGuardarElCierre,
+  datosDeSalida,
 } from '../js/pantallas/recibirCarro.js';
-import { resumen, lineasDevolucion, saldoConTarjeta } from '../js/nucleo/contrato.js';
+import { construirContrato } from '../js/pantallas/sacarCarro.js';
+import { dinero } from '../js/ui.js';
+import { resumen, lineasDevolucion, lineasSalida, saldoConTarjeta } from '../js/nucleo/contrato.js';
 import { construirCierre } from '../js/nucleo/cierre.js';
 import { agregarPago, CODIGO_GARANTIA_LIBERADA_CON_SALDO } from '../js/datos.js';
 import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
@@ -496,4 +499,285 @@ test('recibirCarro.js usa fechaDelCobro en el total que muestra y en el pago que
   assert.equal((fuente.match(/fecha: fechaDelCobro\(/g) ?? []).length, 2);
   assert.ok(!/fecha: campos\.fechaReal/.test(fuente), 'ya no se fecha un cobro con la fecha de entrada tecleada a secas');
   assert.ok(!/fechaDelCobro\([^)]*campos\.fechaReal/.test(fuente), 'la pantalla no lee campos.fechaReal por su cuenta: en solo cobro campos es null');
+});
+
+// ---------------------------------------------------------------------------
+// «Cómo salió el carro»: lo que él compara con el carro que tiene enfrente
+//
+// Lo que pidió: «acá no me dice a qué hora salió el vehículo, dame una prevista de cómo salió el
+// carro». La pantalla mostraba cuatro cosas de la salida y la hora no era una. Lo que él compara con
+// el carro parado frente a él —la hora (para decidir si se debe una hora tardía), el kilometraje y el
+// combustible— se ve siempre; el resto de la salida está a un clic. Estas pruebas fijan las dos mitades
+// y, sobre todo, la tercera: un dato que el contrato no trae NO se pinta como un cero ni como un hueco
+// que parece dato (regla de este sistema: un número que falta no puede parecerse a uno de verdad).
+// Los nombres de los campos son los de §7b del diseño: `horaSalida`, `lugar`, `combustibleSalida`,
+// `kmSalida`, `rentadoPor`, `conductorAdicional{nombre}`, `observaciones`.
+// ---------------------------------------------------------------------------
+
+const SIN_ANOTAR = 'sin anotar';
+
+/** Un contrato con TODA la salida escrita, armado por el mismo `construirContrato` que usa «Sacar carro». */
+const contratoConTodaLaSalida = (cambios = {}) => ({
+  ...construirContrato({
+    id: 'c-salida',
+    numero: 77,
+    cliente: { id: 'k1', nombres: 'Juan', apellidos: 'Pérez' },
+    ajeno: false,
+    carro: { id: 'v1', placas: 'P-123ABC', marca: 'Toyota', linea: 'Corolla', color: 'Blanco' },
+    carroAjeno: null,
+    duenoId: null,
+    fechaSalida: '2026-10-05',
+    horaSalida: '13:45',
+    lugar: 'Aeropuerto La Aurora',
+    dias: 4,
+    precioDia: 700,
+    kmSalida: 45000,
+    combustibleSalida: '3/4',
+    // Cifras distintas entre sí para que una prueba pueda decir «esta sí se cobró y esta no» sin ambigüedad:
+    // seguroDia, seguroTercerosDia y deducible solo se anotan (§7b); menores, PAI y deducible bajo sí se cobran.
+    seguroDia: 33,
+    seguroTercerosDia: 22,
+    seguroMenoresDia: 10,
+    seguroPaiDia: 15,
+    deducible: 1500,
+    deducibleBajo: 50,
+    cartaPoderDestino: 'Ciudad de Guatemala',
+    cartaPoderPrecio: 350,
+    variosDescripcion: 'Silla de bebé',
+    variosPrecio: 80,
+    tarjetas: [],
+    forma: 'efectivo',
+    porcentajeTarjeta: 0,
+    montoPago: 1000,
+    rentadoPor: 'Ana',
+    porcentajeComision: 5,
+    conductorAdicional: { nombre: 'Luis Pérez', licencia: 'L-123', identificacion: '2345' },
+    observaciones: 'Rayón en la puerta derecha',
+  }),
+  ...cambios,
+});
+
+/** Un contrato de antes de que existieran estos campos: las llaves ni siquiera están (no son `''`). */
+const contratoSinHoraNiCombustible = () => {
+  const { horaSalida: _hora, combustibleSalida: _combustible, ...resto } = contratoConTodaLaSalida();
+  return resto;
+};
+
+/** El pedazo de `html` que va de `inicio` a `fin`, con el fin incluido; falla si alguno no está. */
+function pedazo(html, inicio, fin) {
+  const i = html.indexOf(inicio);
+  assert.ok(i > -1, `no se encontró ${inicio}`);
+  const f = html.indexOf(fin, i);
+  assert.ok(f > i, `no se encontró ${fin} después de ${inicio}`);
+  return html.slice(i, f + fin.length);
+}
+
+/** Los pares etiqueta/valor de una lista <dl>, tal como se pintan, con si el valor es el «sin anotar». */
+const paresDe = (html) => [...html.matchAll(/<dt>([^<]*)<\/dt>\s*<dd class="([^"]*)">([\s\S]*?)<\/dd>/g)]
+  .map(([, etiqueta, clase, valor]) => ({ etiqueta, valor, vacio: clase.split(/\s+/).includes('rc-vacio') }));
+
+const MARCA_DE_LO_QUE_SE_VE = '<dl class="rc-salida-datos">';
+const lasTresQueSeVen = (html) => paresDe(pedazo(html, MARCA_DE_LO_QUE_SE_VE, '</dl>'));
+const elRestoDeLaSalida = (html) => pedazo(html, '<details class="rc-salida-todo">', '</details>');
+const textoPlano = (html) => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+test('la hora de salida, el kilometraje y el combustible se ven sin abrir nada, y la hora va primero', () => {
+  const html = plantilla(contratoConTodaLaSalida(), false);
+  assert.deepEqual(lasTresQueSeVen(html), [
+    { etiqueta: 'Hora de salida', valor: '13:45', vacio: false },
+    { etiqueta: 'Kilometraje de salida', valor: '45,000', vacio: false },
+    { etiqueta: 'Combustible al salir', valor: '3/4', vacio: false },
+  ]);
+  // «Sin abrir nada» quiere decir fuera del <details>: lo que va dentro está cerrado hasta que se abre.
+  const finDeLoQueSeVe = html.indexOf('</dl>', html.indexOf(MARCA_DE_LO_QUE_SE_VE));
+  assert.ok(finDeLoQueSeVe < html.indexOf('<details'), 'las tres están antes del «ver todo», no dentro');
+});
+
+test('la hora se ve en 24 horas, tal como se escribió: 22:30 nunca es 10:30 PM', () => {
+  for (const hora of ['00:05', '08:05', '13:45', '22:30']) {
+    const html = plantilla(contratoConTodaLaSalida({ horaSalida: hora }), false);
+    const [laHora] = lasTresQueSeVen(html);
+    assert.equal(laHora.valor, hora);
+    assert.ok(!/\b[ap]\.?\s?m\b/i.test(textoPlano(pedazo(html, MARCA_DE_LO_QUE_SE_VE, '</dl>'))), `${hora} no lleva am/pm`);
+  }
+});
+
+test('la hora pasa por hora24, el mismo camino que la escribe: «1345» se ve 13:45, y lo que no se reconoce se ve tal cual y no como «sin anotar»', () => {
+  assert.equal(lasTresQueSeVen(plantilla(contratoConTodaLaSalida({ horaSalida: '1345' }), false))[0].valor, '13:45');
+  // Algo escrito que hora24 no entiende NO es un dato que falta: esconderlo como «sin anotar» le diría
+  // al dueño que nadie anotó nada cuando sí hay algo anotado.
+  const rara = lasTresQueSeVen(plantilla(contratoConTodaLaSalida({ horaSalida: '13:45:00' }), false))[0];
+  assert.equal(rara.valor, '13:45:00');
+  assert.equal(rara.vacio, false);
+});
+
+test('un contrato sin hora ni combustible dice «sin anotar» en esos dos, no un hueco ni una hora inventada', () => {
+  // La forma de los contratos de antes (la llave no está)...
+  for (const contrato of [
+    contratoSinHoraNiCombustible(),
+    // ...y la de uno de hoy donde el mostrador se saltó los campos: `construirContrato` los deja en ''.
+    contratoConTodaLaSalida({ horaSalida: '', combustibleSalida: '' }),
+    contratoConTodaLaSalida({ horaSalida: '   ', combustibleSalida: null }),
+  ]) {
+    const [hora, km, combustible] = lasTresQueSeVen(plantilla(contrato, false));
+    assert.deepEqual(hora, { etiqueta: 'Hora de salida', valor: SIN_ANOTAR, vacio: true });
+    assert.deepEqual(combustible, { etiqueta: 'Combustible al salir', valor: SIN_ANOTAR, vacio: true });
+    assert.deepEqual(km, { etiqueta: 'Kilometraje de salida', valor: '45,000', vacio: false }, 'el que sí está, se ve');
+    const visible = textoPlano(pedazo(plantilla(contrato, false), MARCA_DE_LO_QUE_SE_VE, '</dl>'));
+    assert.ok(!visible.includes('00:00'), 'una hora que falta no es la medianoche');
+  }
+});
+
+test('un kilometraje de salida que falta o está en 0 dice «sin anotar», no «0»', () => {
+  // `conKmSalidaNormalizado` vuelve 0 al que falta (y la validación del cierre ya trata 0 como «no se anotó»):
+  // pintarlo como «0» sería un cero seguro de sí mismo en la pantalla que él compara con el tablero.
+  const { kmSalida: _km, ...sinKm } = contratoConTodaLaSalida();
+  for (const contrato of [sinKm, contratoConTodaLaSalida({ kmSalida: 0 }), conKmSalidaNormalizado(sinKm)]) {
+    assert.deepEqual(lasTresQueSeVen(plantilla(contrato, false))[1], { etiqueta: 'Kilometraje de salida', valor: SIN_ANOTAR, vacio: true });
+  }
+  // Y el puente de los contratos viejos sigue funcionando: con el nombre antiguo, el kilometraje se ve.
+  const { kmSalida: _otro, ...conNombreViejo } = contratoConTodaLaSalida();
+  assert.equal(lasTresQueSeVen(plantilla({ ...conNombreViejo, kilometrajeSalida: 61250 }, false))[1].valor, '61,250');
+});
+
+test('el resto de la salida está en un «ver todo» nativo, cerrado de entrada', () => {
+  const html = plantilla(contratoConTodaLaSalida(), false);
+  const abierto = html.match(/<details[^>]*>/)[0];
+  assert.ok(!/\bopen\b/.test(abierto), 'arranca cerrado');
+  assert.ok(!/\bhidden\b/.test(abierto), 'y no escondido: lo abre un clic');
+  const resto = elRestoDeLaSalida(html);
+  // <details>/<summary> los resuelve el navegador sin una línea de JavaScript: no hay un oyente que pueda
+  // dejar de responder en silencio (el botón que dejó de responder en esta pantalla no lo notó nadie).
+  assert.match(resto, /^<details class="rc-salida-todo">\s*<summary>/);
+  assert.match(resto, /<summary>[\s\S]*Ver todo[\s\S]*<\/summary>/);
+  assert.ok(!/<button/i.test(resto), 'ningún <button> dentro: uno sin type="button" enviaría el formulario que COBRA');
+});
+
+test('«ver todo» trae lugar, días, precio por día, quién lo rentó, el conductor adicional y las observaciones', () => {
+  const resto = elRestoDeLaSalida(plantilla(contratoConTodaLaSalida(), false));
+  assert.deepEqual(paresDe(resto), [
+    { etiqueta: 'Lugar', valor: 'Aeropuerto La Aurora', vacio: false },
+    { etiqueta: 'Días', valor: '4 días', vacio: false },
+    { etiqueta: 'Precio por día', valor: 'Q700.00', vacio: false },
+    { etiqueta: 'Quién lo rentó', valor: 'Ana', vacio: false },
+    { etiqueta: 'Conductor adicional', valor: 'Luis Pérez', vacio: false },
+    { etiqueta: 'Observaciones', valor: 'Rayón en la puerta derecha', vacio: false },
+  ]);
+});
+
+test('«ver todo» lista lo que se cobró al salir tal como lo dice lineasSalida, con su total', () => {
+  const contrato = contratoConTodaLaSalida();
+  const resto = textoPlano(elRestoDeLaSalida(plantilla(contrato, false)));
+  const lineas = lineasSalida(contrato);
+  assert.equal(lineas.length, 4, 'renta, seguros extra, carta poder y varios');
+  for (const l of lineas) {
+    assert.ok(resto.includes(l.concepto), l.concepto);
+    assert.ok(resto.includes(dinero(l.monto)), `${l.concepto}: ${dinero(l.monto)}`);
+  }
+  assert.ok(resto.includes('Silla de bebé') && resto.includes('Ciudad de Guatemala'), 'el detalle de cada línea');
+  // Cifras de verdad: 4 × 700 = 2,800; (10 + 15) × 4 + 50 = 150; 350; 80.
+  assert.ok(resto.includes('Seguros extra') && resto.includes('Q150.00'));
+  assert.ok(resto.includes(`Total al salir ${dinero(resumen(contrato).totalSalida)}`));
+  assert.equal(resumen(contrato).totalSalida, 3380);
+});
+
+test('lo que solo se anota (seguro, seguro de terceros, deducible) no sale como cobrado: la pantalla no decide qué se cobra', () => {
+  const resto = textoPlano(elRestoDeLaSalida(plantilla(contratoConTodaLaSalida(), false)));
+  assert.ok(!resto.includes('1,500.00'), 'el deducible normal no entra a ninguna cuenta (§7b)');
+  assert.ok(!resto.includes('33.00') && !resto.includes('22.00'), 'el precio por día ya incluye esos seguros (§5)');
+});
+
+test('«ver todo» con datos que faltan dice «sin anotar» en cada fila, y no pinta un Q0.00 ni un total inventado', () => {
+  const vacio = contratoConTodaLaSalida({
+    lugar: '', dias: 0, precioDia: 0, rentadoPor: '', conductorAdicional: { nombre: '', licencia: '', identificacion: '' }, observaciones: '',
+    seguroMenoresDia: 0, seguroPaiDia: 0, deducibleBajo: 0, cartaPoderPrecio: 0, variosPrecio: 0,
+  });
+  const resto = elRestoDeLaSalida(plantilla(vacio, false));
+  assert.deepEqual(paresDe(resto).map((p) => [p.etiqueta, p.valor, p.vacio]), [
+    ['Lugar', SIN_ANOTAR, true], ['Días', SIN_ANOTAR, true], ['Precio por día', SIN_ANOTAR, true],
+    ['Quién lo rentó', SIN_ANOTAR, true], ['Conductor adicional', SIN_ANOTAR, true], ['Observaciones', SIN_ANOTAR, true],
+  ]);
+  const texto = textoPlano(resto);
+  assert.ok(texto.includes('Sin cobros anotados al salir.'));
+  assert.ok(!texto.includes('Q0.00'), 'un cero seguro de sí mismo');
+  assert.ok(!texto.includes('Total al salir'), 'sin renglones no hay total que mostrar');
+});
+
+test('un contrato sin las llaves de la salida (de antes de que existieran) no revienta y dice «sin anotar»', () => {
+  const minimo = { id: 'c-0', numero: 1, clienteNombre: 'Ana', fechaSalida: '2026-09-01' };
+  const html = plantilla(minimo, false);
+  assert.ok(lasTresQueSeVen(html).every((p) => p.valor === SIN_ANOTAR && p.vacio));
+  assert.ok(paresDe(elRestoDeLaSalida(html)).every((p) => p.valor === SIN_ANOTAR && p.vacio));
+});
+
+test('lo que escribe el mostrador (lugar, quién lo rentó, observaciones) se escapa: un «<» o un «&» no rompen la pantalla', () => {
+  const html = plantilla(contratoConTodaLaSalida({ lugar: '<b>Zona 10</b> & "Centro"', observaciones: '<script>x</script>' }), false);
+  assert.ok(html.includes('&lt;b&gt;Zona 10&lt;/b&gt; &amp; &quot;Centro&quot;'));
+  assert.ok(!html.includes('<script>x'));
+  assert.ok(!html.includes('<b>Zona 10'));
+});
+
+test('datosDeSalida: devuelve null (nunca "" ni 0) para lo que no se anotó', () => {
+  const vacio = datosDeSalida({});
+  for (const llave of ['hora', 'km', 'combustible', 'lugar', 'dias', 'precioDia', 'rentadoPor', 'conductor', 'observaciones']) {
+    assert.equal(vacio[llave], null, llave);
+  }
+  assert.deepEqual(vacio.cobros, []);
+  assert.equal(datosDeSalida(contratoConTodaLaSalida()).hora, '13:45');
+});
+
+test('el modo de solo cobro también muestra cómo salió el carro, y el formulario sigue siendo el mismo', () => {
+  const html = plantilla(contratoConTodaLaSalida(), true);
+  assert.equal(lasTresQueSeVen(html)[0].valor, '13:45');
+  assert.ok(html.includes('<details class="rc-salida-todo">'));
+  // Lo que ya existía no se movió: el formulario, el botón de guardar y el bloque de cobro siguen en su sitio.
+  for (const id of ['rc-form', 'rc-guardar', 'rc-pago-monto', 'rc-bloque-cobro']) assert.ok(html.includes(`id="${id}"`), id);
+  const normal = plantilla(contratoConTodaLaSalida(), false);
+  for (const id of ['rc-fecha-real', 'rc-hora-real', 'rc-km-entrada', 'rc-hora-tardia', 'rc-descuento']) assert.ok(normal.includes(`id="${id}"`), id);
+  assert.equal(normal.split('<form').length - 1, 1, 'un solo formulario: el «ver todo» no abre otro');
+  assert.ok(normal.indexOf('<details') > normal.indexOf('<form id="rc-form"'), 'y vive dentro de él, sin tocar el botón de guardar');
+  assert.ok(normal.indexOf('</details>') < normal.indexOf('id="rc-guardar"'));
+});
+
+test('«Kilometraje de salida» ya no se repite en la ficha de arriba: se ve una sola vez', () => {
+  const html = plantilla(contratoConTodaLaSalida(), false);
+  assert.equal(html.split('Kilometraje de salida').length - 1, 1);
+});
+
+// ---------------------------------------------------------------------------
+// El aspecto: nada en línea, y cada clase rc-* que se dibuja está definida en la hoja de estilos
+// (mismo criterio que las pantallas de dinero: una clase que no existe no avisa, el estilo simplemente no se aplica)
+// ---------------------------------------------------------------------------
+
+const CSS_SIN_COMENTARIOS = readFileSync(new URL('../css/estilos.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const FUENTE_SIN_COMENTARIOS = readFileSync(new URL('../js/pantallas/recibirCarro.js', import.meta.url), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const estadosQueDibujaLaSalida = () => [
+  plantilla(contratoConTodaLaSalida(), false), plantilla(contratoConTodaLaSalida(), true),
+  plantilla(contratoSinHoraNiCombustible(), false), plantilla({ id: 'c-0', numero: 1 }, false),
+  plantilla(contratoConTodaLaSalida({ lugar: '', dias: 0, precioDia: 0, rentadoPor: '' }), true),
+];
+
+test('la salida no lleva un solo style= ni en el código ni en lo que dibuja', () => {
+  assert.equal((FUENTE_SIN_COMENTARIOS.match(/style\s*=/g) || []).length, 0);
+  assert.ok(!/\.style\b|cssText|setAttribute\(\s*['"]style/.test(FUENTE_SIN_COMENTARIOS));
+  for (const html of estadosQueDibujaLaSalida()) assert.ok(!/style\s*=/.test(html));
+});
+
+test('cada clase rc-* que dibuja la salida está definida en css/estilos.css, y ninguna definida ahí sobra', () => {
+  const usadas = new Set();
+  for (const html of estadosQueDibujaLaSalida()) {
+    for (const [, valor] of html.matchAll(/class="([^"]*)"/g)) for (const c of valor.split(/\s+/)) if (c.startsWith('rc-')) usadas.add(c);
+  }
+  for (const clase of ['rc-salida-datos', 'rc-dato', 'rc-salida-todo', 'rc-ver', 'rc-ocultar', 'rc-vacio']) assert.ok(usadas.has(clase), `${clase} no se dibuja`);
+  for (const clase of usadas) {
+    assert.match(CSS_SIN_COMENTARIOS, new RegExp(`\\.${clase}(?![\\w-])`), `.${clase} se dibuja y no está en el CSS`);
+  }
+  const definidas = new Set([...CSS_SIN_COMENTARIOS.matchAll(/\.(rc-[a-z0-9-]+)/g)].map((m) => m[1]));
+  for (const clase of definidas) assert.ok(usadas.has(clase), `.${clase} está en el CSS y la pantalla no la usa`);
+});
+
+test('mientras el «ver todo» está cerrado el CSS enseña «Ver todo», y abierto enseña «Ocultar»: sin JavaScript', () => {
+  assert.match(CSS_SIN_COMENTARIOS, /\.rc-salida-todo\[open\]\s+\.rc-ver\s*\{[^}]*display:\s*none/);
+  assert.match(CSS_SIN_COMENTARIOS, /\.rc-salida-todo:not\(\[open\]\)\s+\.rc-ocultar\s*\{[^}]*display:\s*none/);
 });

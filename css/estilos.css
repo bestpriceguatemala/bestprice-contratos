@@ -599,6 +599,119 @@ body {
   background: #fbeaea;
 }
 
+/* Recibir carro — «Cómo salió el carro». Lo que él compara con el carro que tiene enfrente (hora,
+   kilometraje, combustible) va en tarjetas grandes y siempre a la vista; el resto de la salida está
+   detrás de un <details> nativo, que abre y cierra el navegador sin JavaScript. Un dato que no se
+   anotó ("sin anotar", .rc-vacio) sale chico, en gris y en cursiva: no se puede confundir con uno
+   de verdad, que sale grande y en azul marino. */
+
+.rc-salida-datos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 0 0 12px;
+}
+
+.rc-dato {
+  background: var(--fondo);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.rc-dato dt {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gris);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.rc-dato dd {
+  margin: 4px 0 0;
+}
+
+.rc-dato .rc-valor {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--navy);
+}
+
+.rc-vacio {
+  font-size: 13px;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--gris);
+}
+
+.rc-dato dd.rc-vacio {
+  /* Misma altura que un dato grande, para que las tres tarjetas no queden desparejas. */
+  line-height: 26px;
+}
+
+.rc-salida-todo summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--azul);
+  padding: 6px 0;
+}
+
+.rc-salida-todo summary:hover {
+  color: var(--azul-oscuro);
+}
+
+/* Cerrado enseña «Ver todo»; abierto enseña «Ocultar». Es CSS puro: no hay nada que se desincronice. */
+.rc-salida-todo[open] .rc-ver {
+  display: none;
+}
+
+.rc-salida-todo:not([open]) .rc-ocultar {
+  display: none;
+}
+
+.rc-salida-resto {
+  margin: 8px 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rc-fila {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.rc-fila dt {
+  color: var(--gris);
+}
+
+.rc-fila dd {
+  margin: 0;
+  text-align: right;
+  color: var(--texto);
+}
+
+.rc-fila dd.rc-vacio {
+  color: var(--gris);
+}
+
+.rc-salida-titulo {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gris);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.rc-salida-todo .sc-total-linea {
+  margin-top: 10px;
+}
+
 /* El resumen: totales, avisos y el botón de guardar, siempre a la vista. */
 
 .sc-resumen {

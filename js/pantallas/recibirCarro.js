@@ -23,7 +23,7 @@
 // para que un cierre ya hecho no se pueda reabrir ni reeditar por accidente
 // desde aquí.
 import { construirCierre, problemasDelCierre } from '../nucleo/cierre.js';
-import { lineasDevolucion, resumen, horaTardiaDe } from '../nucleo/contrato.js';
+import { lineasDevolucion, lineasSalida, resumen, horaTardiaDe } from '../nucleo/contrato.js';
 import { q, textoEntero } from '../nucleo/dinero.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
@@ -357,6 +357,101 @@ export function leerCamposDelCierre({ texto, num }) {
   };
 }
 
+// ---------- Cómo salió el carro (lo que el contrato dice de la salida) ----------
+
+// Lo que se lee cuando el contrato no trae el dato: ni un cero, ni un campo en blanco que parezca dato.
+// Los contratos de antes de que existieran `horaSalida`, `combustibleSalida` y `lugar` no traen la llave, y
+// uno de hoy donde el mostrador se saltó el campo la trae en '' o en 0 (§7b): para quien tiene el carro
+// enfrente es lo mismo, no se anotó, y así se dice.
+const SIN_ANOTAR = 'sin anotar';
+
+/**
+ * Qué dice el contrato de cómo salió el carro, ya listo para leerse. Cada dato que NO se anotó vale `null`
+ * (nunca '' ni 0): quien lo pinta decide cómo se ve un dato que falta, y no hay forma de que uno vacío
+ * pase por uno de verdad. Función pura — sin DOM — para probar qué se lee de cada campo.
+ *
+ * Los nombres son los de §7b del diseño. Ninguna regla de cobro vive aquí: lo que se cobró al salir sale
+ * de `lineasSalida` y su total de `resumen`, así que lo que solo se anota (`seguroDia`,
+ * `seguroTercerosDia`, `deducible`) no aparece como cobrado, porque el núcleo no lo cobra.
+ */
+export function datosDeSalida(contrato) {
+  const c = contrato ?? {};
+  const limpio = (v) => String(v ?? '').trim() || null;
+  // La hora pasa por hora24, el mismo camino que la normaliza al escribirla: se ve como se tecleó, en 24 horas.
+  // Si lo guardado no lo entiende hora24 (no debería pasar: §7b dice que lo que no es hora se guarda vacío),
+  // se muestra tal cual en vez de decir «sin anotar» sobre algo que sí se anotó.
+  const hora = hora24(c.horaSalida) || limpio(c.horaSalida);
+  // El puente del nombre viejo (`kilometrajeSalida`) vive en conKmSalidaNormalizado; se vuelve 0 si no hay
+  // ninguno de los dos, y un 0 aquí es «no se anotó» (así lo trata también la validación del cierre).
+  const km = q(conKmSalidaNormalizado(c).kmSalida);
+  const dias = q(c.dias);
+  const precioDia = q(c.precioDia);
+  const cobros = lineasSalida(c);
+  return {
+    hora,
+    km: km > 0 ? textoEntero(km) : null,
+    combustible: limpio(c.combustibleSalida),
+    lugar: limpio(c.lugar),
+    dias: dias > 0 ? `${dias} ${dias === 1 ? 'día' : 'días'}` : null,
+    precioDia: precioDia > 0 ? dinero(precioDia) : null,
+    rentadoPor: limpio(c.rentadoPor),
+    conductor: limpio(c.conductorAdicional?.nombre),
+    observaciones: limpio(c.observaciones),
+    cobros,
+    totalSalida: cobros.length ? resumen(c).totalSalida : null,
+  };
+}
+
+/** Un par etiqueta/valor. `valor === null` se pinta como «sin anotar», en gris y chico: no se parece a un dato. */
+function parDeSalida(clase, etiqueta, valor) {
+  const falta = valor === null;
+  return `
+        <div class="${clase}">
+          <dt>${esc(etiqueta)}</dt>
+          <dd class="${falta ? 'rc-vacio' : 'rc-valor'}">${esc(falta ? SIN_ANOTAR : valor)}</dd>
+        </div>`;
+}
+
+/**
+ * «Cómo salió el carro»: lo que él compara con el carro que tiene enfrente (hora, kilometraje y combustible)
+ * siempre a la vista, y el resto de la salida detrás de un «ver todo» a un clic.
+ *
+ * El «ver todo» es un <details> nativo: el navegador lo abre y lo cierra solo, sin un oyente de JavaScript que
+ * pueda dejar de responder sin que nadie se entere (el botón que dejó de responder en esta pantalla no lo
+ * notó ninguna prueba). Tampoco lleva un <button>: dentro de este formulario, uno sin type="button" lo
+ * enviaría, y enviarlo aquí RECIBE el carro y COBRA el saldo.
+ */
+function bloqueDeSalida(contrato) {
+  const d = datosDeSalida(contrato);
+  const cobros = d.cobros.length
+    ? `<ul class="sc-lineas">${d.cobros.map(filaLinea).join('')}</ul>
+          <div class="sc-total-linea"><strong>Total al salir</strong><span>${dinero(d.totalSalida)}</span></div>`
+    : '<p class="rc-vacio">Sin cobros anotados al salir.</p>';
+  const tresQueSeVen = [
+    parDeSalida('rc-dato', 'Hora de salida', d.hora),
+    parDeSalida('rc-dato', 'Kilometraje de salida', d.km),
+    parDeSalida('rc-dato', 'Combustible al salir', d.combustible),
+  ].join('');
+  const resto = [
+    parDeSalida('rc-fila', 'Lugar', d.lugar),
+    parDeSalida('rc-fila', 'Días', d.dias),
+    parDeSalida('rc-fila', 'Precio por día', d.precioDia),
+    parDeSalida('rc-fila', 'Quién lo rentó', d.rentadoPor),
+    parDeSalida('rc-fila', 'Conductor adicional', d.conductor),
+    parDeSalida('rc-fila', 'Observaciones', d.observaciones),
+  ].join('');
+  return `
+          <dl class="rc-salida-datos">${tresQueSeVen}
+          </dl>
+          <details class="rc-salida-todo">
+            <summary><span class="rc-ver">Ver todo de la salida</span><span class="rc-ocultar">Ocultar</span></summary>
+            <dl class="rc-salida-resto">${resto}
+            </dl>
+            <h3 class="rc-salida-titulo">Cobrado al salir</h3>
+            ${cobros}
+          </details>`;
+}
+
 // ---------- La plantilla (se arma una sola vez, con el contrato ya cargado) ----------
 
 function campo(id, etiqueta, opciones = {}) {
@@ -433,10 +528,10 @@ export function plantilla(contrato, soloCobro) {
             ${esc(encabezado || 'Sin datos del carro')}<br>
             Fecha de salida: ${esc(fecha(contrato.fechaSalida) || '—')}<br>
             Devolución prevista: ${esc(fecha(contrato.devolucionPrevista) || '—')}<br>
-            Kilometraje de salida: ${esc(textoEntero(contrato.kmSalida))}<br>
             Pagado hasta ahora: ${esc(dinero(pagadoSalida))}
           </div>
           ${soloCobro ? `<p class="sc-nota">${esc(textoNotaDeSoloCobro(contrato))}</p>` : ''}
+${bloqueDeSalida(contrato)}
         </section>
 ${bloqueCierre}
       </div>
