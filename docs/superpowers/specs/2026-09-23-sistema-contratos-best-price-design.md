@@ -525,16 +525,26 @@ traiga el contrato en memoria se pisa siempre con `estadoContrato()`).
   un guardado que venció y se repite cae en el mismo contrato y no crea un
   segundo, que sería un carro comprometido dos veces y una tarjeta autorizada dos
   veces. `construirContrato` lo deja en `null` si quien lo llama no trae uno, y
-  `guardarContrato` le da uno la primera vez que de verdad se guarda.
+  `guardarContrato` le da uno la primera vez que de verdad se guarda. Lo mismo
+  hacen ahora el cliente, la reservación, el carro y el dueño (`nuevoIdCliente`,
+  `nuevoIdReserva`, `nuevoIdVehiculo`, `nuevoIdDueno`), y sus `guardar*` se niegan
+  sin `id`; `altaConIdFijo` (`js/datos.js`) decide cuándo se suelta (cuando el alta
+  salió bien, y no antes: un `id` reutilizado después de un guardado bueno haría
+  que el alta siguiente pisara a la anterior).
 - `actualizado` es la hora del guardado, en milisegundos (`Date.now()`), y se
-  pone de nuevo en cada guardado. Sirve para dos cosas. La copia local lo usa para
+  pone de nuevo en cada guardado. Sirve para tres cosas. La copia local lo usa para
   decidir cuál de dos versiones gana (`mezclar`, `js/cache.js`: gana la de
-  `actualizado` mayor). Y `guardarContrato` lo usa para saber si el contrato **ya
+  `actualizado` mayor). `guardarContrato` lo usa para saber si el contrato **ya
   existía**: uno que lo trae vino de la nube o de la copia local, y por eso no
   vuelve a escribir su costo del dueño en `privado/dinero` (la sesión normal no
   puede leer qué hay ahí). Un contrato nuevo no lo trae; si uno nuevo lo trajera
   copiado de uno viejo, se tomaría por uno que ya existía y su costo no se
-  escribiría.
+  escribiría. Y es lo que impide que un guardado pise a otro sin saberlo: un
+  contrato que ya existía solo se reescribe si en la nube su `actualizado` **es
+  el mismo** que el de la copia con la que se abrió la pantalla (`cambioDesdeQueSeAbrio`,
+  `js/datos.js`); si es otro, se niega y no guarda nada. Se compara por igualdad y
+  no por orden, a diferencia de `mezclar`: «¿es la misma versión?» no depende de que
+  dos computadoras tengan el reloj igual, «¿cuál es más nueva?» sí.
 
 La lista viva sigue siendo lo que arma `construirContrato`
 (`js/pantallas/sacarCarro.js`) y lo que sella `contratoParaGuardar`

@@ -25,7 +25,8 @@ import { construirDueno } from '../js/nucleo/dueno.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { construirContrato, conAnticipoComoPago, textoFalloAlGuardarElContrato } from '../js/pantallas/sacarCarro.js';
 import { construirReserva } from '../js/nucleo/reserva.js';
-import { textoFalloAlGuardarElCierre } from '../js/pantallas/recibirCarro.js';
+import { textoFalloAlGuardarElCierre, conKmSalidaNormalizado } from '../js/pantallas/recibirCarro.js';
+import { construirCierre } from '../js/nucleo/cierre.js';
 import { textoFalloAlAnular } from '../js/pantallas/contratos.js';
 import { textoFalloAlLiberar } from '../js/pantallas/flota.js';
 import { nubeEnMemoria, copiaLocalEnMemoria } from './fixtures/nubeEnMemoria.mjs';
@@ -89,6 +90,19 @@ test('H-1: la segunda pestaña NO pisa el pago de la primera — se niega, y los
 
   assert.deepEqual(montos(nube.leer('contratos/c4')), [1000, 500], 'lo que el cliente entregó sigue ahí: ni se perdió ni se mezcló');
   assert.equal(resumen(nube.leer('contratos/c4')).saldo, 1300);
+});
+
+test('H-1: lo que Recibir carro arma de verdad (cierre, kilometraje normalizado y cobro) conserva el sello — el candado lo alcanza', async () => {
+  // Si alguna de estas funciones soltara `actualizado`, el contrato parecería «nuevo» y se escribiría sin comparar.
+  const { nube, guardar, pestanaA, pestanaB } = dosPestanas();
+  const alRecibir = (contrato) => cobrar(construirCierre(conKmSalidaNormalizado(contrato), {
+    fechaReal: '2026-09-05', horaReal: '10:00', lugarEntrada: 'Oficina', kmEntrada: 0, combustible: 0, danos: 0, varios: 0, descuento: 0,
+  }), 500);
+  assert.equal(alRecibir(pestanaA).actualizado, pestanaA.actualizado);
+
+  await guardar(alRecibir(pestanaA));
+  await assert.rejects(guardar(alRecibir(pestanaB)), { codigo: CODIGO_COPIA_VIEJA });
+  assert.deepEqual(montos(nube.leer('contratos/c4')), [1000, 500]);
 });
 
 test('H-1: tampoco se «mezclan» los dos arreglos de pagos — el que llegó tarde no deja ni la mitad escrita', async () => {
