@@ -778,6 +778,55 @@ const guardiaDeCopiaVieja = (contrato) => async ({ tx, ref }) => {
   return [];
 };
 
+// ---------- Sacar el carro de una reservación (prueba del sistema, 7 oct 2026: H-3) ----------
+//
+// Con dos pestañas abiertas sobre la misma reservación pendiente, las dos leían «pendiente» antes de que
+// ninguna guardara, así que el aviso de la pantalla pasaba en las dos: salían DOS contratos del mismo carro,
+// los dos con el anticipo de Q400 registrado como pago, y la reservación apuntaba a uno solo (el otro quedaba
+// huérfano). El anticipo se contaba dos veces contra dos contratos distintos.
+//
+// El aviso de la pantalla se queda (es lo que le explica al mostrador por qué no se llena el formulario),
+// pero ya no es el candado: **el candado vive en el momento de escribir**. El contrato y la marca de
+// «entregada» de la reservación se escriben en UNA transacción que primero lee la reservación; si ya no es la
+// misma que la pantalla usó para llenar el formulario, no se escribe nada. Firestore resuelve el cruce de
+// dos transacciones: gana una, la otra vuelve a leer y se niega. Un efecto más: el contrato y la marca ya no
+// pueden separarse (antes, si fallaba la segunda escritura, el contrato salía y la reservación seguía
+// «pendiente» bloqueando fechas).
+
+/** El código del rechazo cuando la reservación de la que se saca el carro ya no es la que la pantalla usó. */
+export const CODIGO_RESERVACION_CAMBIO = 'reservacion-cambio';
+
+export const MENSAJE_RESERVACION_YA_SALIO = 'Esta reservación ya salió en otro contrato: otra pestaña u otra computadora acaba de sacarla. '
+  + 'No se guardó nada, para no cobrar el anticipo dos veces. Revisa en Contratos antes de volver a sacar el carro.';
+export const MENSAJE_RESERVACION_CANCELADA = 'Esta reservación se canceló mientras llenabas la salida. No se guardó nada. '
+  + 'Revísala en Reservaciones; si el cliente sí se lleva el carro, haz la salida sin reservación.';
+export const MENSAJE_RESERVACION_CAMBIO = 'Esta reservación cambió mientras llenabas la salida (su anticipo, su precio o sus fechas pueden ser otros). '
+  + 'No se guardó nada. Recarga la página, ábrela otra vez y vuelve a sacar el carro.';
+
+/**
+ * La guardia de «sacar el carro de una reservación»: dentro de la transacción que escribe el contrato, lee la
+ * reservación y se niega si ya salió en otro contrato, si se canceló o si cambió desde que la pantalla la
+ * leyó; si todo sigue igual, devuelve la reservación marcada como entregada para que se escriba en la misma
+ * transacción. Una reservación que ya apunta a ESTE contrato es un reintento de un guardado que sí había
+ * llegado: pasa. Una que ya no existe en la nube no estorba (se vuelve a crear, como antes).
+ *
+ * La marca se arma sobre lo que la nube tiene AHORA, no sobre la copia de la pantalla, para no devolverle a
+ * la nube una versión vieja de campos que nada tienen que ver con esto.
+ */
+const guardiaDeReservacion = (reservaDeOrigen) => async ({ tx, db, fsMod, ref }) => {
+  const refReserva = fsMod.doc(db, 'reservas', reservaDeOrigen.id);
+  const leida = await tx.get(refReserva);
+  const enNube = leida.exists() ? { id: reservaDeOrigen.id, ...leida.data() } : null;
+  if (enNube && enNube.contratoId !== ref.id) {
+    const estado = estadoReserva(enNube);
+    if (estado === 'entregada') throw rechazo(MENSAJE_RESERVACION_YA_SALIO, CODIGO_RESERVACION_CAMBIO, enNube);
+    if (estado === 'cancelada') throw rechazo(MENSAJE_RESERVACION_CANCELADA, CODIGO_RESERVACION_CAMBIO, enNube);
+    if (cambioDesdeQueSeAbrio(reservaDeOrigen, enNube)) throw rechazo(MENSAJE_RESERVACION_CAMBIO, CODIGO_RESERVACION_CAMBIO, enNube);
+  }
+  const marcada = reservaParaGuardar({ ...(enNube ?? reservaDeOrigen), contratoId: ref.id }, { id: reservaDeOrigen.id });
+  return [{ coleccion: 'reservas', ref: refReserva, datos: marcada }];
+};
+
 /** El código del rechazo de `guardarContrato` cuando la garantía ya se soltó y el contrato todavía debe. */
 export const CODIGO_GARANTIA_LIBERADA_CON_SALDO = 'garantia-liberada-con-saldo';
 
@@ -818,17 +867,31 @@ export const CODIGO_GARANTIA_LIBERADA_CON_SALDO = 'garantia-liberada-con-saldo';
  * sello) no se compara con nada: su id ya lo decidió `nuevoIdContrato`, nadie más
  * pudo escribirlo, y un reintento cae en el mismo documento.
  *
- * Lo que esto NO cubre: un documento sin sello `actualizado` en la nube (de antes de
- * que existiera el sello) no se puede comparar; y lo que se escribe por otro camino
- * sin subir el sello (`updateDoc` de la migración del costo, que no toca `pagos`) no
- * lo ve. Y dos mostradores que sí se enteran pero deciden distinto siguen siendo dos
- * personas: esto solo impide que una pise a la otra sin saberlo.
+ * `reservaDeOrigen`: la reservación de la que sale este contrato nuevo (H-3, ver «Sacar
+ * el carro de una reservación»). El contrato y la marca de «entregada» se escriben en
+ * una sola transacción que se niega (`CODIGO_RESERVACION_CAMBIO`) si la reservación ya
+ * salió, se canceló o cambió desde que la pantalla la leyó.
+ *
+ * Lo que NO cubre, dicho sin adornos:
+ * - Dos salidas del MISMO carro sin reservación, o de dos reservaciones distintas del
+ *   mismo carro: la guardia mira un solo documento, la reservación. Que un carro no se
+ *   rente dos veces sigue dependiendo de lo que la pantalla leyó al abrir.
+ * - Una salida (o un cobro sobre un contrato que ya existía) sin red: una transacción no
+ *   se deja en cola, se niega. Es lo que se quiere, pero es un cambio de comportamiento.
+ * - El número de contrato, que se toma ANTES de la transacción porque el papel lo lleva
+ *   impreso: la pestaña que pierde gasta un número que queda sin usar. Un hueco en la
+ *   numeración se explica; un número repetido, no.
+ * - Un documento sin sello `actualizado` en la nube (de antes de que existiera el sello)
+ *   no se puede comparar, y lo que se escribe por otro camino sin subir el sello
+ *   (`updateDoc` de la migración del costo, que no toca `pagos`) no lo ve.
+ * - Dos mostradores que SÍ se enteran pero deciden distinto siguen siendo dos personas:
+ *   esto solo impide que una pise a la otra sin saberlo.
  *
  * Las dependencias se pueden inyectar solo para probar el orden sin red.
  */
 export async function guardarContrato(contrato, {
   iniciar = iniciarFirebase, guardarCopia = guardarLocal, avisar = avisarCopiaLocal,
-  numeroNuevo = siguienteNumeroContrato,
+  numeroNuevo = siguienteNumeroContrato, reservaDeOrigen = null,
 } = {}) {
   // Candado barato (CRÍTICO 2 de la revisión final): reabrir "Recibir carro"
   // sobre un contrato ya cerrado — por ejemplo con el botón "atrás" del
@@ -859,7 +922,11 @@ export async function guardarContrato(contrato, {
     original = { ...contrato, id };
   }
   // Un contrato que YA existía se reescribe solo si en la nube sigue siendo el que la pantalla abrió (H-1).
-  const guardia = contrato?.actualizado ? guardiaDeCopiaVieja(contrato) : null;
+  // Uno NUEVO que sale de una reservación se escribe junto con la marca de «entregada» de ésta, y solo si
+  // la reservación sigue siendo la que la pantalla usó (H-3).
+  let guardia = null;
+  if (contrato?.actualizado) guardia = guardiaDeCopiaVieja(contrato);
+  else if (reservaDeOrigen?.id) guardia = guardiaDeReservacion(reservaDeOrigen);
   try {
     return await guardarEnNubeYLocal(
       'contratos', original, (id) => contratoParaGuardar(contrato, { id, numero }), {
@@ -873,6 +940,10 @@ export async function guardarContrato(contrato, {
     // rechazo sale igual.
     if (error?.codigo === CODIGO_COPIA_VIEJA && error.enNube) {
       try { await guardarCopia('contratos', [sinCostoDelDueno(error.enNube)]); } catch { /* la copia local es comodidad */ }
+    }
+    // Lo mismo con la reservación: que la pantalla de Reservaciones muestre lo que de verdad pasó.
+    if (error?.codigo === CODIGO_RESERVACION_CAMBIO && error.enNube) {
+      try { await guardarCopia('reservas', [error.enNube]); } catch { /* la copia local es comodidad */ }
     }
     throw error;
   }

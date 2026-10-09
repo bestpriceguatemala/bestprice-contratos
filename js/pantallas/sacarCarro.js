@@ -22,8 +22,8 @@ import { devolucionPrevista, hoyISO, esFechaISO } from '../nucleo/fechas.js';
 import { q, suma, recargoTarjeta } from '../nucleo/dinero.js';
 import {
   cargarFlota, cargarContratosAbiertos, cargarReservas, cargarAjustes, cargarClientes,
-  guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato, agregarPago, guardarReserva,
-  cargarDuenos, guardarDueno,
+  guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato, agregarPago,
+  cargarDuenos, guardarDueno, CODIGO_RESERVACION_CAMBIO,
 } from '../datos.js';
 import { dinero, fecha, aviso, hora24 } from '../ui.js';
 import { textoAvisoSobrecobro } from './recibirCarro.js';
@@ -298,6 +298,17 @@ export function textoCarroPropioNoEncontrado(falloFlota) {
   return falloFlota
     ? 'No se pudo leer la flota, así que no se sabe si este carro está disponible. Revisa tu conexión e intenta de nuevo.'
     : 'No se encontró este carro, o ya no está disponible. Marca "carro ajeno" si es de otra persona.';
+}
+
+/**
+ * Lo que se le dice al mostrador cuando la salida no se pudo guardar. Un fallo cualquiera (la nube no contestó)
+ * se arregla intentando de nuevo. El rechazo porque la reservación ya salió en otro contrato, se canceló o
+ * cambió NO: reintentar se negaría otra vez, y la frase del rechazo ya dice qué hacer (H-3, prueba del
+ * sistema, 7 oct 2026). Función pura.
+ */
+export function textoFalloAlGuardarElContrato(error) {
+  if (error?.codigo === CODIGO_RESERVACION_CAMBIO) return error.message;
+  return 'No se pudo guardar el contrato. Intenta de nuevo.';
 }
 
 /**
@@ -1649,29 +1660,21 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
           porcentajeTarjeta: num('sc-anticipo-porcentaje'),
         })
         : base;
-      const guardado = await guardarContrato(contrato);
-
-      // Tarea 9, Regla 4: el contrato ya quedó guardado a partir de aquí,
-      // pase lo que pase con la reservación — nunca se deshace. Si viene de
-      // una reservación, se marca aparte con contratoId (guardarReserva
-      // sella el estado con estadoReserva(), nunca se escribe a mano) para
-      // que estadoReserva() la deje 'entregada' y deje de estorbar en los
-      // choques y en "salen" del calendario. Un fallo AQUÍ se cuenta tal
-      // cual, en español llano, para que el dueño lo arregle a mano en vez
-      // de descubrir después que la reservación sigue bloqueando fechas.
-      if (reservaOrigen) {
-        try {
-          await guardarReserva({ ...reservaOrigen, contratoId: guardado.id });
-          aviso(`Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro. La reservación quedó entregada.`, 'exito');
-        } catch {
-          aviso(`Contrato N° ${guardado.numero} guardado y ${guardado.clienteNombre} se lleva el carro, pero la reservación NO se pudo marcar como entregada. Entra a Reservaciones y revísala a mano — puede seguir bloqueando esas fechas.`, 'error');
-        }
-      } else {
-        aviso(`Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro.`, 'exito');
-      }
+      // Tarea 9, Regla 4 (vieja): «el contrato ya quedó guardado pase lo que pase con la reservación». Era
+      // un guardado en dos pasos —el contrato, y después la marca de «entregada» en la reservación— y entre
+      // los dos cabía otra pestaña: dos contratos de la misma reservación, el anticipo registrado dos
+      // veces (H-3, prueba del sistema, 7 oct 2026). Ahora son UN guardado: el contrato y la marca se
+      // escriben en la misma transacción, que primero lee la reservación y se niega si ya no es la que
+      // este formulario usó (ya salió en otro contrato, se canceló o cambió). Por eso ya no existe el
+      // aviso «guardado, pero la reservación NO se pudo marcar»: no puede pasar una mitad sin la otra.
+      // La marca la sella guardarContrato con reservaParaGuardar/estadoReserva, nunca se escribe a mano.
+      const guardado = await guardarContrato(contrato, { reservaDeOrigen: reservaOrigen });
+      aviso(reservaOrigen
+        ? `Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro. La reservación quedó entregada.`
+        : `Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro.`, 'exito');
       location.hash = '#/flota';
-    } catch {
-      aviso('No se pudo guardar el contrato. Intenta de nuevo.', 'error');
+    } catch (error) {
+      aviso(textoFalloAlGuardarElContrato(error), 'error');
     } finally {
       guardando = false;
       boton.disabled = false;

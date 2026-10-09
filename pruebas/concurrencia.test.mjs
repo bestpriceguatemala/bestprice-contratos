@@ -14,11 +14,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  guardarContrato, agregarPago, contratoParaGuardar,
+  guardarContrato, agregarPago, contratoParaGuardar, reservaParaGuardar,
   CODIGO_COPIA_VIEJA, MENSAJE_COPIA_VIEJA, cambioDesdeQueSeAbrio,
+  CODIGO_RESERVACION_CAMBIO, MENSAJE_RESERVACION_YA_SALIO, MENSAJE_RESERVACION_CANCELADA, MENSAJE_RESERVACION_CAMBIO,
 } from '../js/datos.js';
 import { resumen } from '../js/nucleo/contrato.js';
-import { construirContrato } from '../js/pantallas/sacarCarro.js';
+import { construirContrato, conAnticipoComoPago, textoFalloAlGuardarElContrato } from '../js/pantallas/sacarCarro.js';
+import { construirReserva } from '../js/nucleo/reserva.js';
 import { textoFalloAlGuardarElCierre } from '../js/pantallas/recibirCarro.js';
 import { textoFalloAlAnular } from '../js/pantallas/contratos.js';
 import { textoFalloAlLiberar } from '../js/pantallas/flota.js';
@@ -268,4 +270,206 @@ test('«Cobrar» (el modo de solo cobro de Recibir carro) también la dice — s
   assert.equal(textoFalloAlRegistrarElAbono(error), MENSAJE_COPIA_VIEJA);
   assert.equal(textoFalloAlRegistrarElAbono(new Error('La nube no respondió a tiempo.')), 'No se pudo registrar el abono. Intenta de nuevo.');
   assert.match(leerFuente('../js/pantallas/recibirCarro.js'), /aviso\(textoFalloAlRegistrarElAbono\(error\), 'error'\)/);
+});
+
+// ---------------------------------------------------------------------------
+// H-3. Dos pestañas sacando el carro de la misma reservación: dos contratos, dos anticipos
+// ---------------------------------------------------------------------------
+//
+// Lo que cada pestaña arma es lo que arma «Sacar carro» de verdad: `construirContrato` y, si la reservación
+// trae el anticipo pagado, `conAnticipoComoPago`. La reservación guardada sale de `reservaParaGuardar`.
+
+/** Una reservación pendiente de un carro exacto, con Q400 de anticipo ya pagado, como queda guardada. */
+const reservaPendiente = () => reservaParaGuardar(construirReserva({}, {
+  clienteId: 'k1',
+  clienteNombre: 'Juan Pérez',
+  telefono: '5555-5555',
+  fechaSalida: '2026-09-01',
+  dias: 4,
+  carroId: 'v1',
+  carroPlacas: 'P-999TST',
+  tipoVehiculo: '',
+  precioDia: 700,
+  anticipo: 400,
+  anticipoPagado: true,
+  nota: '',
+}), { id: 'r7', ahora: 1790000000000 });
+
+/** Lo que una pestaña manda a guardar al sacar el carro: el contrato nuevo (sin sello) con el anticipo como pago. */
+function salidaDeLaReserva({ id, numero, reserva }) {
+  const base = salidaPropia({ id, numero, montoPago: 2800 - 400 });
+  return conAnticipoComoPago(base, reserva, { forma: 'efectivo' });
+}
+
+function dosPestanasConLaReserva() {
+  const reserva = reservaPendiente();
+  const nube = nubeEnMemoria();
+  nube.docs.set('reservas/r7', structuredClone((({ id: _id, ...resto }) => resto)(reserva)));
+  const copia = copiaLocalEnMemoria();
+  const sacar = (contrato, reservaDeOrigen = reserva, extra = {}) => guardarContrato(contrato, {
+    iniciar: nube.iniciar,
+    guardarCopia: async (coleccion, docs) => { copia.guardarCopia(coleccion, docs); },
+    avisar: () => assert.fail('no había nada que avisar'),
+    numeroNuevo: async () => assert.fail('el número ya viene decidido'),
+    reservaDeOrigen,
+    ...extra,
+  });
+  const contratosEnLaNube = () => [...nube.docs.keys()].filter((r) => /^contratos\/[^/]+$/.test(r));
+  return {
+    reserva, nube, copia, sacar, contratosEnLaNube,
+    pestanaA: salidaDeLaReserva({ id: 'c6', numero: 6, reserva }),
+    pestanaB: salidaDeLaReserva({ id: 'c7', numero: 7, reserva }),
+  };
+}
+
+const anticiposRegistrados = (nube) => [...nube.docs]
+  .filter(([ruta]) => /^contratos\/[^/]+$/.test(ruta))
+  .flatMap(([, c]) => c.pagos.filter((p) => p.monto === 400));
+
+test('H-3: la segunda pestaña NO saca el carro otra vez — un contrato, un anticipo, y la reservación apunta al contrato', async () => {
+  const { nube, sacar, contratosEnLaNube, pestanaA, pestanaB } = dosPestanasConLaReserva();
+  assert.deepEqual(montos(pestanaA), [2400, 400], 'punto de partida: la salida registra el anticipo como un pago');
+
+  await sacar(pestanaA);
+  await assert.rejects(sacar(pestanaB), (error) => {
+    assert.equal(error.codigo, CODIGO_RESERVACION_CAMBIO);
+    assert.equal(error.message, MENSAJE_RESERVACION_YA_SALIO);
+    return true;
+  });
+
+  assert.deepEqual(contratosEnLaNube(), ['contratos/c6'], 'un solo contrato');
+  assert.equal(anticiposRegistrados(nube).length, 1, 'el anticipo de Q400 se registró una sola vez');
+  assert.equal(nube.leer('reservas/r7').contratoId, 'c6');
+  assert.equal(nube.leer('reservas/r7').estado, 'entregada');
+});
+
+test('H-3: las dos pestañas guardando a la vez — sale UNO de los dos contratos, nunca los dos ni ninguno', async () => {
+  const { nube, sacar, contratosEnLaNube, pestanaA, pestanaB } = dosPestanasConLaReserva();
+  const resultados = await Promise.allSettled([sacar(pestanaA), sacar(pestanaB)]);
+
+  assert.deepEqual(resultados.map((r) => r.status).sort(), ['fulfilled', 'rejected']);
+  assert.equal(resultados.find((r) => r.status === 'rejected').reason.codigo, CODIGO_RESERVACION_CAMBIO);
+  const ganador = resultados.find((r) => r.status === 'fulfilled').value;
+  assert.deepEqual(contratosEnLaNube(), [`contratos/${ganador.id}`]);
+  assert.equal(anticiposRegistrados(nube).length, 1);
+  assert.equal(nube.leer('reservas/r7').contratoId, ganador.id, 'la reservación apunta al contrato que sí quedó');
+});
+
+test('H-3: el contrato y la marca de «entregada» se escriben en UNA transacción — no pueden separarse', async () => {
+  const { nube, sacar, pestanaA } = dosPestanasConLaReserva();
+  await sacar(pestanaA);
+  assert.deepEqual(
+    nube.escriturasEnTransaccion().map(([, ruta]) => ruta).sort(),
+    ['contratos/c6', 'reservas/r7'],
+  );
+  assert.deepEqual(nube.escrituras(), [], 'y ninguna fuera de la transacción');
+});
+
+test('H-3: si la transacción falla, no queda el contrato sin la marca ni la marca sin el contrato', async () => {
+  const { nube, sacar, contratosEnLaNube, pestanaA, copia } = dosPestanasConLaReserva();
+  nube.fallan.push({ op: 'tx.get', ruta: 'reservas/r7' });
+  await assert.rejects(sacar(pestanaA), /sin internet/);
+  assert.deepEqual(contratosEnLaNube(), []);
+  assert.equal(nube.leer('reservas/r7').contratoId, undefined);
+  assert.equal(copia.guardados.size, 0, 'y la copia local ni se tocó');
+});
+
+test('H-3: el reintento de un guardado que SÍ había llegado (mismo contrato) no se niega — sigue siendo un solo contrato', async () => {
+  const { nube, sacar, contratosEnLaNube, pestanaA } = dosPestanasConLaReserva();
+  await sacar(pestanaA);
+  // «No se pudo guardar el contrato. Intenta de nuevo.» y el primer intento había aterrizado.
+  await sacar(pestanaA);
+  assert.deepEqual(contratosEnLaNube(), ['contratos/c6']);
+  assert.equal(anticiposRegistrados(nube).length, 1);
+  assert.equal(nube.leer('reservas/r7').contratoId, 'c6');
+});
+
+test('H-3: una reservación cancelada mientras tanto tampoco sale: no se guarda nada y se dice por qué', async () => {
+  const { nube, sacar, contratosEnLaNube, pestanaA } = dosPestanasConLaReserva();
+  const otra = reservaParaGuardar({ ...reservaPendiente(), cancelada: true }, { id: 'r7', ahora: 1790000009000 });
+  nube.docs.set('reservas/r7', structuredClone((({ id: _id, ...resto }) => resto)(otra)));
+  await assert.rejects(sacar(pestanaA), (error) => {
+    assert.equal(error.codigo, CODIGO_RESERVACION_CAMBIO);
+    assert.equal(error.message, MENSAJE_RESERVACION_CANCELADA);
+    return true;
+  });
+  assert.deepEqual(contratosEnLaNube(), []);
+});
+
+test('H-3: una reservación que cambió mientras tanto (otro anticipo) tampoco sale — el pago se calculó con el viejo', async () => {
+  const { nube, sacar, contratosEnLaNube, pestanaA } = dosPestanasConLaReserva();
+  const otra = reservaParaGuardar({ ...reservaPendiente(), anticipoPagado: false }, { id: 'r7', ahora: 1790000009000 });
+  nube.docs.set('reservas/r7', structuredClone((({ id: _id, ...resto }) => resto)(otra)));
+  await assert.rejects(sacar(pestanaA), (error) => {
+    assert.equal(error.codigo, CODIGO_RESERVACION_CAMBIO);
+    assert.equal(error.message, MENSAJE_RESERVACION_CAMBIO);
+    return true;
+  });
+  assert.deepEqual(contratosEnLaNube(), [], 'un anticipo fantasma de Q400 no entra a un contrato');
+});
+
+test('H-3: al negarse deja en esta computadora la reservación como está en la nube', async () => {
+  const { sacar, copia, pestanaA, pestanaB } = dosPestanasConLaReserva();
+  await sacar(pestanaA);
+  await assert.rejects(sacar(pestanaB), { codigo: CODIGO_RESERVACION_CAMBIO });
+  assert.equal(copia.guardados.get('r7').contratoId, 'c6');
+});
+
+test('H-3: lo que queda en la copia local es el contrato y la reservación ya entregada', async () => {
+  const { sacar, copia, pestanaA } = dosPestanasConLaReserva();
+  await sacar(pestanaA);
+  assert.equal(copia.guardados.get('c6').numero, 6);
+  assert.equal(copia.guardados.get('r7').estado, 'entregada');
+  assert.equal(copia.guardados.get('r7').contratoId, 'c6');
+});
+
+test('H-3: la marca se arma sobre la reservación de la NUBE — lo que no tiene que ver con la salida no se pisa', async () => {
+  const { nube, sacar, pestanaA, reserva } = dosPestanasConLaReserva();
+  // Una nota que otra pestaña agregó DESPUÉS de leer la reservación no cambia el sello (es un campo más):
+  // aquí el sello coincide, así que la salida pasa y la nota de la nube se conserva.
+  const enNube = nube.docs.get('reservas/r7');
+  enNube.nota = 'llega por la tarde';
+  await sacar(pestanaA, reserva);
+  assert.equal(nube.leer('reservas/r7').nota, 'llega por la tarde');
+});
+
+test('H-3: una reservación que ya no existe en la nube no estorba: la salida se guarda y la marca se vuelve a crear', async () => {
+  const { nube, sacar, contratosEnLaNube, pestanaA } = dosPestanasConLaReserva();
+  nube.docs.delete('reservas/r7');
+  await sacar(pestanaA);
+  assert.deepEqual(contratosEnLaNube(), ['contratos/c6']);
+  assert.equal(nube.leer('reservas/r7').contratoId, 'c6');
+});
+
+test('H-3: una salida SIN reservación no toca ninguna reservación ni usa transacción (como siempre)', async () => {
+  const { nube, sacar, pestanaA } = dosPestanasConLaReserva();
+  await sacar(pestanaA, null);
+  assert.deepEqual(nube.escrituras().map(([, ruta]) => ruta), ['contratos/c6']);
+  assert.equal(nube.escriturasEnTransaccion().length, 0);
+  assert.equal(nube.leer('reservas/r7').contratoId, undefined);
+});
+
+test('H-3: los tres rechazos hablan claro y ninguno dice «intenta de nuevo»', () => {
+  for (const frase of [MENSAJE_RESERVACION_YA_SALIO, MENSAJE_RESERVACION_CANCELADA, MENSAJE_RESERVACION_CAMBIO]) {
+    assert.match(frase, /No se guardó nada/);
+    assert.doesNotMatch(frase, /Intenta de nuevo/i);
+  }
+  assert.match(MENSAJE_RESERVACION_YA_SALIO, /otra pestaña u otra computadora/);
+  assert.match(MENSAJE_RESERVACION_YA_SALIO, /Contratos/);
+});
+
+test('«Sacar carro» dice la frase del rechazo; un fallo cualquiera sigue pidiendo intentar de nuevo', () => {
+  for (const mensaje of [MENSAJE_RESERVACION_YA_SALIO, MENSAJE_RESERVACION_CANCELADA, MENSAJE_RESERVACION_CAMBIO]) {
+    assert.equal(textoFalloAlGuardarElContrato(Object.assign(new Error(mensaje), { codigo: CODIGO_RESERVACION_CAMBIO })), mensaje);
+  }
+  assert.equal(textoFalloAlGuardarElContrato(new Error('La nube no respondió a tiempo.')), 'No se pudo guardar el contrato. Intenta de nuevo.');
+  assert.equal(textoFalloAlGuardarElContrato(undefined), 'No se pudo guardar el contrato. Intenta de nuevo.');
+});
+
+test('estructura: «Sacar carro» saca el contrato y marca la reservación en UN solo guardado, y usa el texto del rechazo', () => {
+  const fuente = leerFuente('../js/pantallas/sacarCarro.js');
+  const guardar = fuente.slice(fuente.indexOf('async function guardar(ev)'), fuente.indexOf('// ---------- Cablear los eventos'));
+  assert.match(guardar, /guardarContrato\(contrato, \{ reservaDeOrigen: reservaOrigen \}\)/);
+  assert.doesNotMatch(guardar, /guardarReserva\(/, 'marcarla aparte, después, es lo que dejaba el hueco');
+  assert.match(guardar, /aviso\(textoFalloAlGuardarElContrato\(error\), 'error'\)/);
 });
