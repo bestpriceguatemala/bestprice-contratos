@@ -27,7 +27,7 @@ import {
 } from '../nucleo/dinero.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
-  cargarContratos, cargarContrato, anularPago, guardarContrato, CODIGO_GARANTIA_LIBERADA_CON_SALDO,
+  cargarContratos, cargarContrato, anularPago, guardarContrato, CODIGO_GARANTIA_LIBERADA_CON_SALDO, CODIGO_COPIA_VIEJA,
 } from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
 // El puente entre kmSalida y kilometrajeSalida (contratos antiguos que
@@ -213,6 +213,8 @@ export function textoConfirmarAnular(pago, contrato) {
  * ya soltada que debe — por mucho que se reintente (prueba del sistema, 7 oct 2026). Función pura.
  */
 export function textoFalloAlAnular(error) {
+  // El contrato cambió desde que se abrió esta ficha: la frase ya dice que no se guardó nada y que hay que recargar.
+  if (error?.codigo === CODIGO_COPIA_VIEJA) return error.message;
   if (error?.codigo === CODIGO_GARANTIA_LIBERADA_CON_SALDO) {
     return 'No se pudo anular el pago: la garantía de esta renta ya se liberó y, sin este pago, quedaría debiendo. '
       + 'El sistema no deja anularlo en ese caso.';

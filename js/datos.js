@@ -69,16 +69,40 @@ function avisarCopiaLocal(coleccion, error) {
  *
  * `armar(id)` devuelve el documento a escribir, ya con el id decidido. Las
  * dependencias se pueden inyectar solo para probar el orden sin red.
+ *
+ * `guardia`, si se da, hace que la escritura sea una TRANSACCIÓN: la guardia lee
+ * lo que necesite y se NIEGA lanzando un error (con su código), o deja pasar y
+ * puede devolver otros documentos que se escriben en la misma transacción
+ * (`[{ coleccion, ref, datos }]`). Es la única forma de que una comprobación
+ * («¿sigue siendo el documento que se abrió?», «¿la reservación sigue
+ * pendiente?») valga *en el momento de escribir*: leer primero y escribir después,
+ * por separado, deja un hueco en medio por donde cabe otra pestaña. Dentro de la
+ * transacción Firestore descarta y repite la función si alguien escribió lo que
+ * ésta leyó, así que la guardia puede correr más de una vez: no debe tener
+ * efectos fuera de lo que lee y devuelve. Una transacción NO funciona sin red
+ * (no se deja en cola): sin internet se niega, y eso es lo que se quiere.
  */
 export async function guardarEnNubeYLocal(coleccion, original, armar, {
-  iniciar = iniciarFirebase, guardarCopia = guardarLocal, avisar = avisarCopiaLocal,
+  iniciar = iniciarFirebase, guardarCopia = guardarLocal, avisar = avisarCopiaLocal, guardia = null,
 } = {}) {
   const { db, fsMod } = await iniciar();
   const ref = original?.id ? fsMod.doc(db, coleccion, original.id) : fsMod.doc(fsMod.collection(db, coleccion));
   const guardado = armar(ref.id);
-  await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
+  let tambien = [];
+  if (guardia) {
+    tambien = await conLimiteDeTiempo(fsMod.runTransaction(db, async (tx) => {
+      const otros = (await guardia({ tx, db, fsMod, ref })) ?? [];
+      // Las lecturas de la guardia ya terminaron: desde aquí solo se escribe.
+      tx.set(ref, guardado, { merge: true });
+      for (const otro of otros) tx.set(otro.ref, otro.datos, { merge: true });
+      return otros;
+    }));
+  } else {
+    await conLimiteDeTiempo(fsMod.setDoc(ref, guardado, { merge: true }));
+  }
   try {
     await guardarCopia(coleccion, [guardado]);
+    for (const otro of tambien) await guardarCopia(otro.coleccion, [otro.datos]);
   } catch (error) {
     avisar(coleccion, error);
   }
@@ -697,6 +721,63 @@ async function escribirCostoDelDueno({ db, fsMod }, id, costoDia) {
   await conLimiteDeTiempo(fsMod.setDoc(ref, { costoDia }, { merge: true }));
 }
 
+// ---------- Guardar sobre algo que ya cambió (prueba del sistema, 7 oct 2026: H-1 y H-3) ----------
+//
+// `guardarContrato` reescribía el contrato ENTERO desde la copia que la pantalla traía en memoria, y un
+// arreglo (`pagos`) se reemplaza completo: con dos pestañas abiertas, la que guardaba última borraba lo que
+// la otra acababa de registrar. Reproducido: la A cobra Q500, la B cobra Q300, y lo guardado quedaba con
+// los Q300 solamente — el cliente entregó Q1,800 y el sistema decía Q1,300.
+//
+// La regla (decidida por el dueño): **un guardado que pisaría una copia distinta de la que se abrió se
+// NIEGA y lo dice**. No se mezclan los dos arreglos de pagos: cada pestaña tiene una lista parcial, y
+// mezclarlas contaría doble un pago que está en las dos, que es el error contrario y cuesta lo mismo. Es la
+// misma forma que ya tiene el área de dinero cuando las rentas de un pago cambiaron mientras tanto
+// (`MENSAJE_PAGO_CAMBIO`): no se registra nada y se dice qué hacer.
+
+/** El código del rechazo cuando el documento cambió en la nube desde que la pantalla lo abrió. */
+export const CODIGO_COPIA_VIEJA = 'copia-vieja';
+
+/**
+ * Lo que lee el dueño cuando un guardado se negó porque el contrato ya no es el que abrió. «Intenta de
+ * nuevo» no sirve aquí: la copia que la pantalla tiene en memoria sigue vieja y se negaría otra vez; hay
+ * que recargar. Incluye «un intento tuyo que sí había llegado»: con internet lento, el primer intento puede
+ * haber aterrizado después de que la pantalla se dio por vencida.
+ */
+export const MENSAJE_COPIA_VIEJA = 'Este contrato cambió desde que lo abriste: otra pestaña, otra computadora —o un intento tuyo '
+  + 'que sí había llegado— registró algo. No se guardó nada, para no borrar lo que ya está. '
+  + 'Recarga la página, revisa cómo quedó el contrato y vuelve a hacerlo.';
+
+/**
+ * ¿Cambió el documento en la nube desde que se abrió? Se compara el sello `actualizado` por IGUALDAD, no
+ * por orden: lo que importa es «¿es la misma versión que yo tengo?». «¿cuál es más nueva?» (lo que hace
+ * `mezclar`, en cache.js, para decidir qué copia mostrar) depende de que dos relojes coincidan, y entre dos
+ * computadoras no tienen por qué: la que escribió después podía traer un sello menor y su cambio pasaría
+ * por viejo — el pago perdido otra vez, por una diferencia de minutos entre dos relojes.
+ */
+export function cambioDesdeQueSeAbrio(abierto, enLaNube) {
+  return Number(enLaNube?.actualizado || 0) !== Number(abierto?.actualizado || 0);
+}
+
+/** Un error con código y con el documento que la nube tiene ahora, para refrescar la copia local sin ensuciar los registros. */
+function rechazo(mensaje, codigo, enNube) {
+  const error = Object.assign(new Error(mensaje), { codigo });
+  Object.defineProperty(error, 'enNube', { value: enNube });
+  return error;
+}
+
+/**
+ * La guardia de un contrato que YA existía (trae `actualizado`): dentro de la transacción que lo escribe,
+ * lee el documento y, si ya no es el que la pantalla abrió, se niega. Un documento que ya no existe en la
+ * nube no es un cambio: se vuelve a crear, como siempre.
+ */
+const guardiaDeCopiaVieja = (contrato) => async ({ tx, ref }) => {
+  const actual = await tx.get(ref);
+  if (actual.exists() && cambioDesdeQueSeAbrio(contrato, actual.data())) {
+    throw rechazo(MENSAJE_COPIA_VIEJA, CODIGO_COPIA_VIEJA, { id: ref.id, ...actual.data() });
+  }
+  return [];
+};
+
 /** El código del rechazo de `guardarContrato` cuando la garantía ya se soltó y el contrato todavía debe. */
 export const CODIGO_GARANTIA_LIBERADA_CON_SALDO = 'garantia-liberada-con-saldo';
 
@@ -729,6 +810,19 @@ export const CODIGO_GARANTIA_LIBERADA_CON_SALDO = 'garantia-liberada-con-saldo';
  * `privado` antes de tocar nada. Un contrato nuevo no tiene sello y su
  * `privado` está vacío por construcción: ahí sí se escribe, y un reintento del
  * mismo guardado (mismo contrato en memoria, aún sin sello) escribe lo mismo.
+ *
+ * **Un contrato que ya existía solo se reescribe si en la nube sigue siendo el que
+ * la pantalla abrió** (H-1, ver arriba «Guardar sobre algo que ya cambió»): se
+ * compara el sello `actualizado` dentro de la misma transacción que escribe, y si
+ * es otro se lanza `CODIGO_COPIA_VIEJA` sin escribir nada. Un contrato NUEVO (sin
+ * sello) no se compara con nada: su id ya lo decidió `nuevoIdContrato`, nadie más
+ * pudo escribirlo, y un reintento cae en el mismo documento.
+ *
+ * Lo que esto NO cubre: un documento sin sello `actualizado` en la nube (de antes de
+ * que existiera el sello) no se puede comparar; y lo que se escribe por otro camino
+ * sin subir el sello (`updateDoc` de la migración del costo, que no toca `pagos`) no
+ * lo ve. Y dos mostradores que sí se enteran pero deciden distinto siguen siendo dos
+ * personas: esto solo impide que una pise a la otra sin saberlo.
  *
  * Las dependencias se pueden inyectar solo para probar el orden sin red.
  */
@@ -764,9 +858,24 @@ export async function guardarContrato(contrato, {
     await escribirCostoDelDueno(nube, id, costoDia);
     original = { ...contrato, id };
   }
-  return guardarEnNubeYLocal(
-    'contratos', original, (id) => contratoParaGuardar(contrato, { id, numero }), { iniciar, guardarCopia, avisar },
-  );
+  // Un contrato que YA existía se reescribe solo si en la nube sigue siendo el que la pantalla abrió (H-1).
+  const guardia = contrato?.actualizado ? guardiaDeCopiaVieja(contrato) : null;
+  try {
+    return await guardarEnNubeYLocal(
+      'contratos', original, (id) => contratoParaGuardar(contrato, { id, numero }), {
+        iniciar, guardarCopia, avisar, guardia,
+      },
+    );
+  } catch (error) {
+    // Al negarse, esta computadora se queda con la copia que la nube tiene AHORA: `cargarContrato` sirve la
+    // copia local primero, y sin esto «recarga la página» volvería a mostrar la misma copia vieja y el
+    // intento siguiente se negaría otra vez, para siempre. Es solo comodidad: si no se puede escribir, el
+    // rechazo sale igual.
+    if (error?.codigo === CODIGO_COPIA_VIEJA && error.enNube) {
+      try { await guardarCopia('contratos', [sinCostoDelDueno(error.enNube)]); } catch { /* la copia local es comodidad */ }
+    }
+    throw error;
+  }
 }
 
 /**

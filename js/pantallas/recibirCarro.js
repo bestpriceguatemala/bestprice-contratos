@@ -27,7 +27,7 @@ import { lineasDevolucion, resumen, horaTardiaDe } from '../nucleo/contrato.js';
 import { q, textoEntero } from '../nucleo/dinero.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
-  cargarContrato, agregarPago, guardarContrato, cargarAjustes, CODIGO_GARANTIA_LIBERADA_CON_SALDO,
+  cargarContrato, agregarPago, guardarContrato, cargarAjustes, CODIGO_GARANTIA_LIBERADA_CON_SALDO, CODIGO_COPIA_VIEJA,
 } from '../datos.js';
 import {
   dinero, fecha, aviso, hora24, bloquearEnterEnElFormulario,
@@ -208,11 +208,24 @@ export function textoAvisoRecibido(numero, saldoRestante) {
  * guardado, así que eso es lo que se le dice. Función pura.
  */
 export function textoFalloAlGuardarElCierre(error) {
+  // El contrato cambió desde que se abrió esta pantalla (otra pestaña, otra computadora): la frase ya dice
+  // que no se guardó nada y que hay que recargar. «Intenta de nuevo» no sirve, la copia en memoria sigue vieja.
+  if (error?.codigo === CODIGO_COPIA_VIEJA) return error.message;
   if (error?.codigo === CODIGO_GARANTIA_LIBERADA_CON_SALDO) {
     return 'La garantía de esta renta ya está liberada y, con lo que corriges, quedaría debiendo: así no se puede guardar. '
       + 'Cobra lo que falta ahora mismo, escribiéndolo en «Monto sin recargo de tarjeta», y vuelve a guardar.';
   }
   return 'No se pudo guardar el cierre. Intenta de nuevo.';
+}
+
+/**
+ * Lo que se le dice al mostrador cuando el abono (el modo de solo cobro, «Cobrar») no se pudo registrar.
+ * Un fallo cualquiera se arregla intentando de nuevo; el rechazo porque el contrato cambió mientras tanto NO
+ * (ver `textoFalloAlGuardarElCierre`): ahí hay que recargar, y la frase del rechazo ya lo dice. Función pura.
+ */
+export function textoFalloAlRegistrarElAbono(error) {
+  if (error?.codigo === CODIGO_COPIA_VIEJA) return error.message;
+  return 'No se pudo registrar el abono. Intenta de nuevo.';
 }
 
 /**
@@ -676,8 +689,8 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
       const saldoRestante = resumen(guardado).saldo;
       aviso(textoAvisoCobro(guardado.numero, saldoRestante), saldoRestante === 0 ? 'exito' : 'info');
       location.hash = '#/flota';
-    } catch {
-      aviso('No se pudo registrar el abono. Intenta de nuevo.', 'error');
+    } catch (error) {
+      aviso(textoFalloAlRegistrarElAbono(error), 'error');
     } finally {
       guardando = false;
       recalcular();

@@ -531,7 +531,9 @@ test('guardarContrato: un contrato SIN costo (uno ya migrado, al cobrar o recibi
   const nube = nubeEnMemoria({ contratos: [migrado], privados: { c1: { costoDia: 400 } } });
   await guardarYMirar({ ...migrado, observaciones: 'cobró el saldo' }, nube);
   assert.deepEqual(nube.leer('contratos/c1/privado/dinero'), { id: 'c1', costoDia: 400 });
-  assert.deepEqual(nube.escrituras().map(([, ruta]) => ruta), ['contratos/c1'], 'solo el documento del contrato');
+  // Un contrato que ya existía se escribe dentro de una transacción (H-1): comprueba y escribe a la vez.
+  assert.deepEqual(nube.escriturasEnTransaccion().map(([, ruta]) => ruta), ['contratos/c1'], 'solo el documento del contrato');
+  assert.deepEqual(nube.escrituras(), [], 'y nada por fuera de la transacción');
   assert.equal(nube.leer('contratos/c1').observaciones, 'cobró el saldo');
 });
 
@@ -582,7 +584,8 @@ test('M2: guardar un contrato que ya existía NO pisa lo que hay en privado, aun
   const nube = nubeEnMemoria({ contratos: [antiguo], privados: { c1: { costoDia: 450 } } }); // …y privado dice 450
   await guardarYMirar({ ...antiguo, observaciones: 'cobró el saldo' }, nube);
   assert.equal(nube.leer('contratos/c1/privado/dinero').costoDia, 450, 'manda privado');
-  assert.deepEqual(nube.escrituras().map(([, ruta]) => ruta), ['contratos/c1'], 'privado ni se escribió');
+  assert.deepEqual(nube.escriturasEnTransaccion().map(([, ruta]) => ruta), ['contratos/c1'], 'privado ni se escribió');
+  assert.deepEqual(nube.escrituras(), []);
 });
 
 test('M2: un guardado ordinario no resuelve en silencio el conflicto que dejó la migración', async () => {

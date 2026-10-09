@@ -16,7 +16,7 @@ import { resumenDeHoy } from '../nucleo/calendario.js';
 import { diasEntre, hoyISO } from '../nucleo/fechas.js';
 import {
   cargarFlota, cargarContratosAbiertos, cargarReservas, liberarGarantia, puedeLiberarse,
-  CODIGO_SALDO_PENDIENTE, CODIGO_GARANTIA_LIBERADA_CON_SALDO,
+  CODIGO_SALDO_PENDIENTE, CODIGO_GARANTIA_LIBERADA_CON_SALDO, CODIGO_COPIA_VIEJA,
 } from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
 
@@ -220,7 +220,8 @@ export function textoAvisoGarantiaLiberada(contrato) {
  * inglés del SDK (prueba del sistema, 7 oct 2026). Función pura.
  */
 export function textoFalloAlLiberar(error) {
-  if (error?.codigo === CODIGO_SALDO_PENDIENTE || error?.codigo === CODIGO_GARANTIA_LIBERADA_CON_SALDO) return error.message;
+  if (error?.codigo === CODIGO_SALDO_PENDIENTE || error?.codigo === CODIGO_GARANTIA_LIBERADA_CON_SALDO
+    || error?.codigo === CODIGO_COPIA_VIEJA) return error.message;
   return 'No se pudo liberar la garantía. Revisa tu conexión e intenta de nuevo.';
 }
 
