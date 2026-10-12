@@ -20,7 +20,9 @@
 import {
   lineasSalida, lineasDevolucion, resumen, horaTardiaDe,
 } from '../nucleo/contrato.js';
-import { estadoContrato, pendientesDe, garantiaPorLiberar } from '../nucleo/estados.js';
+import {
+  estadoContrato, pendientesDe, garantiaPorLiberar, yaVolvio,
+} from '../nucleo/estados.js';
 import { filtrar, textoDeContrato } from '../nucleo/busqueda.js';
 import {
   q, textoDosDecimales, textoEntero, conTarjeta,
@@ -76,16 +78,26 @@ export function ultimoDiaMes(iso) {
   return `${ultimo.getUTCFullYear()}-${mesTexto}-${dia}`;
 }
 
-// Los cinco filtros de estado que pide el brief. Cada criterio se apoya en
+// Los filtros de estado de la lista. Cada criterio se apoya en
 // estadoContrato/pendientesDe (nucleo/estados.js) — las mismas funciones que
 // ya deciden qué se ve en la flota (flota.js) — para que los dos lados nunca
 // se desacuerden sobre qué cuenta como "pendiente de cobro" o "garantía sin
 // liberar".
-const CRITERIOS_ESTADO = {
+export const CRITERIOS_ESTADO = {
   rentados: (c) => estadoContrato(c) === 'rentado',
   devueltos: (c) => estadoContrato(c) === 'devuelto',
   cerrados: (c) => estadoContrato(c) === 'cerrado',
   pendientesCobro: (c) => resumen(c).saldo > 0,
+  // El espejo de «Pendientes de cobro» (H-9, prueba del sistema, 7 oct 2026): la
+  // misma cifra, `resumen(c).saldo`, del otro lado del cero. Un crédito no es un
+  // cobro —por eso «Pendientes de cobro» y «Saldo pendiente» de Clientes filtran
+  // `saldo > 0` a propósito y NO se tocan—, pero sí es dinero que el negocio le
+  // debe a alguien, y una corrección puede dejarlo en un contrato que el sistema
+  // ya da por «cerrado» (puedeCerrar acepta `saldo <= 0`): sin esta pregunta solo
+  // lo recordaba quien abriera ese contrato. Cuenta cualquier estado, igual que
+  // «Pendientes de cobro»: una renta que anda afuera con un sobrepago también es
+  // plata del cliente, y textoCuenta ya la rotula así.
+  aFavorDelCliente: (c) => resumen(c).saldo < 0,
   // garantiaPorLiberar (nucleo/estados.js) — la misma función que usa
   // resumenDeHoy (calendario.js) y la lista de flota.js, para que estos tres
   // lugares nunca puedan volver a desacordarse sobre qué cuenta como
@@ -94,7 +106,35 @@ const CRITERIOS_ESTADO = {
   garantiasSinLiberar: garantiaPorLiberar,
 };
 
-/** Filtra por uno de los cinco estados de arriba; sin filtro (o 'todos') no filtra nada. */
+/**
+ * Las opciones del menú «Estado», en el orden en que se leen. El menú se dibuja
+ * DE ESTA LISTA (opcionesDeEstadoHTML) y no a mano: `filtrarPorEstado` con una
+ * clave que no conoce devuelve la lista entera sin avisar, así que una opción
+ * escrita con un valor distinto al de su criterio se vería «sin efecto» y nadie
+ * sabría por qué. Una prueba compara esta lista con CRITERIOS_ESTADO en las dos
+ * direcciones.
+ *
+ * «A favor del cliente» va pegada a «Pendientes de cobro»: son las dos caras de
+ * la misma cuenta, y quien mira lo que le deben a él mira, al lado, lo que él debe.
+ */
+export const OPCIONES_DE_ESTADO = [
+  { valor: 'todos', texto: 'Todos' },
+  { valor: 'rentados', texto: 'Rentados' },
+  { valor: 'devueltos', texto: 'Devueltos' },
+  { valor: 'pendientesCobro', texto: 'Pendientes de cobro' },
+  { valor: 'aFavorDelCliente', texto: 'A favor del cliente' },
+  { valor: 'garantiasSinLiberar', texto: 'Garantías sin liberar' },
+  { valor: 'cerrados', texto: 'Cerrados' },
+];
+
+/** Las `<option>` del menú «Estado», dibujadas de OPCIONES_DE_ESTADO. */
+export function opcionesDeEstadoHTML() {
+  return OPCIONES_DE_ESTADO
+    .map((o) => `<option value="${esc(o.valor)}">${esc(o.texto)}</option>`)
+    .join('\n              ');
+}
+
+/** Filtra por uno de los estados de arriba; sin filtro (o 'todos') no filtra nada. */
 export function filtrarPorEstado(contratos, filtro) {
   const criterio = CRITERIOS_ESTADO[filtro];
   return criterio ? contratos.filter(criterio) : contratos;
@@ -116,8 +156,13 @@ export function claseFilaContrato(c) {
 /** "Cómo quedó la cuenta": para el renglón de la lista y el encabezado de la ficha. */
 export function textoCuenta(c) {
   const estado = estadoContrato(c);
-  if (estado === 'rentado') return 'En curso';
   const r = resumen(c);
+  if (estado === 'rentado') {
+    // Mientras el carro anda afuera un saldo por cobrar es lo normal y no se dice (el cierre todavía no
+    // existe), pero un saldo NEGATIVO no lo es nunca: es plata del cliente (se cobró de más al salir). Se dice
+    // aquí para que la fila que trae el filtro «A favor del cliente» explique por qué está ahí.
+    return r.saldo < 0 ? `En curso · A favor del cliente ${dinero(-r.saldo)}` : 'En curso';
+  }
   const partes = [];
   if (r.saldo > 0) partes.push(`Debe ${dinero(r.saldo)}`);
   else if (r.saldo < 0) partes.push(`A favor del cliente ${dinero(-r.saldo)}`);
@@ -257,6 +302,19 @@ export function textoSinResultados({ desde, hasta } = {}) {
   return `Sin resultados${rango}. Si buscas una renta de otro mes, cambia «Desde» y «Hasta».`;
 }
 
+/**
+ * La nota que acompaña al filtro «A favor del cliente». La lista solo trae las rentas con SALIDA en el rango
+ * (abre con el mes en curso), y una renta que salió el 28 de septiembre y se corrigió en octubre no está en
+ * él: con una sola fila a la vista, el filtro se leería como «ya no se le debe a nadie más» cuando solo
+ * dice «a nadie más de este rango». Se dice el rango y qué cambiar. Los demás filtros no llevan nota, y sin
+ * filas tampoco: ahí ya habla `textoSinResultados`, con las mismas palabras. Función pura.
+ */
+export function textoAlcanceDelFiltro(filtro, { desde, hasta } = {}, hayFilas = true) {
+  if (filtro !== 'aFavorDelCliente' || !hayFilas) return '';
+  const rango = desde && hasta ? `con salida del ${fecha(desde)} al ${fecha(hasta)}` : 'del rango de salidas elegido';
+  return `Solo busca entre las rentas ${rango}. Un saldo a favor de una renta que salió en otro mes no aparece hasta que cambies «Desde» y «Hasta».`;
+}
+
 function filasCuerpo(contratos, rango) {
   if (!contratos.length) return `<tr><td colspan="6" class="pendiente">${esc(textoSinResultados(rango))}</td></tr>`;
   return contratos.map(filaContrato).join('');
@@ -292,8 +350,20 @@ async function dibujarListaEntrada(contenedor, sigoVigente) {
   function repintarFilas() {
     const cuerpo = el('ct-filas');
     if (!cuerpo) return;
-    cuerpo.innerHTML = filasCuerpo(contratosVisibles(ordenarPorSalida(contratos), { filtro, consulta }), { desde, hasta });
+    const visibles = contratosVisibles(ordenarPorSalida(contratos), { filtro, consulta });
+    cuerpo.innerHTML = filasCuerpo(visibles, { desde, hasta });
+    repintarAlcance(visibles.length > 0);
     cablearFilas();
+  }
+
+  // La nota del filtro «A favor del cliente» (textoAlcanceDelFiltro): vive fuera de la tabla, así que se
+  // actualiza aparte cada vez que cambian las filas.
+  function repintarAlcance(hayFilas) {
+    const nota = el('ct-alcance');
+    if (!nota) return;
+    const texto = textoAlcanceDelFiltro(filtro, { desde, hasta }, hayFilas);
+    nota.textContent = texto;
+    nota.hidden = !texto;
   }
 
   function pintarPantalla() {
@@ -315,18 +385,14 @@ async function dibujarListaEntrada(contenedor, sigoVigente) {
           </label>
           <label class="sc-campo">Estado
             <select id="ct-estado">
-              <option value="todos">Todos</option>
-              <option value="rentados">Rentados</option>
-              <option value="devueltos">Devueltos</option>
-              <option value="pendientesCobro">Pendientes de cobro</option>
-              <option value="garantiasSinLiberar">Garantías sin liberar</option>
-              <option value="cerrados">Cerrados</option>
+              ${opcionesDeEstadoHTML()}
             </select>
           </label>
         </div>
         <label class="carro-campo">Buscar por número, cliente, placas o carro
           <input type="search" id="ct-buscar" placeholder="Escribe para buscar..." value="${esc(consulta)}">
         </label>
+        <p id="ct-alcance" class="sc-nota ct-alcance" hidden></p>
         <table class="tabla-carros">
           <thead>
             <tr><th>N.°</th><th>Cliente</th><th>Carro</th><th>Fechas</th><th>Estado</th><th>Cuenta</th></tr>
@@ -336,6 +402,7 @@ async function dibujarListaEntrada(contenedor, sigoVigente) {
       </div>`;
 
     el('ct-estado').value = filtro;
+    repintarAlcance(contratosVisibles(ordenarPorSalida(contratos), { filtro, consulta }).length > 0);
     cablearFilas();
 
     el('ct-estado').addEventListener('change', () => { filtro = val('ct-estado'); repintarFilas(); });
@@ -569,7 +636,42 @@ function seccionObservaciones(c) {
   return `<section class="carro-seccion"><h2>Observaciones</h2><p>${texto}</p></section>`;
 }
 
-function plantillaDetalle(c) {
+/**
+ * El botón del encabezado de la ficha que lleva a «Recibir carro» (H-8, prueba del sistema, 7 oct 2026):
+ * «Recibir carro» mientras el carro anda afuera y «Corregir» cuando ya volvió. Hasta ahora la ficha no traía
+ * ninguno: recibir un carro ajeno que regresa antes de su fecha no tenía entrada (la flota no tiene cuadro
+ * para un ajeno), y corregir las cifras de un cierre —el camino que usa el dueño para arreglar dinero— solo se
+ * alcanzaba con «atrás» del navegador o escribiendo la dirección.
+ *
+ * Los dos llevan a la MISMA ruta, `#/recibir/<id>`, y no necesitan más: la pantalla elige su modo sola, mirando
+ * si el contrato ya tiene `cierre.fechaReal` (`textoCorreccion`, recibirCarro.js) —con él abre en corrección y
+ * `montoInicialPago` arranca en 0—, y esta función pregunta lo MISMO (`yaVolvio`, nucleo/estados.js) para
+ * rotular el botón, así que botón y modo no pueden desacordarse. Jamás lleva `?cobro=1`: ese es «Cobrar», el
+ * modo de solo abono, que SÍ prellena el saldo completo, y reabrir un cierre ya hecho armado para cobrar todo
+ * otra vez fue como este proyecto produjo un pago fantasma.
+ *
+ * Devuelve null sin id: un enlace a `#/recibir/undefined` no lleva a ningún lado. Función pura.
+ */
+export function accionDeRecibo(c) {
+  if (!c?.id) return null;
+  const ruta = `#/recibir/${c.id}`;
+  return yaVolvio(c)
+    ? { clave: 'corregir', texto: 'Corregir', ruta, primaria: false, titulo: 'Corregir las cifras del cierre de este contrato' }
+    : { clave: 'recibir', texto: 'Recibir carro', ruta, primaria: true, titulo: '' };
+}
+
+// Un enlace y no un <button>: navega por sí solo, sin un manejador de clic que pueda dejar de cablearse sin
+// que ninguna prueba lo note (el mismo patrón de «Recibir carro» y «Cobrar» en flota.js).
+function botonDeRecibo(c) {
+  const accion = accionDeRecibo(c);
+  if (!accion) return '';
+  const clase = accion.primaria ? 'btn btn-primario' : 'btn';
+  const titulo = accion.titulo ? ` title="${esc(accion.titulo)}"` : '';
+  return `<a class="${clase}" href="${esc(accion.ruta)}" data-accion="${accion.clave}"${titulo}>${esc(accion.texto)}</a>`;
+}
+
+// Se exporta solo para probar lo que dibuja la ficha (los botones del encabezado) sin DOM.
+export function plantillaDetalle(c) {
   const r = resumen(c);
   const estado = estadoContrato(c);
   return `
@@ -577,7 +679,10 @@ function plantillaDetalle(c) {
       <div class="carro-formulario">
         <div class="carros-encabezado">
           <h1>Contrato N.° ${esc(c?.numero ?? '—')}</h1>
-          <button type="button" id="ct-volver" class="btn">Volver</button>
+          <div class="carros-acciones">
+            ${botonDeRecibo(c)}
+            <button type="button" id="ct-volver" class="btn">Volver</button>
+          </div>
         </div>
         <p class="sc-carro-info">
           <strong>${esc(c?.clienteNombre || 'Cliente sin nombre')}</strong>

@@ -16,7 +16,17 @@ import {
   primerDiaMes, ultimoDiaMes, filtrarPorEstado, contratosVisibles,
   claseFilaContrato, textoCuenta, numeroEnmascarado, textoConfirmarAnular, textoHoraTardia,
   textoEstadoGarantia, seccionPagos, textoFalloAlAnular, textoSinResultados,
+  CRITERIOS_ESTADO, OPCIONES_DE_ESTADO, opcionesDeEstadoHTML, textoAlcanceDelFiltro, accionDeRecibo, plantillaDetalle,
 } from '../js/pantallas/contratos.js';
+import {
+  leerParametroRuta, textoCorreccion, montoInicialPago, plantilla as plantillaDeRecibir, valoresIniciales,
+} from '../js/pantallas/recibirCarro.js';
+import { emparejar } from '../js/router.js';
+import { construirContrato } from '../js/pantallas/sacarCarro.js';
+import { construirCierre } from '../js/nucleo/cierre.js';
+import { estadoContrato } from '../js/nucleo/estados.js';
+import { contratoParaGuardar } from '../js/datos.js';
+import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
 import { lineasSalida, lineasDevolucion, resumen } from '../js/nucleo/contrato.js';
 import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
 import { contratoGuardadoConHoraTardiaAlSalir } from './fixtures/contratoGuardadoConHoraTardiaAlSalir.mjs';
@@ -451,4 +461,251 @@ test('textoSinResultados: dice el rango de salida que se está mirando y qué ca
 test('textoSinResultados: sin rango conocido no inventa fechas, pero sigue diciendo qué cambiar', () => {
   assert.equal(textoSinResultados(), 'Sin resultados. Si buscas una renta de otro mes, cambia «Desde» y «Hasta».');
   assert.equal(textoSinResultados({ desde: '2026-11-01' }), 'Sin resultados. Si buscas una renta de otro mes, cambia «Desde» y «Hasta».');
+});
+
+// ---------- H-8 y H-9 (prueba del sistema, 7 oct 2026) ----------
+//
+// Los contratos de estas pruebas NO están escritos a mano con las llaves que la prueba necesita: salen de las
+// mismas funciones que los arman de verdad (`construirContrato` de «Sacar carro», `construirCierre` de «Recibir
+// carro» y `contratoParaGuardar`, que sella `estado`), así que llevan cada llave y cada tipo de uno guardado.
+
+const AHORA = 1790000000000;
+
+/** Un carro de la flota, 4 días a Q700 (Q2,800), pagado completo en efectivo al salir. `montoPago` cambia lo pagado. */
+function salidaPagada({ id, numero, montoPago = 2800 }) {
+  return construirContrato({
+    id,
+    numero,
+    cliente: { id: 'k1', nombres: 'Juan', apellidos: 'Pérez' },
+    ajeno: false,
+    carro: { id: 'v1', placas: 'P-111AAA', marca: 'Toyota', linea: 'Hilux', color: 'Blanco' },
+    fechaSalida: '2026-10-03',
+    dias: 4,
+    precioDia: 700,
+    forma: 'efectivo',
+    porcentajeTarjeta: 0,
+    montoPago,
+    rentadoPor: 'Ana',
+    porcentajeComision: 5,
+  });
+}
+
+const CIERRE_LIMPIO = {
+  fechaReal: '2026-10-07', horaReal: '10:00', lugarEntrada: 'Oficina', kmEntrada: 100, combustible: 0, danos: 0, varios: 0, descuento: 0,
+};
+
+/** Lo que queda guardado en la nube. */
+const guardadoDe = (c) => contratoParaGuardar(c, { id: c.id, numero: c.numero, ahora: AHORA });
+
+/** Todavía afuera, pagado completo: no debe ni se le debe. */
+const rentadoAlDia = () => guardadoDe(salidaPagada({ id: 'c-afuera', numero: 61 }));
+/** Todavía afuera, pero el mostrador cobró de más en la salida (Q3,000 por una renta de Q2,800). */
+const rentadoConSobrepago = () => guardadoDe(salidaPagada({ id: 'c-sobrepago', numero: 62, montoPago: 3000 }));
+/** Ya volvió con Q200 de daños sin cobrar: el carro está en el patio pero el contrato sigue abierto. */
+const devueltoDebiendo = () => contratoDeUnCarro({
+  id: 'c-debe', numero: 63, fechaSalida: '2026-10-03', dias: 4, recibidoEl: '2026-10-07', danos: 200,
+});
+/** Ya volvió, pagó todo y no hay tarjeta que soltar: cerrado, saldo 0. */
+const cerradoAlDia = () => contratoDeUnCarro({
+  id: 'c-cerrado', numero: 64, fechaSalida: '2026-10-03', dias: 4, recibidoEl: '2026-10-07', danos: 0,
+});
+/**
+ * El caso de H-9, tal como lo hizo el dueño: un cierre limpio ya guardado y pagado (Q2,800) al que después se le
+ * CORRIGE el descuento a Q1,400 desde «Recibir carro». La corrección pasa por las mismas funciones que usa esa
+ * pantalla (`valoresIniciales` y `construirCierre`) y deja al cliente con Q1,400 a favor.
+ */
+const cerradoConCredito = () => {
+  const cerrado = guardadoDe(construirCierre(salidaPagada({ id: 'c-credito', numero: 65 }), CIERRE_LIMPIO));
+  const corregido = construirCierre(cerrado, { ...valoresIniciales(cerrado), descuento: 1400 });
+  return guardadoDe(corregido);
+};
+
+test('los contratos de estas pruebas son los que dicen ser: el de H-9 queda cerrado con Q1,400 a favor', () => {
+  assert.equal(estadoContrato(rentadoAlDia()), 'rentado');
+  assert.equal(estadoContrato(devueltoDebiendo()), 'devuelto');
+  assert.equal(estadoContrato(cerradoAlDia()), 'cerrado');
+  const credito = cerradoConCredito();
+  assert.equal(credito.estado, 'cerrado', 'sin deuda y sin garantía, el contrato se cierra aunque se le deba al cliente');
+  assert.equal(resumen(credito).saldo, -1400);
+  assert.equal(textoCuenta(credito), 'A favor del cliente Q1,400.00');
+});
+
+// ---- H-9: el filtro «A favor del cliente» ----
+
+test('H-9, filtrarPorEstado: aFavorDelCliente trae al que tiene crédito y a nadie más (ni al que debe, ni al que está a mano)', () => {
+  const credito = cerradoConCredito();
+  const todos = [rentadoAlDia(), devueltoDebiendo(), cerradoAlDia(), credito];
+  assert.deepEqual(filtrarPorEstado(todos, 'aFavorDelCliente'), [credito]);
+});
+
+test('H-9, filtrarPorEstado: un crédito NO es un cobro pendiente — «Pendientes de cobro» sigue siendo saldo > 0 y no lo trae', () => {
+  const credito = cerradoConCredito();
+  const debe = devueltoDebiendo();
+  assert.deepEqual(filtrarPorEstado([credito, debe], 'pendientesCobro'), [debe]);
+  assert.deepEqual(filtrarPorEstado([credito, debe], 'aFavorDelCliente'), [credito], 'y el espejo: el que debe no sale como crédito');
+});
+
+test('H-9, filtrarPorEstado: el crédito de una renta que todavía anda afuera (cobró de más al salir) también aparece', () => {
+  const sobrepago = rentadoConSobrepago();
+  assert.equal(estadoContrato(sobrepago), 'rentado');
+  assert.deepEqual(filtrarPorEstado([rentadoAlDia(), sobrepago], 'aFavorDelCliente'), [sobrepago]);
+});
+
+test('H-9, filtrarPorEstado: un pago anulado deja de contar, y con él el crédito que había hecho', () => {
+  // El sobrepago de Q200 se anula: resumen() ya lo ignora, así que el contrato vuelve a estar a mano.
+  const sobrepago = rentadoConSobrepago();
+  const anulado = { ...sobrepago, pagos: sobrepago.pagos.map((p) => ({ ...p, anulado: true })) };
+  assert.deepEqual(filtrarPorEstado([anulado], 'aFavorDelCliente'), []);
+});
+
+test('H-9, contratosVisibles: el filtro de crédito y el buscador se combinan', () => {
+  const credito = cerradoConCredito();
+  const otroCredito = { ...rentadoConSobrepago(), clienteNombre: 'ANA GÓMEZ' };
+  const lista = [credito, otroCredito, cerradoAlDia()];
+  assert.equal(contratosVisibles(lista, { filtro: 'aFavorDelCliente', consulta: '' }).length, 2);
+  assert.deepEqual(contratosVisibles(lista, { filtro: 'aFavorDelCliente', consulta: 'gomez' }), [otroCredito]);
+});
+
+test('H-9, textoCuenta: una renta que sigue afuera con sobrepago lo dice — si no, el filtro la traería con un renglón que no explica por qué', () => {
+  assert.equal(textoCuenta(rentadoConSobrepago()), 'En curso · A favor del cliente Q200.00');
+  assert.equal(textoCuenta(rentadoAlDia()), 'En curso', 'sin crédito sigue diciendo solo «En curso»');
+  assert.equal(textoCuenta({ dias: 1, precioDia: 100, pagos: [] }), 'En curso', 'y debiendo también: un saldo por cobrar mientras anda afuera es lo normal');
+});
+
+// El <select> sale de UNA lista. filtrarPorEstado con una clave que no conoce devuelve la lista entera sin
+// avisar, así que una opción escrita a mano con otro valor se vería «sin efecto» y nadie sabría por qué.
+test('H-9, OPCIONES_DE_ESTADO: cada opción menos «Todos» tiene su criterio, y ningún criterio queda sin opción', () => {
+  const valores = OPCIONES_DE_ESTADO.map((o) => o.valor);
+  assert.equal(new Set(valores).size, valores.length, 'ningún valor repetido');
+  assert.equal(valores[0], 'todos');
+  for (const valor of valores.filter((v) => v !== 'todos')) {
+    assert.equal(typeof CRITERIOS_ESTADO[valor], 'function', `la opción «${valor}» no tiene criterio: filtraría nada`);
+  }
+  assert.deepEqual([...Object.keys(CRITERIOS_ESTADO)].sort(), valores.filter((v) => v !== 'todos').sort());
+});
+
+test('H-9, opcionesDeEstadoHTML: «A favor del cliente» está en el menú, justo al lado de «Pendientes de cobro» (su espejo)', () => {
+  const html = opcionesDeEstadoHTML();
+  assert.match(html, /<option value="aFavorDelCliente">A favor del cliente<\/option>/);
+  const textos = [...html.matchAll(/<option value="[^"]+">([^<]+)<\/option>/g)].map((m) => m[1]);
+  assert.deepEqual(textos, [
+    'Todos', 'Rentados', 'Devueltos', 'Pendientes de cobro', 'A favor del cliente', 'Garantías sin liberar', 'Cerrados',
+  ]);
+});
+
+// La lista solo trae las rentas con SALIDA en el rango (abre con el mes en curso). Una renta que salió el 28 de
+// septiembre y se corrigió en octubre no está en ese rango: sin decirlo, «A favor del cliente» con una fila
+// parecería la lista completa, y es justo la clase de filtro que se lee como «no se le debe a nadie más».
+test('H-9, textoAlcanceDelFiltro: el filtro de crédito dice qué rango de salidas está mirando; los demás no dicen nada', () => {
+  const rango = { desde: '2026-10-01', hasta: '2026-10-31' };
+  const texto = textoAlcanceDelFiltro('aFavorDelCliente', rango);
+  assert.match(texto, /1 oct 2026/);
+  assert.match(texto, /31 oct 2026/);
+  assert.match(texto, /«Desde» y «Hasta»/);
+  for (const otro of ['todos', 'rentados', 'devueltos', 'pendientesCobro', 'garantiasSinLiberar', 'cerrados', undefined]) {
+    assert.equal(textoAlcanceDelFiltro(otro, rango), '', `«${otro}» no lleva nota`);
+  }
+});
+
+test('H-9, textoAlcanceDelFiltro: sin rango conocido no inventa fechas', () => {
+  const texto = textoAlcanceDelFiltro('aFavorDelCliente', {});
+  assert.doesNotMatch(texto, /undefined|null|NaN/);
+  assert.match(texto, /«Desde» y «Hasta»/);
+});
+
+// ---- H-8: «Recibir carro» y «Corregir» en el detalle del contrato ----
+
+test('H-8, accionDeRecibo: el carro sigue afuera -> «Recibir carro»; ya volvió (devuelto o cerrado) -> «Corregir»', () => {
+  assert.equal(accionDeRecibo(rentadoAlDia()).texto, 'Recibir carro');
+  assert.equal(accionDeRecibo(rentadoConSobrepago()).texto, 'Recibir carro');
+  assert.equal(accionDeRecibo(devueltoDebiendo()).texto, 'Corregir');
+  assert.equal(accionDeRecibo(cerradoAlDia()).texto, 'Corregir');
+  assert.equal(accionDeRecibo(cerradoConCredito()).texto, 'Corregir');
+});
+
+test('H-8, accionDeRecibo: sin contrato o sin id no hay botón (un enlace a «#/recibir/undefined» no lleva a ningún lado)', () => {
+  assert.equal(accionDeRecibo(null), null);
+  assert.equal(accionDeRecibo({ numero: 3, dias: 1, precioDia: 1, pagos: [] }), null);
+});
+
+// LA PRUEBA QUE IMPORTA de H-8. Reabrir un cierre ya guardado fue lo que una vez produjo un pago fantasma: la
+// pantalla volvía armada para cobrar el saldo entero otra vez. El camino correcto es el de la corrección
+// (`montoInicialPago` arranca en 0), y la pantalla elige su modo SOLA, mirando el contrato y el sufijo de la
+// ruta. Aquí se recorre ese mismo camino: la ruta del botón, por el enrutador de verdad, hasta el modo en que
+// abre y el monto con que arranca.
+test('H-8, «Corregir» abre «Recibir carro» en modo de CORRECCIÓN y sin nada pre-cobrado, aunque el contrato todavía deba', () => {
+  const debiendo = devueltoDebiendo();
+  assert.ok(resumen(debiendo).saldo > 0, 'punto de partida: este contrato todavía debe, justo el que armaría un cobro fantasma');
+
+  const accion = accionDeRecibo(debiendo);
+  const [parametro] = emparejar(accion.ruta, '#/recibir/:contratoId');
+  const { contratoId, soloCobro } = leerParametroRuta(parametro);
+
+  assert.equal(contratoId, debiendo.id);
+  assert.equal(soloCobro, false, 'no es «Cobrar»: ese modo SÍ prellena el saldo completo');
+  const enCorreccion = Boolean(textoCorreccion(debiendo));
+  assert.equal(enCorreccion, true, 'la pantalla abre en corrección porque el contrato ya tiene cierre');
+  assert.equal(montoInicialPago(resumen(debiendo).saldo, { enCorreccion, soloCobro }), 0, 'nada pre-cobrado');
+
+  const html = plantillaDeRecibir(debiendo, soloCobro);
+  assert.match(html, /Guardar correcciones/);
+  assert.doesNotMatch(html, /Recibir y cobrar/);
+});
+
+test('H-8, «Recibir carro» abre una recepción NORMAL (sin corrección, sin solo cobro) para un carro que sigue afuera', () => {
+  const afuera = rentadoAlDia();
+  const accion = accionDeRecibo(afuera);
+  const [parametro] = emparejar(accion.ruta, '#/recibir/:contratoId');
+  const { contratoId, soloCobro } = leerParametroRuta(parametro);
+  assert.equal(contratoId, afuera.id);
+  assert.equal(soloCobro, false);
+  assert.equal(textoCorreccion(afuera), null, 'no hay cierre: es la primera vez que se recibe');
+});
+
+test('H-8, accionDeRecibo: el modo de la pantalla y el rótulo del botón nunca se desacuerdan (lo decide `cierre.fechaReal` en los dos)', () => {
+  for (const c of [rentadoAlDia(), rentadoConSobrepago(), devueltoDebiendo(), cerradoAlDia(), cerradoConCredito()]) {
+    assert.equal(accionDeRecibo(c).texto === 'Corregir', Boolean(textoCorreccion(c)), `contrato ${c.numero}`);
+  }
+});
+
+test('H-8, accionDeRecibo: la ruta es la de siempre, sin parámetros (el id va en el último pedazo)', () => {
+  assert.equal(accionDeRecibo(rentadoAlDia()).ruta, '#/recibir/c-afuera');
+  assert.equal(accionDeRecibo(cerradoAlDia()).ruta, '#/recibir/c-cerrado');
+  assert.doesNotMatch(accionDeRecibo(cerradoAlDia()).ruta, /\?|cobro/);
+});
+
+test('H-8, el detalle de un carro que sigue afuera trae «Recibir carro» y no «Corregir»', () => {
+  const html = plantillaDetalle(rentadoConSobrepago());
+  assert.match(html, /<a [^>]*href="#\/recibir\/c-sobrepago"[^>]*>Recibir carro<\/a>/);
+  assert.doesNotMatch(html, />Corregir</);
+});
+
+test('H-8, el detalle de un contrato cerrado trae «Corregir», hacia la recepción de siempre, y no «Recibir carro»', () => {
+  for (const c of [cerradoAlDia(), cerradoConCredito(), devueltoDebiendo()]) {
+    const html = plantillaDetalle(c);
+    assert.match(html, new RegExp(`<a [^>]*href="#/recibir/${c.id}"[^>]*>Corregir</a>`), `contrato ${c.numero}`);
+    assert.doesNotMatch(html, />Recibir carro</);
+    assert.doesNotMatch(html, /cobro=1/, 'jamás el modo de solo cobro: ese pre-cobra el saldo');
+  }
+});
+
+test('H-8, el detalle sigue trayendo «Volver», y el botón de recibir no es un <button> que dependa de un manejador', () => {
+  const html = plantillaDetalle(cerradoAlDia());
+  assert.match(html, /id="ct-volver"/);
+  // Un enlace navega por sí solo: no hay manejador de clic que pueda dejar de cablearse sin que ninguna prueba lo note.
+  assert.doesNotMatch(html, /<button[^>]*>Corregir/);
+  assert.doesNotMatch(html, /<button[^>]*>Recibir carro/);
+});
+
+test('H-8, el detalle de un contrato sin id no dibuja un enlace roto', () => {
+  const html = plantillaDetalle({ numero: 3, dias: 1, precioDia: 1, pagos: [] });
+  assert.doesNotMatch(html, /#\/recibir\//);
+});
+
+test('H-8 y H-9: las pantallas nuevas usan clases de CSS, no style="" (y las clases existen en la hoja de estilos)', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/contratos.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../css/estilos.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(plantillaDetalle(cerradoAlDia()), /style=/);
+  assert.match(css, /\.carros-acciones\s*\{/);
+  assert.match(fuente, /class="carros-acciones"/);
 });

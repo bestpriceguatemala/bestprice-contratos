@@ -883,6 +883,24 @@ body {
   width: auto;
 }
 
+/* Los botones de la derecha del encabezado de una ficha (Contratos: «Recibir carro» o «Corregir», y «Volver»).
+   .btn-primario trae un margen de arriba pensado para un formulario; en una fila no debe subir ni bajar. */
+.carros-acciones {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.carros-acciones .btn-primario {
+  margin-top: 0;
+}
+
+/* La nota bajo el buscador de Contratos (el rango que mira el filtro «A favor del cliente»). */
+.ct-alcance {
+  margin: 10px 0 14px;
+}
+
 .tabla-carros {
   width: 100%;
   border-collapse: collapse;
