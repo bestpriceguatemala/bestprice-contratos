@@ -32,8 +32,9 @@
 //    se dice en pantalla, junto al total, que está corto.
 import {
   agruparPorDueno, cuentaDeDueno, costoDelSubarriendo, elegirParaPago, esPagableAlDueno, totalGeneral, pagoAnulado,
-  pagadoDeMas,
+  pagadoDeMas, totalPagadoDeMas, descuentoMaximo, descuentoSinRespaldo, descuentoDelPago, entregadoDelPago,
 } from '../nucleo/liquidacion.js';
+import { q } from '../nucleo/dinero.js';
 import { estadoContrato, pendientesDe } from '../nucleo/estados.js';
 import { atrasoDe } from '../nucleo/contrato.js';
 import { construirDueno } from '../nucleo/dueno.js';
@@ -43,7 +44,7 @@ import {
   cargarContratosParaDinero, cargarPagosDueno, cargarDuenos, guardarDueno, nuevoIdPagoDueno, altaConIdFijo, nuevoIdDueno,
   siguienteNumeroComprobante, construirPagoDueno, guardarPagoDueno, anularPagoDueno, anotarCostoDelDueno,
   enlazarContratosAlDueno, conCostoDelDueno, costoDelDocumento, migrarCostosDelDueno, mensajeDeMigracion,
-  MENSAJE_PAGO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS, MENSAJE_PAGO_SIN_MONTO, MENSAJE_PAGO_SIN_ID,
+  MENSAJE_PAGO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS, MENSAJE_PAGO_SIN_MONTO, MENSAJE_PAGO_SIN_ID, MENSAJE_PAGO_DESCUENTO,
   MENSAJE_COSTO_SIN_DINERO, MENSAJE_COSTO_SIN_VALOR, MENSAJE_COSTO_YA_ANOTADO, MENSAJE_COSTO_SIN_COMPROBAR,
   MENSAJE_MIGRAR_SIN_DINERO,
 } from '../datos.js';
@@ -106,7 +107,7 @@ export const MENSAJE_FALLO_DATOS = 'Hay un contrato o un pago guardado que no se
 export const MENSAJE_FALLO_DUENOS = 'No se pudo leer la lista de dueños. Los nombres que ves pueden estar desactualizados.';
 export const MENSAJE_SIN_COMPROBAR = 'No se pudo comprobar si estas rentas ya tienen un pago registrado, y registrar sin saberlo podría pagarlas dos veces. Revisa tu internet e intenta de nuevo.';
 export const MENSAJE_SIN_COMPROBAR_RENTAS = 'No se pudo comprobar si estas rentas siguen cerradas y con el mismo monto, y registrar sin saberlo podría pagar una renta que ya cambió. Revisa tu internet e intenta de nuevo.';
-export const MENSAJE_PAGO_CAMBIO = 'Mientras tanto cambió la cuenta de este dueño: alguna de las rentas marcadas ya no se puede pagar o cambió de monto (por ejemplo, ya tiene un pago registrado, o se corrigió su cierre). No se registró nada; la lista ya está al día, revisa y vuelve a marcar.';
+export const MENSAJE_PAGO_CAMBIO = 'Mientras tanto cambió la cuenta de este dueño: alguna de las rentas marcadas ya no se puede pagar o cambió de monto (por ejemplo, ya tiene un pago registrado, o se corrigió su cierre), o cambió lo que se le había pagado de más y el descuento ya no cabe. No se registró nada; la lista ya está al día, revisa y vuelve a marcar.';
 /**
  * Qué está mal con la fecha del pago, o `null` si está bien. Una fecha vacía se pide;
  * una que no existe —el año con cinco dígitos que el campo de fecha deja teclear, un 30 de
@@ -307,7 +308,7 @@ function instalarLatidos() {
 // ---------------------------------------------------------------------------
 
 const FRASES_CONOCIDAS = new Set([
-  MENSAJE_PAGO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS, MENSAJE_PAGO_SIN_MONTO, MENSAJE_PAGO_SIN_ID,
+  MENSAJE_PAGO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS, MENSAJE_PAGO_SIN_MONTO, MENSAJE_PAGO_SIN_ID, MENSAJE_PAGO_DESCUENTO,
   MENSAJE_COSTO_SIN_DINERO, MENSAJE_COSTO_SIN_VALOR, MENSAJE_COSTO_YA_ANOTADO, MENSAJE_COSTO_SIN_COMPROBAR,
   MENSAJE_MIGRAR_SIN_DINERO, MENSAJE_SIN_COMPROBAR, MENSAJE_SIN_COMPROBAR_RENTAS, MENSAJE_PAGO_CAMBIO,
   MENSAJE_ANULAR_SIN_COMPROBAR,
@@ -551,6 +552,56 @@ export function resumenDeMarcadas(entrada, marcados, costoSinLeer) {
 }
 
 /**
+ * El descuento de este pago, para el formulario: si se ofrece el campo, lo más que se puede descontar, lo
+ * que él tecleó (ya como monto) y lo que entrega con eso. `marcadas` es lo que devuelve `resumenDeMarcadas`.
+ *
+ * Esta función no decide nada: el tope sale de `descuentoMaximo` y lo entregado de `entregadoDelPago`
+ * (nucleo/liquidacion.js), las mismas con las que `construirPagoDueno` rechaza o arma el pago, así que lo
+ * que se ve aquí es exactamente lo que se guarda. Lo único propio es leer el texto del campo.
+ *
+ * - `hay`: se ofrece el campo solo si a este dueño se le pagó de más (`totalPagadoDeMas`). Sin eso no hay nada
+ *   que descontar y un campo ahí solo invitaría a borrar una deuda real; y un valor que haya quedado
+ *   tecleado de antes no cuenta (el campo ya no está).
+ * - `valido`: lo tecleado se lee y no pasa del tope. Si no, `entregar` es null (no se enseña ninguna cifra
+ *   hasta que se arregle) y `problema` dice cuál es el caso: 'ilegible' o 'excede'.
+ * - Lo tecleado vacío es 0: sin descuento.
+ */
+export function resumenDelDescuento(entrada, marcadas, costoSinLeer, tecleado = '') {
+  const deMas = totalPagadoDeMas(entrada.cuenta, costoSinLeer);
+  const maximo = descuentoMaximo(entrada.cuenta, costoSinLeer, marcadas.ids);
+  if (!(deMas > 0)) {
+    return {
+      hay: false, deMas, maximo, rentas: marcadas.total, descuento: 0, valido: true,
+      entregar: entregadoDelPago({ monto: marcadas.total }), problema: null,
+    };
+  }
+  const texto = String(tecleado ?? '').trim();
+  const pedido = texto === '' ? 0 : Number(texto);
+  const ilegible = !Number.isFinite(pedido) || pedido < 0;
+  const descuento = ilegible ? 0 : q(pedido);
+  const valido = !ilegible && descuento <= maximo;
+  return {
+    hay: true,
+    deMas,
+    maximo,
+    rentas: marcadas.total,
+    descuento: valido ? descuento : 0,
+    valido,
+    entregar: valido ? entregadoDelPago({ monto: marcadas.total, descuento }) : null,
+    problema: valido ? null : (ilegible ? 'ilegible' : 'excede'),
+  };
+}
+
+/** Lo que se le dice cuando el descuento que tecleó no se puede aplicar, o '' si está bien. Las cifras vienen de `resumenDelDescuento`. */
+export function textoDelProblemaDelDescuento(r) {
+  if (r.problema === 'ilegible') return 'El descuento tiene que ser un monto de cero o más.';
+  if (r.problema === 'excede') {
+    return `El descuento no puede pasar de ${dinero(r.maximo)}: a este dueño se le pagó de más ${dinero(r.deMas)} y las rentas marcadas suman ${dinero(r.rentas)}.`;
+  }
+  return '';
+}
+
+/**
  * Por qué un contrato todavía no cierra. No decide nada: lo lee de
  * `estadoContrato` (¿el carro ya regresó?) y de `pendientesDe` (¿falta cobrar
  * un saldo? ¿falta liberar la garantía?), las dos de nucleo/estados.js, las
@@ -610,6 +661,11 @@ export function pagosDeLaCuenta(entrada, pagos) {
  * 4. Arma el pago con `construirPagoDueno` sobre lo leído AHORA, que se niega
  *    con su propia frase si alguna renta marcada no tiene costo legible (el
  *    «sin leer» también es el de ahora, no el de cuando se abrió).
+ *    Con `descuento`, lo mismo: el tope se vuelve a calcular con lo de ahora. Si
+ *    mientras tanto lo que se le había pagado de más cambió (se anuló ese pago, o ya
+ *    se descontó en otra pestaña) y el descuento ya no cabe, no se registra una
+ *    versión recortada en silencio —él vio una cifra a entregar y se guardaría
+ *    otra—: se devuelve `cambio`, como con las rentas.
  * 5. Pide el id y el número UNA vez (`enCurso`) y guarda.
  *
  * Devuelve `{ tipo, pagos, contratos?, pago? }`: `pagos` y `contratos` son lo
@@ -617,7 +673,7 @@ export function pagosDeLaCuenta(entrada, pagos) {
  * `ya-guardado`, que no necesitó leerlos). Lanza lo que lance cada paso.
  */
 export async function registrarElPago({
-  entrada, idsMarcados, forma, fecha: fechaDelPago, enCurso = {},
+  entrada, idsMarcados, forma, fecha: fechaDelPago, descuento, enCurso = {},
   leerPagos = cargarPagosDueno, leerContratos = cargarContratosParaDinero,
   nuevoId = nuevoIdPagoDueno, nuevoNumero = siguienteNumeroComprobante,
   guardar = guardarPagoDueno,
@@ -642,6 +698,12 @@ export async function registrarElPago({
   const cuentaDeAhora = vista.entradas.find((e) => e.clave === entrada.clave);
   if (!cuentaDeAhora) return { tipo: 'cambio', pagos: frescos.datos, contratos: rentas };
 
+  // El descuento que él vio cabía en lo que se le había pagado de más CUANDO lo tecleó. Si ya no cabe con lo de
+  // ahora, es la misma situación que una renta que cambió: se avisa y se vuelve a empezar, no se recorta.
+  if (q(descuento) > 0 && q(descuento) > descuentoMaximo(cuentaDeAhora.cuenta, rentas.costoSinLeer, idsMarcados)) {
+    return { tipo: 'cambio', pagos: frescos.datos, contratos: rentas };
+  }
+
   const pago = construirPagoDueno({
     duenoId: entrada.duenoId,
     fecha: fechaDelPago,
@@ -650,6 +712,7 @@ export async function registrarElPago({
     pagos: frescos.datos,
     idsMarcados,
     costoSinLeer: rentas.costoSinLeer,
+    descuento,
   });
   // Cada casilla marcada tiene que haber sido algo de la cuenta que él vio (una
   // renta por pagar o una diferencia), y el pago de ahora tiene que cubrir lo mismo
@@ -657,7 +720,8 @@ export async function registrarElPago({
   const igual = visto.rentas.length + visto.diferencias.length === idsMarcados.length
     && pago.contratos.length === visto.contratos.length
     && visto.contratos.every((id) => pago.contratos.includes(id))
-    && pago.monto === visto.monto;
+    && pago.monto === visto.monto
+    && descuentoDelPago(pago) === q(descuento);
   if (!igual) return { tipo: 'cambio', pagos: frescos.datos, contratos: rentas };
 
   // Una vez por intención de pagar, y se conservan aunque este intento falle.
@@ -696,8 +760,13 @@ export function textoConfirmarAnularPagoDueno(pago, entrada) {
   const efecto = otros.length
     ? `Esas rentas también están en ${textoDeComprobantes(otros)}: al anularlo solo vuelve a «Por pagar» lo que falte para completar lo que cuestan hoy.`
     : `${rentas === 1 ? 'Esa renta vuelve' : 'Esas rentas vuelven'} a «Por pagar».`;
-  return `¿Anular el pago de ${dinero(pago?.monto)} a ${entrada?.nombre ?? 'este dueño'} (comprobante N.° ${pago?.numero ?? '—'}, del ${fecha(pago?.fecha)})? `
-    + `Cubre ${rentas} ${palabraRentas(rentas)}. ${efecto} `
+  // Un pago con descuento se anula entero: lo que se había descontado vuelve a verse como pagado de más.
+  const descuento = descuentoDelPago(pago);
+  const delDescuento = descuento > 0
+    ? ` Tenía un descuento de ${dinero(descuento)} por lo que se le había pagado de más: al anularlo, eso vuelve a verse como pagado de más.`
+    : '';
+  return `¿Anular el pago de ${dinero(entregadoDelPago(pago))} a ${entrada?.nombre ?? 'este dueño'} (comprobante N.° ${pago?.numero ?? '—'}, del ${fecha(pago?.fecha)})? `
+    + `Cubre ${rentas} ${palabraRentas(rentas)}. ${efecto}${delDescuento} `
     + 'El pago queda marcado como anulado, con su número, y no desaparece de «Ya pagado».';
 }
 
@@ -976,11 +1045,43 @@ function htmlFilaPorPagar(contrato, ctx) {
     </tr>`;
 }
 
+/** Lo que dice el botón de guardar: lo que se ENTREGA (con el descuento ya restado), o nada de cifra si el descuento no vale. */
+function textoDelBotonGuardar(descuento) {
+  return descuento.entregar === null ? 'Guardar pago' : `Guardar pago de ${dinero(descuento.entregar)}`;
+}
+
+/** La línea que explica la cifra a entregar cuando hay un descuento: las rentas, y cuánto de eso se descuenta. Vacía sin descuento. */
+function textoDelDetalleDeEntrega(descuento) {
+  return descuento.descuento > 0
+    ? `(rentas por ${dinero(descuento.rentas)}, menos ${dinero(descuento.descuento)} de descuento)`
+    : '';
+}
+
+/**
+ * El campo del descuento, dentro del formulario del pago. Solo existe si a este dueño se le pagó de más: el
+ * tope sale del núcleo (`descuentoMaximo`), no de lo que se escriba, y un campo sin nada que descontar solo
+ * invitaría a borrar una deuda real. `max` es una ayuda para el campo; la regla la aplica `construirPagoDueno`.
+ */
+function htmlDescuento(descuento, ui) {
+  const problema = textoDelProblemaDelDescuento(descuento);
+  return `
+      <div class="dn-descuento">
+        <label class="carro-campo">Descontar lo que ya se le pagó de más
+          <input type="number" id="dn-descuento" class="dn-descuento-campo" min="0" max="${esc(descuento.maximo)}" step="0.01" inputmode="decimal"
+            placeholder="Q 0.00" value="${esc(ui.descuento ?? '')}">
+        </label>
+        <p class="dn-explica-chica dn-sin-margen">Se le pagó de más ${esc(dinero(descuento.deMas))}. Puedes descontar hasta ${esc(dinero(descuento.maximo))} de este pago: esa parte no la entregas, y las rentas quedan pagadas igual.</p>
+        <p id="dn-descuento-problema" class="barra-lectura-fallida dn-mensaje" role="alert" ${problema ? '' : 'hidden'}>${esc(problema)}</p>
+        <p class="dn-entrega">Entregas ahora <strong id="dn-entregar" class="dn-total-marcado">${esc(descuento.entregar === null ? '—' : dinero(descuento.entregar))}</strong> <span id="dn-entrega-detalle" class="dn-explica-chica">${esc(textoDelDetalleDeEntrega(descuento))}</span></p>
+      </div>`;
+}
+
 function htmlBloquePorPagar(ctx) {
   const { entrada, vista, ui } = ctx;
   const { cuenta } = entrada;
   const notas = notasDeTotal(entrada, vista.costoSinLeer);
   const marcadas = resumenDeMarcadas(entrada, ui.marcados, vista.costoSinLeer);
+  const descuento = resumenDelDescuento(entrada, marcadas, vista.costoSinLeer, ui.descuento);
   // Las diferencias van en la misma tabla que las rentas: son deuda por pagar, y
   // «No hay rentas cerradas por pagar» junto a una cifra que sí se debe sería mentira.
   const filas = cuenta.porPagar.length || cuenta.diferencias.length
@@ -1002,9 +1103,10 @@ function htmlBloquePorPagar(ctx) {
           <input type="date" id="dn-fecha" value="${esc(ui.fecha)}">
         </label>
       </div>
+      ${descuento.hay ? htmlDescuento(descuento, ui) : ''}
       <div class="carro-botones dn-botones-pago">
         <button type="button" class="btn" data-dn="cancelar-pago">Cancelar</button>
-        <button type="button" class="btn btn-primario dn-boton-suelto" id="dn-guardar-pago" data-dn="guardar-pago" ${marcadas.cuantas === 0 ? 'disabled' : ''}>Guardar pago de ${esc(dinero(marcadas.total))}</button>
+        <button type="button" class="btn btn-primario dn-boton-suelto" id="dn-guardar-pago" data-dn="guardar-pago" ${marcadas.cuantas === 0 || !descuento.valido ? 'disabled' : ''}>${esc(textoDelBotonGuardar(descuento))}</button>
       </div>
       <p id="dn-mensaje-pago" class="barra-lectura-fallida dn-mensaje" role="alert" ${ui.mensajePago ? '' : 'hidden'}>${esc(ui.mensajePago)}</p>
     </div>` : '';
@@ -1092,14 +1194,21 @@ function htmlBloqueYaPagado(ctx) {
     const botones = anulado ? '' : `
             <button type="button" class="btn" data-dn="comprobante" data-id="${esc(p.id)}">Ver comprobante</button>
             <button type="button" class="btn" data-dn="anular-pago" data-id="${esc(p.id)}">Anular</button>`;
+    // La cifra grande es lo que SALIÓ de sus manos (`entregadoDelPago`). Si el pago llevó descuento, una línea
+    // dice cuánto sumaban las rentas y cuánto de eso se descontó: sin ella, las rentas de abajo sumarían más que la cifra.
+    const descontado = descuentoDelPago(p);
+    const delDescuento = descontado > 0
+      ? `<div class="dn-explica-chica dn-sin-margen">Las rentas suman ${esc(dinero(p.monto))}; se descontaron ${esc(dinero(descontado))} por lo que se le había pagado de más.</div>`
+      : '';
     return `
       <article class="dn-caja dn-pago-hecho${anulado ? ' dn-pago-anulado' : ''}">
         <div class="dn-pago-cabecera">
           <div><strong>Comprobante N.° ${esc(p.numero ?? '—')}</strong> · ${esc(fecha(p.fecha))} · ${esc(etiquetaDeForma(p.forma))}${etiquetaAnulado}</div>
           <div class="dn-pago-monto">
-            <strong class="dn-pago-cifra">${esc(dinero(p.monto))}</strong>${botones}
+            <strong class="dn-pago-cifra">${esc(dinero(entregadoDelPago(p)))}</strong>${botones}
           </div>
         </div>
+        ${delDescuento}
         <ul class="dn-pago-rentas">${rentas}</ul>
       </article>`;
   }).join('');
@@ -1144,7 +1253,25 @@ function htmlEnlace(ctx) {
  */
 export function textoDePagadoDeMas(grupo) {
   const suman = grupo.contratos.length === 1 ? 'esa renta suma' : 'esas rentas suman';
-  return `Se le pagó de más: ${dinero(grupo.deMas)}. Se pagaron ${dinero(grupo.pagado)} en ${textoDeComprobantes(grupo.pagos)} y hoy ${suman} ${dinero(grupo.ahora)}.`;
+  // Cuando el pago incluye un descuento, o ya se descontó parte de este pago de más, la línea lo dice: sin
+  // eso, «se pagaron A, hoy suman B» no daría la cifra que encabeza la línea.
+  const deDescuento = grupo.descuento > 0 ? ` (${dinero(grupo.descuento)} de eso fue descuento)` : '';
+  const yaDescontado = grupo.descontado > 0
+    ? `: eran ${dinero(grupo.bruto)} de más y ya se le descontaron ${dinero(grupo.descontado)}`
+    : '';
+  return `Se le pagó de más: ${dinero(grupo.deMas)}. Se pagaron ${dinero(grupo.pagado)} en ${textoDeComprobantes(grupo.pagos)}${deDescuento} y hoy ${suman} ${dinero(grupo.ahora)}${yaDescontado}.`;
+}
+
+/**
+ * Lo que se descontó de MÁS (`descuentoSinRespaldo`): descuentos que ya no tienen un pago de más que los respalde —
+ * se anuló el pago que había pagado de más, o esa renta volvió a subir—. No es un pago de más sino lo contrario: a
+ * ese dueño se le entregó menos de lo que costaban sus rentas, y «Por pagar» no lo ve porque esas rentas están
+ * pagadas. La salida que existe es la de siempre: anular el comprobante con el descuento y registrarlo otra vez.
+ */
+export function textoDeDescuentoSinRespaldo(sinRespaldo, pagos) {
+  return `Se le descontaron ${dinero(sinRespaldo)} de más. Los descuentos hechos en ${textoDeComprobantes(pagos)} ya no tienen de dónde salir `
+    + `(lo que se le había pagado de más ya no alcanza), y a este dueño se le entregó ${dinero(sinRespaldo)} menos de lo que costaban sus rentas. `
+    + 'Para corregirlo, anula ese comprobante y regístralo otra vez con el descuento que corresponda.';
 }
 
 /**
@@ -1152,14 +1279,20 @@ export function textoDePagadoDeMas(grupo) {
  * una pantalla aparte que habría que acordarse de abrir. Una línea por cada pago de más.
  *
  * Solo informa: no resta nada de «Por pagar» ni de lo marcado, y no es un aviso rojo (nadie
- * lo pidió así, y no es una deuda: se pagó de más). Él decide si lo quita del próximo pago o
- * lo pide de vuelta. Vacío cuando no hay nada, igual que el resto de la ficha cuando no hay
- * qué decir: ningún «sin pagos de más».
+ * lo pidió así, y no es una deuda: se pagó de más). Él decide si lo descuenta de un pago (el campo
+ * de «Registrar pago») o lo pide de vuelta. Las líneas ya traen restado lo descontado: una vez que
+ * descuenta lo que se le pagó de más, la línea se va. Vacío cuando no hay nada, igual que el resto
+ * de la ficha cuando no hay qué decir: ningún «sin pagos de más».
  */
 function htmlPagadoDeMas(ctx) {
-  const lineas = pagadoDeMas(ctx.entrada.cuenta, ctx.vista.costoSinLeer);
+  const lineas = pagadoDeMas(ctx.entrada.cuenta, ctx.vista.costoSinLeer).map((g) => `<p>${esc(textoDePagadoDeMas(g))}</p>`);
+  const sinRespaldo = descuentoSinRespaldo(ctx.entrada.cuenta, ctx.vista.costoSinLeer);
+  if (sinRespaldo > 0) {
+    const conDescuento = ctx.entrada.cuenta.gruposDePago.flatMap((g) => g.pagos).filter((p) => descuentoDelPago(p) > 0);
+    lineas.push(`<p>${esc(textoDeDescuentoSinRespaldo(sinRespaldo, conDescuento))}</p>`);
+  }
   if (lineas.length === 0) return '';
-  return `<div class="dn-de-mas">${lineas.map((g) => `<p>${esc(textoDePagadoDeMas(g))}</p>`).join('')}</div>`;
+  return `<div class="dn-de-mas">${lineas.join('')}</div>`;
 }
 
 /** La ficha de un dueño: lo que se le pagó de más (si algo), y sus tres bloques, en este orden. */
@@ -1197,16 +1330,29 @@ export function htmlFicha(ctx) {
  * la plantilla: antes solo se cambiaba el número, y marcar una casilla dejaba
  * «Marcado: 1 rentas». `raiz` es cualquier cosa con `querySelector`.
  */
-export function parchearMarcado(raiz, resumenMarcado, { pagando = false } = {}) {
+export function parchearMarcado(raiz, resumenMarcado, { pagando = false, descuento = null } = {}) {
   const poner = (id, texto) => { const nodo = raiz.querySelector(id); if (nodo) nodo.textContent = texto; };
   poner('#dn-marcadas', String(resumenMarcado.cuantas));
   poner('#dn-marcadas-palabra', palabraRentas(resumenMarcado.cuantas));
   poner('#dn-total-marcado', dinero(resumenMarcado.total));
-  poner('#dn-guardar-pago', `Guardar pago de ${dinero(resumenMarcado.total)}`);
+  // Sin campo de descuento (a este dueño no se le pagó de más), se entrega lo que suman las rentas marcadas.
+  const valido = descuento ? descuento.valido : true;
+  poner('#dn-guardar-pago', descuento ? textoDelBotonGuardar(descuento) : `Guardar pago de ${dinero(resumenMarcado.total)}`);
   const guardar = raiz.querySelector('#dn-guardar-pago');
-  if (guardar) guardar.disabled = resumenMarcado.cuantas === 0;
+  if (guardar) guardar.disabled = resumenMarcado.cuantas === 0 || !valido;
   const registrar = raiz.querySelector('#dn-registrar');
   if (registrar) registrar.disabled = resumenMarcado.cuantas === 0 || pagando;
+  if (descuento?.hay) {
+    // Lo mismo que dibuja `htmlDescuento`: el parche y la plantilla tienen que decir lo mismo.
+    poner('#dn-entregar', descuento.entregar === null ? '—' : dinero(descuento.entregar));
+    poner('#dn-entrega-detalle', textoDelDetalleDeEntrega(descuento));
+    const problema = textoDelProblemaDelDescuento(descuento);
+    poner('#dn-descuento-problema', problema);
+    const aviso = raiz.querySelector('#dn-descuento-problema');
+    if (aviso) aviso.hidden = !problema;
+    const campo = raiz.querySelector('#dn-descuento');
+    if (campo) campo.max = String(descuento.maximo);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1403,6 +1549,8 @@ async function pintarCuentas(contenedor, claveDeFicha) {
 
   const ui = {
     marcados: new Set(), anotando: null, pagando: false, forma: FORMAS_DE_PAGO[0].valor, fecha: hoy,
+    // Lo que tecleó en «Descontar lo que ya se le pagó de más», tal cual (texto): se lee con `resumenDelDescuento`.
+    descuento: '',
     mensajePago: '', mensajeEnlace: '', enCurso: null, ocupado: false, migracion: '',
     // «Dar de alta como dueño y enlazar» crea un dueño: su id se decide una vez, antes del primer intento, para
     // que un reintento tras un tiempo vencido no cree un segundo dueño con el mismo nombre (H-2). Va por grupo
@@ -1436,6 +1584,10 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     // Lo marcado que ya no se puede pagar (porque se pagó, o cambió) se desmarca.
     const pagables = new Set([...entrada.cuenta.porPagar.map((c) => c.id), ...entrada.cuenta.diferencias.map((d) => d.clave)]);
     for (const id of [...ui.marcados]) if (!pagables.has(id)) ui.marcados.delete(id);
+    // Un descuento tecleado antes no sobrevive a que ya no haya con qué descontarlo (otra pestaña lo descontó, se anuló
+    // el pago de más): el campo ya no está, y su valor no debe seguir mandando a escondidas.
+    const marcadasAhora = resumenDeMarcadas(entrada, ui.marcados, vista.costoSinLeer);
+    if (!resumenDelDescuento(entrada, marcadasAhora, vista.costoSinLeer, ui.descuento).hay) ui.descuento = '';
     raiz.innerHTML = htmlFicha({ entrada, vista, ui, lectura: lector.actual, hoy });
     if (ui.anotando) raiz.querySelector('#dn-costo-input')?.focus();
   }
@@ -1478,7 +1630,11 @@ async function pintarCuentas(contenedor, claveDeFicha) {
   // ----- Marcar rentas: solo se mueve el total, no se redibuja nada -----
   function actualizarMarcado() {
     if (!entrada) return;
-    parchearMarcado(raiz, resumenDeMarcadas(entrada, ui.marcados, vista.costoSinLeer), { pagando: ui.pagando });
+    const marcadas = resumenDeMarcadas(entrada, ui.marcados, vista.costoSinLeer);
+    parchearMarcado(raiz, marcadas, {
+      pagando: ui.pagando,
+      descuento: resumenDelDescuento(entrada, marcadas, vista.costoSinLeer, ui.descuento),
+    });
   }
 
   // ----- Anotar el costo de una renta sin costo -----
@@ -1512,8 +1668,12 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     const campoFecha = raiz.querySelector('#dn-fecha');
     ui.fecha = campoFecha?.value || ui.fecha;
     ui.forma = raiz.querySelector('#dn-forma')?.value || ui.forma;
+    ui.descuento = raiz.querySelector('#dn-descuento')?.value ?? ui.descuento;
     const problemaDeFecha = problemaDeLaFechaDelPago(ui.fecha, hoyISO());
     if (problemaDeFecha) { ui.mensajePago = problemaDeFecha; dibujar(); return; }
+    // El descuento que se manda es el que el núcleo da por válido, no el texto del campo.
+    const descuento = resumenDelDescuento(entrada, marcadas, vista.costoSinLeer, ui.descuento);
+    if (!descuento.valido) { ui.mensajePago = textoDelProblemaDelDescuento(descuento); dibujar(); return; }
     ui.ocupado = true;
     const boton = raiz.querySelector('#dn-guardar-pago');
     if (boton) boton.disabled = true;
@@ -1523,6 +1683,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
         idsMarcados: marcadas.ids,
         forma: ui.forma,
         fecha: ui.fecha,
+        descuento: descuento.descuento,
         enCurso: ui.enCurso ?? (ui.enCurso = {}),
       });
       if (!lector.actual) return;
@@ -1533,11 +1694,13 @@ async function pintarCuentas(contenedor, claveDeFicha) {
       if (r.tipo === 'cambio') {
         ui.mensajePago = MENSAJE_PAGO_CAMBIO;
         ui.marcados.clear();
+        ui.descuento = '';
         ui.enCurso = null;
       } else {
         ui.pagando = false;
         ui.mensajePago = '';
         ui.marcados.clear();
+        ui.descuento = '';
         ui.enCurso = null;
         aviso(r.tipo === 'ya-guardado'
           ? `Ese pago ya estaba registrado (comprobante N.° ${r.pago.numero}).`
@@ -1669,8 +1832,8 @@ async function pintarCuentas(contenedor, claveDeFicha) {
         case 'anotar-costo': ui.anotando = id; dibujar(); return;
         case 'cancelar-costo': ui.anotando = null; dibujar(); return;
         case 'guardar-costo': guardarCosto(id); return;
-        case 'registrar': ui.pagando = true; ui.mensajePago = ''; ui.enCurso = {}; dibujar(); return;
-        case 'cancelar-pago': ui.pagando = false; ui.mensajePago = ''; ui.enCurso = null; dibujar(); return;
+        case 'registrar': ui.pagando = true; ui.mensajePago = ''; ui.descuento = ''; ui.enCurso = {}; dibujar(); return;
+        case 'cancelar-pago': ui.pagando = false; ui.mensajePago = ''; ui.descuento = ''; ui.enCurso = null; dibujar(); return;
         case 'guardar-pago': guardarPago(); return;
         case 'enlazar': enlazar({ crear: false }); return;
         case 'crear-y-enlazar': enlazar({ crear: true }); return;
@@ -1696,6 +1859,14 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     } else if (caja.id === 'dn-fecha') {
       ui.fecha = caja.value;
     }
+  });
+
+  // El descuento se lee mientras se teclea: lo que va a entregar y el aviso de que pasó del tope cambian al instante,
+  // sin redibujar la ficha (redibujarla le quitaría el cursor del campo).
+  raiz.addEventListener('input', (ev) => {
+    if (ev.target.id !== 'dn-descuento') return;
+    ui.descuento = ev.target.value;
+    actualizarMarcado();
   });
 
   raiz.addEventListener('keydown', (ev) => {

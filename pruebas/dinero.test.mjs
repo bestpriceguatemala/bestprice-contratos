@@ -20,7 +20,7 @@ import {
   cerrarElDinero, cerrarElDineroOReiniciar, salirDelSistema, crearVigilante, crearLector, mensajeSeguro,
   htmlEntrada, htmlFallo, htmlLista, htmlFicha, htmlMigracion, entradaDelComprobante, problemaDeLaFechaDelPago,
   textoConfirmarAnularPagoDueno, anularElPago, MENSAJE_ANULAR_SIN_COMPROBAR, MENSAJE_ANULAR_NO_ESTA, MENSAJE_ANULAR_FALLO,
-  textoDePagadoDeMas,
+  textoDePagadoDeMas, resumenDelDescuento, textoDelProblemaDelDescuento, textoDeDescuentoSinRespaldo,
 } from '../js/pantallas/dinero.js';
 import { armarComprobante } from '../js/pantallas/comprobante.js';
 import { htmlListaDeDuenos, htmlFormularioDeDueno } from '../js/pantallas/duenos.js';
@@ -30,13 +30,15 @@ import { resumen } from '../js/nucleo/contrato.js';
 import { estadoContrato, pendientesDe } from '../js/nucleo/estados.js';
 import { sumarDias } from '../js/nucleo/fechas.js';
 import {
-  cuentaDeDueno, agruparPorDueno, totalSeleccionado, pagoAnulado, pagadoDeMas,
+  cuentaDeDueno, agruparPorDueno, totalSeleccionado, pagoAnulado, pagadoDeMas, totalPagadoDeMas, descuentoMaximo,
+  descuentoSinRespaldo, entregadoDelPago,
 } from '../js/nucleo/liquidacion.js';
 import { mensajeDeErrorDeDinero } from '../js/dinero-sesion.js';
 import {
   agregarPago, contratoParaGuardar, conCostoDelDueno, costoDelDocumento, construirPagoDueno, pagoDuenoParaGuardar,
   guardarPagoDueno, anotarCostoDelDueno, enlazarContratosAlDueno, nuevoIdPagoDueno, anularPagoDueno,
   MENSAJE_COSTO_SIN_VALOR, MENSAJE_COSTO_SIN_DINERO, MENSAJE_COSTO_YA_ANOTADO, MENSAJE_COSTO_SIN_COMPROBAR, MENSAJE_PAGO_SIN_RENTAS,
+  MENSAJE_PAGO_DESCUENTO,
 } from '../js/datos.js';
 
 test('redondea a dos decimales', () => {

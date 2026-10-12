@@ -468,6 +468,7 @@ function pagadoDeMasNeto(cuenta, costoSinLeer) {
         pagado: g.pagado,
         descuento: g.descuento,
         ahora: g.ahora,
+        bruto,
         descontado,
         deMas: suma(bruto, -descontado),
       });
@@ -499,9 +500,10 @@ function pagadoDeMasNeto(cuenta, costoSinLeer) {
  * desaparece; con un descuento parcial queda lo que falta. Si no se restaran, la ficha seguiría diciendo
  * que se le debe devolver algo que ya se descontó, y lo descontaría dos veces.
  *
- * Cada una es `{ contratos, pagos, pagado, descuento, ahora, descontado, deMas }`, con `deMas` siempre
- * positivo (`pagado - ahora - descontado`), una por grupo de pagos, en el orden de los grupos:
+ * Cada una es `{ contratos, pagos, pagado, descuento, ahora, bruto, descontado, deMas }`, con `deMas` siempre
+ * positivo (`bruto - descontado`), una por grupo de pagos, en el orden de los grupos:
  * - `descuento`: de lo `pagado`, lo que fue descuento en los propios pagos de este grupo.
+ * - `bruto`: lo que se pagó de más antes de descontar nada (`pagado - ahora`).
  * - `descontado`: lo que ya se descontó de ESTE pago de más, en pagos posteriores.
  *
  * NO dice que se pagó de más cuando la comparación no es de fiar, porque entonces diría
