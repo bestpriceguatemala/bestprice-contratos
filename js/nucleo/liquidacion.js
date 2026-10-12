@@ -188,7 +188,7 @@ export function sinIdsRepetidos(contratos) {
  * Comparar cada pago por separado haría que el primero siguiera «debiendo» para
  * siempre aunque la diferencia ya se hubiera pagado.
  *
- * Cada grupo es `{ contratos, pagos, pagado, ahora, cierra, diferencia }`:
+ * Cada grupo es `{ contratos, pagos, pagado, ahora, cierra, completo, diferencia }`:
  * - `contratos`: las rentas de ESTA cuenta que esos pagos cubren.
  * - `pagos`: del más antiguo al más nuevo (por número de comprobante).
  * - `pagado`: lo que suman los `monto` guardados.
@@ -200,8 +200,13 @@ export function sinIdsRepetidos(contratos) {
  * - `cierra`: si TODAS esas rentas están cerradas (`esPagableAlDueno`). De esto
  *   depende solo si la diferencia se puede pagar ya, igual que una renta
  *   cualquiera: solo se paga lo cerrado.
+ * - `completo`: si TODAS las rentas que esos pagos cubren están en esta cuenta. Un pago
+ *   que cubre una renta que ya no está (o que es de otro dueño) trae su `monto` entero
+ *   pero `ahora` solo cuenta las que sí están: la comparación no es de lo mismo contra
+ *   lo mismo, y no se puede decir que se pagó de más (ver `pagadoDeMas`).
  * - `diferencia`: `ahora - pagado`. Positiva es deuda nueva con el dueño del
- *   carro; negativa, que se le pagó de más, y eso no es una deuda.
+ *   carro; negativa, que se le pagó de más, y eso no es una deuda (pero sí se
+ *   ve: ver `pagadoDeMas`).
  *
  * Un pago que llega repetido (misma `id`) cuenta una sola vez: si contara dos,
  * `pagado` se inflaría y una deuda real se leería como saldada.
@@ -221,20 +226,23 @@ function gruposDePago(contratos, pagos) {
   };
   const relevantes = [];
   for (const pago of sinIdsRepetidos(pagos)) {
-    const ids = [...new Set(pago.contratos)].filter((id) => porId.has(id));
+    const pedidos = new Set(pago.contratos.filter(Boolean));
+    const ids = [...pedidos].filter((id) => porId.has(id));
     if (ids.length === 0) continue;
-    relevantes.push({ pago, ids });
+    // `completo`: de las rentas que este pago cubre, ninguna falta en esta cuenta (ver `pagadoDeMas`).
+    relevantes.push({ pago, ids, completo: ids.length === pedidos.size });
     for (const id of ids) if (!padre.has(id)) padre.set(id, id);
     for (const id of ids.slice(1)) padre.set(raiz(id), raiz(ids[0]));
   }
 
   const grupos = new Map();
-  for (const { pago, ids } of relevantes) {
+  for (const { pago, ids, completo } of relevantes) {
     const clave = raiz(ids[0]);
-    if (!grupos.has(clave)) grupos.set(clave, { ids: new Set(), pagos: [] });
+    if (!grupos.has(clave)) grupos.set(clave, { ids: new Set(), pagos: [], completo: true });
     const grupo = grupos.get(clave);
     for (const id of ids) grupo.ids.add(id);
     grupo.pagos.push(pago);
+    grupo.completo = grupo.completo && completo;
   }
 
   return [...grupos.values()].map((g) => {
@@ -250,6 +258,7 @@ function gruposDePago(contratos, pagos) {
       pagado,
       ahora,
       cierra: enGrupo.every(esPagableAlDueno),
+      completo: g.completo,
       diferencia: suma(ahora, -pagado),
     };
   }).sort((a, b) => (
@@ -289,7 +298,9 @@ function gruposDePago(contratos, pagos) {
  *   Esta es la dirección peligrosa: un monto que BAJA después de pagado no le
  *   debe nada a nadie (se pagó de más), pero uno que SUBE se leía como Q0.00 —
  *   una deuda real que nadie ve, porque «estás a mano» es una buena noticia y
- *   las buenas noticias nadie las audita. Solo las que suben aparecen aquí.
+ *   las buenas noticias nadie las audita. Solo las que suben aparecen aquí. Las que
+ *   bajan no son deuda y NO se descuentan de nada solas, pero tampoco se pierden de
+ *   vista: ver `pagadoDeMas`.
  * - `diferenciasSinCerrar`: lo mismo, cuando alguna de las rentas del grupo no
  *   está cerrada (se corrigió el cierre y el cliente todavía debe los días de
  *   más). Se ven, pero no se pueden marcar ni suman al total, igual que
@@ -367,6 +378,64 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
     totalPorPagar: suma(...porPagar.map(costoDelSubarriendo), totalDiferencias),
     sinCostoAnotado,
   };
+}
+
+/**
+ * Lo que se le pagó de MÁS a un dueño (H-7 de la prueba del sistema del 7 de octubre).
+ *
+ * Una renta que se corrige HACIA ABAJO después de pagada deja de costar lo que se
+ * pagó: se pagaron Q2,100 y hoy la renta suma Q1,500. «Lo que baja después de pagado
+ * no es deuda» (`1b4f748`) sigue siendo cierto y la cuenta no lo cuenta como deuda ni
+ * descuenta nada —decide él si lo quita del próximo pago o lo pide de vuelta—, pero
+ * un pago de más que ninguna pantalla dice es plata que no se recupera: «estás a mano»
+ * es una buena noticia y las buenas noticias nadie las audita. Esto es lo que la ficha
+ * del dueño le enseña.
+ *
+ * No suma nada por su cuenta: parte de los grupos de `cuentaDeDueno` (`gruposDePago`),
+ * que ya comparan lo que suman los `monto` guardados (`pagado`) contra lo que esas
+ * rentas cuestan hoy (`ahora`). Es la misma pregunta que se hace el comprobante con un
+ * pago, así que la ficha y el papel no pueden contestarla distinto. Y como esos grupos
+ * salen de los pagos VIGENTES, un pago anulado (H-6) no cuenta: sus rentas volvieron a
+ * «por pagar» y su dinero está deshecho, no sobra.
+ *
+ * Cada una es `{ contratos, pagos, pagado, ahora, deMas }`, con `deMas` siempre
+ * positivo (`pagado - ahora`), una por grupo de pagos, en el orden de los grupos.
+ *
+ * NO dice que se pagó de más cuando la comparación no es de fiar, porque entonces diría
+ * una cifra falsa con toda confianza:
+ * - alguna renta del grupo no tiene un costo en el que confiar: sin costo anotado
+ *   (`sinCostoAnotado`; cuesta Q0.00 aunque no sea cierto) o con el costo sin leer
+ *   (`costoSinLeer`, lo que devuelve `cargarContratosParaDinero`). `ahora` saldría muy
+ *   bajo y casi todo lo pagado parecería de más;
+ * - alguna renta que el pago cubre ya no está en esta cuenta (`completo`).
+ *
+ * `costoSinLeer` es obligatorio y DEBE ser una lista (aunque vacía), igual que en el
+ * comprobante: `undefined` no es «todo se leyó bien», es «no sé». LANZA si no lo es, o
+ * si `cuenta` no es la de `cuentaDeDueno`.
+ */
+export function pagadoDeMas(cuenta, costoSinLeer) {
+  if (!Array.isArray(cuenta?.gruposDePago) || !Array.isArray(cuenta?.sinCostoAnotado)) {
+    throw new TypeError(
+      `liquidacion: «cuenta» debe ser la que devuelve cuentaDeDueno y llegó ${queLlego(cuenta)}. `
+      + 'Sin ella no se sabe qué se pagó, y suponer que nada sobra diría «estás a mano» cuando quizá no.',
+    );
+  }
+  if (!Array.isArray(costoSinLeer)) {
+    throw new TypeError(
+      `liquidacion: «costoSinLeer» debe ser una lista (la que devuelve cargarContratosParaDinero, aunque vacía) y llegó ${queLlego(costoSinLeer)}. `
+      + 'Sin ella no se sabe qué costos faltan, y comparar contra un costo que no se leyó inventaría un pago de más.',
+    );
+  }
+  const dudosas = new Set([...cuenta.sinCostoAnotado, ...costoSinLeer]);
+  return cuenta.gruposDePago
+    .filter((g) => g.diferencia < 0 && g.completo && !g.contratos.some((c) => dudosas.has(c.id)))
+    .map((g) => ({
+      contratos: g.contratos,
+      pagos: g.pagos,
+      pagado: g.pagado,
+      ahora: g.ahora,
+      deMas: suma(g.pagado, -g.ahora),
+    }));
 }
 
 /**
