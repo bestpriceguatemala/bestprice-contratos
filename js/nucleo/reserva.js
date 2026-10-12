@@ -262,7 +262,7 @@ function compromisosDelTipo({
       if (k >= 0) fijos.push({ carro: k, rango });
       return;
     }
-    if (tipoPedido === tipo) libres.push({ rango });
+    if (tipoPedido === tipo) libres.push({ rango, reserva: compromiso });
   };
   reservas.forEach((r) => {
     if (r?.id !== excepto && estadoReserva(r) === 'pendiente') clasificar(r, rangoDeReserva(r), r?.tipoVehiculo);
@@ -274,17 +274,22 @@ function compromisosDelTipo({
 }
 
 /**
- * ¿Puede lo nuevo tener su carro sin dejar sin carro a una reservación por tipo que hoy sí lo tiene?
- * `nuevo` es `{ libre: true, rango }` (otra reservación por tipo: necesita un carro suyo) o `{ carro, rango }`
- * (un compromiso clavado al carro número `carro` de `grupo.carros`: se lo quita a quien lo fuera a usar).
- * Devuelve `true`, `false`, o `null` si la búsqueda se pasó de su límite y no se pudo saber.
+ * La pregunta de la capacidad, contestada una vez: ¿cuántas reservaciones por tipo se quedan sin carro por culpa
+ * de `nuevo`? `nuevo` es `{ libre: true, rango }` (otra reservación por tipo: necesita un carro suyo) o
+ * `{ carro, rango }` (un compromiso clavado al carro número `carro` de `grupo.carros`: se lo quita a quien lo
+ * fuera a usar). Devuelve `{ perdida, sin, delGrupo }`, o `null` si la búsqueda se pasó de su límite y no se pudo
+ * saber:
+ *
+ * - `perdida`: cuántas se quedan sin carro de las que hoy lo tienen. Cero es «cabe».
+ * - `sin`: cuántas reservaciones del grupo pueden tener carro hoy, sin lo nuevo.
+ * - `delGrupo`: las reservaciones por tipo que entran en la cuenta (ver abajo).
  *
  * Solo se mira el grupo conectado con las fechas de lo nuevo: las reservaciones por tipo que se cruzan con
  * ellas, las que se cruzan con ESAS, y así hasta que no hay más. No basta con las que tocan las fechas:
  * si lo nuevo manda a una a un carro, esa le quita su lugar a la que sigue, y así en cadena hasta una que ya
  * ni toca las fechas. Lo que no está conectado no cambia con lo nuevo, así que ni se mira.
  */
-function cabeEnElTipo({ carros, fijos, libres }, nuevo, limite) {
+function analizar({ carros, fijos, libres }, nuevo, limite) {
   const enGrupo = new Set();
   const frontera = [nuevo.rango];
   for (let k = 0; k < frontera.length; k += 1) {
@@ -308,10 +313,75 @@ function cabeEnElTipo({ carros, fijos, libres }, nuevo, limite) {
   if (sin === null) return null;
   if (nuevo.libre) {
     const con = preguntar([...delGrupo, { rango: nuevo.rango }]);
-    return con === null ? null : con === sin + 1;
+    return con === null ? null : { perdida: sin + 1 - con, sin, delGrupo };
   }
   const con = preguntar(delGrupo, nuevo);
-  return con === null ? null : con === sin;
+  return con === null ? null : { perdida: sin - con, sin, delGrupo };
+}
+
+/**
+ * ¿Puede lo nuevo tener su carro sin dejar sin carro a una reservación por tipo que hoy sí lo tiene?
+ * Devuelve `true`, `false`, o `null` si la búsqueda se pasó de su límite y no se pudo saber.
+ */
+function cabeEnElTipo(grupo, nuevo, limite) {
+  const a = analizar(grupo, nuevo, limite);
+  return a === null ? null : a.perdida === 0;
+}
+
+/**
+ * Lo que apartar un carro (para una reservación) o sacarlo (en un contrato) le hace a las reservaciones que solo
+ * piden su TIPO: la misma pregunta de `cabeEnElTipo`, vista desde el carro. Es lo que comparten el formulario de
+ * reservaciones y «Sacar carro», para que nunca puedan contestar distinto.
+ *
+ * - `carroId` y `rango` (`{ desde, hasta }`): el carro que se ocupa y los días.
+ * - `excepto`: el id de la reservación que no compite (la que se está editando; o la que esta salida cumple).
+ * - `nombrar`: además de si cabe, quiénes son las afectadas (cuesta unas búsquedas más: solo cuando se va a decir).
+ *
+ * Devuelve `null` cuando no hay nada que preguntar: el carro no está en la flota (uno ajeno), está en el taller
+ * (no era una unidad con la que se contaba) o la renta no tiene fechas. Si no, `{ tipo, unidades, cabe }`, con
+ * `cabe` verdadero, falso, o `null` si no se pudo saber. Cuando `cabe` es falso y se pidió `nombrar`, trae además
+ * `afectadas` (reservaciones, por fecha de salida) y `seguro`:
+ *
+ * - `seguro` verdadero: ESAS son las que se quedan sin carro, no hay otra forma de acomodarlas.
+ * - `seguro` falso: alguna de ellas se queda sin carro, pero cuál depende de cómo se acomoden. Pasa cuando hay
+ *   varias que podrían ser, o cuando ya había más reservaciones que carros (entonces no se sabe a quién culpar).
+ *
+ * Una reservación es «posible afectada» si, sin ella, lo nuevo ya cabe. Si ya estaban todas acomodadas, quienes
+ * pueden perder el carro son exactamente esas; si el cupo ya estaba pasado, no se puede decir a quién, y se
+ * nombran todas las que entran en la cuenta.
+ */
+export function reservasQueSeQuedanSinCarro({
+  carroId, rango, flota = [], reservas = [], contratos = [], excepto, hoy, nombrar = false, limiteDeBusqueda = LIMITE_DE_PASOS,
+}) {
+  const delCarro = flota.find((c) => c.id === carroId);
+  const tipo = delCarro?.tipo;
+  if (!tipo || delCarro.fueraDeServicio || !tieneRango(rango)) return null;
+
+  const grupo = compromisosDelTipo({ tipo, flota, reservas, contratos, excepto, hoy });
+  const unidades = grupo.carros.length;
+  const nuevo = { carro: grupo.carros.indexOf(delCarro), rango };
+  const a = analizar(grupo, nuevo, limiteDeBusqueda);
+  if (a === null) return { tipo, unidades, cabe: null };
+  if (a.perdida === 0) return { tipo, unidades, cabe: true };
+  if (!nombrar) return { tipo, unidades, cabe: false };
+
+  // Sin lo cual lo nuevo cabe: quienes pueden ser la que se quede sin carro. Solo tiene sentido si hoy todas
+  // tienen el suyo; con el cupo ya pasado, quitar una no cambia a quién le toca perder.
+  let posibles = null;
+  if (a.sin === a.delGrupo.length) {
+    posibles = [];
+    for (const l of a.delGrupo) {
+      const sinEsta = analizar({ ...grupo, libres: a.delGrupo.filter((otra) => otra !== l) }, nuevo, limiteDeBusqueda);
+      if (sinEsta === null) { posibles = null; break; }
+      if (sinEsta.perdida < a.perdida) posibles.push(l);
+    }
+    if (posibles?.length === 0) posibles = null;
+  }
+  const nombradas = posibles ?? a.delGrupo;
+  const afectadas = nombradas.map((l) => l.reserva).sort((x, y) => diasEntre(y.fechaSalida, x.fechaSalida));
+  return {
+    tipo, unidades, cabe: false, afectadas, seguro: posibles !== null && posibles.length === a.perdida,
+  };
 }
 
 /**
@@ -363,19 +433,17 @@ export function choquesDeReserva({
     }
 
     // Y lo que apartar este carro le hace a las reservaciones que solo piden su tipo. Con el carro que no está
-    // en la flota, o el del taller, no hay unidades de las que contar.
-    const delCarro = flota.find((c) => c.id === reserva.carroId);
-    const tipo = delCarro?.tipo;
-    if (tipo && !delCarro.fueraDeServicio && tieneRango(rango)) {
-      const grupo = compromisosDelTipo({ tipo, flota, reservas, contratos, excepto: reserva.id, hoy });
-      const cabe = cabeEnElTipo(grupo, { carro: grupo.carros.indexOf(delCarro), rango }, limiteDeBusqueda);
-      const cuantas = grupo.carros.length;
-      if (cabe === null) {
-        avisos.push(alto(`No se pudo comprobar si apartar este carro le deja sin unidad a otra reservación de ${tipo}: hay demasiadas cruzadas. Revisa las de ese tipo.`));
-      } else if (!cabe) {
-        const cuantasTienes = cuantas === 1 ? 'es la única que tienes' : `tienes ${cuantas} y los ${cuantas} quedan comprometidos`;
-        avisos.push(alto(`Si apartas este carro, otra reservación de ${tipo} (sin carro elegido) se queda sin unidad en esas fechas: ${cuantasTienes}.`));
-      }
+    // en la flota, o el del taller, no hay unidades de las que contar. La pregunta es la misma que se le hace a
+    // «Sacar carro» (reservasQueSeQuedanSinCarro): una sola regla, dos pantallas.
+    const efecto = reservasQueSeQuedanSinCarro({
+      carroId: reserva.carroId, rango, flota, reservas, contratos, excepto: reserva.id, hoy, limiteDeBusqueda,
+    });
+    if (efecto?.cabe === null) {
+      avisos.push(alto(`No se pudo comprobar si apartar este carro le deja sin unidad a otra reservación de ${efecto.tipo}: hay demasiadas cruzadas. Revisa las de ese tipo.`));
+    } else if (efecto?.cabe === false) {
+      const cuantas = efecto.unidades;
+      const cuantasTienes = cuantas === 1 ? 'es la única que tienes' : `tienes ${cuantas} y los ${cuantas} quedan comprometidos`;
+      avisos.push(alto(`Si apartas este carro, otra reservación de ${efecto.tipo} (sin carro elegido) se queda sin unidad en esas fechas: ${cuantasTienes}.`));
     }
     return avisos;
   }

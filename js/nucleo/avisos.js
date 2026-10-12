@@ -14,12 +14,61 @@ import { revisionDeDevoluciones, textoDeVecesTarde } from './historial.js';
 // otro — por eso esta pantalla usa la de reserva.js en vez de mantener la suya.
 // Y hasta cuándo ocupa un contrato su carro tampoco se decide aquí: es
 // `finDelContrato` (estados.js), vía `seCruzanConContrato` y `textoDeOcupacion`.
+//
+// Y lo mismo con la capacidad por tipo: si sacar este carro deja sin carro a una reservación que solo pidió el
+// TIPO («una pickup»), eso lo contesta `reservasQueSeQuedanSinCarro` (reserva.js), la misma pregunta que el
+// formulario de reservaciones le hace a un carro exacto. Aquí solo se dice con las palabras de este mostrador.
 import {
-  seCruzan, seCruzanConContrato, textoDeOcupacion, estadoReserva,
+  seCruzan, seCruzanConContrato, textoDeOcupacion, estadoReserva, reservasQueSeQuedanSinCarro,
 } from './reserva.js';
 
 const alto = (mensaje) => ({ nivel: 'alto', mensaje });
 const medio = (mensaje) => ({ nivel: 'medio', mensaje });
+
+// A cuántas reservaciones se nombran en el aviso de capacidad; las demás se cuentan. Igual que el aviso de las
+// apartadas de este carro: una pared de nombres no es ayuda, es ruido.
+const MAX_NOMBRADAS = 3;
+
+/** «A, B y C» (o «A, B o C»); una sola, tal cual. */
+function enLista(partes, conjuncion) {
+  if (partes.length <= 1) return partes.join('');
+  return `${partes.slice(0, -1).join(', ')} ${conjuncion} ${partes[partes.length - 1]}`;
+}
+
+/**
+ * La frase del aviso «sacar este carro deja sin carro a una reservación por tipo», a partir de lo que contestó
+ * `reservasQueSeQuedanSinCarro` (reserva.js) — que es quien decide si pasa y a quién; aquí solo se escribe.
+ *
+ * Nombra a quién afecta y desde cuándo (la fecha en que esa reservación necesita su carro), en una oración. Si
+ * se sabe con certeza quiénes se quedan sin carro, dice que ESAS se quedan sin carro. Si no (varias podrían ser
+ * la que pierda, o ya había más reservaciones que carros), dice que ALGUNA de ellas — nunca señala a una persona
+ * que quizás no es la afectada.
+ */
+function textoDeReservacionesSinCarro({ tipo, unidades, cabe, afectadas, seguro }) {
+  if (cabe === null) {
+    return `No se pudo comprobar si sacar este carro le deja sin carro a una reservación de ${tipo}: hay demasiadas reservaciones cruzadas. Revisa las de ese tipo.`;
+  }
+  const porque = unidades === 1
+    ? `solo tienes 1 ${tipo}`
+    : `tienes ${unidades} ${tipo} y los ${unidades} quedan comprometidos`;
+  const quien = (r) => r.clienteNombre || 'un cliente sin nombre';
+  const resto = afectadas.length - MAX_NOMBRADAS;
+  const nombradas = (cadaUna) => {
+    const partes = afectadas.slice(0, MAX_NOMBRADAS).map(cadaUna);
+    return resto > 0 ? [...partes, `${resto} más`] : partes;
+  };
+
+  if (seguro && afectadas.length === 1) {
+    const [r] = afectadas;
+    return `Si sacas este carro, la reservación de ${tipo} de ${quien(r)} (desde el ${textoFecha(r.fechaSalida)}) se queda sin carro: ${porque}.`;
+  }
+  if (seguro) {
+    const lista = enLista(nombradas((r) => `${quien(r)} (desde el ${textoFecha(r.fechaSalida)})`), 'y');
+    return `Si sacas este carro, las reservaciones de ${tipo} de ${lista} se quedan sin carro: ${porque}.`;
+  }
+  const lista = enLista(nombradas((r) => `la de ${quien(r)} desde el ${textoFecha(r.fechaSalida)}`), 'o');
+  return `Si sacas este carro, alguna de las reservaciones de ${tipo} sin carro elegido se queda sin carro (${lista}): ${porque}.`;
+}
 
 // El precio y los días NO se avisan: el dueño pone el precio que quiera en cada
 // renta y el sistema no opina. Un aviso que él no quiere lo entrena a ignorar
@@ -29,9 +78,16 @@ const medio = (mensaje) => ({ nivel: 'medio', mensaje });
 // ÚLTIMO AÑO de sus rentas, cerradas o no (`historialDelCliente`: `{ datos, fallo }` de
 // `cargarContratosDelCliente`, o `null` mientras no llega), porque un cliente que devolvió tarde, pagó y
 // cerró es el caso normal y los abiertos nunca lo ven (H-4).
+//
+// `reservasDelCarro` son las apartadas para ESTE carro exacto. Las que solo piden un tipo no tienen carro, así
+// que no están ahí: para ellas hacen falta `flota`, TODAS las `reservas` y TODOS los `contratosAbiertos` (no
+// solo los de este carro), y `reservaDeOrigenId`, la reservación que esta salida cumple, que no compite contra
+// sí misma. Sin esas listas no se pregunta nada (nunca se inventa un aviso). `limiteDeBusqueda` es para las
+// pruebas; ver `choquesDeReserva`.
 export function avisosDeSalida({
   cliente, carro, contrato, contratosDelCliente = [], historialDelCliente = null, contratosDelCarro = [],
-  reservasDelCarro = [], hoy,
+  reservasDelCarro = [], flota = [], reservas = [], contratosAbiertos = [], reservaDeOrigenId = null,
+  limiteDeBusqueda, hoy,
 }) {
   const avisos = [];
 
@@ -106,6 +162,29 @@ export function avisosDeSalida({
     const plural = extra === 1 ? 'reservación' : 'reservaciones';
     const demas = extra > 0 ? ` (y ${extra} ${plural} más)` : '';
     avisos.push(alto(`Este carro está apartado para ${primera.clienteNombre} desde el ${textoFecha(primera.fechaSalida)}${demas}.`));
+  }
+
+  // Lo que no se ve en el carro: una reservación que solo pidió el TIPO («una pickup») ya cuenta con uno de los
+  // carros de ese tipo, y no está apartada para este. Sacar este puede dejarla sin ninguno; el mostrador se
+  // entera cuando llega el cliente. Es la misma pregunta que se le hace a un carro exacto en el formulario de
+  // reservaciones, y la contesta la misma regla (reserva.js): un carro de otro tipo, uno que ya vuelve antes,
+  // uno del taller o un contrato ajeno no cuentan, y tocarse no es cruzarse.
+  //
+  // El contrato que se está escribiendo no se cuenta contra sí mismo si ya apareció entre los abiertos (un
+  // guardado que se quedó esperando), igual que más arriba.
+  if (carro?.id) {
+    const efecto = reservasQueSeQuedanSinCarro({
+      carroId: carro.id,
+      rango: { desde: contrato?.fechaSalida, hasta: contrato?.devolucionPrevista },
+      flota,
+      reservas,
+      contratos: contratosAbiertos.filter((otro) => otro.id !== contrato?.id),
+      excepto: reservaDeOrigenId,
+      hoy,
+      nombrar: true,
+      limiteDeBusqueda,
+    });
+    if (efecto && efecto.cabe !== true) avisos.push(alto(textoDeReservacionesSinCarro(efecto)));
   }
 
   return [...avisos.filter((a) => a.nivel === 'alto'), ...avisos.filter((a) => a.nivel === 'medio')];
