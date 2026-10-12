@@ -1490,6 +1490,18 @@ test('H-7: un pago de varias rentas compara el grupo entero: baja una y sobra lo
   assert.deepEqual(ids(grupo.contratos), ['a', 'b']);
 });
 
+test('H-7: se ve aunque la renta ya no esté «cerrada»: lo pagado de más no depende de si el cliente terminó de pagar', () => {
+  // Se anuló un pago del cliente después de corregir: el contrato queda «devuelto» con saldo, pero el costo del dueño
+  // sigue siendo Q1,500 y se le pagaron Q2,100. «Solo se paga lo cerrado» decide si algo se puede PAGAR, no si sobra.
+  const reabierta = anularPago(corregidaHaciaAbajo('r2'), 1, { fecha: '2026-10-05' });
+  assert.equal(estadoContrato(reabierta), 'devuelto', 'el escenario: ya no está cerrada');
+  assert.equal(costoDelSubarriendo(reabierta), 1500);
+  const cuenta = cuentaDeDueno({ contratos: [reabierta], pagos: [pagoDeLaDos()] });
+  assert.equal(cuenta.gruposDePago[0].cierra, false);
+  assert.equal(pagadoDeMas(cuenta, [])[0].deMas, 600);
+  assert.equal(cuenta.totalPorPagar, 0, 'y sigue sin ser deuda');
+});
+
 test('H-7: el dueño de otra cuenta no se mezcla: cada uno tiene lo suyo', () => {
   const mario = enlazado(corregidaHaciaAbajo('r2'), 'd1');
   const ana = enlazado(cerrado('r50'), 'd2');
