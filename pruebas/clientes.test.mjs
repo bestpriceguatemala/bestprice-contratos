@@ -11,6 +11,7 @@ import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
 import {
   estaVencido, contratosDe, saldoPendienteDe, vecesTarde, alertasDe, clienteParaFormulario,
   mensajesDeFalloDeClientes, htmlListaVacia, textoClienteNoEncontrado, seccionHistorial,
+  htmlAvisoDeDocumento, seccionesHTML,
 } from '../js/pantallas/clientes.js';
 
 const HOY = '2026-09-25';
@@ -204,4 +205,60 @@ test('seccionHistorial: se llama «Rentas abiertas» y dice dónde están las ya
 
 test('seccionHistorial: sin rentas abiertas lo dice igual que antes', () => {
   assert.match(seccionHistorial([]), /Todavía no tiene rentas abiertas\./);
+});
+
+// ---------- DPI repetido al dar de alta un cliente (H-10) ----------
+//
+// La misma persona dada de alta dos veces parte su historial en dos. Se avisa mientras se escribe el documento,
+// nombrando a quién ya existe, y se deja guardar. Los clientes llevan la forma con la que quedan guardados
+// (§7b): `documento` tal como se escribió, con espacios, y a veces los cuatro campos viejos de nombre.
+
+const CLIENTES_GUARDADOS = [
+  {
+    id: 'k1', nombres: 'Juan', apellidos: 'Pérez', documento: '2345 67890 0101', licencia: 'L-445566', telefono: '5555-0000', actualizado: 1790000000000,
+  },
+  {
+    id: 'k2', nombre1: 'María', apellido1: 'López', documento: '1111-22222-0303', telefono: '4444-7777', actualizado: 1790000000001,
+  },
+];
+
+test('htmlAvisoDeDocumento: un cliente NUEVO con un DPI que ya existe dice quién es', () => {
+  const html = htmlAvisoDeDocumento({ documento: '2345678900101', clientes: CLIENTES_GUARDADOS });
+  assert.match(html, /Ya hay un cliente con este documento\./);
+  assert.match(html, /Juan Pérez · documento 2345 67890 0101 · tel\. 5555-0000/);
+  assert.match(html, /puedes guardar de todos modos/i);
+});
+
+test('htmlAvisoDeDocumento: corregir la ficha de alguien sin tocar su documento no lo marca repetido de sí mismo', () => {
+  assert.equal(htmlAvisoDeDocumento({ documento: '2345 67890 0101', clientes: CLIENTES_GUARDADOS, clienteId: 'k1' }), '');
+  assert.match(htmlAvisoDeDocumento({ documento: '2345 67890 0101', clientes: CLIENTES_GUARDADOS, clienteId: 'k2' }), /Ya hay otro cliente con este documento\./);
+});
+
+test('htmlAvisoDeDocumento: un documento nuevo o sin escribir no dice nada; con la lista sin leer, no afirma que no hay', () => {
+  assert.equal(htmlAvisoDeDocumento({ documento: '9999 99999 9999', clientes: CLIENTES_GUARDADOS }), '');
+  assert.equal(htmlAvisoDeDocumento({ documento: '', clientes: CLIENTES_GUARDADOS }), '');
+  const fallo = htmlAvisoDeDocumento({ documento: '9999 99999 9999', clientes: [], falloClientes: true });
+  assert.match(fallo, /No se pudo leer la lista de clientes, así que no se sabe si este documento ya está registrado\./);
+});
+
+test('la ficha del cliente tiene su lugar para el aviso pegado al campo del documento, y solo ahí', () => {
+  const html = seccionesHTML({});
+  const lugares = html.match(/<div id="cf-documento-repetido"[^>]*>/g) || [];
+  assert.equal(lugares.length, 1);
+  assert.match(lugares[0], /class="rep-aviso"/);
+  assert.match(lugares[0], /role="status"/);
+  assert.match(lugares[0], /\bhidden\b/);
+  assert.doesNotMatch(lugares[0], /style=/);
+  const etiqueta = html.match(/<label class="carro-campo">Cédula o pasaporte[\s\S]*?<\/label>/)[0];
+  assert.ok(etiqueta.includes('cf-documento-repetido'), 'dentro del mismo label del documento');
+  assert.equal((html.match(/-repetido"/g) || []).length, 1, 'ningún otro campo lo lleva');
+});
+
+test('la ficha avisa al escribir y al abrir, y guardar NUNCA consulta si hay repetido (no bloquea)', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/clientes.js', import.meta.url), 'utf8');
+  assert.match(fuente, /el\('cf-documento'\)\.addEventListener\('input', mostrarAvisoDeDocumento\)/);
+  assert.match(fuente, /^\s*mostrarAvisoDeDocumento\(\);/m, 'y al abrir');
+  const guardar = fuente.match(/async function guardar\(ev\) \{[\s\S]*?\n  \}\n/)[0];
+  assert.doesNotMatch(guardar, /htmlAvisoDeDocumento|mostrarAvisoDeDocumento|Repetid|repetid/, 'guardar no mira si hay repetido');
+  assert.doesNotMatch(fuente, /confirm\(|alert\(|showModal|<dialog/);
 });

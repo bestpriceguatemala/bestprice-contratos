@@ -15,13 +15,14 @@ import {
   CAMPOS_CLIENTE, construirCliente, nombreCompleto, faltaAlgo, nombresResueltos,
 } from '../nucleo/cliente.js';
 import { filtrar, textoDeCliente } from '../nucleo/busqueda.js';
+import { avisoDeClienteRepetido } from '../nucleo/repetidos.js';
 import { resumen } from '../nucleo/contrato.js';
 import { diasEntre, hoyISO } from '../nucleo/fechas.js';
 import { suma } from '../nucleo/dinero.js';
 import {
   cargarClientes, cargarContratosAbiertos, guardarCliente, altaConIdFijo, nuevoIdCliente,
 } from '../datos.js';
-import { dinero, fecha, aviso } from '../ui.js';
+import { dinero, fecha, aviso, htmlAvisoRepetido } from '../ui.js';
 
 // El texto libre que escribe el mostrador se escapa antes de entrar al HTML,
 // igual que en carros.js y flota.js, para que un "&" o un "<" sueltos no
@@ -266,11 +267,30 @@ const GRUPOS = [
 
 const TIPO_INPUT = { fecha: 'date', correo: 'email', telefono: 'tel' };
 
+/**
+ * El aviso de documento repetido, ya dibujado (vacío si no hay nada que decir). `clienteId` es el cliente
+ * que se está editando, si lo hay: él mismo no cuenta como repetido. Solo informa — guardar() no lo
+ * consulta, así que nunca impide guardar (la regla de «no me tires avisos» es sobre su juicio de negocio, y
+ * un DPI repetido no es un juicio: el historial de la misma persona queda partido en dos). Se exporta
+ * para probarlo sin DOM.
+ */
+export function htmlAvisoDeDocumento({
+  documento, clientes, clienteId, falloClientes = false,
+}) {
+  return htmlAvisoRepetido(avisoDeClienteRepetido({
+    documento, clientes, exceptoId: clienteId, noSePudoLeer: falloClientes,
+  }));
+}
+
 function campoHTML(campo, valor) {
   const tipo = TIPO_INPUT[campo.tipo] || 'text';
+  // Debajo del documento va el lugar del aviso de «ya hay un cliente con este documento».
+  const lugarDelAviso = campo.id === 'documento'
+    ? '\n      <div id="cf-documento-repetido" class="rep-aviso" role="status" aria-live="polite" hidden></div>'
+    : '';
   return `
     <label class="carro-campo">${esc(campo.etiqueta)}
-      <input type="${tipo}" id="cf-${campo.id}" value="${esc(valor)}">
+      <input type="${tipo}" id="cf-${campo.id}" value="${esc(valor)}">${lugarDelAviso}
     </label>`;
 }
 
@@ -284,7 +304,8 @@ function seccionCampos(titulo, campos, cliente) {
     </section>`;
 }
 
-function seccionesHTML(cliente) {
+// Se exporta solo para probar que el aviso tiene dónde dibujarse, pegado al campo del documento.
+export function seccionesHTML(cliente) {
   const usados = new Set();
   const secciones = GRUPOS.map((g) => {
     const campos = g.ids.map((id) => CAMPOS_CLIENTE.find((c) => c.id === id)).filter(Boolean);
@@ -399,6 +420,17 @@ async function dibujarFicha(contenedor, clienteId, clientes, contratos, hoy, fal
     return campos;
   }
 
+  // Si ya hay un cliente con este documento se dice aquí mismo, debajo del campo, mientras se escribe y al
+  // abrir (una ficha que ya repite a otra lo muestra de una vez). Solo informa: guardar() no lo mira.
+  function mostrarAvisoDeDocumento() {
+    const lugar = el('cf-documento-repetido');
+    const html = htmlAvisoDeDocumento({
+      documento: texto('cf-documento'), clientes, clienteId: cliente?.id, falloClientes,
+    });
+    lugar.innerHTML = html;
+    lugar.hidden = !html;
+  }
+
   async function guardar(ev) {
     ev.preventDefault();
 
@@ -431,6 +463,8 @@ async function dibujarFicha(contenedor, clienteId, clientes, contratos, hoy, fal
     }
   }
 
+  el('cf-documento').addEventListener('input', mostrarAvisoDeDocumento);
+  mostrarAvisoDeDocumento();
   el('cli-form').addEventListener('submit', guardar);
   el('cli-volver').addEventListener('click', () => { location.hash = '#/clientes'; });
 }

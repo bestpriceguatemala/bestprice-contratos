@@ -8,11 +8,12 @@
 // - #/carros/:id: formulario para editar un carro existente
 // - #/habilitar/:id: marcar un carro como disponible de nuevo
 import { estadoCarro } from '../nucleo/estados.js';
+import { avisoDeCarroRepetido } from '../nucleo/repetidos.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
   cargarFlota, cargarContratosAbiertos, guardarVehiculo, altaConIdFijo, nuevoIdVehiculo,
 } from '../datos.js';
-import { aviso } from '../ui.js';
+import { aviso, htmlAvisoRepetido } from '../ui.js';
 
 /**
  * Construye el objeto vehículo para guardar, preservando campos que no vienen
@@ -174,7 +175,22 @@ function dibujarLista(contenedor, flota, contratos, hoy, fallos = {}) {
 
 // ---------- Vista: formulario nuevo/editar ----------
 
-function formularioHTML() {
+/**
+ * El aviso de placas repetidas, ya dibujado (vacío si no hay nada que decir). `carroId` es el carro que se
+ * está editando, si lo hay: él mismo no cuenta como repetido. Solo informa — guardar() no lo consulta, así
+ * que nunca impide guardar (la regla de «no me tires avisos» es sobre su juicio de negocio, y una placa
+ * repetida no es un juicio). Se exporta para probarlo sin DOM.
+ */
+export function htmlAvisoDePlacas({
+  placas, flota, carroId, falloFlota = false,
+}) {
+  return htmlAvisoRepetido(avisoDeCarroRepetido({
+    placas, flota, exceptoId: carroId, noSePudoLeer: falloFlota,
+  }));
+}
+
+// Se exporta solo para probar que el aviso tiene dónde dibujarse, pegado al campo de las placas.
+export function formularioHTML() {
   return `
     <form id="frm-carro" class="carro-forma" novalidate>
       <div class="carro-contenido">
@@ -189,6 +205,7 @@ function formularioHTML() {
               </label>
               <label class="carro-campo">Placas
                 <input type="text" id="frm-placas" required>
+                <div id="frm-placas-repetido" class="rep-aviso" role="status" aria-live="polite" hidden></div>
               </label>
               <label class="carro-campo">Tipo de vehículo
                 <input type="text" id="frm-tipo">
@@ -273,6 +290,17 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
     } else {
       btnFuera.style.display = 'inline-block';
     }
+  }
+
+  // Si ya hay un carro con estas placas se dice aquí mismo, debajo del campo, mientras se escribe y al abrir
+  // (un carro que ya repite a otro lo muestra de una vez). Solo informa: guardar() no lo mira.
+  function mostrarAvisoDePlacas() {
+    const lugar = el('frm-placas-repetido');
+    const html = htmlAvisoDePlacas({
+      placas: texto('frm-placas'), flota, carroId: carro?.id, falloFlota,
+    });
+    lugar.innerHTML = html;
+    lugar.hidden = !html;
   }
 
   // Validar y guardar
@@ -371,6 +399,8 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
   }
 
   // Eventos
+  el('frm-placas').addEventListener('input', mostrarAvisoDePlacas);
+  mostrarAvisoDePlacas();
   el('frm-carro').addEventListener('submit', guardar);
   el('frm-volver').addEventListener('click', () => {
     location.hash = '#/carros';

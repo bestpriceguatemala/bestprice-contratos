@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  dinero, fecha, hora24, enterEnviariaElFormulario, bloquearEnterEnElFormulario,
+  dinero, fecha, hora24, enterEnviariaElFormulario, bloquearEnterEnElFormulario, htmlAvisoRepetido,
 } from '../js/ui.js';
 
 test('dinero() da separador de miles y dos decimales', () => {
@@ -188,4 +188,42 @@ test('bloquearEnterEnElFormulario: cancela el Enter que enviaría, y deja pasar 
   oyente(evento('Enter', 'TEXTAREA', 'textarea'));
   oyente(evento('Tab', 'INPUT', 'text'));
   assert.deepEqual(cancelados, ['Enter:INPUT', 'Enter:INPUT'], 'solo los dos Enter de campos; el botón, el texto largo y Tab pasan');
+});
+
+
+// ---------- El aviso de «ya existe» (placas repetidas, DPI repetido) ----------
+//
+// El aviso viene del núcleo (nucleo/repetidos.js) como { titulo, filas, pie }; esto solo lo dibuja. Lo que
+// se escribió en la ficha (marca, nombre) es texto libre y entra al HTML escapado.
+
+test('htmlAvisoRepetido: sin aviso no dibuja nada', () => {
+  assert.equal(htmlAvisoRepetido(null), '');
+  assert.equal(htmlAvisoRepetido(undefined), '');
+});
+
+test('htmlAvisoRepetido: el título, un renglón por cada uno que ya existe y el pie', () => {
+  const html = htmlAvisoRepetido({
+    titulo: 'Ya hay 2 carros con estas placas.',
+    filas: ['Carro 12 · P-234IFN · Toyota Hilux', 'Carro 14 · P-234IFN · Toyota Hilux · Negro'],
+    pie: 'Si es el mismo carro, no hace falta registrarlo dos veces.',
+  });
+  assert.match(html, /<p class="rep-titulo">Ya hay 2 carros con estas placas\.<\/p>/);
+  assert.equal((html.match(/<li>/g) || []).length, 2);
+  assert.match(html, /<li>Carro 12 · P-234IFN · Toyota Hilux<\/li>/);
+  assert.match(html, /<p class="rep-pie">Si es el mismo carro/);
+});
+
+test('htmlAvisoRepetido: sin renglones o sin pie no deja una lista ni un párrafo vacíos (el «no se pudo leer»)', () => {
+  const html = htmlAvisoRepetido({ titulo: 'No se pudo leer la flota.', filas: [], pie: '' });
+  assert.equal(html, '<p class="rep-titulo">No se pudo leer la flota.</p>');
+});
+
+test('htmlAvisoRepetido: lo escrito en la ficha entra escapado, nunca como HTML', () => {
+  const html = htmlAvisoRepetido({
+    titulo: 'Ya hay un cliente con este documento.',
+    filas: ['<img src=x onerror=alert(1)> & "Comillas" · documento 1'],
+    pie: '',
+  });
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt; &amp; &quot;Comillas&quot;/);
 });

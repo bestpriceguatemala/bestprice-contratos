@@ -10,7 +10,7 @@ import {
   construirContrato, ultimos4Digitos, leerParametroRuta, montoSalidaConAnticipo, conAnticipoComoPago,
   resultadosDeLista, avisoDeLista, conAltasDeHoy,
   vistaDeBuscador, crearListaDeSesion, duenoDelContrato, lectorDeCampos, leerFormularioDe, plantilla, motivoParaNoGuardar,
-  textoCarroPropioNoEncontrado, avisosConSobrecobro, avisoAnticipoDeMas,
+  textoCarroPropioNoEncontrado, avisosConSobrecobro, avisoAnticipoDeMas, htmlAvisoDeDocumentoEnAlta,
 } from '../js/pantallas/sacarCarro.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { construirReserva } from '../js/nucleo/reserva.js';
@@ -1241,4 +1241,82 @@ test('la pantalla de la salida le pasa a motivoParaNoGuardar los ocho cobros ext
   for (const id of ['sc-seguro-dia', 'sc-seguro-terceros-dia', 'sc-seguro-menores-dia', 'sc-seguro-pai-dia', 'sc-deducible', 'sc-deducible-bajo', 'sc-carta-poder-precio', 'sc-varios-precio']) {
     assert.match(fuente, new RegExp(`cobrosExtra: \\{[^}]*num\\('${id}'\\)`), id);
   }
+});
+
+// ---------- DPI repetido en el alta rápida de cliente (H-10) ----------
+//
+// El alta rápida de «Sacar carro» es la otra puerta por la que entra un cliente (la primera es la ficha de
+// Clientes). Misma regla: se avisa mientras se escribe el documento, nombrando a quién ya existe, y se deja
+// guardar. La lista es la de la sesión del buscador: lo que llegó (`items`) más las altas hechas en esta misma
+// pantalla (`altas`), que la lectura de la nube todavía no trae.
+
+const CLIENTES_DE_LA_SESION = [
+  { id: 'k1', nombres: 'Juan', apellidos: 'Pérez', documento: '2345 67890 0101', licencia: 'L-445566', telefono: '5555-0000', actualizado: 1790000000000 },
+  { id: 'k2', nombres: 'Lucía', apellidos: 'Méndez', documento: '1111 22222 0303', licencia: 'L-998877', telefono: '4444-7777', actualizado: 1790000000001 },
+];
+
+test('htmlAvisoDeDocumentoEnAlta: un DPI que ya existe dice quién es', () => {
+  const html = htmlAvisoDeDocumentoEnAlta({
+    documento: '2345678900101', items: CLIENTES_DE_LA_SESION, altas: [], fallo: false, leida: true,
+  });
+  assert.match(html, /Ya hay un cliente con este documento\./);
+  assert.match(html, /Juan Pérez · documento 2345 67890 0101 · tel\. 5555-0000/);
+});
+
+test('htmlAvisoDeDocumentoEnAlta: también ve a quien se dio de alta hace un momento en esta misma pantalla', () => {
+  const reciente = { id: 'k9', nombres: 'Pedro', apellidos: 'Ruiz', documento: '7777 88888 0909', telefono: '3333-1111' };
+  const html = htmlAvisoDeDocumentoEnAlta({
+    documento: '7777888880909', items: CLIENTES_DE_LA_SESION, altas: [reciente], fallo: false, leida: true,
+  });
+  assert.match(html, /Pedro Ruiz/, 'la lectura de la nube no lo trae todavía, pero el alta de hoy sí cuenta');
+});
+
+test('htmlAvisoDeDocumentoEnAlta: sin repetido, sin documento, o con la lista todavía en camino, no dice nada', () => {
+  assert.equal(htmlAvisoDeDocumentoEnAlta({
+    documento: '9999 99999 9999', items: CLIENTES_DE_LA_SESION, altas: [], fallo: false, leida: true,
+  }), '');
+  assert.equal(htmlAvisoDeDocumentoEnAlta({
+    documento: '', items: CLIENTES_DE_LA_SESION, altas: [], fallo: false, leida: true,
+  }), '');
+  // La lista aún no llegó: no es un fallo, y cuando llegue la pantalla vuelve a mirar. Con un fallo VIEJO
+  // todavía anotado (crearListaDeSesion.olvidar() deja `leida` en falso pero conserva `fallo`) tampoco se
+  // dice «no se pudo leer» antes de que la lectura nueva conteste.
+  assert.equal(htmlAvisoDeDocumentoEnAlta({
+    documento: '2345 67890 0101', items: [], altas: [], fallo: false, leida: false,
+  }), '');
+  assert.equal(htmlAvisoDeDocumentoEnAlta({
+    documento: '2345 67890 0101', items: [], altas: [], fallo: true, leida: false,
+  }), '');
+});
+
+test('htmlAvisoDeDocumentoEnAlta: si la lista no se pudo leer y no hay coincidencia, NO afirma que no hay (vacío ≠ falló)', () => {
+  const html = htmlAvisoDeDocumentoEnAlta({
+    documento: '9999 99999 9999', items: [], altas: [], fallo: true, leida: true,
+  });
+  assert.match(html, /No se pudo leer la lista de clientes, así que no se sabe si este documento ya está registrado\./);
+  // Con la copia local que sí se alcanzó a leer, la coincidencia se nombra aunque la nube haya fallado.
+  const conCopia = htmlAvisoDeDocumentoEnAlta({
+    documento: '2345 67890 0101', items: CLIENTES_DE_LA_SESION, altas: [], fallo: true, leida: true,
+  });
+  assert.match(conCopia, /Ya hay un cliente con este documento\./);
+});
+
+test('el alta rápida tiene su lugar para el aviso pegado al campo del documento y el aviso nunca la bloquea', () => {
+  const html = plantilla();
+  const lugares = html.match(/<div id="sc-nc-documento-repetido"[^>]*>/g) || [];
+  assert.equal(lugares.length, 1);
+  assert.match(lugares[0], /class="rep-aviso"/);
+  assert.match(lugares[0], /role="status"/);
+  assert.match(lugares[0], /\bhidden\b/);
+  assert.doesNotMatch(lugares[0], /style=/);
+  const etiqueta = html.match(/<label class="sc-campo">Cédula o pasaporte[\s\S]*?<\/label>/)[0];
+  assert.ok(etiqueta.includes('sc-nc-documento-repetido'), 'dentro del mismo label del documento');
+
+  const fuente = readFileSync(new URL('../js/pantallas/sacarCarro.js', import.meta.url), 'utf8');
+  assert.match(fuente, /el\('sc-nc-documento'\)\.addEventListener\('input', mostrarAvisoDeDocumentoEnAlta\)/);
+  // Y cuando la lista llega (o falla) tarde, el aviso se vuelve a mirar: el buscador de clientes avisa al alta.
+  assert.match(fuente, /alLlegar: \(\) => mostrarAvisoDeDocumentoEnAlta\(\)/);
+  assert.match(fuente, /pintar\(\);\s*if \(alLlegar\) alLlegar\(\);/);
+  const guardar = fuente.match(/async function guardarClienteNuevo\(\) \{[\s\S]*?\n  \}\n/)[0];
+  assert.doesNotMatch(guardar, /htmlAvisoDeDocumentoEnAlta|mostrarAvisoDeDocumentoEnAlta|Repetid|repetid/, 'guardar el cliente no mira si hay repetido');
 });

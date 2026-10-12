@@ -30,6 +30,28 @@ export function fecha(iso) {
   return `${dia} ${MESES[mes - 1]} ${anio}`;
 }
 
+function escapar(texto) {
+  return String(texto ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+/**
+ * Dibuja el aviso de «esto ya existe» (placas repetidas, DPI repetido) que arma el núcleo
+ * (nucleo/repetidos.js) como `{ titulo, filas, pie }`: la frase, un renglón por cada registro que ya
+ * existe y lo que puede hacer. Vacío si no hay aviso. Es el contenido de un lugar que cada formulario
+ * trae debajo del campo (`.rep-aviso`); aquí no se decide nada, solo se dibuja, y lo escrito en las
+ * fichas (marca, nombre) es texto libre y entra escapado.
+ */
+export function htmlAvisoRepetido(aviso) {
+  if (!aviso) return '';
+  const filas = aviso.filas?.length
+    ? `<ul class="rep-filas">${aviso.filas.map((f) => `<li>${escapar(f)}</li>`).join('')}</ul>`
+    : '';
+  const pie = aviso.pie ? `<p class="rep-pie">${escapar(aviso.pie)}</p>` : '';
+  return `<p class="rep-titulo">${escapar(aviso.titulo)}</p>${filas}${pie}`;
+}
+
 /**
  * Muestra un mensaje flotante que se quita solo a los pocos segundos.
  * `tipo` es 'error', 'exito' o 'info' (por defecto) y solo cambia el color:

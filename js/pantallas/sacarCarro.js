@@ -25,9 +25,12 @@ import {
   guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato, agregarPago,
   cargarDuenos, guardarDueno, CODIGO_RESERVACION_CAMBIO, altaConIdFijo, nuevoIdCliente, nuevoIdDueno,
 } from '../datos.js';
-import { dinero, fecha, aviso, hora24 } from '../ui.js';
+import {
+  dinero, fecha, aviso, hora24, htmlAvisoRepetido,
+} from '../ui.js';
 import { textoAvisoSobrecobro } from './recibirCarro.js';
 import { filtrar, textoDeCliente } from '../nucleo/busqueda.js';
+import { avisoDeClienteRepetido } from '../nucleo/repetidos.js';
 // El alta rápida de aquí y la ficha de clientes.js tienen que pedir
 // exactamente los mismos campos (Tarea 7) — por eso esta pantalla ya no
 // inventa su propia lista de siete campos sueltos ni su propia forma de
@@ -742,7 +745,9 @@ if (typeof window !== 'undefined') {
 // ---------- La plantilla estática (se pinta una sola vez) ----------
 
 function campo(id, etiqueta, opciones = {}) {
-  const { tipo = 'text', ancho = false, paso, minimo, valor = '', autocompletar, marcador, numerico } = opciones;
+  const {
+    tipo = 'text', ancho = false, paso, minimo, valor = '', autocompletar, marcador, numerico, despues = '',
+  } = opciones;
   const attrs = [
     paso !== undefined && `step="${paso}"`,
     minimo !== undefined && `min="${minimo}"`,
@@ -754,7 +759,7 @@ function campo(id, etiqueta, opciones = {}) {
   ].filter(Boolean).join(' ');
   return `
     <label class="sc-campo${ancho ? ' ancho' : ''}">${esc(etiqueta)}
-      <input type="${tipo}" id="${id}" value="${esc(valor)}" ${attrs}>
+      <input type="${tipo}" id="${id}" value="${esc(valor)}" ${attrs}>${despues}
     </label>`;
 }
 
@@ -782,9 +787,30 @@ const CAMPOS_ALTA_ADICIONALES = [
   'paisAdicional', 'telefonoAdicional',
 ];
 
+/**
+ * El aviso de documento repetido del alta rápida, ya dibujado (vacío si no hay nada que decir). La lista es
+ * la de la sesión del buscador (crearListaDeSesion): lo que llegó (`items`, de la nube o de la copia local)
+ * más las altas hechas en esta misma pantalla (`altas`, que esa lectura todavía no trae — ver conAltasDeHoy).
+ * Mientras la lista no ha llegado (`leida` en falso) no se dice nada: no es un fallo, y al llegar la pantalla
+ * vuelve a mirar. Si llegó con fallo y no hay coincidencia NO se afirma que no hay (vacío ≠ falló).
+ * Solo informa: guardar el cliente nuevo no lo consulta. Se exporta para probarlo sin DOM.
+ */
+export function htmlAvisoDeDocumentoEnAlta({
+  documento, items, altas = [], fallo = false, leida = true,
+}) {
+  if (!leida) return '';
+  return htmlAvisoRepetido(avisoDeClienteRepetido({
+    documento, clientes: conAltasDeHoy(items, altas), noSePudoLeer: fallo,
+  }));
+}
+
 /** El campo de CAMPOS_CLIENTE `c`, dibujado con el input id `sc-nc-<id>`. */
 function campoAlta(c) {
-  return campo(`sc-nc-${c.id}`, c.etiqueta, { tipo: TIPO_INPUT_CLIENTE[c.tipo] || 'text' });
+  // Debajo del documento va el lugar del aviso de «ya hay un cliente con este documento».
+  const despues = c.id === 'documento'
+    ? '<div id="sc-nc-documento-repetido" class="rep-aviso" role="status" aria-live="polite" hidden></div>'
+    : '';
+  return campo(`sc-nc-${c.id}`, c.etiqueta, { tipo: TIPO_INPUT_CLIENTE[c.tipo] || 'text', despues });
 }
 
 /**
@@ -1429,7 +1455,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
    * aviso rojo se va (ver avisoDeLista).
    */
   function crearBuscador({
-    tipo, prefijo, lista, fila, hayElegido,
+    tipo, prefijo, lista, fila, hayElegido, alLlegar,
   }) {
     let pedida = false;
     let ultimos = [];
@@ -1453,7 +1479,11 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
 
     // Lo que llegue de la nube (también un fallo tardío) vuelve a pintar, salvo
     // que el mostrador ya se haya ido de esta pantalla.
-    lista.escuchar(() => { if (sigoVigente()) pintar(); });
+    lista.escuchar(() => {
+      if (!sigoVigente()) return;
+      pintar();
+      if (alLlegar) alLlegar();
+    });
 
     return {
       pintar,
@@ -1472,7 +1502,13 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   }
 
   const buscadorClientes = crearBuscador({
-    tipo: 'clientes', prefijo: 'cliente', lista: listaDeClientes, fila: filaCliente, hayElegido: () => Boolean(clienteSeleccionado),
+    tipo: 'clientes',
+    prefijo: 'cliente',
+    lista: listaDeClientes,
+    fila: filaCliente,
+    hayElegido: () => Boolean(clienteSeleccionado),
+    // Cuando la lista llega (o falla) tarde, el aviso de documento repetido del alta se vuelve a mirar.
+    alLlegar: () => mostrarAvisoDeDocumentoEnAlta(),
   });
   const buscadorDuenos = crearBuscador({
     tipo: 'duenos', prefijo: 'dueno', lista: listaDeDuenos, fila: filaDueno, hayElegido: () => Boolean(duenoSeleccionado),
@@ -1515,6 +1551,17 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     const campos = {};
     CAMPOS_CLIENTE.forEach((c) => { campos[c.id] = texto(`sc-nc-${c.id}`); });
     return campos;
+  }
+
+  /**
+   * Si ya hay un cliente con el documento que se está escribiendo en el alta rápida, se dice aquí mismo,
+   * debajo del campo. Solo informa: guardarClienteNuevo() no lo mira, así que nunca impide dar de alta.
+   */
+  function mostrarAvisoDeDocumentoEnAlta() {
+    const lugar = el('sc-nc-documento-repetido');
+    const html = htmlAvisoDeDocumentoEnAlta({ documento: texto('sc-nc-documento'), ...listaDeClientes.estado() });
+    lugar.innerHTML = html;
+    lugar.hidden = !html;
   }
 
   async function guardarClienteNuevo() {
@@ -1730,6 +1777,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   alReintentar('sc-cliente-reintentar', buscadorClientes);
   sinEnviarConEnter(el('sc-cliente-buscar'));
   sinEnviarConEnter(el('sc-cliente-alta'), guardarClienteNuevo);
+  el('sc-nc-documento').addEventListener('input', mostrarAvisoDeDocumentoEnAlta);
   el('sc-cliente-nuevo').addEventListener('click', () => { el('sc-cliente-alta').hidden = false; });
   el('sc-cliente-cambiar').addEventListener('click', () => {
     clienteSeleccionado = null;

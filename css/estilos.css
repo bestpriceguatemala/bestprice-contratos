@@ -520,6 +520,39 @@ body {
   margin-left: 4px;
 }
 
+/* Lo que ya existe (placas repetidas, DPI repetido): sale debajo del campo mientras se escribe. Ámbar y
+   tranquilo, nunca rojo ni una ventana encima: es información para quien decide, no un bloqueo, y el
+   botón de guardar sigue igual. Va dentro del <label> del campo, que trae su propio peso y tamaño de
+   letra; por eso se reponen aquí. */
+.rep-aviso {
+  margin-top: 2px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--amarillo);
+  border-radius: 6px;
+  background: #fff6e0;
+  color: #8a5b00;
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.rep-aviso p {
+  margin: 0;
+}
+
+.rep-aviso .rep-titulo {
+  font-weight: 600;
+}
+
+.rep-aviso .rep-filas {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.rep-aviso .rep-pie {
+  margin-top: 4px;
+}
+
 /* Cliente: buscador con resultados flotando encima del resto del formulario. */
 
 .sc-cliente-buscar {
