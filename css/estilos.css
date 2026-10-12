@@ -887,9 +887,11 @@ body {
    .btn-primario trae un margen de arriba pensado para un formulario; en una fila no debe subir ni bajar. */
 .carros-acciones {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
 }
 
 .carros-acciones .btn-primario {
