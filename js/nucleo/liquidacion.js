@@ -99,6 +99,48 @@ export function entregadoDelPago(pago) {
 }
 
 /**
+ * ¿El `descuento` que trae un pago es imposible? Ausente, vacío o cero no lo es (un pago de antes del
+ * descuento, o sin él). Lo es uno que no es un número, uno negativo, o uno mayor que el `monto` del pago:
+ * `guardarPagoDueno` no deja guardar los dos últimos, así que verlos en un pago guardado quiere decir que el
+ * documento se tocó o se dañó.
+ *
+ * `descuentoDelPago` ya no se deja engañar por un campo así (lo recorta, para que nunca entregue más de lo
+ * que vale el pago), pero recortar es lo que conviene a una cuenta, no a un papel que sale de la empresa: el
+ * comprobante de un pago con un descuento imposible diría una cifra entregada que nadie decidió. Quien
+ * imprime pregunta aquí, y no imprime.
+ */
+export function descuentoInvalido(pago) {
+  const crudo = pago?.descuento;
+  if (crudo === undefined || crudo === null || crudo === '') return false;
+  // Un número o un texto con un número: otra cosa (una lista, un objeto) `Number()` la volvería un monto sin serlo.
+  if (typeof crudo !== 'number' && typeof crudo !== 'string') return true;
+  const n = Number(crudo);
+  return !Number.isFinite(n) || n < 0 || q(n) > q(pago?.monto);
+}
+
+/**
+ * Lo que suman VARIOS pagos a un dueño: `monto` (lo que cubren), `descuento` (la parte de eso que no se
+ * entregó) y `entregado` (lo que de verdad salió de sus manos). Es la suma de todo lo anterior hecha una sola
+ * vez: los grupos de pagos la usan para `pagado` y `descuento`, y el comprobante para decir «en total, por
+ * estas rentas…» cuando un pago completa a otros. Ninguna pantalla suma pagos por su cuenta.
+ *
+ * LANZA si no recibe una lista: igual que el resto de este archivo, «no llegó» no es «nada pagado».
+ */
+export function totalesDePagos(pagos) {
+  if (!Array.isArray(pagos)) {
+    throw new TypeError(
+      `liquidacion: «pagos» debe ser una lista y llegó ${queLlego(pagos)}. Sin ella no se sabe cuánto se pagó, `
+      + 'y sumar nada diría «no se le ha pagado» cuando quizá sí.',
+    );
+  }
+  return {
+    monto: suma(...pagos.map((p) => p?.monto)),
+    descuento: suma(...pagos.map(descuentoDelPago)),
+    entregado: suma(...pagos.map(entregadoDelPago)),
+  };
+}
+
+/**
  * Los pagos que de verdad cuentan: sin repetidos y sin los anulados. Es por donde
  * entran los pagos a toda la cuenta, así «qué rentas ya se pagaron» y «contra qué se
  * compara lo que cuestan hoy» (`gruposDePago`) parten de la misma lista y no pueden
@@ -275,13 +317,13 @@ function gruposDePago(contratos, pagos) {
     const ordenados = [...g.pagos].sort((a, b) => (
       (Number(a.numero) || 0) - (Number(b.numero) || 0) || porCodigo(String(a.id ?? ''), String(b.id ?? ''))
     ));
-    const pagado = suma(...ordenados.map((p) => p.monto));
+    const { monto: pagado, descuento } = totalesDePagos(ordenados);
     const ahora = suma(...enGrupo.map(costoDelSubarriendo));
     return {
       contratos: enGrupo,
       pagos: ordenados,
       pagado,
-      descuento: suma(...ordenados.map(descuentoDelPago)),
+      descuento,
       ahora,
       cierra: enGrupo.every(esPagableAlDueno),
       completo: g.completo,

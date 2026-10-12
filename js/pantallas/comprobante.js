@@ -34,14 +34,27 @@
 // pago, y es lo que el papel dice siempre. Si aquí se sumara algo por cuenta propia, un día el papel contradiría la
 // pantalla que lo produjo — justo lo que este proyecto ya sufrió cinco veces.
 //
+// EL DESCUENTO. Cuando a ese dueño ya se le había pagado de más, el pago que se le hace después puede
+// descontar eso (`descuento`, §7b): las rentas quedan pagadas completas —`monto` es lo que suman— pero lo que
+// de verdad se entrega es `monto − descuento`. El papel que él guarda tiene que explicarse solo: las rentas, lo
+// que ya se le había pagado de más, y lo que se entregó (`descuentoDelPago`, `entregadoDelPago` y
+// `totalesDePagos`, del núcleo; aquí no se resta ni se suma nada). Todo sale de lo que el pago GUARDÓ, nunca de
+// lo que las rentas cuestan hoy: el dueño del carro tiene ese papel en la mano, y una reimpresión que dijera
+// otra cifra entregada no sería el mismo comprobante.
+//
+// Y la palabra «descuento» no sale en el papel. La prueba de lo prohibido la tiene en su lista porque en un
+// contrato es lo que se le rebaja al CLIENTE, y esa prueba no puede saber de cuál se habla; en vez de aflojarla,
+// el papel dice lo que el dueño del carro entiende sin conocer el sistema: «lo que ya se le había pagado de más».
+//
 // El PDF lo hace el navegador (ADR-003): esta hoja se imprime con
 // Cmd + P → Guardar como PDF, y css/estilos.css (@media print) esconde todo lo
 // que no sea ella.
 import {
   costoDelSubarriendo, agruparPorDueno, totalSeleccionado, pagoAnulado,
+  descuentoDelPago, entregadoDelPago, descuentoInvalido, totalesDePagos,
 } from '../nucleo/liquidacion.js';
 import { atrasoDe } from '../nucleo/contrato.js';
-import { q, suma } from '../nucleo/dinero.js';
+import { q } from '../nucleo/dinero.js';
 import { diasEntre, esFechaISO } from '../nucleo/fechas.js';
 import { dinero, fecha } from '../ui.js';
 
@@ -167,7 +180,8 @@ const cuantas = (filas, motivo) => filas.filter((f) => f.sinCosto === motivo).le
  * - `pago`: el pago a un dueño ya guardado (`id`, `fecha`, `forma`, `monto`,
  *   `contratos[]`, `numero`; §7 del diseño). Sin `numero` no hay papel: el
  *   correlativo es lo que lo vuelve un comprobante y no una hoja cualquiera.
- *   Un pago ANULADO tampoco: ya no pagó nada (ver `pagoAnulado`) y el papel lo afirmaría.
+ *   Un pago ANULADO tampoco: ya no pagó nada (ver `pagoAnulado`) y el papel lo afirmaría. Ni uno
+ *   con un `descuento` imposible (`descuentoInvalido`): la cifra entregada saldría de un dato dañado.
  * - `dueno`: el registro del dueño (`nombre`, `telefono`, `nit`) o `null` para
  *   el grupo de contratos viejos con el dueño escrito a mano; ahí el nombre es el
  *   que se escribió en los contratos, y teléfono y NIT salen en blanco en vez de
@@ -209,6 +223,15 @@ export function armarComprobante({
   if (!(q(pago.monto) > 0)) {
     throw new Error(`El pago N° ${pago.numero} no trae monto: un comprobante por Q0.00 no prueba que se pagó nada.`);
   }
+  // `guardarPagoDueno` no deja guardar un descuento negativo ni mayor que el monto. Si uno llega así, el
+  // documento se dañó, y el núcleo lo recorta para que una cuenta no entregue de más; un papel no se recorta:
+  // diría una cifra entregada que nadie decidió, y saldría de la empresa.
+  if (descuentoInvalido(pago)) {
+    throw new Error(
+      `El pago N° ${pago.numero} trae un descuento que no es posible (no es un monto, es negativo o es mayor que lo que suman sus rentas): `
+      + 'el comprobante diría una cifra entregada que nadie decidió. Revisa ese pago antes de imprimirlo.',
+    );
+  }
   if (!esFechaISO(hoy)) {
     throw new Error('Falta la fecha de hoy (hoy): lo que queda pendiente es «al día de hoy» y el papel tiene que decir cuál es.');
   }
@@ -218,6 +241,10 @@ export function armarComprobante({
       + 'Sin ella no se sabe qué costos no se pudieron leer, y se imprimirían cifras que quizá no son.',
     );
   }
+
+  // Del núcleo, no restados aquí: lo que se descontó y lo que de verdad se entregó con este pago.
+  const descuento = descuentoDelPago(pago);
+  const entregado = entregadoDelPago(pago);
 
   const idsDelPago = new Set(Array.isArray(pago.contratos) ? pago.contratos.filter(Boolean) : []);
   if (idsDelPago.size === 0) {
@@ -263,9 +290,13 @@ export function armarComprobante({
   const esEste = (p) => p === pago || (pago.id && p?.id === pago.id);
   const delGrupo = grupo.cuenta.gruposDePago.find((g) => g.pagos.some(esEste));
   const lugar = delGrupo ? delGrupo.pagos.findIndex(esEste) : -1;
-  const hastaAqui = lugar > 0 ? suma(...delGrupo.pagos.slice(0, lugar + 1).map((p) => p.monto)) : q(pago.monto);
+  // Lo que suman los pagos de la cadena hasta este (la suma es del núcleo: `totalesDePagos`).
+  const hasta = totalesDePagos(lugar > 0 ? delGrupo.pagos.slice(0, lugar + 1) : [pago]);
+  const hastaAqui = hasta.monto;
+  // De cada comprobante anterior se dice lo que ese papel dice como «Total pagado»: lo que se ENTREGÓ.
+  // Sin descuento es su `monto`, igual que siempre.
   const anteriores = lugar > 0 && hastaAqui <= delGrupo.ahora
-    ? delGrupo.pagos.slice(0, lugar).map((p) => ({ numero: p.numero, monto: q(p.monto) }))
+    ? delGrupo.pagos.slice(0, lugar).map((p) => ({ numero: p.numero, monto: entregadoDelPago(p) }))
     : [];
 
   // ¿Las rentas de «Le pagué» todavía suman lo que se pagó? Se le pregunta al
@@ -293,15 +324,22 @@ export function armarComprobante({
     },
     pagado: {
       filas: filasPagadas,
-      // El monto que se guardó, no una suma de las filas: es lo que de verdad se
-      // pagó ese día y es lo que enseña la pantalla de «ya pagado».
+      // El monto que se guardó, no una suma de las filas: es lo que las rentas de este pago suman y
+      // lo que se comparó contra ellas el día que se hizo.
       total: q(pago.monto),
+      // De ese `total`, lo que no se entregó porque ya se le había pagado de más antes (0 si no hubo), y
+      // lo que de verdad salió de las manos de él: la cifra de «Total pagado» cuando hay descuento.
+      // Los dos salen de lo guardado en el pago, así que una reimpresión dice lo mismo que el original.
+      descuento,
+      entregado,
       forma: String(pago.forma ?? ''),
       cambiaron,
       // Los comprobantes anteriores que este completa (vacío si es un pago normal) y
-      // lo que suman junto con este: lo que el dueño del carro lleva recibido por esas rentas.
+      // lo que suman junto con este: lo que el dueño del carro lleva recibido por esas rentas,
+      // con la parte de eso que fue lo ya pagado de más (`acumuladoDescuento`) para que la cuenta cuadre.
       anteriores,
       acumulado: anteriores.length ? hastaAqui : q(pago.monto),
+      acumuladoDescuento: anteriores.length ? hasta.descuento : descuento,
     },
     pendiente: {
       filas: filasPendientes,
@@ -370,9 +408,85 @@ function tablaHtml(filas, pie, extra = '') {
  * La línea que dice la verdad cuando el detalle ya no suma lo pagado. Solo dice
  * qué se pagó y que las rentas cambiaron: no escribe la suma nueva, que
  * contradiría el total del comprobante que el dueño del carro ya tiene.
+ *
+ * Con un descuento, «lo pagado» no es lo que suman las rentas (parte de eso ya estaba pagado de más): la
+ * nota dice lo que las rentas sumaban al pagar, que es contra lo que se compara el detalle, y que lo
+ * entregado no cambia.
  */
-function notaDeCambio(totalPagado) {
-  return `<p class="comp-nota-cambio">Nota: lo pagado fue ${dinero(totalPagado)}. Las rentas de esta lista cambiaron después del pago, por eso su detalle ya no suma esa cifra.</p>`;
+function notaDeCambio(p) {
+  if (p.descuento > 0) {
+    return `<p class="comp-nota-cambio">Nota: al hacer este pago las rentas de esta lista sumaban ${dinero(p.total)}. Cambiaron después, por eso su detalle ya no suma esa cifra. Lo entregado con este comprobante, ${dinero(p.entregado)}, es lo que se pagó ese día y no cambia.</p>`;
+  }
+  return `<p class="comp-nota-cambio">Nota: lo pagado fue ${dinero(p.total)}. Las rentas de esta lista cambiaron después del pago, por eso su detalle ya no suma esa cifra.</p>`;
+}
+
+/**
+ * La nota que explica el descuento a quien no conoce el sistema: de dónde sale la resta y por qué lo
+ * entregado es menos que lo que suman las rentas. Solo lleva cifras del propio dueño del carro (lo que se le
+ * pagó de más, lo que suman sus rentas, lo que se le entregó) y ninguna palabra del negocio de Best Price.
+ *
+ * No nombra de cuál comprobante viene lo pagado de más: el pago guarda cuánto se descontó, no contra cuál
+ * (un descuento se reparte entre los pagos de más que hubiera), y decirlo con lo que las rentas cuestan HOY
+ * haría que la reimpresión dijera algo distinto al papel que él ya tiene.
+ *
+ * Cuando lo descontado es todo lo que suman las rentas no se entregó dinero, y se dice así: «Forma de pago:
+ * Efectivo» sobre un pago de Q0.00 haría pensar que sí.
+ */
+function notaDeDescuento(p) {
+  const queda = p.anteriores.length ? 'La diferencia queda pagada' : 'Las rentas de esta lista quedan pagadas';
+  const entrega = p.entregado > 0
+    ? `lo que se entregó con este comprobante fue ${dinero(p.entregado)}`
+    : 'con este comprobante no se entregó dinero';
+  return `<p class="comp-nota-cambio">Nota: antes se le pagaron ${dinero(p.descuento)} de más. Esa cantidad no se entrega otra vez: se resta de este pago. ${queda} por completo (${dinero(p.total)}) y ${entrega}.</p>`;
+}
+
+/**
+ * Las notas bajo la tabla de «Le pagué», en este orden: primero qué se descontó (si hubo), que es lo que
+ * explica por qué el total es menos que las rentas, y después lo que cambió desde el pago (si cambió). Un
+ * pago que completa a otros dice eso y no el «cambiaron» a secas (ver `anteriores`).
+ */
+function notasDePagado(p) {
+  const notas = [];
+  if (p.descuento > 0) notas.push(notaDeDescuento(p));
+  if (p.anteriores.length) notas.push(notaDeComplemento(p));
+  else if (p.cambiaron) notas.push(notaDeCambio(p));
+  return notas.join('\n    ');
+}
+
+/** Cómo se dice la forma de pago: con dinero entregado, la forma; sin él, que no se entregó nada. */
+function lineaDeForma(p) {
+  if (p.descuento > 0 && p.entregado === 0) {
+    return '<p class="comp-forma">Forma de pago: <strong>Sin entrega de dinero</strong></p>';
+  }
+  return `<p class="comp-forma">Forma de pago: <strong>${esc(textoDeForma(p.forma))}</strong></p>`;
+}
+
+/**
+ * El pie de la tabla de «Le pagué». Sin descuento es la fila de siempre, «Total pagado». Con descuento son
+ * tres, y la cuenta se lee de arriba abajo: lo que suman las rentas de este pago, menos lo que ya se le había
+ * pagado de más, igual al total pagado (lo que se entregó). Cada fila dice qué es, sin que haga falta
+ * conocer el sistema.
+ */
+function pieDePagado(p) {
+  if (!(p.descuento > 0)) {
+    return `<tr>
+          <th scope="row" colspan="5">Total pagado</th>
+          <td class="num">${dinero(p.total)}</td>
+        </tr>`;
+  }
+  const suman = p.anteriores.length ? 'Diferencia pagada con este comprobante' : 'Rentas pagadas con este comprobante';
+  return `<tr class="comp-pie-suma">
+          <th scope="row" colspan="5">${suman}</th>
+          <td class="num">${dinero(p.total)}</td>
+        </tr>
+        <tr class="comp-pie-menos">
+          <th scope="row" colspan="5">Menos: lo que ya se le había pagado de más</th>
+          <td class="num">${dinero(-p.descuento)}</td>
+        </tr>
+        <tr class="comp-pie-total">
+          <th scope="row" colspan="5">Total pagado</th>
+          <td class="num">${dinero(p.entregado)}</td>
+        </tr>`;
 }
 
 /**
@@ -394,7 +508,12 @@ function textoDeAnteriores(anteriores) {
  * cuánto suma todo junto.
  */
 function notaDeComplemento(p) {
-  return `<p class="comp-nota-cambio">Nota: este pago completa ${textoDeAnteriores(p.anteriores)}. Las rentas de esta lista cambiaron de monto después de ese pago, y esto es la diferencia. En total, por estas rentas se le han pagado ${dinero(p.acumulado)}.</p>`;
+  // Si en la cadena hubo lo ya pagado de más, el total incluye esa parte, que no se entregó otra vez:
+  // los comprobantes dicen lo que se entregó y la suma de ellos no sería este total sin esta aclaración.
+  const deMas = p.acumuladoDescuento > 0
+    ? `, de los cuales ${dinero(p.acumuladoDescuento)} ya se le habían pagado de más antes y no se entregaron otra vez`
+    : '';
+  return `<p class="comp-nota-cambio">Nota: este pago completa ${textoDeAnteriores(p.anteriores)}. Las rentas de esta lista cambiaron de monto después de ese pago, y esto es la diferencia. En total, por estas rentas se le han pagado ${dinero(p.acumulado)}${deMas}.</p>`;
 }
 
 /** Una diferencia pendiente: una fila que dice de dónde viene y cuánto falta. */
@@ -467,12 +586,9 @@ export function htmlComprobante(m) {
 
   <section class="comp-seccion comp-pagado">
     <h2>Le pagué</h2>
-    ${tablaHtml(m.pagado.filas, `<tr>
-          <th scope="row" colspan="5">Total pagado</th>
-          <td class="num">${dinero(m.pagado.total)}</td>
-        </tr>`)}
-    <p class="comp-forma">Forma de pago: <strong>${esc(textoDeForma(m.pagado.forma))}</strong></p>
-    ${m.pagado.anteriores.length ? notaDeComplemento(m.pagado) : (m.pagado.cambiaron ? notaDeCambio(m.pagado.total) : '')}
+    ${tablaHtml(m.pagado.filas, pieDePagado(m.pagado))}
+    ${lineaDeForma(m.pagado)}
+    ${notasDePagado(m.pagado)}
   </section>
 
   <section class="comp-seccion comp-pendiente">
@@ -510,9 +626,14 @@ function avisosDePantalla(m) {
     );
   }
   if (m.pagado.cambiaron) {
+    // Con un descuento, «lo pagado» (lo entregado) no es contra lo que se compara el detalle: es lo que las
+    // rentas sumaban al pagar. Decir «lo pagado ya no coincide» sería afirmar algo que no se comparó.
     partes.push(
-      `Lo pagado (${dinero(m.pagado.total)}) ya no coincide con el detalle de las rentas de este comprobante: alguna cambió después del pago. `
-      + 'El papel lo dice en una nota y mantiene el total pagado. Revisa qué cambió antes de mandarlo.',
+      m.pagado.descuento > 0
+        ? `Las rentas de este comprobante sumaban ${dinero(m.pagado.total)} cuando se pagó y ya no coinciden con su detalle: alguna cambió después del pago. `
+          + `El papel lo dice en una nota y mantiene lo entregado (${dinero(m.pagado.entregado)}). Revisa qué cambió antes de mandarlo.`
+        : `Lo pagado (${dinero(m.pagado.total)}) ya no coincide con el detalle de las rentas de este comprobante: alguna cambió después del pago. `
+          + 'El papel lo dice en una nota y mantiene el total pagado. Revisa qué cambió antes de mandarlo.',
     );
   }
   if (!partes.length) return '';

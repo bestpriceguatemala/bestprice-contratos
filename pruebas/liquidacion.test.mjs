@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import {
   costoDelSubarriendo, esPagableAlDueno, cuentaDeDueno, agruparPorDueno, totalSeleccionado,
   elegirParaPago, totalGeneral, pagoAnulado, pagadoDeMas, descuentoDelPago, entregadoDelPago,
-  totalPagadoDeMas, descuentoMaximo, descuentoSinRespaldo,
+  totalPagadoDeMas, descuentoMaximo, descuentoSinRespaldo, totalesDePagos, descuentoInvalido,
 } from '../js/nucleo/liquidacion.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
 import { resumen } from '../js/nucleo/contrato.js';
@@ -1826,4 +1826,55 @@ test('descuentoSinRespaldo: no afirma nada cuando la comparación no es de fiar'
   assert.equal(descuentoSinRespaldo(enPie, ['r2']), 0, 'con el costo de r2 sin leer no se sabe cuánto sobra: no se inventa una deuda');
   const sinCosto = cuentaDeDueno({ contratos: [corregidaHaciaAbajo('r2', { costoDia: 0 }), c1], pagos: [p2, p7] });
   assert.equal(descuentoSinRespaldo(sinCosto, []), 0, 'y con r2 sin costo anotado tampoco');
+});
+
+// --- lo que el comprobante le pregunta al núcleo: la suma de varios pagos y si un descuento es posible ---
+
+test('totalesDePagos: lo que cubren varios pagos, lo que se descontó y lo que de verdad se entregó, sin errores de decimales', () => {
+  assert.deepEqual(totalesDePagos([]), { monto: 0, descuento: 0, entregado: 0 }, 'una lista vacía de verdad: nada pagado');
+  assert.deepEqual(
+    totalesDePagos([{ monto: 2100 }, { monto: 1200, descuento: 600 }, { monto: 450 }]),
+    { monto: 3750, descuento: 600, entregado: 3150 },
+  );
+  // 0.1 + 0.2 no es 0.3 en binario: la suma pasa por q().
+  assert.deepEqual(
+    totalesDePagos([{ monto: 100.1, descuento: 0.2 }, { monto: 0.2 }]),
+    { monto: 100.3, descuento: 0.2, entregado: 100.1 },
+  );
+  // Un descuento dañado no infla lo entregado ni lo descontado (el de cada pago, `descuentoDelPago`).
+  assert.deepEqual(totalesDePagos([{ monto: 1200, descuento: -500 }, { monto: 800, descuento: 5000 }]), {
+    monto: 2000, descuento: 800, entregado: 1200,
+  });
+});
+
+test('totalesDePagos: es la misma suma que hacen los grupos de pagos — `pagado` y `descuento` salen de aquí', () => {
+  const { cuenta, p2, p7 } = conSobrePago({ descuento: 600 });
+  const grupos = cuenta([p2, p7]).gruposDePago;
+  assert.equal(grupos.length, 2);
+  for (const g of grupos) {
+    const t = totalesDePagos(g.pagos);
+    assert.equal(g.pagado, t.monto);
+    assert.equal(g.descuento, t.descuento);
+  }
+  assert.deepEqual(totalesDePagos([p2, p7]), { monto: 3300, descuento: 600, entregado: 2700 });
+});
+
+test('totalesDePagos LANZA si no recibe una lista: «no llegó» no es «no se pagó nada»', () => {
+  for (const mala of [undefined, null, {}, 'pagos', 42]) {
+    assert.throws(() => totalesDePagos(mala), { name: 'TypeError', message: /«pagos» debe ser una lista/ }, String(mala));
+  }
+});
+
+test('descuentoInvalido: ausente, vacío o cero no lo es; negativo, mayor que el monto o que no es número, sí', () => {
+  for (const bien of [undefined, null, '', 0, 600, 1200, '600', 0.01]) {
+    assert.equal(descuentoInvalido({ monto: 1200, descuento: bien }), false, `con ${JSON.stringify(bien)}`);
+  }
+  assert.equal(descuentoInvalido({ monto: 1200 }), false, 'un pago de antes del descuento');
+  assert.equal(descuentoInvalido(undefined), false, 'sin pago no hay descuento imposible');
+  for (const mal of [-1, -500, 1200.01, 5000, 'mucho', NaN, Infinity, {}, [5]]) {
+    assert.equal(descuentoInvalido({ monto: 1200, descuento: mal }), true, `con ${String(mal)}`);
+  }
+  // El tope es el monto del pago: el mismo descuento es posible en un pago grande e imposible en uno chico.
+  assert.equal(descuentoInvalido({ monto: 500, descuento: 600 }), true);
+  assert.equal(descuentoInvalido({ monto: 2000, descuento: 600 }), false);
 });

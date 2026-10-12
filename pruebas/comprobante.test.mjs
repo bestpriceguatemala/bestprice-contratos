@@ -23,7 +23,9 @@ import { readFileSync } from 'node:fs';
 import {
   armarComprobante, htmlComprobante, pintarComprobante, MEMBRETE,
 } from '../js/pantallas/comprobante.js';
-import { cuentaDeDueno, totalSeleccionado } from '../js/nucleo/liquidacion.js';
+import {
+  cuentaDeDueno, totalSeleccionado, pagadoDeMas, descuentoDelPago, entregadoDelPago,
+} from '../js/nucleo/liquidacion.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { comisionDe } from '../js/nucleo/comision.js';
@@ -108,7 +110,7 @@ const devueltoConSaldo = (datos) => guardado(recibido(salida(datos), 2));
  * Mientras tanto el dueño del carro cobra `costoDia` por día.
  */
 function conMargen({
-  id, numero, placas, cliente, costoDia, fechaSalida,
+  id, numero, placas, cliente, costoDia, fechaSalida, duenoId = 'd1', dueno = 'Mario López Estrada',
 }) {
   const sinCierre = construirContrato({
     id,
@@ -117,9 +119,9 @@ function conMargen({
     ajeno: true,
     carro: null,
     carroAjeno: {
-      placas, tipo: 'Pickup', marca: 'Toyota', color: 'Blanco', modelo: '2021', dueno: 'Mario López Estrada', costoDia,
+      placas, tipo: 'Pickup', marca: 'Toyota', color: 'Blanco', modelo: '2021', dueno, costoDia,
     },
-    duenoId: 'd1',
+    duenoId,
     fechaSalida,
     dias: 4,
     precioDia: 850,
@@ -772,6 +774,9 @@ test('el modelo solo tiene las llaves permitidas: una llave nueva (comision, uti
     '.dueno', '.dueno.nombre', '.dueno.telefono', '.dueno.nit',
     '.pagado', '.pagado.filas', '.pagado.total', '.pagado.forma', '.pagado.cambiaron',
     '.pagado.anteriores', '.pagado.acumulado',
+    // El descuento (12 oct): lo que ya se le había pagado de más y lo que de verdad se le entregó son
+    // cifras SUYAS —su propio dinero—, y el papel tiene que decirlas para explicar su propio total.
+    '.pagado.descuento', '.pagado.entregado', '.pagado.acumuladoDescuento',
     '.pendiente', '.pendiente.filas', '.pendiente.diferencias', '.pendiente.total', '.pendiente.incompleto',
     ...['pagado', 'pendiente'].flatMap((t) => ['fecha', 'placas', 'cliente', 'dias', 'diasAtraso', 'costoDia', 'monto', 'sinCosto']
       .map((k) => `.${t}.filas[].${k}`)),
@@ -1117,13 +1122,13 @@ test('con diferencias el modelo sigue teniendo solo las llaves permitidas, y el 
   const complemento = armarComprobante(entrada({ pago: p9, contratos: CRECIDAS, pagos: [PAGO_5, PAGO_7, p9] }));
   const nuevas = (modelo) => [...new Set(llaves(modelo))].filter((k) => /anteriores|acumulado|diferencias/.test(k)).sort();
   assert.deepEqual(nuevas(original), [
-    '.pagado.acumulado', '.pagado.anteriores', '.pendiente.diferencias',
+    '.pagado.acumulado', '.pagado.acumuladoDescuento', '.pagado.anteriores', '.pendiente.diferencias',
     '.pendiente.diferencias[].ahora', '.pendiente.diferencias[].comprobantes', '.pendiente.diferencias[].monto',
     '.pendiente.diferencias[].pagado', '.pendiente.diferencias[].placas', '.pendiente.diferencias[].sinCosto',
   ]);
   assert.deepEqual(nuevas(complemento), [
-    '.pagado.acumulado', '.pagado.anteriores', '.pagado.anteriores[].monto', '.pagado.anteriores[].numero',
-    '.pendiente.diferencias',
+    '.pagado.acumulado', '.pagado.acumuladoDescuento', '.pagado.anteriores', '.pagado.anteriores[].monto',
+    '.pagado.anteriores[].numero', '.pendiente.diferencias',
   ]);
 
   // Nada del negocio de Best Price en el papel de la diferencia, ni en su versión en pantalla.
@@ -1139,4 +1144,622 @@ test('con diferencias el modelo sigue teniendo solo las llaves permitidas, y el 
     assert.ok(!/data-contrato|data-id|data-json/i.test(html));
     for (const c of CONTRATOS) assert.ok(!html.includes(c.id) && !pantalla.includes(c.id), `lleva el id ${c.id}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// El DESCUENTO en el papel (12 oct 2026).
+//
+// A Ofelia Ramos se le pagó de más: la renta N.° 21 se pagó con Q2,100 (comprobante N.° 12) y se
+// corrigió después a Q1,500. Al pagarle la renta N.° 22 (Q1,200) él descontó esos Q600 y le entregó
+// Q600. El pago guarda `monto` = Q1,200 (lo que suman las rentas) y `descuento` = Q600; lo entregado
+// es la resta, y lo dice el núcleo (`entregadoDelPago`).
+//
+// Antes de este cambio el papel decía «Total pagado Q1,200.00» sobre una renta de Q1,200: lo que NO
+// salió de sus manos. Y ese papel va con el dueño del carro, que cuadra su cuenta con él. Un papel
+// cuyas filas no explican su total es peor que ninguno: lo primero que concluye quien lo nota es que
+// la contabilidad es descuidada.
+//
+// Todo sale de los constructores reales (`construirContrato`, `construirCierre`, `construirPagoDueno`,
+// `pagoDuenoParaGuardar`): ningún pago ni contrato escrito a mano.
+// ---------------------------------------------------------------------------
+
+const OFELIA = construirDueno(
+  { id: 'd3', actualizado: AHORA },
+  {
+    nombre: 'Ofelia Ramos', telefono: '4444-5678', nit: '7650123-0', nota: 'NOTA-INTERNA-DEL-DUENO',
+  },
+);
+const DE_OFELIA = { duenoId: 'd3', dueno: 'Ofelia Ramos' };
+const DATOS_21 = {
+  id: 'ctr-o21', numero: 21, placas: 'P-212OOO', cliente: ROSA, costoDia: 300, dias: 4, fechaSalida: '2026-08-20', ...DE_OFELIA,
+};
+const DATOS_22 = {
+  id: 'ctr-o22', numero: 22, placas: 'P-313OOO', cliente: LUCIA, costoDia: 240, dias: 4, fechaSalida: '2026-09-25', ...DE_OFELIA,
+};
+const DATOS_23 = {
+  id: 'ctr-o23', numero: 23, placas: 'P-414OOO', cliente: JUAN, costoDia: 190, dias: 4, fechaSalida: '2026-09-28', ...DE_OFELIA,
+};
+
+/**
+ * Una renta de Ofelia, cerrada con `atraso` días de atraso. Con `corregidaA`, el cierre se corrige
+ * después a esos días de atraso —como «Guardar correcciones»—: si baja, el cliente queda con crédito
+ * y la renta sigue cerrada; si sube, el cliente paga lo de más y vuelve a quedar cerrada.
+ */
+function rentaDeOfelia(datos, atraso, corregidaA = null) {
+  const base = saldado(recibido(salida(datos), atraso));
+  if (corregidaA === null) return guardado(base);
+  const corregido = recibido(base, corregidaA);
+  return guardado(resumen(corregido).saldo > 0 ? saldado(corregido) : corregido);
+}
+
+/**
+ * El escenario completo. La renta 21 se pagó con Q2,100 (3 días de atraso) y hoy está corregida a
+ * `corregida21` días de atraso (1 → Q1,500: Q600 de más). La renta que se paga con descuento es
+ * `nueva` (por omisión la 22, con todo lo que el dueño del carro no debe ver, Q1,200 con un día de
+ * atraso); la 23 (Q760) queda por pagar.
+ */
+function escenarioOfelia({
+  descuento = 600, corregida21 = 1, nueva = null, datosNueva = DATOS_22, atrasoNueva = 1,
+} = {}) {
+  const antes21 = rentaDeOfelia(DATOS_21, 3);
+  const ahora21 = rentaDeOfelia(DATOS_21, 3, corregida21);
+  const nueva22 = nueva ?? conMargen({
+    id: datosNueva.id, numero: datosNueva.numero, placas: datosNueva.placas, cliente: datosNueva.cliente,
+    costoDia: datosNueva.costoDia, fechaSalida: datosNueva.fechaSalida, ...DE_OFELIA,
+  });
+  const pendiente = rentaDeOfelia(DATOS_23, 0);
+  const p12 = pagoDuenoParaGuardar(
+    construirPagoDueno({
+      duenoId: 'd3', fecha: '2026-09-10', forma: 'efectivo', contratos: [antes21], pagos: [], idsMarcados: ['ctr-o21'], costoSinLeer: [],
+    }),
+    { id: 'p12', numero: 12, ahora: AHORA },
+  );
+  const contratos = [ahora21, nueva22, pendiente];
+  const p14 = pagoDuenoParaGuardar(
+    construirPagoDueno({
+      duenoId: 'd3',
+      fecha: '2026-10-01',
+      forma: 'efectivo',
+      contratos,
+      pagos: [p12],
+      idsMarcados: [nueva22.id],
+      descuento,
+      costoSinLeer: [],
+    }),
+    { id: 'p14', numero: 14, ahora: AHORA },
+  );
+  return {
+    contratos, p12, p14, nueva22, ahora21, pendiente, atrasoNueva,
+    entrada: (extra = {}) => ({
+      pago: p14, dueno: OFELIA, contratos, pagos: [p12, p14], costoSinLeer: [], hoy: HOY, ...extra,
+    }),
+  };
+}
+
+/** Las filas del pie de «Le pagué», como [etiqueta, cifra]: lo que alguien lee de arriba abajo en el papel. */
+function pieDePagado(html) {
+  const pagado = html.slice(html.indexOf('<section class="comp-seccion comp-pagado">'), html.indexOf('<section class="comp-seccion comp-pendiente">'));
+  const pie = pagado.match(/<tfoot>([^]*?)<\/tfoot>/)[1];
+  return [...pie.matchAll(/<tr[^>]*>\s*<th[^>]*>([^<]*)<\/th>\s*<td[^>]*>([^<]*)<\/td>\s*<\/tr>/g)].map((m) => [m[1], m[2]]);
+}
+/** El texto de cada nota (`comp-nota-cambio`) de «Le pagué». */
+function notasDe(html) {
+  const pagado = html.slice(html.indexOf('<section class="comp-seccion comp-pagado">'), html.indexOf('<section class="comp-seccion comp-pendiente">'));
+  return [...pagado.matchAll(/<p class="comp-nota-cambio">([^<]*)<\/p>/g)].map((m) => m[1]);
+}
+
+test('descuento, el escenario: se pagaron Q2,100, hoy cuesta Q1,500, y se paga una renta de Q1,200 descontando Q600', () => {
+  const e = escenarioOfelia();
+  assert.equal(estadoContrato(e.ahora21), 'cerrado');
+  assert.equal(estadoContrato(e.nueva22), 'cerrado');
+  assert.equal(e.p12.monto, 2100);
+  assert.equal(resumen(e.ahora21).costoSubarriendo, 1500, 'hoy cuesta Q1,500: se le pagaron Q600 de más');
+  assert.equal(resumen(e.nueva22).costoSubarriendo, 1200);
+  assert.equal(e.p14.monto, 1200, 'monto = lo que suman las rentas, como siempre');
+  assert.equal(e.p14.descuento, 600);
+  assert.equal(entregadoDelPago(e.p14), 600, 'lo que de verdad salió de sus manos');
+  assert.deepEqual(e.p14.contratos, ['ctr-o22']);
+  // El descuento tiene de dónde salir: después de él ya no sobra nada.
+  const cuenta = cuentaDeDueno({ contratos: e.contratos, pagos: [e.p12, e.p14] });
+  assert.deepEqual(pagadoDeMas(cuenta, []), []);
+  assert.equal(pagadoDeMas(cuentaDeDueno({ contratos: e.contratos, pagos: [e.p12] }), [])[0].deMas, 600, 'y sin el descuento sobrarían los Q600');
+});
+
+test('descuento: el modelo dice las rentas, lo descontado y lo entregado — del núcleo, no restado aquí', () => {
+  const e = escenarioOfelia();
+  const m = armarComprobante(e.entrada());
+  assert.equal(m.numero, 14);
+  assert.equal(m.pagado.total, 1200, 'lo que suman las rentas de este pago');
+  assert.equal(m.pagado.descuento, 600);
+  assert.equal(m.pagado.entregado, 600);
+  assert.equal(m.pagado.entregado, entregadoDelPago(e.p14), 'la misma cifra que el núcleo y que «Ya pagado» de la ficha');
+  assert.equal(m.pagado.descuento, descuentoDelPago(e.p14));
+  assert.deepEqual(placasDe(m.pagado.filas), ['P-313OOO']);
+  assert.equal(m.pagado.filas[0].monto, 1200);
+  assert.deepEqual(m.pagado.anteriores, []);
+});
+
+test('descuento: el pie de «Le pagué» se lee de arriba abajo — rentas, menos lo ya pagado de más, igual al total pagado', () => {
+  const html = htmlComprobante(armarComprobante(escenarioOfelia().entrada()));
+  assert.deepEqual(pieDePagado(html), [
+    ['Rentas pagadas con este comprobante', 'Q1,200.00'],
+    ['Menos: lo que ya se le había pagado de más', '-Q600.00'],
+    ['Total pagado', 'Q600.00'],
+  ]);
+  // La cuenta cuadra con las filas de arriba: la tabla suma las rentas, y la resta da el total (sumado AQUÍ, no en el módulo).
+  const m = armarComprobante(escenarioOfelia().entrada());
+  assert.equal(suma(...m.pagado.filas.map((f) => f.monto)), 1200);
+  assert.equal(suma(1200, -600), 600);
+  // «Total pagado» ya no es lo que suman las rentas (Q1,200): ese era el papel equivocado.
+  assert.ok(!/Total pagado<\/th>\s*<td class="num">Q1,200\.00/.test(html), 'el total pagado no es Q1,200');
+});
+
+test('descuento: el papel dice con palabras de dónde sale la resta, para quien no conoce el sistema', () => {
+  const html = htmlComprobante(armarComprobante(escenarioOfelia().entrada()));
+  const [nota, ...mas] = notasDe(html);
+  assert.deepEqual(mas, [], 'una sola nota: las rentas no cambiaron');
+  assert.equal(
+    nota,
+    'Nota: antes se le pagaron Q600.00 de más. Esa cantidad no se entrega otra vez: se resta de este pago. '
+    + 'Las rentas de esta lista quedan pagadas por completo (Q1,200.00) y lo que se entregó con este comprobante fue Q600.00.',
+  );
+  // Va dentro de «Le pagué», antes de «Queda pendiente», y el pie con la cuenta va antes que la nota.
+  assert.ok(html.indexOf('Le pagué') < html.indexOf('Menos: lo que ya se le había pagado de más'));
+  assert.ok(html.indexOf('Menos: lo que ya se le había pagado de más') < html.indexOf('Nota: antes se le pagaron'));
+  assert.ok(html.indexOf('Nota: antes se le pagaron') < html.indexOf('Queda pendiente'));
+  assert.ok(html.includes('Forma de pago: <strong>Efectivo</strong>'), 'la forma es de lo que se entregó');
+});
+
+test('descuento: la nota de «cambiaron» NO se dispara sola — las rentas no cambiaron, el total difiere por el descuento', () => {
+  const e = escenarioOfelia();
+  const m = armarComprobante(e.entrada());
+  assert.equal(m.pagado.cambiaron, false);
+  const html = htmlComprobante(m);
+  assert.ok(!html.includes('cambiaron'), 'ni la nota de «cambiaron» ni la de «completa»');
+  assert.ok(!html.includes('ya no suma'));
+  // Ni el aviso al dueño del negocio en pantalla: no hay nada que revisar.
+  const c = contenedorFalso();
+  pintarComprobante(c, e.entrada());
+  assert.ok(!c.innerHTML.includes('ya no coincide'));
+  assert.ok(!c.innerHTML.includes('barra-lectura-fallida'));
+});
+
+test('descuento: si las rentas SÍ cambiaron después, la nota de cambio lo dice y no confunde lo entregado con lo que sumaban', () => {
+  // La renta 22 (la de este pago) se corrige DESPUÉS del pago, de 1 a 0 días de atraso: hoy cuesta Q960.
+  const base = escenarioOfelia({ nueva: rentaDeOfelia(DATOS_22, 1) });
+  assert.equal(base.p14.monto, 1200);
+  const corregida = rentaDeOfelia(DATOS_22, 1, 0);
+  assert.equal(resumen(corregida).costoSubarriendo, 960);
+  const e = { ...base, contratos: base.contratos.map((c) => (c.id === 'ctr-o22' ? corregida : c)) };
+  const m = armarComprobante(base.entrada({ contratos: e.contratos }));
+  assert.equal(m.pagado.cambiaron, true);
+  assert.equal(m.pagado.total, 1200, 'lo que sumaban al pagar: no se recalcula');
+  assert.equal(m.pagado.entregado, 600, 'y lo entregado tampoco');
+  const html = htmlComprobante(m);
+  assert.deepEqual(pieDePagado(html), [
+    ['Rentas pagadas con este comprobante', 'Q1,200.00'],
+    ['Menos: lo que ya se le había pagado de más', '-Q600.00'],
+    ['Total pagado', 'Q600.00'],
+  ]);
+  const notas = notasDe(html);
+  assert.equal(notas.length, 2, 'la del descuento y la del cambio');
+  assert.ok(notas[0].startsWith('Nota: antes se le pagaron Q600.00 de más.'), 'primero lo que explica el total');
+  assert.equal(
+    notas[1],
+    'Nota: al hacer este pago las rentas de esta lista sumaban Q1,200.00. Cambiaron después, por eso su detalle ya no suma esa cifra. '
+    + 'Lo entregado con este comprobante, Q600.00, es lo que se pagó ese día y no cambia.',
+  );
+  assert.ok(!notas[1].includes('lo pagado fue'), 'no la frase de siempre, que con un descuento llamaría «pagado» a lo que sumaban las rentas');
+  // La fila de la renta sí dice lo que cuesta hoy (Q960.00), como siempre; lo que no se escribe es una suma nueva
+  // en el pie ni en las notas, que contradiría el comprobante que el dueño del carro ya tiene.
+  assert.equal(m.pagado.filas[0].monto, 960);
+  assert.ok(!notas.join(' ').includes(dinero(960)));
+  // Y el aviso para quien manda el papel, en pantalla, habla de lo mismo.
+  const c = contenedorFalso();
+  pintarComprobante(c, base.entrada({ contratos: e.contratos }));
+  const aviso = c.innerHTML.match(/<div class="barra-lectura-fallida[^"]*"[^>]*>[^]*?<\/div>/)[0];
+  assert.ok(aviso.includes('no-imprimir'));
+  assert.match(aviso, /sumaban Q1,200\.00 cuando se pagó y ya no coinciden/);
+  assert.match(aviso, /lo entregado \(Q600\.00\)/);
+  assert.ok(!/Lo pagado \(/.test(aviso), 'no la frase de siempre');
+});
+
+test('descuento y núcleo: la nota de cambio y los grupos del núcleo contestan igual en cada estado de la renta pagada', () => {
+  // El comprobante contesta «¿cambiaron las rentas?» comparando contra `monto`, no contra lo entregado; el núcleo
+  // (`gruposDePago`) compara `pagado` contra `ahora`. Con un descuento NO deben irse cada uno por su lado: si
+  // lo hicieran, el papel diría «cambiaron» donde la ficha dice que está a mano, o al revés.
+  const estados = [['sin cambios', 1, false], ['corregida hacia abajo', 0, true], ['corregida hacia arriba', 2, true]];
+  for (const [nombre, corregidaA, cambio] of estados) {
+    const base = escenarioOfelia({ nueva: rentaDeOfelia(DATOS_22, 1) });
+    const hoyEstaRenta = rentaDeOfelia(DATOS_22, 1, corregidaA);
+    assert.equal(estadoContrato(hoyEstaRenta), 'cerrado', `${nombre}: sigue cerrada`);
+    const contratos = base.contratos.map((c) => (c.id === 'ctr-o22' ? hoyEstaRenta : c));
+    const cuenta = cuentaDeDueno({ contratos, pagos: [base.p12, base.p14] });
+    const grupo = cuenta.gruposDePago.find((g) => g.pagos.some((p) => p.numero === 14));
+    const m = armarComprobante(base.entrada({ contratos }));
+    assert.equal(m.pagado.cambiaron, cambio, nombre);
+    assert.equal(grupo.diferencia !== 0, cambio, `${nombre}: el núcleo dice lo mismo`);
+    assert.equal(grupo.pagado, 1200, `${nombre}: el grupo compara el monto, descuento incluido`);
+    assert.equal(grupo.descuento, 600, nombre);
+    assert.equal(m.pagado.entregado, 600, `${nombre}: lo entregado no se mueve`);
+  }
+});
+
+test('descuento: una REIMPRESIÓN dice lo mismo — el descuento y lo entregado salen del pago guardado, no del costo de hoy', () => {
+  const e = escenarioOfelia({ nueva: rentaDeOfelia(DATOS_22, 1) });
+  const original = armarComprobante(e.entrada());
+  const pieOriginal = pieDePagado(htmlComprobante(original));
+
+  // (a) semanas después, con otra fecha de «hoy».
+  const despues = armarComprobante(e.entrada({ hoy: '2026-12-20' }));
+  assert.deepEqual(pieDePagado(htmlComprobante(despues)), pieOriginal);
+
+  // (b) la renta pagada cuesta otra cosa hoy (corregida hacia abajo y hacia arriba).
+  for (const corregidaA of [0, 2]) {
+    const contratos = e.contratos.map((c) => (c.id === 'ctr-o22' ? rentaDeOfelia(DATOS_22, 1, corregidaA) : c));
+    const m = armarComprobante(e.entrada({ contratos }));
+    assert.equal(m.pagado.total, 1200, `corregida a ${corregidaA}`);
+    assert.equal(m.pagado.descuento, 600);
+    assert.equal(m.pagado.entregado, 600, 'lo entregado no se recalcula con el costo de hoy');
+    assert.deepEqual(pieDePagado(htmlComprobante(m)), pieOriginal, 'el pie del papel es el mismo que el original');
+  }
+
+  // (c) el comprobante N.° 12, el que había pagado de más, se anula: el descuento se queda sin respaldo en la
+  // cuenta, pero el papel que él ya entregó no cambia (es lo que se entregó ese día).
+  const anulado12 = pagoDuenoParaGuardar(anularPagoDueno(e.p12, { fecha: '2026-10-03' }), { ahora: AHORA + 60000 });
+  const m12 = armarComprobante(e.entrada({ pagos: [anulado12, e.p14] }));
+  assert.equal(m12.pagado.entregado, 600);
+  assert.deepEqual(pieDePagado(htmlComprobante(m12)), pieOriginal);
+
+  // (d) con el pago llegando en la lista de pagos o sin llegar: igual.
+  assert.deepEqual(pieDePagado(htmlComprobante(armarComprobante(e.entrada({ pagos: [e.p12] })))), pieOriginal);
+
+  // (e) la misma hoja entera, byte por byte, cuando no cambió nada más que el «hoy» y el pago es el mismo.
+  assert.equal(
+    htmlComprobante(armarComprobante(e.entrada())).replace(/\s+/g, ' '),
+    htmlComprobante(armarComprobante(e.entrada({ pagos: [e.p14, e.p12] }))).replace(/\s+/g, ' '),
+    'el orden en que llegan los pagos no cambia el papel',
+  );
+});
+
+test('descuento: la reimpresión de un pago con descuento dañado en el modelo no sale — `descuento` no se pierde al sellar', () => {
+  // El campo sobrevive a `pagoDuenoParaGuardar` (es lo que se lee de la nube): sin esto, una reimpresión
+  // leería un pago sin descuento y diría que se entregaron Q1,200.
+  const e = escenarioOfelia();
+  const releido = pagoDuenoParaGuardar(JSON.parse(JSON.stringify(e.p14)), { ahora: AHORA + 1 });
+  assert.equal(releido.descuento, 600);
+  const m = armarComprobante(e.entrada({ pago: releido, pagos: [e.p12, releido] }));
+  assert.equal(m.pagado.entregado, 600);
+});
+
+test('descuento: si lo descontado es todo lo que suman las rentas, el papel dice que no se entregó dinero', () => {
+  // La renta 21 corregida a 0 días de atraso hoy cuesta Q1,200: se pagaron Q900 de más. La renta 22 de Q800 se paga
+  // descontando los Q800 completos.
+  const e = escenarioOfelia({
+    corregida21: 0, nueva: rentaDeOfelia({ ...DATOS_22, costoDia: 200 }, 0), descuento: 800,
+  });
+  assert.equal(e.p14.monto, 800);
+  assert.equal(entregadoDelPago(e.p14), 0);
+  const m = armarComprobante(e.entrada());
+  assert.equal(m.pagado.entregado, 0);
+  const html = htmlComprobante(m);
+  assert.deepEqual(pieDePagado(html), [
+    ['Rentas pagadas con este comprobante', 'Q800.00'],
+    ['Menos: lo que ya se le había pagado de más', '-Q800.00'],
+    ['Total pagado', 'Q0.00'],
+  ]);
+  assert.ok(html.includes('Forma de pago: <strong>Sin entrega de dinero</strong>'), 'no «Efectivo» sobre un pago de Q0.00');
+  assert.ok(!html.includes('Forma de pago: <strong>Efectivo'));
+  assert.ok(notasDe(html)[0].endsWith('quedan pagadas por completo (Q800.00) y con este comprobante no se entregó dinero.'));
+  assert.ok(!html.includes('lo que se entregó con este comprobante fue Q0.00'));
+});
+
+test('un pago de antes del descuento se imprime como siempre: una sola fila «Total pagado» y sin notas nuevas', () => {
+  const m = armarComprobante(entrada());
+  assert.equal(m.pagado.descuento, 0);
+  assert.equal(m.pagado.entregado, m.pagado.total);
+  assert.equal(m.pagado.acumuladoDescuento, 0);
+  const html = htmlComprobante(m);
+  assert.deepEqual(pieDePagado(html), [['Total pagado', 'Q4,100.00']]);
+  assert.ok(!html.includes('Menos:'));
+  assert.ok(!html.includes('pagaron') || !html.includes('de más'), 'ni una palabra del descuento');
+  assert.ok(!html.includes('Sin entrega de dinero'));
+  assert.ok(!/comp-pie-/.test(html), 'ni las clases de la cuenta de tres renglones');
+});
+
+test('un descuento imposible no se imprime: negativo, mayor que el monto o que no es un número lanzan', () => {
+  const e = escenarioOfelia();
+  for (const malo of [-50, 1201, 5000, 'mucho', NaN]) {
+    const pago = { ...e.p14, descuento: malo };
+    assert.throws(
+      () => armarComprobante(e.entrada({ pago, pagos: [e.p12, pago] })),
+      { message: /descuento que no es posible/ },
+      `con ${String(malo)}`,
+    );
+  }
+  // Y lo que no está, o está en cero, es un pago sin descuento (los de antes): no lanza.
+  for (const vacio of [undefined, null, '', 0]) {
+    const pago = { ...e.p14, descuento: vacio };
+    assert.equal(armarComprobante(e.entrada({ pago, pagos: [e.p12, pago] })).pagado.descuento, 0);
+  }
+  // El descuento igual al monto sí es posible (se salda todo con lo pagado de más).
+  const todo = { ...e.p14, descuento: 1200 };
+  assert.equal(armarComprobante(e.entrada({ pago: todo, pagos: [e.p12, todo] })).pagado.entregado, 0);
+});
+
+// ---------------------------------------------------------------------------
+// El descuento y los pagos que se completan unos a otros.
+//
+// Un pago con descuento puede ser después el «anterior» de uno que paga una diferencia. Cada papel dice
+// como «Total pagado» lo que se ENTREGÓ, así que el que lo nombra debe decir ese número y no el de las
+// rentas; y la cuenta total tiene que cuadrar contra ellos: lo entregado en cada papel, más lo que ya
+// estaba pagado de más, es lo que esas rentas suman.
+// ---------------------------------------------------------------------------
+
+const DATOS_25 = {
+  id: 'ctr-o25', numero: 25, placas: 'P-525OOO', cliente: JUAN, costoDia: 300, dias: 4, fechaSalida: '2026-08-25', ...DE_OFELIA,
+};
+
+/**
+ * La cadena: el N.° 12 y el N.° 13 pagaron de más (Q600 cada uno). El N.° 14 paga la renta 22 (Q1,200)
+ * descontando Q600. Después la renta 22 sube a Q1,440 y el N.° 15 paga esos Q240 de diferencia, con el descuento
+ * que se pida (`descuentoDelQuince`, de los Q600 que todavía sobran del N.° 13).
+ */
+function cadenaDeOfelia({ descuentoDelQuince = 0 } = {}) {
+  const r21Antes = rentaDeOfelia(DATOS_21, 3);
+  const r25Antes = rentaDeOfelia(DATOS_25, 3);
+  const r21 = rentaDeOfelia(DATOS_21, 3, 1);
+  const r25 = rentaDeOfelia(DATOS_25, 3, 1);
+  const r22 = rentaDeOfelia(DATOS_22, 1);
+  const pagoPrimero = (id, numero, contratos, idsMarcados) => pagoDuenoParaGuardar(
+    construirPagoDueno({
+      duenoId: 'd3', fecha: '2026-09-10', forma: 'efectivo', contratos, pagos: [], idsMarcados, costoSinLeer: [],
+    }),
+    { id, numero, ahora: AHORA },
+  );
+  const p12 = pagoPrimero('p12', 12, [r21Antes], ['ctr-o21']);
+  const p13 = pagoPrimero('p13', 13, [r25Antes], ['ctr-o25']);
+  const p14 = pagoDuenoParaGuardar(
+    construirPagoDueno({
+      duenoId: 'd3', fecha: '2026-10-01', forma: 'efectivo', contratos: [r21, r25, r22], pagos: [p12, p13], idsMarcados: ['ctr-o22'], descuento: 600, costoSinLeer: [],
+    }),
+    { id: 'p14', numero: 14, ahora: AHORA },
+  );
+  // La renta 22 sube de 1 a 2 días de atraso: Q1,440. El cliente paga lo de más y vuelve a quedar cerrada.
+  const r22Subida = rentaDeOfelia(DATOS_22, 1, 2);
+  const contratos = [r21, r25, r22Subida];
+  const { diferencias } = cuentaDeDueno({ contratos, pagos: [p12, p13, p14] });
+  assert.equal(diferencias.length, 1, 'el escenario: la renta 22 subió y deja una diferencia');
+  assert.equal(diferencias[0].diferencia, 240);
+  const p15 = pagoDuenoParaGuardar(
+    construirPagoDueno({
+      duenoId: 'd3',
+      fecha: '2026-10-04',
+      forma: 'transferencia',
+      contratos,
+      pagos: [p12, p13, p14],
+      idsMarcados: [diferencias[0].clave],
+      descuento: descuentoDelQuince,
+      costoSinLeer: [],
+    }),
+    { id: 'p15', numero: 15, ahora: AHORA },
+  );
+  const pagos = [p12, p13, p14, p15];
+  return {
+    contratos, pagos, p14, p15, entrada: (extra = {}) => ({
+      pago: p15, dueno: OFELIA, contratos, pagos, costoSinLeer: [], hoy: HOY, ...extra,
+    }),
+  };
+}
+
+test('descuento, en cadena: el pago que completa a uno con descuento nombra lo que ese papel dice entregado, y la cuenta cuadra', () => {
+  const { p14, p15, entrada: entradaDe } = cadenaDeOfelia();
+  assert.equal(p14.descuento, 600);
+  assert.equal(p15.monto, 240);
+  assert.equal('descuento' in p15, false);
+
+  const m = armarComprobante(entradaDe());
+  assert.equal(m.numero, 15);
+  assert.deepEqual(m.pagado.anteriores, [{ numero: 14, monto: 600 }], 'el N.° 14 dice «Total pagado Q600.00», no Q1,200');
+  assert.equal(m.pagado.acumulado, 1440, 'lo que esas rentas suman hoy');
+  assert.equal(m.pagado.acumuladoDescuento, 600);
+  assert.equal(m.pagado.cambiaron, false);
+
+  const html = htmlComprobante(m);
+  const [nota] = notasDe(html);
+  assert.equal(
+    nota,
+    'Nota: este pago completa el comprobante N° 14 (Q600.00). Las rentas de esta lista cambiaron de monto después de ese pago, y esto es la diferencia. '
+    + 'En total, por estas rentas se le han pagado Q1,440.00, de los cuales Q600.00 ya se le habían pagado de más antes y no se entregaron otra vez.',
+  );
+  // La cuenta del párrafo cuadra: lo entregado en cada papel + lo ya pagado de más = lo que suman las rentas.
+  assert.equal(suma(m.pagado.anteriores[0].monto, m.pagado.entregado, m.pagado.acumuladoDescuento), m.pagado.acumulado);
+  assert.deepEqual(pieDePagado(html), [['Total pagado', 'Q240.00']], 'el pago de la diferencia no tiene descuento: la fila de siempre');
+});
+
+test('descuento, en cadena: el pago de la diferencia puede llevar su propio descuento, y el papel suma los dos', () => {
+  const { p15, entrada: entradaDe } = cadenaDeOfelia({ descuentoDelQuince: 100 });
+  assert.equal(p15.monto, 240);
+  assert.equal(p15.descuento, 100);
+  const m = armarComprobante(entradaDe());
+  assert.equal(m.pagado.entregado, 140);
+  assert.deepEqual(m.pagado.anteriores, [{ numero: 14, monto: 600 }]);
+  assert.equal(m.pagado.acumulado, 1440);
+  assert.equal(m.pagado.acumuladoDescuento, 700, 'los 600 del N.° 14 y los 100 de este');
+  assert.equal(suma(600, 140, 700), 1440, 'el escenario: la cuenta cuadra');
+
+  const html = htmlComprobante(m);
+  assert.deepEqual(pieDePagado(html), [
+    ['Diferencia pagada con este comprobante', 'Q240.00'],
+    ['Menos: lo que ya se le había pagado de más', '-Q100.00'],
+    ['Total pagado', 'Q140.00'],
+  ]);
+  const [delDescuento, delComplemento] = notasDe(html);
+  assert.equal(
+    delDescuento,
+    'Nota: antes se le pagaron Q100.00 de más. Esa cantidad no se entrega otra vez: se resta de este pago. '
+    + 'La diferencia queda pagada por completo (Q240.00) y lo que se entregó con este comprobante fue Q140.00.',
+  );
+  assert.ok(delComplemento.includes('este pago completa el comprobante N° 14 (Q600.00)'));
+  assert.ok(delComplemento.includes('Q1,440.00, de los cuales Q700.00 ya se le habían pagado de más antes'));
+  assert.ok(!html.includes('cambiaron después del pago'), 'la nota de «complementa», no la de «cambiaron»');
+});
+
+test('descuento, en cadena: el N.° 14 reimpreso después del N.° 15 sigue diciendo lo suyo, y no nombra al que vino después', () => {
+  const { p14, entrada: entradaDe } = cadenaDeOfelia({ descuentoDelQuince: 100 });
+  const m = armarComprobante(entradaDe({ pago: p14 }));
+  assert.equal(m.numero, 14);
+  assert.equal(m.pagado.total, 1200);
+  assert.equal(m.pagado.descuento, 600);
+  assert.equal(m.pagado.entregado, 600);
+  assert.deepEqual(m.pagado.anteriores, [], 'es el primero de su cadena');
+  assert.equal(m.pagado.acumuladoDescuento, 600, 'solo lo suyo, no el descuento de un pago que vino después');
+  assert.deepEqual(pieDePagado(htmlComprobante(m)), [
+    ['Rentas pagadas con este comprobante', 'Q1,200.00'],
+    ['Menos: lo que ya se le había pagado de más', '-Q600.00'],
+    ['Total pagado', 'Q600.00'],
+  ]);
+});
+
+// ---------------------------------------------------------------------------
+// LO QUE EL DUEÑO NO VE, ahora con un pago con descuento.
+//
+// El descuento agrega cifras al papel (lo ya pagado de más y lo entregado). Son del dueño del carro, pero el
+// papel que las explica no puede arrastrar nada que no lo sea. Se vuelven a buscar TODAS las cifras y
+// palabras prohibidas sobre este escenario, donde la renta pagada es el contrato con margen de verdad.
+// ---------------------------------------------------------------------------
+
+/** Todo lo que el papel de este escenario dice a propósito (lo suyo), para no confundirlo con una fuga. */
+function permitidosDelDescuento(m) {
+  return new Set([
+    ...numerosPermitidos(m),
+    m.pagado.descuento, m.pagado.entregado, m.pagado.acumulado, m.pagado.acumuladoDescuento,
+    ...m.pagado.anteriores.map((a) => a.monto),
+  ].filter(Number.isFinite));
+}
+
+test('descuento, lo prohibido: el escenario de verdad tiene margen, y las cifras del descuento no chocan con ninguna', () => {
+  const e = escenarioOfelia();
+  const m = armarComprobante(e.entrada());
+  const { numeros } = numerosProhibidosDe(e.nueva22);
+  assert.ok(comisionDe(e.nueva22).monto > 0, 'la renta pagada tiene comisión');
+  assert.ok(numeros.length >= 10, `hay muchos números prohibidos que buscar (${numeros.length})`);
+  const permitidos = permitidosDelDescuento(m);
+  for (const c of [e.nueva22, e.pendiente, e.ahora21]) {
+    const chocan = numerosProhibidosDe(c).numeros.filter((n) => permitidos.has(n));
+    // La renta pendiente es del tipo sencillo (precio por día de Q700): su Q700 no es del dueño pero
+    // tampoco sale en el papel; lo que no puede pasar es que una cifra del descuento sea una del negocio.
+    assert.ok(![600, 1200].some((n) => chocan.includes(n)), `${c.id}: Q600 o Q1,200 no pueden ser también una cifra del negocio`);
+  }
+});
+
+test('descuento, lo prohibido: ninguna cifra, texto ni palabra del negocio de Best Price sale en el papel con descuento', () => {
+  const e = escenarioOfelia();
+  const modelo = armarComprobante(e.entrada());
+  const html = htmlComprobante(modelo);
+  const contenedor = { innerHTML: '', querySelector: () => null, addEventListener() {} };
+  pintarComprobante(contenedor, e.entrada());
+  const salidas = [['el HTML', html], ['lo que queda en pantalla', contenedor.innerHTML], ['el modelo', JSON.stringify(modelo)]];
+  // La pantalla con el cambio de las rentas (el aviso al dueño del negocio también cuenta como salida).
+  const corregida = rentaDeOfelia(DATOS_22, 1, 0);
+  const cambiado = escenarioOfelia({ nueva: rentaDeOfelia(DATOS_22, 1) });
+  const contenedor2 = { innerHTML: '', querySelector: () => null, addEventListener() {} };
+  pintarComprobante(contenedor2, cambiado.entrada({ contratos: cambiado.contratos.map((c) => (c.id === 'ctr-o22' ? corregida : c)) }));
+  salidas.push(['la pantalla con el aviso de cambio', contenedor2.innerHTML]);
+
+  const permitidos = permitidosDelDescuento(modelo);
+  const prohibidos = new Set();
+  const porcentajes = new Set();
+  for (const c of [e.nueva22, e.pendiente, e.ahora21, rentaDeOfelia(DATOS_21, 3)]) {
+    const r = numerosProhibidosDe(c);
+    r.numeros.forEach((n) => prohibidos.add(n));
+    r.porcentajes.forEach((p) => porcentajes.add(p));
+  }
+  const buscar = [...prohibidos].filter((n) => !permitidos.has(n));
+  assert.ok(buscar.length >= 12, `se buscan muchas cifras (${buscar.length})`);
+  const margen = resumen(e.nueva22);
+  for (const n of [850, 3400, 3621, 221, margen.pagado, margen.utilidad, comisionDe(e.nueva22).monto, 275, 125, 4321]) {
+    assert.ok(buscar.includes(n), `${n} (del contrato con margen) tiene que estar entre lo que se busca`);
+  }
+  for (const [donde, texto] of salidas) {
+    for (const n of buscar) {
+      assert.deepEqual(encontrados(texto, formasDe(n)), [], `${donde} lleva ${dinero(n)}, una cifra del negocio de Best Price`);
+    }
+    for (const p of porcentajes) assert.deepEqual(encontrados(texto, formasDePorcentaje(p)), [], `${donde} lleva el ${p} %`);
+    assert.deepEqual(encontrados(texto, TEXTOS_PROHIBIDOS), [], `${donde} lleva un dato del mostrador`);
+    // Las palabras se buscan en lo que se LEE (el papel y la pantalla), no en el nombre de las llaves del modelo:
+    // `descuento` es el campo del pago (§7b) y no se imprime.
+    if (donde === 'el modelo') continue;
+    for (const palabra of PALABRAS_PROHIBIDAS) assert.ok(!palabra.test(texto), `${donde} dice ${palabra}`);
+  }
+  // La explicación del descuento no nombra nada más que lo del dueño: ni el otro comprobante, ni sus rentas, ni sus clientes.
+  for (const x of ['P-212OOO', 'Rosa Díaz', 'N° 12', dinero(2100), dinero(1500), dinero(900)]) {
+    assert.ok(!html.includes(x), `el papel del N.° 14 lleva «${x}», de otro comprobante`);
+  }
+  for (const c of e.contratos) assert.ok(!html.includes(c.id) && !contenedor.innerHTML.includes(c.id), `lleva el id ${c.id}`);
+});
+
+test('descuento, lo prohibido: el modelo con descuento tiene las mismas llaves permitidas que el de siempre, y nada de más se cuela', () => {
+  const llaves = (valor, ruta = '') => {
+    if (Array.isArray(valor)) return valor.flatMap((v) => llaves(v, `${ruta}[]`));
+    if (valor && typeof valor === 'object') {
+      return Object.entries(valor).flatMap(([k, v]) => [`${ruta}.${k}`, ...llaves(v, `${ruta}.${k}`)]);
+    }
+    return [];
+  };
+  const unicas = (modelo) => [...new Set(llaves(modelo))].sort();
+  const e = escenarioOfelia();
+  assert.deepEqual(unicas(armarComprobante(e.entrada())), unicas(armarComprobante(entrada())),
+    'con descuento y sin él, el modelo trae exactamente las mismas llaves (la lista blanca de arriba)');
+
+  // Un pago, un contrato o un dueño con campos de más NO los arrastra al papel, tampoco con descuento.
+  const rico = { ...e.nueva22, utilidadExtra: 424242.42, margenSecreto: 'MARGEN-SECRETO' };
+  const pagoRico = {
+    ...e.p14, comisionTotal: 535353.53, utilidad: 646464.64, descuentoDelCliente: 767676.76,
+  };
+  const { modelo, html } = (() => {
+    const m = armarComprobante(e.entrada({
+      pago: pagoRico, pagos: [e.p12, pagoRico], dueno: { ...OFELIA, saldoFavor: 757575.75 },
+      contratos: e.contratos.map((c) => (c.id === 'ctr-o22' ? rico : c)),
+    }));
+    return { modelo: JSON.stringify(m), html: htmlComprobante(m) };
+  })();
+  for (const x of ['424242', 'MARGEN-SECRETO', '535353', '646464', '767676', '757575']) {
+    assert.ok(!html.includes(x) && !modelo.includes(x), `se coló ${x}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// El cableado: el papel le pregunta al núcleo, no suma ni resta.
+// ---------------------------------------------------------------------------
+
+test('comprobante.js no suma ni resta dinero por su cuenta: el descuento y lo entregado vienen del núcleo', () => {
+  const codigo = readFileSync(new URL('../js/pantallas/comprobante.js', import.meta.url), 'utf8')
+    .replace(/\/\*[^]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/\s\/\/ .*$/gm, '');
+  assert.doesNotMatch(codigo, /\bsuma\s*\(/, 'no suma montos');
+  assert.doesNotMatch(codigo, /import[^;]*\bsuma\b[^;]*from/, 'ni siquiera importa `suma`');
+  // Ninguna resta entre cifras del pago: ni `monto - descuento` ni `total - algo`.
+  // (con espacios alrededor del signo: «comp-pie-total» es una clase, no una resta)
+  assert.doesNotMatch(codigo, /\b(monto|total|descuento|entregado|pagado|acumulado)\s+-\s+[\w(.]/, 'no resta cifras');
+  assert.doesNotMatch(codigo, /[\w)]\s+-\s+(pago\.)?(monto|descuento|total|entregado)\b/, 'ni restándoles');
+  for (const llamada of ['descuentoDelPago(pago)', 'entregadoDelPago(pago)', 'totalesDePagos(', 'descuentoInvalido(pago)']) {
+    assert.ok(codigo.includes(llamada), `le pregunta al núcleo: ${llamada}`);
+  }
+  // Y la pregunta de «¿cambiaron las rentas?» sigue siendo contra el `monto`, nunca contra lo entregado.
+  assert.match(codigo, /totalSeleccionado\(delPago, delPago\.map\(\(c\) => c\.id\)\) !== q\(pago\.monto\)/);
+});
+
+test('estilos.css: el pie de tres renglones tiene su forma, y al imprimir la cuenta no se parte de su total', () => {
+  const css = readFileSync(new URL('../css/estilos.css', import.meta.url), 'utf8');
+  for (const clase of ['.comp-pie-suma', '.comp-pie-menos', '.comp-pie-total']) {
+    assert.ok(css.includes(clase), `falta ${clase}`);
+  }
+  const impresion = css.slice(css.indexOf('@media print'));
+  assert.match(impresion, /\.comp-pie-suma,\s*\.comp-pie-menos\s*{[^}]*break-after:\s*avoid/, 'los dos renglones de arriba no se separan del total');
+  // Las clases que usa el HTML son las que el CSS conoce (ni un renglón sin estilo ni un estilo sin renglón).
+  const html = htmlComprobante(armarComprobante(escenarioOfelia().entrada()));
+  const usadas = [...html.matchAll(/class="(comp-pie-[a-z]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(usadas, ['comp-pie-suma', 'comp-pie-menos', 'comp-pie-total']);
 });

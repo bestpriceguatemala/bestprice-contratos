@@ -1361,6 +1361,28 @@ body {
   text-align: right;
 }
 
+/* Cuando a ese dueño ya se le había pagado de más, el pie es una cuenta de tres renglones que se lee de
+   arriba abajo: lo que suman las rentas, menos lo ya pagado de más, igual a lo que se entregó. Los dos
+   primeros son renglones de cuenta (sin negrita, el segundo pegado al primero); el total conserva la
+   negrita y su raya, como el «Total pagado» de siempre. */
+.comp-tabla tfoot .comp-pie-suma th,
+.comp-tabla tfoot .comp-pie-suma td,
+.comp-tabla tfoot .comp-pie-menos th,
+.comp-tabla tfoot .comp-pie-menos td {
+  font-weight: 400;
+}
+
+.comp-tabla tfoot .comp-pie-menos th,
+.comp-tabla tfoot .comp-pie-menos td {
+  padding-top: 2pt;
+  border-top: none;
+}
+
+.comp-tabla tfoot .comp-pie-total th,
+.comp-tabla tfoot .comp-pie-total td {
+  border-top: 1px solid var(--navy);
+}
+
 .comp-forma {
   margin-top: 6pt !important;
   text-align: right;
@@ -1787,6 +1809,13 @@ body {
   .comp-nota-cambio,
   .comp-forma {
     break-inside: avoid;
+  }
+
+  /* Los tres renglones de la cuenta del descuento no se separan: el total no puede quedar solo en la hoja de
+     abajo, sin lo que suman las rentas ni lo que se restó. */
+  .comp-pie-suma,
+  .comp-pie-menos {
+    break-after: avoid;
   }
 
   .comp-seccion h2 {
