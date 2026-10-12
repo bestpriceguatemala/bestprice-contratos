@@ -258,19 +258,21 @@ test('Sacar carro: otra reservación por tipo distinta de la que se cumple SÍ a
   assert.doesNotMatch(r[0].mensaje, /Carlos Méndez/);
 });
 
-test('Sacar carro: el contrato que se está escribiendo no compite contra sí mismo si ya llegó a la lista (un guardado que se quedó esperando)', () => {
-  const flota = [carro('ranger', 'Pickup'), carro('hilux', 'Pickup')];
-  const reservas = [apartada('P', '2026-11-03', '2026-11-05', { tipoVehiculo: 'Pickup' })];
-  // Un guardado que venció pero sí llegó a la nube: el contrato ya aparece entre los abiertos con el mismo id.
-  const yaGuardado = rentado('c-nuevo', 'hilux', '2026-11-03', '2026-11-05');
+test('Sacar carro: el contrato que se está escribiendo no se cuenta con su copia vieja si ya llegó a la lista (un guardado que se quedó esperando y se rehízo)', () => {
+  const flota = [carro('ranger', 'Pickup')];
+  const reservas = [apartada('P', '2026-11-04', '2026-11-06', { clienteNombre: 'Carlos Méndez', tipoVehiculo: 'Pickup' })];
   const miCarro = flota[0];
+  // El primer intento de guardar venció pero sí llegó a la nube: 3 al 8 de noviembre, con el id que el reintento reutiliza.
+  // Antes de reintentar, el mostrador acortó la renta al 3–5. El reintento PISA esa copia: la que cuenta es la nueva.
+  const copiaVieja = rentado('c-nuevo', 'ranger', '2026-11-03', '2026-11-08');
   const borrador = { ...salida(miCarro, '2026-11-03', '2026-11-05'), id: 'c-nuevo' };
-  // Contra la hilux no hay competencia (es otro carro); lo que importa es que el id propio se descarte.
-  const mismoIdMismoCarro = rentado('c-nuevo', 'ranger', '2026-11-03', '2026-11-05');
   const r = avisosDeSalida({
-    cliente: clienteSinProblemas, carro: miCarro, contrato: borrador, flota, reservas, contratosAbiertos: [yaGuardado, mismoIdMismoCarro], hoy: HOY,
+    cliente: clienteSinProblemas, carro: miCarro, contrato: borrador, flota, reservas, contratosAbiertos: [copiaVieja], hoy: HOY,
   });
-  assert.deepEqual(deCapacidad(r), [], 'la hilux está libre y el contrato propio no se cuenta dos veces');
+  // Con la copia vieja contada como otro contrato, la reservación P ya «no tenía» la ranger y la renta no le quitaba nada:
+  // se callaba. Pero la copia vieja desaparece al guardar, y entonces la renta 3–5 sí le quita la ranger a P (4–6).
+  assert.equal(deCapacidad(r).length, 1);
+  assert.match(r[0].mensaje, /Carlos Méndez/);
 });
 
 // ---------- La cadena ----------

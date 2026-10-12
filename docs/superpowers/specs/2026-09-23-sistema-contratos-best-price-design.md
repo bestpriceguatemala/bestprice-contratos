@@ -961,6 +961,17 @@ tipo no gasta unidades de este. Si la búsqueda se pasara de su límite, el avis
 vez de callar o adivinar. Un carro exacto que apartas también pregunta lo mismo al revés:
 si dejarías sin unidad a una reservación por tipo.
 
+**«Sacar carro» hace esa misma pregunta** (12 oct 2026). Darle la Ranger a un cliente podía dejar
+sin carro a una reservación «Pickup» que solo pidió el tipo, y la salida no decía nada: solo
+miraba las reservaciones clavadas a ESE carro. Ahora, además, pregunta lo mismo que el
+formulario de reservaciones con un carro exacto, y lo contesta **la misma función**
+(`reservasQueSeQuedanSinCarro`, `nucleo/reserva.js`, sobre la misma `cabeEnElTipo`): no hay una
+segunda copia de la regla. El aviso dice, en una frase, a quién afecta y desde cuándo; si se
+sabe con certeza quién se queda sin carro, lo dice, y si podría ser cualquiera de varias dice
+«alguna de» sin señalar a una persona que quizás no es la afectada. La reservación de la que se
+está saliendo no compite contra sí misma. Avisa y no bloquea: él puede conocer a ese cliente, o
+saber que el carro vuelve antes.
+
 ### Mantenimiento de la flota propia
 
 Cada carro propio lleva el control de sus servicios: **aceite y filtro, pastillas
