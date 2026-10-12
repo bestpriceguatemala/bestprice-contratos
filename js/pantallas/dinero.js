@@ -32,6 +32,7 @@
 //    se dice en pantalla, junto al total, que está corto.
 import {
   agruparPorDueno, cuentaDeDueno, costoDelSubarriendo, elegirParaPago, esPagableAlDueno, totalGeneral, pagoAnulado,
+  pagadoDeMas,
 } from '../nucleo/liquidacion.js';
 import { estadoContrato, pendientesDe } from '../nucleo/estados.js';
 import { atrasoDe } from '../nucleo/contrato.js';
@@ -1135,7 +1136,33 @@ function htmlEnlace(ctx) {
     </section>`;
 }
 
-/** La ficha de un dueño: sus tres bloques, en este orden. */
+/**
+ * La línea de un pago de más (H-7): cuánto, de cuál comprobante y contra qué. Las cifras
+ * las trae `pagadoDeMas` (nucleo/liquidacion.js) ya hechas; aquí solo se dicen. Misma voz que
+ * la explicación de una diferencia («Se pagaron … y hoy esas rentas suman …»), a propósito:
+ * es la misma comparación vista del otro lado.
+ */
+export function textoDePagadoDeMas(grupo) {
+  const suman = grupo.contratos.length === 1 ? 'esa renta suma' : 'esas rentas suman';
+  return `Se le pagó de más: ${dinero(grupo.deMas)}. Se pagaron ${dinero(grupo.pagado)} en ${textoDeComprobantes(grupo.pagos)} y hoy ${suman} ${dinero(grupo.ahora)}.`;
+}
+
+/**
+ * Lo que se le pagó de más a este dueño, en la ficha donde ya está mirando su cuenta, no en
+ * una pantalla aparte que habría que acordarse de abrir. Una línea por cada pago de más.
+ *
+ * Solo informa: no resta nada de «Por pagar» ni de lo marcado, y no es un aviso rojo (nadie
+ * lo pidió así, y no es una deuda: se pagó de más). Él decide si lo quita del próximo pago o
+ * lo pide de vuelta. Vacío cuando no hay nada, igual que el resto de la ficha cuando no hay
+ * qué decir: ningún «sin pagos de más».
+ */
+function htmlPagadoDeMas(ctx) {
+  const lineas = pagadoDeMas(ctx.entrada.cuenta, ctx.vista.costoSinLeer);
+  if (lineas.length === 0) return '';
+  return `<div class="dn-de-mas">${lineas.map((g) => `<p>${esc(textoDePagadoDeMas(g))}</p>`).join('')}</div>`;
+}
+
+/** La ficha de un dueño: lo que se le pagó de más (si algo), y sus tres bloques, en este orden. */
 export function htmlFicha(ctx) {
   const { entrada, vista } = ctx;
   const datos = entrada.registro
@@ -1151,6 +1178,7 @@ export function htmlFicha(ctx) {
       </div>
       ${vista.falloDuenos ? barraRoja([MENSAJE_FALLO_DUENOS]) : ''}
       ${datos}
+      ${htmlPagadoDeMas(ctx)}
       ${entrada.sinEnlazar ? htmlEnlace(ctx) : ''}
       ${htmlBloquePorPagar(ctx)}
       ${htmlBloqueAunNoCierra(ctx)}

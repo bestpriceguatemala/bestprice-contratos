@@ -20,6 +20,7 @@ import {
   cerrarElDinero, cerrarElDineroOReiniciar, salirDelSistema, crearVigilante, crearLector, mensajeSeguro,
   htmlEntrada, htmlFallo, htmlLista, htmlFicha, htmlMigracion, entradaDelComprobante, problemaDeLaFechaDelPago,
   textoConfirmarAnularPagoDueno, anularElPago, MENSAJE_ANULAR_SIN_COMPROBAR, MENSAJE_ANULAR_NO_ESTA, MENSAJE_ANULAR_FALLO,
+  textoDePagadoDeMas,
 } from '../js/pantallas/dinero.js';
 import { armarComprobante } from '../js/pantallas/comprobante.js';
 import { htmlListaDeDuenos, htmlFormularioDeDueno } from '../js/pantallas/duenos.js';
@@ -29,7 +30,7 @@ import { resumen } from '../js/nucleo/contrato.js';
 import { estadoContrato, pendientesDe } from '../js/nucleo/estados.js';
 import { sumarDias } from '../js/nucleo/fechas.js';
 import {
-  cuentaDeDueno, agruparPorDueno, totalSeleccionado, pagoAnulado,
+  cuentaDeDueno, agruparPorDueno, totalSeleccionado, pagoAnulado, pagadoDeMas,
 } from '../js/nucleo/liquidacion.js';
 import { mensajeDeErrorDeDinero } from '../js/dinero-sesion.js';
 import {
@@ -2649,4 +2650,208 @@ test('el cableado: «Ver comprobante» tampoco se abre a la fuerza para un pago 
   const codigo = sinComentarios(PANTALLA);
   const cuerpo = codigo.slice(codigo.indexOf('function verComprobante('), codigo.indexOf('async function anularPagoDeDueno('));
   assert.match(cuerpo, /pagoAnulado\(pago\)/);
+});
+
+// ===========================================================================
+// H-7: se le pagó más de lo que esas rentas cuestan hoy, y la ficha lo dice
+// ===========================================================================
+//
+// Prueba del sistema (7 oct 2026): la renta N.° 2 se cerró con 3 días de atraso (Q2,100) y se le
+// pagaron Q2,100 a su dueño; después se corrigió el cierre a 1 día (Q1,500). Los Q600 pagados de más
+// no se veían en ninguna pantalla de dinero. «Lo que baja después de pagado no es deuda» (1b4f748) se
+// queda, y decidió él: se muestra en la ficha de ESE dueño, en una línea, y NO se descuenta solo.
+//
+// Ofelia Ramos (d4) tiene la renta N.° 2: la que se pagó con la cifra de antes, y la misma renta
+// ya corregida. Todo sale de los mismos constructores que los reales.
+
+const REGISTRO_OFELIA = { id: 'd4', nombre: 'Ofelia Ramos', telefono: '', nit: '', nota: '', actualizado: AHORA };
+const deOfelia = (id, opciones = {}) => ({
+  numero: 2, placas: 'P-OFE002', costoDia: 300, dueno: 'Ofelia Ramos', duenoId: 'd4', ...opciones, id,
+});
+/** La renta N.° 2 cuando se pagó: 3 días de atraso, (4 + 3) × 300 = Q2,100. */
+const O2_COMO_SE_PAGO = alLeer(saldado(recibido(salida(deOfelia('o2')), 3)));
+/** La misma, después de corregir su cierre a 1 día de atraso: Q1,500. El cliente queda con saldo a favor, y sigue «cerrada». */
+const O2_CORREGIDA = alLeer(recibido(saldado(recibido(salida(deOfelia('o2')), 3)), 1));
+const PAGO_A_OFELIA = pagoDuenoParaGuardar(
+  construirPagoDueno({
+    duenoId: 'd4', fecha: '2026-09-20', forma: 'transferencia', contratos: [O2_COMO_SE_PAGO], pagos: [], idsMarcados: ['o2'],
+  }),
+  { id: 'pg-ofelia', numero: 2, ahora: AHORA },
+);
+const ANULADO_A_OFELIA = pagoDuenoParaGuardar(
+  anularPagoDueno(PAGO_A_OFELIA, { fecha: '2026-10-02' }),
+  { id: PAGO_A_OFELIA.id, numero: PAGO_A_OFELIA.numero, ahora: AHORA + 60000 },
+);
+const lecturaConOfelia = ({ pagos = [PAGO_A_OFELIA], contratos = [O2_CORREGIDA], costoSinLeer = [] } = {}) => lecturaOk({
+  contratos: { datos: [...TODOS, ...contratos], fallo: false, costoSinLeer },
+  pagos: { datos: [PAGO_A_LUCIA, ...pagos], fallo: false },
+  duenos: { datos: [...DUENOS, REGISTRO_OFELIA], fallo: false },
+});
+const fichaDeOfelia = (cambios) => {
+  const lectura = lecturaConOfelia(cambios);
+  return fichaDe('Ofelia Ramos', { vista: armarVista(lectura), lectura });
+};
+/** Las líneas de «pagado de más» de una ficha, o '' si no hay. */
+const deMasDe = (ficha) => (ficha.match(/<div class="dn-de-mas">[\s\S]*?<\/div>/) || [''])[0];
+
+test('H-7, el escenario: Q2,100 pagados, la renta cuesta Q1,500 hoy y sigue cerrada', () => {
+  assert.equal(PAGO_A_OFELIA.monto, 2100);
+  assert.equal(resumen(O2_CORREGIDA).costoSubarriendo, 1500);
+  assert.equal(estadoContrato(O2_CORREGIDA), 'cerrado');
+});
+
+test('H-7: la ficha de ese dueño dice, en una línea, que se le pagó de más y cuánto', () => {
+  const linea = deMasDe(fichaDeOfelia());
+  assert.ok(linea, 'hay una línea');
+  assert.match(linea, /Se le pagó de más: Q600\.00\./);
+  assert.ok(linea.includes('Se pagaron Q2,100.00 en el comprobante N.° 2'), 'de dónde viene');
+  assert.ok(linea.includes('hoy esa renta suma Q1,500.00'), 'y contra qué se compara');
+  assert.equal((linea.match(/<p>/g) || []).length, 1, 'una sola línea');
+  assert.equal(
+    textoDePagadoDeMas(pagadoDeMas(entradaDe(armarVista(lecturaConOfelia()), 'Ofelia Ramos').cuenta, [])[0]),
+    'Se le pagó de más: Q600.00. Se pagaron Q2,100.00 en el comprobante N.° 2 y hoy esa renta suma Q1,500.00.',
+  );
+});
+
+test('H-7: está donde ya mira su cuenta: arriba de la ficha, antes de «Por pagar», y no dentro de una tabla', () => {
+  const ficha = fichaDeOfelia();
+  const i = ficha.indexOf('class="dn-de-mas"');
+  assert.ok(i > 0);
+  assert.ok(i > ficha.indexOf('<h1>Ofelia Ramos</h1>'), 'después del nombre del dueño');
+  assert.ok(i < ficha.indexOf('<h2>Por pagar</h2>'), 'antes de «Por pagar»');
+  assert.ok(!entre(ficha, '<h2>Por pagar</h2>').includes('Se le pagó de más'), 'y no se repite en los bloques de abajo');
+  assert.ok(!/<table[^>]*>(?:(?!<\/table>)[\s\S])*Se le pagó de más/.test(ficha), 'no es una fila de una tabla');
+});
+
+test('H-7: se ve, pero NO se descuenta: «Por pagar» y lo marcado dicen lo mismo con o sin el pago de más', () => {
+  const nueva = cerrado('o3', deOfelia('o3', { numero: 3, placas: 'P-OFE003', fechaSalida: '2026-09-10' })); // 4 × 300 = Q1,200
+  const ui = uiVacia({ marcados: new Set(['o3']) });
+  const con = lecturaConOfelia({ contratos: [O2_CORREGIDA, nueva] }); // se pagaron Q2,100 y hoy cuesta Q1,500
+  const sin = lecturaConOfelia({ contratos: [O2_COMO_SE_PAGO, nueva] }); // se pagaron Q2,100 y hoy cuesta Q2,100
+  const fichaCon = fichaDe('Ofelia Ramos', { vista: armarVista(con), lectura: con, ui });
+  const fichaSin = fichaDe('Ofelia Ramos', { vista: armarVista(sin), lectura: sin, ui });
+
+  assert.ok(deMasDe(fichaCon).includes('Q600.00') && !deMasDe(fichaSin), 'el escenario: solo una tiene el pago de más');
+  const porPagar = (f) => entre(f, '<h2>Por pagar</h2>', '<h2>Aún no cierra</h2>');
+  assert.equal(porPagar(fichaCon), porPagar(fichaSin), '«Por pagar» es byte por byte el mismo');
+  assert.match(porPagar(fichaCon), /class="dn-total">Q1,200\.00</, 'se le deben Q1,200 enteros, no Q600');
+  assert.match(porPagar(fichaCon), /id="dn-total-marcado" class="dn-total-marcado">Q1,200\.00</, 'y lo marcado también');
+  assert.equal(entradaDe(armarVista(con), 'Ofelia Ramos').cuenta.totalPorPagar, 1200);
+  assert.deepEqual(resumenDeMarcadas(entradaDe(armarVista(con), 'Ofelia Ramos'), new Set(['o3']), []), { ids: ['o3'], cuantas: 1, total: 1200 });
+});
+
+test('H-7: lo que viene de los datos entra escapado, nunca como HTML', () => {
+  const raro = { ...PAGO_A_OFELIA, numero: '<i>2</i>' };
+  const linea = deMasDe(fichaDeOfelia({ pagos: [raro] }));
+  assert.ok(linea.includes('&lt;i&gt;2&lt;/i&gt;') && !linea.includes('<i>'));
+});
+
+test('H-7: no es un aviso rojo ni una alarma: es una línea normal, sin la barra roja de los fallos', () => {
+  const linea = deMasDe(fichaDeOfelia());
+  assert.ok(!linea.includes('barra-lectura-fallida') && !linea.includes('dn-alerta') && !linea.includes('role="alert"'));
+  assert.ok(!fichaDeOfelia().includes('barra-lectura-fallida'), 'ninguna barra roja en la ficha');
+});
+
+test('H-7: solo en la ficha de ese dueño: las demás no dicen nada de más, ni la lista de dueños', () => {
+  const lectura = lecturaConOfelia();
+  const vista = armarVista(lectura);
+  for (const nombre of ['Mario López Alvarado', 'Lucía Barrios', 'Don Mario', 'Doña Pura', 'Zacarías Sin Rentas']) {
+    const ficha = fichaDe(nombre, { vista, lectura });
+    assert.ok(!ficha.includes('dn-de-mas') && !ficha.includes('Se le pagó de más'), nombre);
+  }
+  assert.ok(!htmlLista(vista).includes('Se le pagó de más'), 'la decisión fue la ficha de ese dueño');
+});
+
+test('H-7: sin pago de más, la ficha no dice nada (nadie pidió un «todo en orden»)', () => {
+  const lectura = lecturaConOfelia({ contratos: [O2_COMO_SE_PAGO] });
+  assert.equal(armarVista(lectura).ok, true);
+  assert.ok(!fichaDe('Ofelia Ramos', { vista: armarVista(lectura), lectura }).includes('dn-de-mas'), 'cuadra: pagó Q2,100 y cuestan Q2,100');
+  assert.ok(!fichaDe('Lucía Barrios').includes('dn-de-mas'), 'y la de siempre tampoco');
+});
+
+test('H-7 y H-6: un pago ANULADO no sale como pagado de más: la renta vuelve a «Por pagar» con lo que cuesta hoy', () => {
+  assert.ok(deMasDe(fichaDeOfelia()), 'el control: vigente, la línea sale');
+  const lectura = lecturaConOfelia({ pagos: [ANULADO_A_OFELIA] });
+  const ficha = fichaDe('Ofelia Ramos', { vista: armarVista(lectura), lectura });
+  assert.ok(!ficha.includes('dn-de-mas') && !ficha.includes('Se le pagó de más'));
+  const porPagar = entre(ficha, '<h2>Por pagar</h2>', '<h2>Aún no cierra</h2>');
+  assert.ok(porPagar.includes('P-OFE002') && porPagar.includes('Q1,500.00'), 'la renta volvió, con lo que cuesta hoy');
+  assert.match(porPagar, /class="dn-total">Q1,500\.00</);
+  assert.ok(entre(ficha, '<h2>Ya pagado</h2>').includes('Anulado el 2 oct 2026'), 'y el anulado sigue como rastro');
+});
+
+test('H-7 y H-6: anular de verdad (por anularElPago) el pago del que sobra Q600 hace desaparecer la línea', async () => {
+  const deps = depsDeAnular({ pagos: [PAGO_A_OFELIA] });
+  const r = await anularElPago({ pago: PAGO_A_OFELIA, hoy: '2026-10-12', ...deps });
+  assert.equal(r.tipo, 'anulado');
+  assert.equal(r.pago.anulado, true);
+  const lectura = lecturaConOfelia({ pagos: r.pagos });
+  const ficha = fichaDe('Ofelia Ramos', { vista: armarVista(lectura), lectura });
+  assert.ok(!ficha.includes('Se le pagó de más'), 'anulado, ya no sobra: su dinero está deshecho');
+  assert.ok(entre(ficha, '<h2>Por pagar</h2>', '<h2>Aún no cierra</h2>').includes('P-OFE002'), 'y la renta volvió a «Por pagar»');
+});
+
+test('H-7: un costo que no se pudo leer no inventa un pago de más', () => {
+  assert.ok(deMasDe(fichaDeOfelia()), 'el control: leído, sale');
+  assert.ok(!fichaDeOfelia({ costoSinLeer: ['o2'] }).includes('Se le pagó de más'));
+  assert.ok(deMasDe(fichaDeOfelia({ costoSinLeer: ['otra'] })), 'el costo sin leer de OTRA renta no la apaga');
+  const sinCosto = alLeer(recibido(saldado(recibido(salida(deOfelia('o2', { costoDia: 0 })), 3)), 1));
+  assert.ok(!fichaDeOfelia({ contratos: [sinCosto] }).includes('Se le pagó de más'), 'ni una renta sin costo anotado');
+});
+
+test('H-7: dos rentas en un mismo pago dicen «esas rentas suman», y varios comprobantes se nombran todos', () => {
+  const o3 = cerrado('o3', deOfelia('o3', { numero: 3, placas: 'P-OFE003', fechaSalida: '2026-09-10' })); // Q1,200
+  const juntas = pagoDuenoParaGuardar(
+    construirPagoDueno({ duenoId: 'd4', fecha: '2026-09-20', forma: 'cheque', contratos: [O2_COMO_SE_PAGO, o3], pagos: [], idsMarcados: ['o2', 'o3'] }),
+    { id: 'pg-ofelia-3', numero: 3, ahora: AHORA },
+  );
+  const linea = deMasDe(fichaDeOfelia({ contratos: [O2_CORREGIDA, o3], pagos: [juntas] }));
+  assert.ok(linea.includes('Se le pagó de más: Q600.00.'));
+  assert.ok(linea.includes('Se pagaron Q3,300.00 en el comprobante N.° 3 y hoy esas rentas suman Q2,700.00.'));
+
+  const complemento = pagoDuenoParaGuardar(
+    { duenoId: 'd4', fecha: '2026-09-25', forma: 'efectivo', monto: 300, contratos: ['o2'] },
+    { id: 'pg-ofelia-9', numero: 9, ahora: AHORA },
+  );
+  assert.ok(
+    deMasDe(fichaDeOfelia({ pagos: [PAGO_A_OFELIA, complemento] })).includes('en los comprobantes N.° 2 y N.° 9 y hoy esa renta suma Q1,500.00'),
+    'varios comprobantes del mismo grupo',
+  );
+});
+
+test('H-7: si a un mismo dueño se le pagó de más en dos pagos distintos, hay una línea por cada uno', () => {
+  const opciones = deOfelia('o4', { numero: 4, placas: 'P-OFE004', fechaSalida: '2026-09-12' });
+  const o4AlPagar = alLeer(saldado(recibido(salida(opciones), 2))); // (4 + 2) × 300 = Q1,800
+  const o4Corregida = alLeer(recibido(saldado(recibido(salida(opciones), 2)), 0)); // 4 × 300 = Q1,200
+  const pagoO4 = pagoDuenoParaGuardar(
+    construirPagoDueno({ duenoId: 'd4', fecha: '2026-09-21', forma: 'efectivo', contratos: [O2_COMO_SE_PAGO, o4AlPagar], pagos: [PAGO_A_OFELIA], idsMarcados: ['o4'] }),
+    { id: 'pg-ofelia-4', numero: 4, ahora: AHORA },
+  );
+  const linea = deMasDe(fichaDeOfelia({ contratos: [O2_CORREGIDA, o4Corregida], pagos: [PAGO_A_OFELIA, pagoO4] }));
+  assert.equal((linea.match(/<p>/g) || []).length, 2, 'una por cada pago de más');
+  assert.ok(linea.includes('Se le pagó de más: Q600.00. Se pagaron Q2,100.00 en el comprobante N.° 2'));
+  assert.ok(linea.includes('Se le pagó de más: Q600.00. Se pagaron Q1,800.00 en el comprobante N.° 4 y hoy esa renta suma Q1,200.00'));
+});
+
+test('H-7: la ficha y el comprobante no se contradicen sobre el mismo pago', () => {
+  const lectura = lecturaConOfelia();
+  const entrada = entradaDe(armarVista(lectura), 'Ofelia Ramos');
+  const modelo = armarComprobante(entradaDelComprobante({ entrada, pago: PAGO_A_OFELIA, lectura, hoy: HOY }));
+  const [grupo] = pagadoDeMas(entrada.cuenta, []);
+  const detalle = suma(...modelo.pagado.filas.map((f) => f.monto));
+
+  assert.equal(modelo.pagado.total, grupo.pagado, 'lo pagado: el mismo monto guardado');
+  assert.equal(detalle, grupo.ahora, 'lo que las rentas suman hoy: la misma cifra');
+  assert.equal(modelo.pagado.cambiaron, true, 'y el papel avisa que el detalle ya no suma lo pagado');
+  assert.equal(modelo.pagado.total - detalle, grupo.deMas);
+  const ficha = deMasDe(fichaDe('Ofelia Ramos', { vista: armarVista(lectura), lectura }));
+  assert.ok(ficha.includes(`Q${textoDosDecimales(modelo.pagado.total)}`) && ficha.includes(`Q${textoDosDecimales(detalle)}`));
+});
+
+test('H-7: el cableado — la ficha le pregunta a pagadoDeMas del núcleo con los costos sin leer, y la pantalla no suma ni compara', () => {
+  const codigo = sinComentarios(PANTALLA);
+  const cuerpo = codigo.slice(codigo.indexOf('function htmlPagadoDeMas('), codigo.indexOf('export function htmlFicha('));
+  assert.match(cuerpo, /pagadoDeMas\(ctx\.entrada\.cuenta, ctx\.vista\.costoSinLeer\)/);
+  assert.doesNotMatch(cuerpo, /suma\(|reduce\(|\.monto|diferencia|ahora -|pagado -/, 'ninguna cifra se calcula en la pantalla');
+  assert.match(codigo, /\$\{htmlPagadoDeMas\(ctx\)\}/, 'y la ficha la dibuja');
 });

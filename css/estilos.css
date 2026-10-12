@@ -1520,6 +1520,27 @@ body {
   color: var(--gris);
 }
 
+/*
+ * Lo que se le pagó de más a un dueño (dinero.js: htmlPagadoDeMas). Se ve, pero no es una
+ * alarma: no es una deuda ni algo que falló, y por eso el amarillo de la marca y no el rojo.
+ */
+.dn-de-mas {
+  margin: 0 0 20px;
+  padding: 12px 16px;
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-left: 4px solid var(--amarillo);
+  border-radius: 8px;
+}
+
+.dn-de-mas p {
+  margin: 0;
+}
+
+.dn-de-mas p + p {
+  margin-top: 6px;
+}
+
 .dn-ver-cuenta {
   margin: 24px 0 0;
 }
