@@ -7,9 +7,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  estadoContrato, puedeCerrar, pendientesDe, garantiaPorLiberar, estadoCarro, finDelContrato,
+  estadoContrato, puedeCerrar, pendientesDe, garantiaPorLiberar, estadoCarro, finDelContrato, creditoDelCliente,
 } from '../js/nucleo/estados.js';
+import { resumen } from '../js/nucleo/contrato.js';
 import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
+import {
+  rentadoAlDia, rentadoConSobrepago, devueltoDebiendo, cerradoAlDia, cerradoConCredito,
+} from './fixtures/contratosDeUnaCuenta.mjs';
 
 const rentado = {
   id: 'c1', carroId: 'v1', dias: 4, precioDia: 700,
@@ -237,4 +241,47 @@ test('finDelContrato: un contrato sin fechas no inventa un fin', () => {
   assert.equal(finDelContrato({}, '2026-10-10'), '');
   assert.equal(finDelContrato(null, '2026-10-10'), '');
   assert.equal(finDelContrato(undefined), '');
+});
+
+// ---------- creditoDelCliente (H-9) ----------
+//
+// «A favor del cliente» es la misma cifra que «Pendientes de cobro», `resumen(c).saldo`, del otro lado del cero.
+// Se pregunta aquí, una sola vez, para que el filtro de Contratos y la frase de cada renglón no puedan volver a
+// desacordarse (el mismo motivo por el que `garantiaPorLiberar` vive en este archivo). Un crédito NO es un cobro:
+// `puedeCerrar` ya lo acepta (`saldo <= 0`), y por eso un contrato con crédito se ve «cerrado» y desaparece de
+// las listas de pendientes sin que nadie recuerde que se le debe plata a alguien.
+
+test('creditoDelCliente: lo que se le debe al cliente, en positivo, tras una corrección que lo dejó a favor', () => {
+  const credito = cerradoConCredito();
+  assert.equal(estadoContrato(credito), 'cerrado', 'cerrado y, aun así, el negocio le debe Q1,400');
+  assert.equal(creditoDelCliente(credito), 1400);
+  assert.equal(creditoDelCliente(rentadoConSobrepago()), 200, 'afuera y con un sobrepago también es plata del cliente');
+});
+
+test('creditoDelCliente: es 0 si el cliente debe o está a mano — una deuda no es un crédito negativo', () => {
+  assert.equal(creditoDelCliente(devueltoDebiendo()), 0);
+  assert.equal(creditoDelCliente(cerradoAlDia()), 0);
+  assert.equal(creditoDelCliente(rentadoAlDia()), 0);
+});
+
+test('creditoDelCliente concuerda con resumen(c).saldo en las dos direcciones: hay crédito si y solo si el saldo es negativo, y por lo mismo', () => {
+  for (const c of [rentadoAlDia(), rentadoConSobrepago(), devueltoDebiendo(), cerradoAlDia(), cerradoConCredito()]) {
+    const { saldo } = resumen(c);
+    assert.equal(creditoDelCliente(c) > 0, saldo < 0, `contrato ${c.numero}`);
+    assert.equal(creditoDelCliente(c), saldo < 0 ? -saldo : 0, `contrato ${c.numero}`);
+  }
+});
+
+test('creditoDelCliente: un pago anulado deja de contar y con él el crédito; los centavos no se pierden', () => {
+  const sobrepago = rentadoConSobrepago();
+  const anulado = { ...sobrepago, pagos: sobrepago.pagos.map((p) => ({ ...p, anulado: true })) };
+  assert.equal(creditoDelCliente(anulado), 0, 'sin pagos vigentes ahora DEBE todo: ya no es un crédito');
+  const centavos = { ...sobrepago, pagos: [{ ...sobrepago.pagos[0], monto: 2800.35 }] };
+  assert.equal(creditoDelCliente(centavos), 0.35);
+});
+
+test('creditoDelCliente: sin contrato o sin nada no inventa un crédito', () => {
+  assert.equal(creditoDelCliente(null), 0);
+  assert.equal(creditoDelCliente(undefined), 0);
+  assert.equal(creditoDelCliente({}), 0);
 });

@@ -53,6 +53,22 @@ export function garantiaPorLiberar(c) {
 }
 
 /**
+ * Lo que el negocio le debe a este cliente en este contrato, en positivo: lo que `saldo` tiene de negativo, o 0
+ * si el cliente debe o está a mano. Es la misma cifra que «Pendientes de cobro» (`saldo`, de `resumen`), del
+ * otro lado del cero, y se pregunta AQUÍ —como `garantiaPorLiberar`— para que el filtro «A favor del cliente» de
+ * Contratos y la frase de cada renglón no puedan volver a desacordarse sobre qué cuenta como crédito.
+ *
+ * Un crédito NO es un cobro, y por eso las listas de pendientes filtran `saldo > 0` a propósito y no lo traen.
+ * Tampoco impide cerrar (`puedeCerrar` acepta `saldo <= 0`): una corrección puede dejar a un cliente con
+ * plata a favor en un contrato que ya se ve «cerrado», que sale de toda lista de pendientes. De ahí que esto
+ * se pregunte aparte. No se compensa con la deuda de otro contrato: cada uno cuenta solo.
+ */
+export function creditoDelCliente(c) {
+  const { saldo } = pendientesDe(c);
+  return saldo < 0 ? q(-saldo) : 0;
+}
+
+/**
  * Un contrato se cierra cuando no debe nada y la garantía ya se liberó.
  *
  * `saldo <= 0`, no `saldo === 0` (hallazgo importante de la revisión final):

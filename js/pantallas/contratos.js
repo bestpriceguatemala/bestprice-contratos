@@ -21,7 +21,7 @@ import {
   lineasSalida, lineasDevolucion, resumen, horaTardiaDe,
 } from '../nucleo/contrato.js';
 import {
-  estadoContrato, pendientesDe, garantiaPorLiberar, yaVolvio,
+  estadoContrato, pendientesDe, garantiaPorLiberar, creditoDelCliente, yaVolvio,
 } from '../nucleo/estados.js';
 import { filtrar, textoDeContrato } from '../nucleo/busqueda.js';
 import {
@@ -89,15 +89,16 @@ export const CRITERIOS_ESTADO = {
   cerrados: (c) => estadoContrato(c) === 'cerrado',
   pendientesCobro: (c) => resumen(c).saldo > 0,
   // El espejo de «Pendientes de cobro» (H-9, prueba del sistema, 7 oct 2026): la
-  // misma cifra, `resumen(c).saldo`, del otro lado del cero. Un crédito no es un
-  // cobro —por eso «Pendientes de cobro» y «Saldo pendiente» de Clientes filtran
-  // `saldo > 0` a propósito y NO se tocan—, pero sí es dinero que el negocio le
-  // debe a alguien, y una corrección puede dejarlo en un contrato que el sistema
-  // ya da por «cerrado» (puedeCerrar acepta `saldo <= 0`): sin esta pregunta solo
-  // lo recordaba quien abriera ese contrato. Cuenta cualquier estado, igual que
-  // «Pendientes de cobro»: una renta que anda afuera con un sobrepago también es
-  // plata del cliente, y textoCuenta ya la rotula así.
-  aFavorDelCliente: (c) => resumen(c).saldo < 0,
+  // misma cifra, `saldo`, del otro lado del cero. Un crédito no es un cobro —por eso
+  // «Pendientes de cobro» y «Saldo pendiente» de Clientes filtran `saldo > 0` a
+  // propósito y NO se tocan—, pero sí es dinero que el negocio le debe a alguien, y una
+  // corrección puede dejarlo en un contrato que el sistema ya da por «cerrado»
+  // (puedeCerrar acepta `saldo <= 0`): sin esta pregunta solo lo recordaba quien abriera
+  // ese contrato. Lo decide `creditoDelCliente` (nucleo/estados.js), la misma que usa
+  // textoCuenta para decir «A favor del cliente» en cada renglón. Cuenta cualquier
+  // estado, igual que «Pendientes de cobro»: una renta que anda afuera con un sobrepago
+  // también es plata del cliente, y textoCuenta ya la rotula así.
+  aFavorDelCliente: (c) => creditoDelCliente(c) > 0,
   // garantiaPorLiberar (nucleo/estados.js) — la misma función que usa
   // resumenDeHoy (calendario.js) y la lista de flota.js, para que estos tres
   // lugares nunca puedan volver a desacordarse sobre qué cuenta como
@@ -156,16 +157,17 @@ export function claseFilaContrato(c) {
 /** "Cómo quedó la cuenta": para el renglón de la lista y el encabezado de la ficha. */
 export function textoCuenta(c) {
   const estado = estadoContrato(c);
-  const r = resumen(c);
+  const credito = creditoDelCliente(c);
   if (estado === 'rentado') {
     // Mientras el carro anda afuera un saldo por cobrar es lo normal y no se dice (el cierre todavía no
-    // existe), pero un saldo NEGATIVO no lo es nunca: es plata del cliente (se cobró de más al salir). Se dice
-    // aquí para que la fila que trae el filtro «A favor del cliente» explique por qué está ahí.
-    return r.saldo < 0 ? `En curso · A favor del cliente ${dinero(-r.saldo)}` : 'En curso';
+    // existe), pero un crédito no lo es nunca: es plata del cliente (se cobró de más al salir). Se dice aquí
+    // para que la fila que trae el filtro «A favor del cliente» explique por qué está ahí.
+    return credito > 0 ? `En curso · A favor del cliente ${dinero(credito)}` : 'En curso';
   }
+  const { saldo } = resumen(c);
   const partes = [];
-  if (r.saldo > 0) partes.push(`Debe ${dinero(r.saldo)}`);
-  else if (r.saldo < 0) partes.push(`A favor del cliente ${dinero(-r.saldo)}`);
+  if (saldo > 0) partes.push(`Debe ${dinero(saldo)}`);
+  else if (credito > 0) partes.push(`A favor del cliente ${dinero(credito)}`);
   else partes.push('Pagado');
   if (estado === 'devuelto' && pendientesDe(c).garantia) partes.push('garantía sin liberar');
   return partes.join(' · ');
