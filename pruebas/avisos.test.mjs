@@ -88,6 +88,91 @@ test('avisa si el cliente ya devolvió tarde antes', () => {
   assert.match(r[0].mensaje, /1 vez/, 'singular cuando es una sola vez');
 });
 
+// ---------------------------------------------------------------------------
+// H-4: «Este cliente ya devolvió tarde» casi nunca se prendía
+//
+// Prueba del sistema (7 oct 2026): Juan devolvió 3 días tarde, pagó y el contrato quedó CERRADO; al sacarle
+// otro carro no salía nada, porque el aviso solo miraba los contratos abiertos. El dueño decidió mirar el
+// último año de rentas de ese cliente (nucleo/historial.js), leído aparte (`cargarContratosDelCliente`) y
+// entregado aquí como `historialDelCliente`: `{ datos, fallo }`, o `null` si todavía no llega.
+// ---------------------------------------------------------------------------
+
+// Juan, con el contrato que la prueba del sistema le dejó: sale el 3 ago, debía volver el 7, volvió el 10.
+const juanTardeYCerrado = () => contratoDeUnCarro({
+  id: 'c-juan', fechaSalida: '2026-08-03', dias: 4, recibidoEl: '2026-08-10', danos: 0,
+});
+const hoyDeLaPrueba = { ...base, hoy: '2026-10-11' };
+
+test('H-4: Juan devolvió 3 días tarde en un contrato ya cerrado y pagado — sacarle otro carro lo avisa', () => {
+  const cerrado = juanTardeYCerrado();
+  assert.equal(cerrado.estado, 'cerrado', 'el escenario: ya pagó y cerró, así que NO está entre los abiertos');
+  const r = avisosDeSalida({
+    ...hoyDeLaPrueba, contratosDelCliente: [], historialDelCliente: { datos: [cerrado], fallo: false },
+  });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].nivel, 'medio');
+  assert.equal(r[0].mensaje, 'Este cliente ya devolvió tarde 1 vez en el último año.');
+});
+
+test('H-4: la cuenta dice «en el último año»: la cifra no es de toda la vida del cliente', () => {
+  const dos = [juanTardeYCerrado(), contratoDeUnCarro({
+    id: 'c-juan-2', fechaSalida: '2026-09-01', dias: 2, recibidoEl: '2026-09-05', danos: 0,
+  })];
+  const r = avisosDeSalida({ ...hoyDeLaPrueba, historialDelCliente: { datos: dos, fallo: false } });
+  assert.equal(r[0].mensaje, 'Este cliente ya devolvió tarde 2 veces en el último año.');
+});
+
+test('H-4: una devolución tarde de hace más de un año no avisa', () => {
+  const vieja = contratoDeUnCarro({
+    id: 'c-vieja', fechaSalida: '2025-08-03', dias: 4, recibidoEl: '2025-08-10', danos: 0,
+  });
+  assert.deepEqual(avisosDeSalida({ ...hoyDeLaPrueba, historialDelCliente: { datos: [vieja], fallo: false } }), []);
+});
+
+test('H-4: un cliente que siempre devolvió a tiempo no avisa nada', () => {
+  const aTiempo = contratoDeUnCarro({ id: 'c-bien', fechaSalida: '2026-08-03', dias: 4, recibidoEl: '2026-08-07', danos: 0 });
+  assert.deepEqual(avisosDeSalida({ ...hoyDeLaPrueba, historialDelCliente: { datos: [aTiempo], fallo: false } }), []);
+});
+
+test('H-4: el contrato abierto que sale en las dos lecturas (abiertos y último año) cuenta una sola vez', () => {
+  const abierto = contratoDeUnCarro({ id: 'c-debe', fechaSalida: '2026-08-03', dias: 4, recibidoEl: '2026-08-10', danos: 200 });
+  const r = avisosDeSalida({
+    ...hoyDeLaPrueba, contratosDelCliente: [abierto], historialDelCliente: { datos: [abierto, juanTardeYCerrado()], fallo: false },
+  });
+  const tarde = r.find((a) => /devolvió tarde/.test(a.mensaje));
+  assert.equal(tarde.mensaje, 'Este cliente ya devolvió tarde 2 veces en el último año.');
+});
+
+// «Un historial que no se pudo leer» no es «un historial limpio»: es la confusión que este sistema ya pagó
+// varias veces (resultadoLectura). Un récord limpio que el cliente no se ha ganado es una falsa tranquilidad.
+test('H-4: si el historial no se pudo leer y no se encontró nada, DICE que no se pudo revisar — no se calla', () => {
+  const r = avisosDeSalida({ ...hoyDeLaPrueba, historialDelCliente: { datos: [], fallo: true } });
+  assert.equal(r.length, 1, 'un historial sin leer no es un historial limpio');
+  assert.equal(r[0].nivel, 'medio');
+  assert.match(r[0].mensaje, /No se pudo revisar si este cliente ya devolvió tarde/);
+});
+
+test('H-4: si el historial no se pudo leer pero ya se sabe de una tarde, avisa «al menos» y dice por qué', () => {
+  const abierto = contratoDeUnCarro({ id: 'c-debe', fechaSalida: '2026-08-03', dias: 4, recibidoEl: '2026-08-10', danos: 200 });
+  const r = avisosDeSalida({
+    ...hoyDeLaPrueba, contratosDelCliente: [abierto], historialDelCliente: { datos: [], fallo: true },
+  });
+  const tarde = r.find((a) => /devolvió tarde/.test(a.mensaje));
+  assert.equal(tarde.mensaje, 'Este cliente ya devolvió tarde al menos 1 vez en el último año (no se pudo leer todo su historial).');
+  assert.equal(r.filter((a) => /No se pudo revisar/.test(a.mensaje)).length, 0, 'una sola frase, no dos');
+});
+
+test('H-4: mientras el historial no llega (o no hay cliente) no se inventa ni un fallo ni una tranquilidad', () => {
+  assert.deepEqual(avisosDeSalida({ ...hoyDeLaPrueba, historialDelCliente: null }), []);
+  assert.deepEqual(avisosDeSalida(hoyDeLaPrueba), []);
+});
+
+test('H-4: los contratos abiertos siguen avisando aunque no llegue ningún historial (nada de lo que ya funcionaba se pierde)', () => {
+  const abierto = contratoDeUnCarro({ id: 'c-debe', fechaSalida: '2026-08-03', dias: 4, recibidoEl: '2026-08-10', danos: 200 });
+  const r = avisosDeSalida({ ...hoyDeLaPrueba, contratosDelCliente: [abierto] });
+  assert.ok(r.some((a) => /devolvió tarde 1 vez/.test(a.mensaje)));
+});
+
 test('avisa si el carro ya está comprometido en esas fechas', () => {
   const encima = [{ id: 'c7', carroId: 'v1', fechaSalida: '2026-08-22', devolucionPrevista: '2026-08-27' }];
   const r = avisosDeSalida({ ...base, contratosDelCarro: encima });

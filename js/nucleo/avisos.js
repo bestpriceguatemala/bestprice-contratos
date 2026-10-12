@@ -6,6 +6,7 @@
 import { diasEntre, textoFecha } from './fechas.js';
 import { resumen } from './contrato.js';
 import { textoDosDecimales } from './dinero.js';
+import { revisionDeDevoluciones, textoDeVecesTarde } from './historial.js';
 // seCruzan es la misma regla que antes vivía aquí duplicada como seEnciman:
 // tocarse no es cruzarse (un carro que regresa el 20 puede volver a salir el
 // 20, y eso pasa a diario), así que la comparación es estricta. Dos copias de
@@ -23,8 +24,14 @@ const medio = (mensaje) => ({ nivel: 'medio', mensaje });
 // El precio y los días NO se avisan: el dueño pone el precio que quiera en cada
 // renta y el sistema no opina. Un aviso que él no quiere lo entrena a ignorar
 // los que sí importan.
+//
+// `contratosDelCliente` son sus contratos ABIERTOS: de ahí sale lo que debe. Lo que devolvió tarde sale del
+// ÚLTIMO AÑO de sus rentas, cerradas o no (`historialDelCliente`: `{ datos, fallo }` de
+// `cargarContratosDelCliente`, o `null` mientras no llega), porque un cliente que devolvió tarde, pagó y
+// cerró es el caso normal y los abiertos nunca lo ven (H-4).
 export function avisosDeSalida({
-  cliente, carro, contrato, contratosDelCliente = [], contratosDelCarro = [], reservasDelCarro = [], hoy,
+  cliente, carro, contrato, contratosDelCliente = [], historialDelCliente = null, contratosDelCarro = [],
+  reservasDelCarro = [], hoy,
 }) {
   const avisos = [];
 
@@ -53,10 +60,16 @@ export function avisosDeSalida({
     avisos.push(alto(`Este cliente debe Q${textoDosDecimales(deuda)} de una renta anterior.`));
   }
 
-  const tardes = contratosDelCliente.filter((c) => resumen(c).diasAtraso > 0).length;
-  if (tardes > 0) {
-    const plural = tardes === 1 ? 'vez' : 'veces';
-    avisos.push(medio(`Este cliente ya devolvió tarde ${tardes} ${plural}.`));
+  // Cuántas veces devolvió tarde en el último año — la regla vive en nucleo/historial.js y la comparte la
+  // marca «Devolvió tarde» de Clientes. Un historial que NO se pudo leer nunca se calla: «cero veces» con la
+  // lectura caída no es «nunca devolvió tarde» sino «no se sabe», y un récord limpio que no se ha ganado es
+  // exactamente la falsa tranquilidad que estos avisos existen para evitar.
+  const { veces, sinLeer } = revisionDeDevoluciones({ abiertos: contratosDelCliente, historial: historialDelCliente, hoy });
+  if (veces > 0) {
+    const incompleto = sinLeer ? ' (no se pudo leer todo su historial)' : '';
+    avisos.push(medio(`Este cliente ya devolvió tarde ${textoDeVecesTarde(veces, { sinLeer })}${incompleto}.`));
+  } else if (sinLeer) {
+    avisos.push(medio('No se pudo revisar si este cliente ya devolvió tarde antes: su historial no cargó. Revisa tu conexión.'));
   }
 
   // El otro contrato ocupa el carro hasta su fin EFECTIVO, no hasta el previsto:
