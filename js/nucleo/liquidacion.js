@@ -10,7 +10,7 @@
 // Solo se le paga al dueño de un contrato ya CERRADO (diseño de liquidación,
 // §2 y §3). Un contrato abierto todavía puede cambiar de monto — días de
 // atraso, daños — y pagarle antes sería pagar sobre una cifra que se mueve.
-import { suma } from './dinero.js';
+import { q, suma } from './dinero.js';
 import { resumen } from './contrato.js';
 import { estadoContrato } from './estados.js';
 
@@ -74,6 +74,28 @@ const queLlego = (valor) => (valor === null ? 'null' : typeof valor);
  */
 export function pagoAnulado(pago) {
   return Boolean(pago?.anulado);
+}
+
+/**
+ * Lo que se DESCONTÓ en un pago a un dueño (`descuento`, §7b): la parte de las rentas que ese pago
+ * cubre y que no se entregó, porque ya se le había pagado de más antes y se saldó contra eso.
+ * Nunca negativo ni mayor que el `monto` del pago, y 0 en un pago que no lo trae (los de antes de
+ * existir el descuento): un campo dañado no puede hacer que un pago entregue MÁS de lo que vale ni
+ * que haya más «descontado» del que el pago contiene.
+ */
+export function descuentoDelPago(pago) {
+  const monto = Math.max(0, q(pago?.monto));
+  return Math.min(Math.max(0, q(pago?.descuento)), monto);
+}
+
+/**
+ * Lo que de verdad salió de las manos de él con ese pago: `monto − descuento`. Es lo que dice «Total
+ * pagado» en el comprobante y la cifra de «Ya pagado»; `monto`, en cambio, es lo que suman las rentas
+ * (ver `construirPagoDueno`), y es lo que comparan los grupos. Una sola resta, aquí: ninguna pantalla
+ * la repite.
+ */
+export function entregadoDelPago(pago) {
+  return suma(pago?.monto, -descuentoDelPago(pago));
 }
 
 /**
@@ -188,10 +210,13 @@ export function sinIdsRepetidos(contratos) {
  * Comparar cada pago por separado haría que el primero siguiera «debiendo» para
  * siempre aunque la diferencia ya se hubiera pagado.
  *
- * Cada grupo es `{ contratos, pagos, pagado, ahora, cierra, completo, diferencia }`:
+ * Cada grupo es `{ contratos, pagos, pagado, descuento, ahora, cierra, completo, diferencia }`:
  * - `contratos`: las rentas de ESTA cuenta que esos pagos cubren.
  * - `pagos`: del más antiguo al más nuevo (por número de comprobante).
- * - `pagado`: lo que suman los `monto` guardados.
+ * - `pagado`: lo que suman los `monto` guardados. Cuenta lo que se DESCONTÓ igual que lo entregado: una
+ *   renta de Q1,200 pagada con Q600 y un descuento de Q600 está pagada, no a medias. El descuento
+ *   salda un pago de más anterior (ver `pagadoDeMas`), no deja esta renta debiendo.
+ * - `descuento`: de ese `pagado`, lo que fue descuento (`descuentoDelPago`). No cambia `diferencia`.
  * - `ahora`: lo que esas rentas cuestan hoy, con `costoDelSubarriendo` — la
  *   misma fórmula de siempre — y SIN preguntar si están cerradas. Si una renta
  *   se reabrió porque se corrigió su cierre y el cliente todavía no paga los
@@ -256,6 +281,7 @@ function gruposDePago(contratos, pagos) {
       contratos: enGrupo,
       pagos: ordenados,
       pagado,
+      descuento: suma(...ordenados.map(descuentoDelPago)),
       ahora,
       cierra: enGrupo.every(esPagableAlDueno),
       completo: g.completo,
@@ -381,15 +407,86 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
 }
 
 /**
- * Lo que se le pagó de MÁS a un dueño (H-7 de la prueba del sistema del 7 de octubre).
+ * Lo que `pagadoDeMas`, `descuentoMaximo` y `descuentoSinRespaldo` exigen para no mentir: la cuenta de
+ * `cuentaDeDueno` y la lista (aunque vacía) de rentas cuyo costo no se pudo leer. `undefined` no es
+ * «todo se leyó bien», es «no sé»: comparar contra un costo que no se leyó inventaría un pago de más.
+ */
+function exigirCuentaYCostos(cuenta, costoSinLeer) {
+  if (!Array.isArray(cuenta?.gruposDePago) || !Array.isArray(cuenta?.sinCostoAnotado)) {
+    throw new TypeError(
+      `liquidacion: «cuenta» debe ser la que devuelve cuentaDeDueno y llegó ${queLlego(cuenta)}. `
+      + 'Sin ella no se sabe qué se pagó, y suponer que nada sobra diría «estás a mano» cuando quizá no.',
+    );
+  }
+  if (!Array.isArray(costoSinLeer)) {
+    throw new TypeError(
+      `liquidacion: «costoSinLeer» debe ser una lista (la que devuelve cargarContratosParaDinero, aunque vacía) y llegó ${queLlego(costoSinLeer)}. `
+      + 'Sin ella no se sabe qué costos faltan, y comparar contra un costo que no se leyó inventaría un pago de más.',
+    );
+  }
+}
+
+/**
+ * El pago de más de una cuenta con los DESCUENTOS ya aplicados: la única cuenta de «cuánto se le pagó de
+ * más y todavía no se le ha descontado», de la que salen la línea de la ficha, el tope de lo que se puede
+ * descontar y lo que se descontó sin tener de dónde. Ninguna de las tres la calcula por su lado.
+ *
+ * Primero, cada grupo de pagos que está pasado (`diferencia < 0`) y de fiar (sus costos se leen, está
+ * completo) dice cuánto: `pagado - ahora`. Después, TODO lo descontado en los pagos de la cuenta
+ * (`grupo.descuento`, de los pagos vigentes) se reparte entre esos grupos, del comprobante más viejo al
+ * más nuevo, hasta agotarse. Un descuento no apunta a un comprobante en particular —él descuenta «lo que
+ * ya le pagué de más»—, así que se reparte con una regla fija que no depende del orden en que llegaron
+ * los datos. Lo que queda en cada grupo es lo que la ficha dice.
+ *
+ * Todo sale de los pagos VIGENTES: si se anula el pago que descontó, su descuento deja de repartirse y el
+ * pago de más reaparece entero; si se anula el que había pagado de más, ese grupo desaparece. Y como
+ * lo que se descuenta sale de lo repartido y no se vuelve a sumar en otro lado, la cifra de la ficha, el
+ * tope del descuento y lo entregado no pueden irse cada una por su lado.
+ *
+ * `sinRespaldo` es lo que queda de lo descontado después de repartir: se descontó más de lo que hoy hay
+ * pagado de más. Pasa si se anuló el pago que había pagado de más, o si esa renta volvió a subir de monto.
+ * Es plata que ese dueño NO recibió: entregaron menos de lo que costaban las rentas, y el resto ya no
+ * tiene de dónde salir. Con un grupo en el que no se puede confiar (costo sin leer o sin anotar, o un pago
+ * que cubre una renta que ya no está) no se afirma nada y vale 0: ese grupo podría ser justo el que lo
+ * respalda, y decir «te falta pagarle» sobre un dato que no se sabe es inventar una deuda.
+ */
+function pagadoDeMasNeto(cuenta, costoSinLeer) {
+  exigirCuentaYCostos(cuenta, costoSinLeer);
+  const dudosas = new Set([...cuenta.sinCostoAnotado, ...costoSinLeer]);
+  const deFiar = (g) => g.completo && !g.contratos.some((c) => dudosas.has(c.id));
+  let porRepartir = suma(...cuenta.gruposDePago.map((g) => g.descuento));
+  const lineas = [];
+  for (const g of cuenta.gruposDePago) {
+    if (!(g.diferencia < 0 && deFiar(g))) continue;
+    const bruto = suma(g.pagado, -g.ahora);
+    const descontado = Math.min(porRepartir, bruto);
+    porRepartir = suma(porRepartir, -descontado);
+    if (descontado < bruto) {
+      lineas.push({
+        contratos: g.contratos,
+        pagos: g.pagos,
+        pagado: g.pagado,
+        descuento: g.descuento,
+        ahora: g.ahora,
+        descontado,
+        deMas: suma(bruto, -descontado),
+      });
+    }
+  }
+  return { lineas, sinRespaldo: cuenta.gruposDePago.every(deFiar) ? porRepartir : 0 };
+}
+
+/**
+ * Lo que se le pagó de MÁS a un dueño (H-7 de la prueba del sistema del 7 de octubre), y todavía no se
+ * le ha descontado.
  *
  * Una renta que se corrige HACIA ABAJO después de pagada deja de costar lo que se
  * pagó: se pagaron Q2,100 y hoy la renta suma Q1,500. «Lo que baja después de pagado
  * no es deuda» (`1b4f748`) sigue siendo cierto y la cuenta no lo cuenta como deuda ni
- * descuenta nada —decide él si lo quita del próximo pago o lo pide de vuelta—, pero
- * un pago de más que ninguna pantalla dice es plata que no se recupera: «estás a mano»
- * es una buena noticia y las buenas noticias nadie las audita. Esto es lo que la ficha
- * del dueño le enseña.
+ * descuenta nada SOLA —decide él si lo descuenta del próximo pago (`descuento`, que se anota al
+ * registrar el pago) o lo pide de vuelta—, pero un pago de más que ninguna pantalla dice es plata
+ * que no se recupera: «estás a mano» es una buena noticia y las buenas noticias nadie las audita.
+ * Esto es lo que la ficha del dueño le enseña.
  *
  * No suma nada por su cuenta: parte de los grupos de `cuentaDeDueno` (`gruposDePago`),
  * que ya comparan lo que suman los `monto` guardados (`pagado`) contra lo que esas
@@ -398,8 +495,14 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
  * salen de los pagos VIGENTES, un pago anulado (H-6) no cuenta: sus rentas volvieron a
  * «por pagar» y su dinero está deshecho, no sobra.
  *
- * Cada una es `{ contratos, pagos, pagado, ahora, deMas }`, con `deMas` siempre
- * positivo (`pagado - ahora`), una por grupo de pagos, en el orden de los grupos.
+ * Los descuentos YA hechos (`pagadoDeMasNeto`) se restan aquí: una vez que descontó los Q600, la línea
+ * desaparece; con un descuento parcial queda lo que falta. Si no se restaran, la ficha seguiría diciendo
+ * que se le debe devolver algo que ya se descontó, y lo descontaría dos veces.
+ *
+ * Cada una es `{ contratos, pagos, pagado, descuento, ahora, descontado, deMas }`, con `deMas` siempre
+ * positivo (`pagado - ahora - descontado`), una por grupo de pagos, en el orden de los grupos:
+ * - `descuento`: de lo `pagado`, lo que fue descuento en los propios pagos de este grupo.
+ * - `descontado`: lo que ya se descontó de ESTE pago de más, en pagos posteriores.
  *
  * NO dice que se pagó de más cuando la comparación no es de fiar, porque entonces diría
  * una cifra falsa con toda confianza:
@@ -414,28 +517,45 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
  * si `cuenta` no es la de `cuentaDeDueno`.
  */
 export function pagadoDeMas(cuenta, costoSinLeer) {
-  if (!Array.isArray(cuenta?.gruposDePago) || !Array.isArray(cuenta?.sinCostoAnotado)) {
-    throw new TypeError(
-      `liquidacion: «cuenta» debe ser la que devuelve cuentaDeDueno y llegó ${queLlego(cuenta)}. `
-      + 'Sin ella no se sabe qué se pagó, y suponer que nada sobra diría «estás a mano» cuando quizá no.',
-    );
-  }
-  if (!Array.isArray(costoSinLeer)) {
-    throw new TypeError(
-      `liquidacion: «costoSinLeer» debe ser una lista (la que devuelve cargarContratosParaDinero, aunque vacía) y llegó ${queLlego(costoSinLeer)}. `
-      + 'Sin ella no se sabe qué costos faltan, y comparar contra un costo que no se leyó inventaría un pago de más.',
-    );
-  }
-  const dudosas = new Set([...cuenta.sinCostoAnotado, ...costoSinLeer]);
-  return cuenta.gruposDePago
-    .filter((g) => g.diferencia < 0 && g.completo && !g.contratos.some((c) => dudosas.has(c.id)))
-    .map((g) => ({
-      contratos: g.contratos,
-      pagos: g.pagos,
-      pagado: g.pagado,
-      ahora: g.ahora,
-      deMas: suma(g.pagado, -g.ahora),
-    }));
+  return pagadoDeMasNeto(cuenta, costoSinLeer).lineas;
+}
+
+/**
+ * Lo que dicen las líneas de `pagadoDeMas`, sumado: todo lo que se le pagó de más y aún no se descontó.
+ * Es el tope de lo que se puede descontar en total (`descuentoMaximo`), así que la ficha y el campo del
+ * descuento hablan de la misma cifra.
+ */
+export function totalPagadoDeMas(cuenta, costoSinLeer) {
+  return suma(...pagadoDeMas(cuenta, costoSinLeer).map((l) => l.deMas));
+}
+
+/**
+ * Lo más que se puede DESCONTAR al registrar un pago de lo marcado: lo que se le pagó de más y aún no se
+ * le ha descontado (`totalPagadoDeMas`), y nunca más de lo que suman las rentas que se marcaron.
+ *
+ * ESTE TOPE ES LA REGLA. Un descuento rebaja lo que entrega ahora, y si pudiera escribirse a mano sin
+ * límite, un Q5,000 contra un pago de más de Q600 le quitaría al dueño del carro plata que de verdad se le
+ * debe, y el comprobante lo diría como si fuera cierto: una deuda real borrada con un número tecleado.
+ * Por eso lo descontable no sale de lo que él escribe sino de lo que se pagó de más, que ya está en los
+ * pagos. Y por eso es 0 cuando no hay un pago de más de fiar (costo sin leer o sin anotar, una renta que ya
+ * no está): sin saber cuánto sobra no se descuenta nada.
+ *
+ * `idsMarcados` son los de `elegirParaPago` (rentas por pagar y claves «dif:…»). `costoSinLeer` es
+ * obligatorio, como en `pagadoDeMas`.
+ */
+export function descuentoMaximo(cuenta, costoSinLeer, idsMarcados) {
+  const sobra = totalPagadoDeMas(cuenta, costoSinLeer);
+  return Math.min(sobra, elegirParaPago(cuenta, idsMarcados).monto);
+}
+
+/**
+ * Lo que se descontó de MÁS: descuentos en pagos vigentes que ya no tienen un pago de más que los
+ * respalde (ver `pagadoDeMasNeto`). Es 0 casi siempre. No es un pago de más (ese es de él) sino lo
+ * contrario: ese dueño recibió menos de lo que costaban sus rentas, y la cuenta de «por pagar» no lo ve
+ * porque las rentas están pagadas. Sale aquí para que la ficha lo diga en vez de dejarlo en Q0.00.
+ */
+export function descuentoSinRespaldo(cuenta, costoSinLeer) {
+  return pagadoDeMasNeto(cuenta, costoSinLeer).sinRespaldo;
 }
 
 /**

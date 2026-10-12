@@ -11,14 +11,16 @@ import {
   migrarCostosDelDueno, mensajeDeMigracion, MENSAJE_MIGRAR_SIN_DINERO,
   pagoDuenoParaGuardar, construirPagoDueno, guardarPagoDueno, cargarPagosDueno, siguienteNumeroComprobante,
   nuevoIdPagoDueno, MENSAJE_PAGO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS, MENSAJE_PAGO_SIN_ID, MENSAJE_PAGO_SIN_MONTO,
-  anularPagoDueno,
+  anularPagoDueno, MENSAJE_PAGO_DESCUENTO,
 } from '../js/datos.js';
 import { CAMPOS_DUENO } from '../js/nucleo/dueno.js';
 import { mezclar } from '../js/cache.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
 import { construirCierre } from '../js/nucleo/cierre.js';
-import { costoDelSubarriendo, cuentaDeDueno, totalSeleccionado } from '../js/nucleo/liquidacion.js';
+import {
+  costoDelSubarriendo, cuentaDeDueno, totalSeleccionado, pagadoDeMas,
+} from '../js/nucleo/liquidacion.js';
 import { construirContrato } from '../js/pantallas/sacarCarro.js';
 import { nubeEnMemoria, copiaLocalEnMemoria } from './fixtures/nubeEnMemoria.mjs';
 
@@ -2068,4 +2070,179 @@ test('de punta a punta: lo que se guarda se vuelve a leer, y esa renta deja de d
   const cuenta = cuentaDeDueno({ contratos: SELECCION.contratos, pagos: despues.datos });
   assert.deepEqual(cuenta.pagados.map((c) => c.id).sort(), ['c1', 'c2']);
   assert.equal(cuenta.totalPorPagar, 1000 + 400, 'c5 y c4 (c4 no se pagó en esta nube)');
+});
+
+// ---------- El descuento al registrar un pago (12 oct 2026) ----------
+//
+// Un pago a un dueño puede llevar `descuento`: de las rentas que cubre, lo que ya estaba pagado porque a ese
+// dueño se le había pagado de más. `monto` sigue siendo lo que suman las rentas; lo entregado es `monto −
+// descuento`. El tope no es lo que él escribe sino lo que de verdad se pagó de más (`descuentoMaximo`).
+//
+// El pago de más sale de las mismas piezas que arman todo lo demás: c4 (Q100 × 4 = Q400) se pagó con el
+// comprobante N.° 1 por Q1,000, o sea Q600 de más. c1 y c2 (Q1,600 y Q750) están por pagar.
+
+const PAGADO_DE_MAS = {
+  contratos: SELECCION.contratos,
+  pagos: [pagoDuenoParaGuardar(
+    { duenoId: 'd1', fecha: '2026-09-10', forma: 'efectivo', monto: 1000, contratos: ['c4'] },
+    { id: 'p1', numero: 1, ahora: 1790000000000 },
+  )],
+};
+const conDescuento = (idsMarcados, descuento, extra = {}) => construirPagoDueno({
+  duenoId: 'd1', fecha: '2026-09-20', forma: 'efectivo', ...PAGADO_DE_MAS, idsMarcados, descuento, costoSinLeer: [], ...extra,
+});
+
+test('descuento: el punto de partida — a este dueño se le pagaron Q600 de más', () => {
+  const cuenta = cuentaDeDueno(PAGADO_DE_MAS);
+  assert.equal(pagadoDeMas(cuenta, [])[0].deMas, 600);
+  assert.equal(cuenta.totalPorPagar, 3350, 'y no se descuenta solo: c1 + c2 + c5 son Q3,350');
+});
+
+test('descuento: construirPagoDueno guarda el descuento junto al monto, que sigue siendo lo que suman las rentas', () => {
+  assert.deepEqual(conDescuento(['c1'], 600), {
+    duenoId: 'd1', fecha: '2026-09-20', forma: 'efectivo', monto: 1600, contratos: ['c1'], descuento: 600,
+  });
+});
+
+test('descuento: sin descuento —ausente, vacío o en cero— el pago sale con la forma de siempre, sin el campo', () => {
+  for (const d of [undefined, null, '', 0, '0', 0.004]) {
+    const pago = conDescuento(['c1'], d);
+    assert.equal('descuento' in pago, false, `descuento: ${JSON.stringify(d)}`);
+    assert.equal(pago.monto, 1600);
+  }
+});
+
+test('descuento: viene del formulario como TEXTO y se acepta igual, pasando por q()', () => {
+  assert.equal(conDescuento(['c1'], '600').descuento, 600);
+  assert.equal(conDescuento(['c1'], '250.5').descuento, 250.5);
+  assert.equal(conDescuento(['c1'], 0.1 + 0.2).descuento, 0.3, 'sin el error de los decimales');
+});
+
+test('descuento: el tope es lo que se le pagó de más — pedir más LANZA y dice cuál es el máximo y por qué', () => {
+  assert.equal(conDescuento(['c1'], 600).descuento, 600, 'justo el tope entra');
+  for (const pedido of [600.01, 5000, '5000']) {
+    assert.throws(() => conDescuento(['c1'], pedido), (e) => {
+      assert.match(e.message, /^No se registró el pago\./, 'la pantalla reconoce las frases de esta función por cómo empiezan');
+      assert.match(e.message, /lo máximo es Q600\.00/);
+      assert.match(e.message, /a este dueño, Q600\.00/, 'dice contra qué se descuenta');
+      assert.match(e.message, /Q1,600\.00/, 'y de lo que suman las rentas marcadas');
+      return true;
+    }, String(pedido));
+  }
+});
+
+test('descuento: no se puede descontar más de lo que suman las rentas marcadas aunque sobre más', () => {
+  const pago600 = pagoDuenoParaGuardar(
+    { duenoId: 'd1', fecha: '2026-09-10', forma: 'efectivo', monto: 3000, contratos: ['c4'] },
+    { id: 'p1', numero: 1, ahora: 1790000000000 },
+  ); // sobran Q2,600
+  const arma = (d) => construirPagoDueno({
+    duenoId: 'd1', fecha: '2026-09-20', forma: 'efectivo', contratos: SELECCION.contratos, pagos: [pago600], idsMarcados: ['c2'], descuento: d, costoSinLeer: [],
+  });
+  assert.equal(arma(750).descuento, 750, 'descontar todo lo que suma la renta: se entrega Q0 y la renta queda pagada');
+  assert.throws(() => arma(751), /lo máximo es Q750\.00/);
+});
+
+test('descuento: sin pago de más no hay nada que descontar — un campo libre borraría una deuda real', () => {
+  assert.throws(() => construirPagoDueno({
+    duenoId: 'd1', fecha: '2026-09-20', forma: 'efectivo', ...SELECCION, idsMarcados: ['c1'], descuento: 100, costoSinLeer: [],
+  }), (e) => {
+    assert.match(e.message, /lo máximo es Q0\.00/);
+    assert.match(e.message, /a este dueño, Q0\.00/);
+    return true;
+  });
+});
+
+test('descuento: lo ya descontado no se puede descontar otra vez — el segundo pago topa con lo que quedaba', () => {
+  const primero = pagoDuenoParaGuardar(conDescuento(['c1'], 400), { id: 'p2', numero: 2, ahora: 1790000000001 });
+  const arma = (d) => construirPagoDueno({
+    duenoId: 'd1', fecha: '2026-09-21', forma: 'efectivo', contratos: SELECCION.contratos, pagos: [...PAGADO_DE_MAS.pagos, primero], idsMarcados: ['c2'], descuento: d, costoSinLeer: [],
+  });
+  assert.equal(arma(200).descuento, 200, 'quedaban Q200 de los Q600');
+  assert.throws(() => arma(201), /lo máximo es Q200\.00/);
+});
+
+test('descuento: un pago anulado no gasta el pago de más — el descuento vuelve a estar disponible', () => {
+  const primero = pagoDuenoParaGuardar(conDescuento(['c1'], 600), { id: 'p2', numero: 2, ahora: 1790000000001 });
+  const arma = (pagos, d) => construirPagoDueno({
+    duenoId: 'd1', fecha: '2026-09-21', forma: 'efectivo', contratos: SELECCION.contratos, pagos, idsMarcados: ['c2'], descuento: d, costoSinLeer: [],
+  });
+  assert.throws(() => arma([...PAGADO_DE_MAS.pagos, primero], 1), /lo máximo es Q0\.00/, 'con el N.° 2 vigente ya se descontó todo');
+  const anulado = pagoDuenoParaGuardar(anularPagoDueno(primero, { fecha: '2026-09-22' }), { ahora: 1790000000002 });
+  assert.equal(arma([...PAGADO_DE_MAS.pagos, anulado], 600).descuento, 600, 'anulado, vuelve a haber Q600 por descontar');
+});
+
+test('descuento: lo que no es un monto LANZA — ni un negativo ni un texto se leen como «sin descuento»', () => {
+  for (const malo of [-1, -0.01, '-600', 'abc', NaN, Infinity]) {
+    assert.throws(() => conDescuento(['c1'], malo), (e) => {
+      assert.match(e.message, /^No se registró el pago\./);
+      assert.match(e.message, /descuento/);
+      return true;
+    }, String(malo));
+  }
+});
+
+test('descuento: sin saber qué costos no se pudieron leer, LANZA — no supone que todos se leyeron', () => {
+  assert.throws(() => construirPagoDueno({
+    duenoId: 'd1', fecha: '2026-09-20', forma: 'efectivo', ...PAGADO_DE_MAS, idsMarcados: ['c1'], descuento: 100,
+  }), { name: 'TypeError', message: /costoSinLeer/ });
+  // Sin descuento, el comportamiento de siempre: costoSinLeer ausente no estorba.
+  assert.equal(construirPagoDueno({
+    duenoId: 'd1', fecha: '2026-09-20', forma: 'efectivo', ...PAGADO_DE_MAS, idsMarcados: ['c1'],
+  }).monto, 1600);
+});
+
+test('descuento: si el costo de la renta pagada de más no se pudo leer, no se sabe cuánto sobra y no se descuenta', () => {
+  assert.throws(() => conDescuento(['c1'], 100, { costoSinLeer: ['c4'] }), /lo máximo es Q0\.00/);
+  assert.equal(conDescuento(['c1'], 100, { costoSinLeer: ['otra'] }).descuento, 100, 'el de otra renta no estorba');
+});
+
+test('descuento: la casilla vieja de una renta que ya no es pagable no mete su dinero a la base del tope', () => {
+  // c3 sigue afuera: no entra al pago, y por eso tampoco a lo que suman las rentas marcadas.
+  assert.throws(() => conDescuento(['c3'], 100), /lo máximo es Q0\.00/);
+});
+
+// --- sellar y guardar ---
+
+test('pagoDuenoParaGuardar: el descuento pasa por q(), se guarda solo si es mayor que cero y no ensucia la forma de §7', () => {
+  const sellar = (d) => pagoDuenoParaGuardar({ ...pagoBase, descuento: d }, { id: 'p1', numero: 1, ahora: 1 });
+  assert.equal(sellar(0.1 + 0.2).descuento, 0.3);
+  assert.equal(sellar('600').descuento, 600);
+  for (const nada of [0, '', null, undefined, -5, 'abc', NaN]) {
+    assert.equal('descuento' in sellar(nada), false, `descuento: ${String(nada)}`);
+  }
+  assert.deepEqual(Object.keys(sellar(100)).sort(), [...CAMPOS_DE_UN_PAGO, 'descuento'].sort());
+  assert.deepEqual(Object.keys(sellar(0)).sort(), CAMPOS_DE_UN_PAGO, 'sin descuento, los mismos campos de siempre');
+});
+
+test('pagoDuenoParaGuardar: anular un pago con descuento lo conserva — el papel que ese dueño tiene dice lo que dice', () => {
+  const sellado = pagoDuenoParaGuardar({ ...pagoBase, descuento: 600 }, { id: 'p1', numero: 12, ahora: 1 });
+  const anulado = pagoDuenoParaGuardar(anularPagoDueno(sellado, { fecha: '2026-10-02' }), { ahora: 2 });
+  assert.equal(anulado.descuento, 600);
+  assert.equal(anulado.monto, 2350);
+  assert.equal(anulado.numero, 12);
+  assert.equal(anulado.anulado, true);
+});
+
+test('guardarPagoDueno: guarda el descuento en la nube junto al monto y las rentas', async () => {
+  const nube = nubeEnMemoria();
+  const guardado = await guardarCon(nube, conDescuento(['c1'], 600)).promesa;
+  assert.equal(guardado.descuento, 600);
+  const enLaNube = nube.leer(`pagosDueno/${guardado.id}`);
+  assert.equal(enLaNube.descuento, 600);
+  assert.equal(enLaNube.monto, 1600);
+  assert.deepEqual(enLaNube.contratos, ['c1']);
+});
+
+test('guardarPagoDueno: un descuento imposible (negativo, o mayor que las rentas) se niega ANTES de gastar un número', async () => {
+  for (const descuento of [-1, 1600.01, 99999]) {
+    const nube = nubeEnMemoria({ contadores: { comprobantes: { ultimo: 3 } } });
+    const g = guardarCon(nube, { ...pagoBase, monto: 1600, contratos: ['c1'], descuento });
+    await assert.rejects(g.promesa, (e) => e.message === MENSAJE_PAGO_DESCUENTO, `descuento: ${descuento}`);
+    assert.equal(g.numeros.pedidos, 0, 'no se gastó un comprobante');
+    assert.equal(nube.leer('contadores/comprobantes').ultimo, 3);
+    assert.equal(nube.escrituras().length, 0);
+  }
+  const justo = await guardarCon(nubeEnMemoria(), { ...pagoBase, monto: 1600, contratos: ['c1'], descuento: 1600 }).promesa;
+  assert.equal(justo.descuento, 1600, 'descontar todo lo que suman las rentas sí se puede');
 });

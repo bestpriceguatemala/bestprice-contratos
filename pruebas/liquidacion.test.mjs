@@ -17,7 +17,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   costoDelSubarriendo, esPagableAlDueno, cuentaDeDueno, agruparPorDueno, totalSeleccionado,
-  elegirParaPago, totalGeneral, pagoAnulado, pagadoDeMas,
+  elegirParaPago, totalGeneral, pagoAnulado, pagadoDeMas, descuentoDelPago, entregadoDelPago,
+  totalPagadoDeMas, descuentoMaximo, descuentoSinRespaldo,
 } from '../js/nucleo/liquidacion.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
 import { resumen } from '../js/nucleo/contrato.js';
@@ -1221,11 +1222,11 @@ test('totalGeneral: si las cuentas no llegaron, lanza en vez de decir que no se 
 
 /** Un pago real a un dueño, armado y sellado como lo hace la pantalla. */
 function pagoReal({
-  id, numero, contratos, idsMarcados, pagos = [], fecha = '2026-09-20', ahora = AHORA,
+  id, numero, contratos, idsMarcados, pagos = [], fecha = '2026-09-20', ahora = AHORA, descuento, costoSinLeer, duenoId = 'd1',
 }) {
   return pagoDuenoParaGuardar(
     construirPagoDueno({
-      duenoId: 'd1', fecha, forma: 'transferencia', contratos, pagos, idsMarcados,
+      duenoId, fecha, forma: 'transferencia', contratos, pagos, idsMarcados, descuento, costoSinLeer,
     }),
     { id, numero, ahora },
   );
@@ -1570,4 +1571,259 @@ test('pagadoDeMas LANZA si lo que le falta no llegó: no convierte «no sé» en
     assert.throws(() => pagadoDeMas(mala, []), { name: 'TypeError', message: /«cuenta» debe ser la que devuelve cuentaDeDueno/ }, JSON.stringify(mala));
   }
   assert.deepEqual(pagadoDeMas(cuentaDeDueno({ contratos: [], pagos: [] }), []), [], 'una cuenta vacía de verdad no lanza');
+});
+
+// ---------------------------------------------------------------------------
+// El descuento al registrar un pago (12 oct 2026).
+//
+// H-7 le dijo a él «se le pagó de más Q600», pero el sistema no le dejaba quitarlo: un pago es la
+// suma de las rentas que marca, y si marca Q1,200 de rentas nuevas y entrega Q600 porque lo demás
+// ya estaba pagado, se guardaba (y se imprimía) Q1,200. Su decisión: un descuento al registrar el
+// pago. La renta de Q1,200 queda PAGADA —el descuento salda un pago de más anterior, no paga a
+// medias esta—, el papel dice las rentas, el descuento y lo que de verdad entregó, y la línea de
+// «se le pagó de más» deja de decir Q600.
+//
+// Se guarda como `descuento` en el pago; `monto` sigue siendo lo que suman las rentas que cubre.
+// Todo se arma con los constructores reales (`construirPagoDueno` + `pagoDuenoParaGuardar`).
+// ---------------------------------------------------------------------------
+
+/**
+ * El escenario: la renta N.° 2 se pagó con Q2,100 y se corrigió a Q1,500 (se pagaron Q600 de más);
+ * después sale una renta nueva de Q1,200 (c1). `descuento` es lo que se descuenta al pagar c1.
+ */
+function conSobrePago({ descuento, numero = 7, id = 'p7' } = {}) {
+  const bajada = corregidaHaciaAbajo('r2');
+  const c1 = cerrado('c1');
+  const p2 = pagoDeLaDos();
+  const contratos = [bajada, c1];
+  const p7 = pagoReal({
+    id, numero, contratos, pagos: [p2], idsMarcados: ['c1'], descuento, costoSinLeer: [],
+  });
+  return { bajada, c1, p2, p7, contratos, cuenta: (pagos) => cuentaDeDueno({ contratos, pagos }) };
+}
+
+test('descuento: el pago guarda `descuento`, y `monto` sigue siendo lo que suman las rentas', () => {
+  const { p7 } = conSobrePago({ descuento: 600 });
+  assert.equal(p7.monto, 1200, 'monto = las rentas que cubre: es lo que el resto del sistema compara');
+  assert.equal(p7.descuento, 600);
+  assert.deepEqual(p7.contratos, ['c1']);
+});
+
+test('descuento: un pago sin descuento no trae el campo, igual que los pagos de antes', () => {
+  const { p7 } = conSobrePago({});
+  assert.equal('descuento' in p7, false);
+  assert.equal(p7.monto, 1200);
+  const conCero = conSobrePago({ descuento: 0 }).p7;
+  assert.equal('descuento' in conCero, false, 'un descuento en cero no se guarda como si fuera algo');
+});
+
+test('descuentoDelPago y entregadoDelPago: lo que se descontó y lo que de verdad salió de sus manos', () => {
+  assert.equal(descuentoDelPago({ monto: 1200, descuento: 600 }), 600);
+  assert.equal(entregadoDelPago({ monto: 1200, descuento: 600 }), 600);
+  assert.equal(entregadoDelPago({ monto: 1200 }), 1200, 'un pago de antes del descuento se entregó completo');
+  assert.equal(descuentoDelPago({ monto: 1200 }), 0);
+  assert.equal(descuentoDelPago(undefined), 0);
+  assert.equal(entregadoDelPago({ monto: 1200, descuento: 1200 }), 0, 'descontar todo es válido: la renta se saldó con lo pagado de más');
+  assert.equal(entregadoDelPago({ monto: 100.1, descuento: 0.2 }), 99.9, 'pasa por q(): sin el error de los decimales');
+});
+
+test('descuentoDelPago: un descuento dañado (negativo, texto, mayor que el pago) nunca infla lo entregado ni lo pagado de más', () => {
+  assert.equal(descuentoDelPago({ monto: 1200, descuento: -500 }), 0, 'un negativo subiría lo entregado por encima del monto');
+  assert.equal(entregadoDelPago({ monto: 1200, descuento: -500 }), 1200);
+  assert.equal(descuentoDelPago({ monto: 1200, descuento: 'mucho' }), 0);
+  assert.equal(descuentoDelPago({ monto: 1200, descuento: 5000 }), 1200, 'no se descuenta más de lo que vale el pago');
+  assert.equal(entregadoDelPago({ monto: 1200, descuento: 5000 }), 0, 'y lo entregado nunca sale negativo');
+});
+
+test('descuento: la renta de Q1,200 queda PAGADA — sale de «por pagar» y no queda media diferencia', () => {
+  const { cuenta, p2, p7 } = conSobrePago({ descuento: 600 });
+  const sin = cuenta([p2]);
+  assert.equal(sin.totalPorPagar, 1200, 'el control: antes del pago se le deben Q1,200');
+  assert.deepEqual(ids(sin.porPagar), ['c1']);
+
+  const con = cuenta([p2, p7]);
+
+  assert.deepEqual(ids(con.porPagar), [], 'la renta salió de «por pagar»');
+  assert.deepEqual(ids(con.pagados).sort(), ['c1', 'r2']);
+  assert.deepEqual(con.diferencias, [], 'y NO aparece como una diferencia de Q600 por pagar: se pagó completa');
+  assert.deepEqual(con.diferenciasSinCerrar, []);
+  assert.equal(con.totalPorPagar, 0, 'no se le debe nada: los Q600 que no entregó ya estaban pagados');
+  const grupo = con.gruposDePago.find((g) => ids(g.contratos).includes('c1'));
+  assert.equal(grupo.pagado, 1200, 'lo pagado de esa renta es lo que cuesta, el descuento incluido');
+  assert.equal(grupo.diferencia, 0);
+  assert.equal(grupo.descuento, 600, 'y el grupo sabe cuánto de eso fue descuento');
+});
+
+test('descuento: la línea «se le pagó de más» deja de decir Q600 una vez que se descontó', () => {
+  const { cuenta, p2, p7 } = conSobrePago({ descuento: 600 });
+  const antes = pagadoDeMas(cuenta([p2]), []);
+  assert.equal(antes.length, 1, 'el control: sin el descuento sobran Q600');
+  assert.equal(antes[0].deMas, 600);
+  assert.equal(totalPagadoDeMas(cuenta([p2]), []), 600);
+
+  assert.deepEqual(pagadoDeMas(cuenta([p2, p7]), []), [], 'descontados los Q600, ya no se le debe nada de vuelta');
+  assert.equal(totalPagadoDeMas(cuenta([p2, p7]), []), 0);
+});
+
+test('descuento: uno parcial deja lo que falta por descontar, y la línea lo explica con sus cifras', () => {
+  const { cuenta, p2, p7 } = conSobrePago({ descuento: 200 });
+  const [linea, ...mas] = pagadoDeMas(cuenta([p2, p7]), []);
+  assert.equal(mas.length, 0);
+  assert.equal(linea.deMas, 400, '600 de más, 200 ya descontados');
+  assert.equal(linea.descontado, 200, 'dice cuánto ya se descontó de este pago de más');
+  assert.equal(linea.pagado, 2100, 'las demás cifras son las de siempre: lo pagado…');
+  assert.equal(linea.ahora, 1500, '…y lo que hoy cuesta');
+  assert.equal(linea.pagado - linea.ahora - linea.descontado, linea.deMas, 'las cifras de la línea cuadran entre sí');
+  assert.equal(totalPagadoDeMas(cuenta([p2, p7]), []), 400);
+  const sinDescuento = pagadoDeMas(cuenta([p2]), [])[0];
+  assert.equal(sinDescuento.descontado, 0, 'sin descuento, ninguno aplicado');
+});
+
+test('descuento: dos pagos con descuento se acumulan y el segundo ya no puede pasar de lo que quedaba', () => {
+  const { bajada, c1, p2 } = conSobrePago({});
+  const c3 = cerrado('c3');
+  const contratos = [bajada, c1, c3];
+  const p7 = pagoReal({ id: 'p7', numero: 7, contratos, pagos: [p2], idsMarcados: ['c1'], descuento: 400, costoSinLeer: [] });
+  const cuenta = cuentaDeDueno({ contratos, pagos: [p2, p7] });
+  assert.equal(totalPagadoDeMas(cuenta, []), 200, 'de los Q600, ya se descontaron Q400');
+  assert.equal(descuentoMaximo(cuenta, [], ['c3']), 200, 'lo máximo que se puede descontar en el siguiente pago');
+
+  const p8 = pagoReal({ id: 'p8', numero: 8, contratos, pagos: [p2, p7], idsMarcados: ['c3'], descuento: 200, costoSinLeer: [] });
+  const todo = cuentaDeDueno({ contratos, pagos: [p2, p7, p8] });
+  assert.deepEqual(pagadoDeMas(todo, []), []);
+  assert.equal(descuentoMaximo(todo, [], []), 0);
+  assert.equal(todo.totalPorPagar, 0);
+});
+
+test('descuento: anular el pago con descuento lo pone todo de vuelta, el pago de más incluido', () => {
+  const { cuenta, p2, p7 } = conSobrePago({ descuento: 600 });
+  assert.deepEqual(pagadoDeMas(cuenta([p2, p7]), []), [], 'el control: con el pago vigente no sobra nada');
+
+  const anulado = anuladoReal(p7);
+  assert.equal(anulado.descuento, 600, 'el pago anulado conserva su descuento: es parte de lo que ese papel dijo');
+  assert.equal(anulado.monto, 1200);
+  for (const pagos of [[p2, anulado], [anulado, p2]]) {
+    const con = cuenta(pagos);
+    assert.deepEqual(ids(con.porPagar), ['c1'], 'la renta vuelve a «por pagar»');
+    assert.equal(con.totalPorPagar, 1200, 'por su costo completo');
+    const [linea] = pagadoDeMas(con, []);
+    assert.equal(linea.deMas, 600, 'y el pago de más que se había saldado reaparece entero');
+    assert.equal(linea.descontado, 0);
+  }
+  const conLasDosCopias = cuenta([p2, p7, anulado]);
+  assert.equal(pagadoDeMas(conLasDosCopias, [])[0].deMas, 600, 'la copia vieja y la anulada del mismo pago: gana la anulada');
+});
+
+test('descuento: dos pagos de más reparten el descuento del más viejo al más nuevo', () => {
+  // r2 se pagó con Q2,100 y hoy cuesta Q1,500 (sobran 600); r3 igual, con otro comprobante (sobran 600 más).
+  const r2 = corregidaHaciaAbajo('r2');
+  const r3 = corregidaHaciaAbajo('r3');
+  const p2 = pagoReal({ id: 'p2', numero: 2, contratos: [cerradoConDias('r2', 3)], idsMarcados: ['r2'] });
+  const p3 = pagoReal({ id: 'p3', numero: 3, contratos: [cerradoConDias('r3', 3)], idsMarcados: ['r3'] });
+  const c1 = cerrado('c1');
+  const contratos = [r2, r3, c1];
+  const p7 = pagoReal({ id: 'p7', numero: 7, contratos, pagos: [p2, p3], idsMarcados: ['c1'], descuento: 900, costoSinLeer: [] });
+  const cuenta = cuentaDeDueno({ contratos, pagos: [p2, p3, p7] });
+  assert.equal(totalPagadoDeMas(cuentaDeDueno({ contratos, pagos: [p2, p3] }), []), 1200, 'el control: 1,200 de más en total');
+
+  const lineas = pagadoDeMas(cuenta, []);
+
+  assert.equal(lineas.length, 1, 'el más viejo quedó saldado y su línea se fue');
+  assert.deepEqual(lineas[0].pagos.map((p) => p.numero), [3], 'queda el comprobante N.° 3');
+  assert.equal(lineas[0].deMas, 300, '900 de descuento: 600 al N.° 2 y 300 al N.° 3');
+  assert.equal(lineas[0].descontado, 300);
+  assert.equal(totalPagadoDeMas(cuenta, []), 300, 'y el total es lo que dicen las líneas');
+});
+
+test('descuentoMaximo: nunca más de lo que se le pagó de más, ni más de lo que suman las rentas marcadas', () => {
+  const { cuenta, p2 } = conSobrePago({});
+  const c = cuenta([p2]);
+  assert.equal(descuentoMaximo(c, [], ['c1']), 600, 'sobran 600 y la renta marcada suma 1,200: el tope es lo que sobra');
+  assert.equal(descuentoMaximo(c, [], []), 0, 'sin nada marcado no hay contra qué descontar');
+
+  const chica = cerradoConDias('c4', 0, { dias: 1 }); // Q300
+  const contratos = [corregidaHaciaAbajo('r2'), chica];
+  const c2 = cuentaDeDueno({ contratos, pagos: [p2] });
+  assert.equal(descuentoMaximo(c2, [], ['c4']), 300, 'la renta marcada suma 300: no se descuenta más de lo que se paga');
+});
+
+test('descuentoMaximo: sin pago de más es cero — no hay con qué descontar, y un campo libre erraría la deuda real', () => {
+  const sin = cuentaDeDueno({ contratos: [cerrado('c1')], pagos: [] });
+  assert.equal(descuentoMaximo(sin, [], ['c1']), 0);
+  const cuadrado = cuentaDeDueno({ contratos: [cerradoConDias('r2', 3), cerrado('c1')], pagos: [pagoDeLaDos()] });
+  assert.equal(descuentoMaximo(cuadrado, [], ['c1']), 0, 'lo pagado cuadra con lo que cuesta: nada que descontar');
+  const crecida = cuentaDeDueno({ contratos: [corregido('r41')], pagos: [pagoReal({ id: 'p7', numero: 7, contratos: [cerradoConDias('r41', 1)], idsMarcados: ['r41'] })] });
+  assert.equal(descuentoMaximo(crecida, [], [crecida.diferencias[0].clave]), 0, 'una diferencia por pagar es deuda, no un pago de más');
+});
+
+test('descuentoMaximo: lo que no es de fiar no se puede descontar (costo sin leer, sin anotar, renta que ya no está)', () => {
+  const { cuenta, p2 } = conSobrePago({});
+  assert.equal(descuentoMaximo(cuenta([p2]), ['r2'], ['c1']), 0, 'el costo de r2 no se pudo leer: no se sabe cuánto sobra');
+  assert.equal(descuentoMaximo(cuenta([p2]), ['otra'], ['c1']), 600, 'el de otra renta no estorba');
+  const sinCosto = cuentaDeDueno({ contratos: [corregidaHaciaAbajo('r2', { costoDia: 0 }), cerrado('c1')], pagos: [p2] });
+  assert.equal(descuentoMaximo(sinCosto, [], ['c1']), 0, 'r2 sin costo anotado: Q0.00 hoy no es «lo que cuesta»');
+  const sinLaRenta = cuentaDeDueno({ contratos: [cerrado('c1')], pagos: [p2] });
+  assert.equal(descuentoMaximo(sinLaRenta, [], ['c1']), 0, 'el pago cubre una renta que ya no está en la cuenta');
+});
+
+test('descuentoMaximo, totalPagadoDeMas y descuentoSinRespaldo LANZAN si lo que les falta no llegó', () => {
+  const { cuenta, p2 } = conSobrePago({});
+  const c = cuenta([p2]);
+  for (const f of [descuentoMaximo, totalPagadoDeMas, descuentoSinRespaldo]) {
+    assert.throws(() => f(c, undefined, ['c1']), { name: 'TypeError', message: /costoSinLeer/ }, f.name);
+    assert.throws(() => f(undefined, [], ['c1']), { name: 'TypeError', message: /«cuenta»/ }, f.name);
+  }
+});
+
+test('descuento: el de OTRO dueño no se gasta contra este — cada cuenta tiene el suyo', () => {
+  const mario = enlazado(corregidaHaciaAbajo('r2'), 'd1');
+  const ana = enlazado(cerrado('r50'), 'd2');
+  const ana2 = enlazado(cerrado('r51'), 'd2');
+  const p2 = pagoDeLaDos();
+  const delAna = pagoReal({
+    id: 'p8', numero: 8, contratos: [ana, ana2], idsMarcados: ['r51'], pagos: [], descuento: undefined, duenoId: 'd2',
+  });
+  // Un pago de Ana con un descuento que (por un dato dañado) trae más de lo que ella tiene de más.
+  const conDescuento = { ...delAna, descuento: 500 };
+  const grupos = agruparPorDueno([mario, ana, ana2], [p2, conDescuento]);
+  const deMario = grupos.find((g) => g.duenoId === 'd1').cuenta;
+  assert.equal(pagadoDeMas(deMario, [])[0].deMas, 600, 'el descuento de Ana no toca lo que sobra en la cuenta de Mario');
+  assert.equal(totalPagadoDeMas(deMario, []), 600);
+});
+
+test('descuento: no cambia lo que se debe — ni el total, ni las diferencias, ni el pago anterior', () => {
+  const { cuenta, c1, bajada, p2 } = conSobrePago({ descuento: 600 });
+  const copia = structuredClone(p2);
+  const sin = cuentaDeDueno({ contratos: [bajada, cerrado('c9')], pagos: [p2] });
+  assert.equal(sin.totalPorPagar, 1200, 'otra renta por pagar suma lo que suma: el descuento solo vive en el pago que lo lleva');
+  assert.deepEqual(p2, copia, 'el papel anterior (Q2,100) sigue diciendo lo mismo');
+  assert.equal(c1.id, 'c1');
+  assert.equal(cuenta([p2]).totalPorPagar, 1200);
+});
+
+// --- cuando el pago de más ya no alcanza para lo que se descontó ---
+
+test('descuentoSinRespaldo: si lo pagado de más ya no existe, lo descontado se ve — no se esconde como Q0.00', () => {
+  const { cuenta, bajada, c1, p2, p7 } = conSobrePago({ descuento: 600 });
+  assert.equal(descuentoSinRespaldo(cuenta([p2, p7]), []), 0, 'el control: con el pago de más en pie, todo está respaldado');
+
+  // 1) Se anuló el pago que había pagado de más: r2 vuelve a «por pagar» y los Q600 ya no se pagaron de más.
+  const sinElDeMas = cuentaDeDueno({ contratos: [bajada, c1], pagos: [anuladoReal(p2), p7] });
+  assert.equal(descuentoSinRespaldo(sinElDeMas, []), 600, 'se descontaron 600 contra un pago de más que ya no existe');
+  assert.equal(sinElDeMas.totalPorPagar, 1500, 'la renta r2 vuelve a deberse por lo que cuesta');
+  assert.deepEqual(pagadoDeMas(sinElDeMas, []), []);
+
+  // 2) La renta pagada de más sube otra vez: sobran solo 300 y se descontaron 600.
+  const sube = guardado(recibido(saldado(recibido(salida({ id: 'r2' }), 3)), 2)); // 6 días: Q1,800
+  const parcial = cuentaDeDueno({ contratos: [sube, c1], pagos: [p2, p7] });
+  assert.equal(totalPagadoDeMas(parcial, []), 0);
+  assert.equal(descuentoSinRespaldo(parcial, []), 300, 'sobraban 300: se descontaron 300 de más');
+});
+
+test('descuentoSinRespaldo: no afirma nada cuando la comparación no es de fiar', () => {
+  const { bajada, c1, p2, p7 } = conSobrePago({ descuento: 600 });
+  const enPie = cuentaDeDueno({ contratos: [bajada, c1], pagos: [p2, p7] });
+  assert.equal(descuentoSinRespaldo(enPie, ['r2']), 0, 'con el costo de r2 sin leer no se sabe cuánto sobra: no se inventa una deuda');
+  const sinCosto = cuentaDeDueno({ contratos: [corregidaHaciaAbajo('r2', { costoDia: 0 }), c1], pagos: [p2, p7] });
+  assert.equal(descuentoSinRespaldo(sinCosto, []), 0, 'y con r2 sin costo anotado tampoco');
 });

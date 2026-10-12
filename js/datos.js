@@ -13,7 +13,9 @@ import { mezclar, guardarLocal, leerLocal, idsQueSobran, borrarLocales, depurarL
 import { filtrar, textoDeCliente } from './nucleo/busqueda.js';
 import { textoDeDueno } from './nucleo/dueno.js';
 import { estadoContrato } from './nucleo/estados.js';
-import { cuentaDeDueno, elegirParaPago } from './nucleo/liquidacion.js';
+import {
+  cuentaDeDueno, elegirParaPago, descuentoMaximo, totalPagadoDeMas,
+} from './nucleo/liquidacion.js';
 import { estadoReserva } from './nucleo/reserva.js';
 import { resumen } from './nucleo/contrato.js';
 import { q, textoDosDecimales } from './nucleo/dinero.js';
@@ -1734,6 +1736,15 @@ export const MENSAJE_PAGO_SIN_ID = 'Este pago no tiene su identificador todavía
   + 'Pídelo con nuevoIdPagoDueno() antes del primer intento y úsalo en todos los reintentos.';
 
 /**
+ * Lo que lee quien intente guardar un pago con un descuento imposible: negativo, o mayor que las rentas que
+ * el propio pago cubre. Es la última línea, como `MENSAJE_PAGO_SIN_MONTO`: contra qué se le pagó de más
+ * lo decide `construirPagoDueno` (que tiene la cuenta), y esa frase dice las cifras; esta es para lo que
+ * llegue por cualquier otro camino y no pueda comprobarse aquí.
+ */
+export const MENSAJE_PAGO_DESCUENTO = 'El descuento de este pago no es válido: no puede ser negativo ni mayor que lo que suman las rentas que cubre. '
+  + 'No se registró nada.';
+
+/**
  * Un id nuevo para un pago a un dueño, sin escribir nada todavía: Firestore lo
  * genera localmente, sin ida y vuelta a la nube. Es `nuevoIdContrato` para los
  * pagos, y por la misma razón.
@@ -1854,9 +1865,17 @@ function mensajeDeRentasSinCosto(contratos, sinLeer) {
  * viejo: `privado` es el que manda (ver `conCostoDelDueno`) y no se sabe qué decía.
  * Un contrato cuyo costo de verdad es 0 se queda en «por pagar» marcado «sin costo
  * anotado» hasta que alguien le anote el costo real.
+ *
+ * EL DESCUENTO (`descuento`, opcional). Si a ese dueño se le pagó de más (H-7), al registrar un pago nuevo
+ * él puede descontar de lo que entrega esa parte: las rentas marcadas quedan PAGADAS completas —`monto` es
+ * lo que suman, no lo que se entrega—, y el descuento es lo que de ese `monto` ya estaba pagado. No puede
+ * pasar de `descuentoMaximo` (lo que se le pagó de más y aún no se descontó, y lo que suman las rentas
+ * marcadas): esta función LANZA si pasa. Es el único lugar donde se decide, con la cuenta de ahora, así que
+ * ni un campo escrito a mano ni una pantalla vieja pueden descontarle a un dueño plata que sí se le debe.
+ * Sin descuento el pago sale como siempre, sin el campo.
  */
 export function construirPagoDueno({
-  duenoId, fecha, forma, contratos, pagos, idsMarcados, costoSinLeer,
+  duenoId, fecha, forma, contratos, pagos, idsMarcados, costoSinLeer, descuento,
 } = {}) {
   // `cuentaDeDueno` cuenta cada contrato una sola vez (M3 de la revisión de las Tareas 6 y 7).
   const cuenta = cuentaDeDueno({ contratos, pagos });
@@ -1869,6 +1888,18 @@ export function construirPagoDueno({
   const sinCosto = [...new Map(dePago.map((c) => [c.id, c])).values()]
     .filter((c) => sinAnotar.has(c.id) || sinLeer.has(c.id));
   if (sinCosto.length) throw new Error(mensajeDeRentasSinCosto(sinCosto, sinLeer));
+  const aDescontar = descuentoPedido(descuento);
+  if (aDescontar > 0) {
+    // El tope no es lo que él escribe sino lo que de verdad se le pagó de más (ver `descuentoMaximo`).
+    // `costoSinLeer` aquí DEBE ser una lista: `descuentoMaximo` lanza si no, y sin saber qué costos faltan
+    // no se sabe cuánto se le pagó de más.
+    const tope = descuentoMaximo(cuenta, costoSinLeer, idsMarcados);
+    if (aDescontar > tope) {
+      throw new Error(mensajeDeDescuentoExcedido({
+        pedido: aDescontar, tope, deMas: totalPagadoDeMas(cuenta, costoSinLeer), rentas: monto,
+      }));
+    }
+  }
   return {
     duenoId: duenoId ?? null,
     fecha,
@@ -1876,7 +1907,35 @@ export function construirPagoDueno({
     // `monto` y `contratos` salen de la misma elección: no pueden contradecirse.
     monto,
     contratos: ids,
+    // `monto` sigue siendo lo que suman las rentas; el descuento es lo que de eso no se entrega. Solo está
+    // cuando hay uno: un pago sin descuento queda con la misma forma de siempre.
+    ...(aDescontar > 0 ? { descuento: aDescontar } : {}),
   };
+}
+
+const textoQ = (n) => `Q${textoDosDecimales(n)}`;
+
+/**
+ * Lo que se pidió descontar, como monto: vacío o ausente es 0 (no hay descuento). Un número negativo, o algo que
+ * no es un número, LANZA en vez de leerse como 0: «descuento: -500» entregaría Q500 de más sin que nada lo
+ * note, y un 'abc' leído como 0 guardaría el pago completo cuando él quiso descontar algo.
+ */
+function descuentoPedido(descuento) {
+  if (descuento === undefined || descuento === null || descuento === '') return 0;
+  const n = Number(descuento);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error('No se registró el pago. El descuento tiene que ser un monto de cero o más; revisa lo que escribiste.');
+  }
+  return q(n);
+}
+
+/** La frase de un descuento mayor que el tope: dice cuánto es lo máximo y de dónde sale ese límite. */
+function mensajeDeDescuentoExcedido({
+  pedido, tope, deMas, rentas,
+}) {
+  return `No se registró el pago. El descuento de ${textoQ(pedido)} es más de lo que se puede descontar ahora: lo máximo es ${textoQ(tope)}. `
+    + `Un descuento solo salda lo que ya se le pagó de más (a este dueño, ${textoQ(deMas)}) y no puede pasar de lo que suman las rentas marcadas (${textoQ(rentas)}). `
+    + 'Baja el descuento y vuelve a intentarlo.';
 }
 
 /**
@@ -1901,10 +1960,12 @@ export function construirPagoDueno({
  *   pago sin rentas, así que esa vía no llega a la nube.
  * - `anulado` y `anuladoEn` (ver `anularPagoDueno`) viajan con el resto del pago:
  *   se copia `...pago` y aquí no se pregunta por ellos. Un pago anulado se guarda
- *   por este mismo camino y conserva su `numero`, su `monto` y sus `contratos`.
+ *   por este mismo camino y conserva su `numero`, su `monto`, su `descuento` y sus `contratos`.
+ * - `descuento` (opcional, ver `construirPagoDueno`) pasa por `q()` y solo se escribe si es mayor que
+ *   cero: un pago de antes del descuento, o sin él, queda con la misma forma de siempre.
  */
 export function pagoDuenoParaGuardar(pago, { id, numero, ahora = Date.now() } = {}) {
-  return {
+  const sellado = {
     ...pago,
     id: id ?? pago?.id,
     numero: pago?.numero || numero,
@@ -1912,6 +1973,11 @@ export function pagoDuenoParaGuardar(pago, { id, numero, ahora = Date.now() } = 
     contratos: Array.isArray(pago?.contratos) ? [...pago.contratos] : [],
     actualizado: ahora,
   };
+  // `descuento` también pasa por q(), y solo se guarda si hay uno: en cero, o dañado, no se escribe.
+  const descuento = q(pago?.descuento);
+  if (descuento > 0) sellado.descuento = descuento;
+  else delete sellado.descuento;
+  return sellado;
 }
 
 /**
@@ -1980,6 +2046,8 @@ export async function guardarPagoDueno(pago, {
   // dejaría un comprobante que no prueba nada (I1 de la revisión). `q()` y no
   // `> 0` a secas, para que un texto o un NaN no pasen por números.
   if (!(q(pago.monto) > 0)) throw new Error(MENSAJE_PAGO_SIN_MONTO);
+  // Un descuento negativo entregaría más de lo que valen las rentas; uno mayor que ellas, menos que nada.
+  if (q(pago.descuento) < 0 || q(pago.descuento) > q(pago.monto)) throw new Error(MENSAJE_PAGO_DESCUENTO);
   const db = dbDinero();
   if (!db) throw new Error(MENSAJE_PAGO_SIN_DINERO);
   if (!pago.id) throw new Error(MENSAJE_PAGO_SIN_ID);
