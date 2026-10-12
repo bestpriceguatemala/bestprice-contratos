@@ -128,6 +128,26 @@ Contenido, en orden:
 - **«Le pagué»** — tabla con una fila por renta cubierta: fecha, placas,
   cliente, días, costo por día, monto. Al pie, el **total pagado** y la forma
   de pago.
+
+  **Si el pago llevó descuento** (agregado el 12 de octubre: a ese dueño ya se le
+  había pagado de más y él lo descontó al registrar el pago, `descuento` en §7b del
+  diseño general), el pie son tres renglones que se leen de arriba abajo: *Rentas
+  pagadas con este comprobante* (lo que suman, el `monto`), *Menos: lo que ya se le
+  había pagado de más*, y *Total pagado* (lo que de verdad se entregó). Debajo, una
+  nota con palabras: cuánto se le había pagado de más, que no se entrega otra vez y
+  que las rentas quedan pagadas por completo. Si se descontó todo, la forma de pago
+  dice *Sin entrega de dinero* y la nota lo dice. Sin descuento el papel es el de
+  siempre, byte por byte.
+
+  La palabra «descuento» **no sale en el papel**: en un contrato es lo que se le
+  rebaja al cliente, y la prueba que protege este papel la tiene prohibida. Tampoco
+  nombra de cuál comprobante viene lo pagado de más: el pago guarda cuánto se
+  descontó, no contra cuál. **Una reimpresión dice lo mismo que el original**: el
+  descuento y lo entregado salen de lo que el pago guardó, nunca del costo de hoy
+  (el dueño del carro tiene el papel en la mano). Un pago con un descuento imposible
+  (negativo, o mayor que el monto) no se imprime. Cuando un pago completa a otro que
+  llevó descuento, nombra el *Total pagado* de ese papel (lo que se entregó) y dice
+  cuánto del total ya se había pagado de más, para que la cuenta cuadre.
 - **«Queda pendiente»** — tabla con las rentas cerradas que aún se le deben, y
   su total. Si no queda nada, dice *«No queda nada pendiente»* en vez de una
   tabla vacía.
@@ -173,7 +193,9 @@ paga ahora**:
 **Del dueño:** `nombre`, `telefono`, `nit`, `nota`, `actualizado`.
 
 **Del pago a un dueño:** `duenoId`, `fecha`, `forma`, `monto`, `contratos[]`,
-`numero`, `actualizado`.
+`numero`, `actualizado`; después, `anulado` y `anuladoEn` (11 de octubre) y
+`descuento` (12 de octubre, opcional). Los tres están explicados en §7b del diseño
+general.
 
 **Del contrato:** `duenoId` (nuevo, junto a `carroAjeno`), que apunta a la
 lista. `carroAjeno.dueno` se conserva como texto para los contratos viejos y

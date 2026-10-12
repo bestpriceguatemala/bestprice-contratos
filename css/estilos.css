@@ -1812,7 +1812,8 @@ body {
   }
 
   /* Los tres renglones de la cuenta del descuento no se separan: el total no puede quedar solo en la hoja de
-     abajo, sin lo que suman las rentas ni lo que se restó. */
+     abajo, sin lo que suman las rentas ni lo que se restó. Chrome ya los junta solo (se midió imprimiendo con
+     la tabla justo en el borde de la hoja); esto es por los navegadores que no. */
   .comp-pie-suma,
   .comp-pie-menos {
     break-after: avoid;

@@ -609,8 +609,25 @@ contrato es `carroAjeno.dueno`, el texto de ese día; y la ficha de la lista es 
 colección `duenos`, a la que apunta `duenoId`.
 
 **Del pago a un dueño** (colección `pagosDueno`; agregado el 5 de octubre):
-`duenoId`, `fecha`, `forma`, `monto`, `contratos[]`, `numero`, `actualizado`, y
-los dos de la anulación, `anulado` y `anuladoEn` (agregados el 11 de octubre).
+`duenoId`, `fecha`, `forma`, `monto`, `contratos[]`, `numero`, `actualizado`, los
+dos de la anulación, `anulado` y `anuladoEn` (agregados el 11 de octubre), y
+`descuento` (agregado el 12 de octubre, opcional).
+
+- `descuento` es, de lo que suman las rentas que cubre el pago (`monto`), la parte
+  que **no se entregó** porque a ese dueño ya se le había pagado de más antes
+  (H-7). **`monto` no se toca:** sigue siendo lo que suman las rentas, y todo lo que
+  se compara contra lo que esas rentas cuestan hoy (`gruposDePago`, la nota de
+  «cambiaron» del comprobante) compara contra él, así que una renta de Q1,200
+  pagada con Q600 de descuento está pagada y no «a medias». Lo que de verdad salió
+  de las manos de él es `monto − descuento`, y esa resta está en un solo lugar,
+  `entregadoDelPago` (`nucleo/liquidacion.js`); con `descuentoDelPago` y
+  `totalesDePagos` son lo que ninguna pantalla repite. Solo se guarda cuando hay
+  uno (un pago de antes del descuento no trae el campo, y se lee como sin
+  descuento), y `guardarPagoDueno` no deja guardar uno negativo ni mayor que el
+  `monto`. **Ojo con el nombre:** `descuento` también es un campo del cierre (arriba,
+  `cierre{}`: lo que se le rebaja al CLIENTE al recibir el carro). No es el mismo
+  campo ni el mismo dinero, y por eso la palabra «descuento» no sale en el
+  comprobante del dueño (ver §6 de la liquidación).
 
 - `anulado` y `anuladoEn` se llaman **igual que en un pago del cliente** (arriba), a
   propósito: es la misma idea y la misma forma, y un segundo nombre sería un segundo

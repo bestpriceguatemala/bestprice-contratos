@@ -178,7 +178,8 @@ const cuantas = (filas, motivo) => filas.filter((f) => f.sinCosto === motivo).le
  *
  * Recibe:
  * - `pago`: el pago a un dueño ya guardado (`id`, `fecha`, `forma`, `monto`,
- *   `contratos[]`, `numero`; §7 del diseño). Sin `numero` no hay papel: el
+ *   `contratos[]`, `numero` y, si lo hubo, `descuento`; §7 del diseño y §7b del general).
+ *   Sin `numero` no hay papel: el
  *   correlativo es lo que lo vuelve un comprobante y no una hoja cualquiera.
  *   Un pago ANULADO tampoco: ya no pagó nada (ver `pagoAnulado`) y el papel lo afirmaría. Ni uno
  *   con un `descuento` imposible (`descuentoInvalido`): la cifra entregada saldría de un dato dañado.
@@ -481,7 +482,7 @@ function pieDePagado(p) {
         </tr>
         <tr class="comp-pie-menos">
           <th scope="row" colspan="5">Menos: lo que ya se le había pagado de más</th>
-          <td class="num">${dinero(-p.descuento)}</td>
+          <td class="num">-${dinero(p.descuento)}</td>
         </tr>
         <tr class="comp-pie-total">
           <th scope="row" colspan="5">Total pagado</th>

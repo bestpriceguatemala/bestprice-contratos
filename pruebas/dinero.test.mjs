@@ -33,6 +33,7 @@ import {
   cuentaDeDueno, agruparPorDueno, totalSeleccionado, pagoAnulado, pagadoDeMas, totalPagadoDeMas, descuentoMaximo,
   descuentoSinRespaldo, entregadoDelPago,
 } from '../js/nucleo/liquidacion.js';
+import { dinero } from '../js/ui.js';
 import { mensajeDeErrorDeDinero } from '../js/dinero-sesion.js';
 import {
   agregarPago, contratoParaGuardar, conCostoDelDueno, costoDelDocumento, construirPagoDueno, pagoDuenoParaGuardar,
@@ -2740,6 +2741,37 @@ test('H-7: se ve, pero NO se descuenta: «Por pagar» y lo marcado dicen lo mism
   assert.match(porPagar(fichaCon), /id="dn-total-marcado" class="dn-total-marcado">Q1,200\.00</, 'y lo marcado también');
   assert.equal(entradaDe(armarVista(con), 'Ofelia Ramos').cuenta.totalPorPagar, 1200);
   assert.deepEqual(resumenDeMarcadas(entradaDe(armarVista(con), 'Ofelia Ramos'), new Set(['o3']), []), { ids: ['o3'], cuantas: 1, total: 1200 });
+});
+
+test('descuento: la cifra grande de «Ya pagado» en la ficha y el «Total pagado» del comprobante son la misma — lo que él entregó', () => {
+  // La ficha y el papel tienen que decir lo mismo de un pago: si no, él ve Q600 en pantalla y el dueño del carro lee Q1,200.
+  const nueva = cerrado('o3', deOfelia('o3', { numero: 3, placas: 'P-OFE003', fechaSalida: '2026-09-10' })); // 4 × 300 = Q1,200
+  const contratos = [O2_CORREGIDA, nueva];
+  const pagoConDescuento = pagoDuenoParaGuardar(
+    construirPagoDueno({
+      duenoId: 'd4', fecha: '2026-10-01', forma: 'efectivo', contratos, pagos: [PAGO_A_OFELIA], idsMarcados: ['o3'], descuento: 600, costoSinLeer: [],
+    }),
+    { id: 'pg-o3', numero: 7, ahora: AHORA },
+  );
+  assert.equal(pagoConDescuento.monto, 1200);
+  assert.equal(pagoConDescuento.descuento, 600);
+  const lectura = lecturaConOfelia({ pagos: [PAGO_A_OFELIA, pagoConDescuento], contratos });
+  const vista = armarVista(lectura);
+  const ficha = fichaDe('Ofelia Ramos', { vista, lectura });
+  const tarjeta = ficha.match(/<article class="dn-caja dn-pago-hecho">(?:(?!<\/article>)[\s\S])*?Comprobante N\.° 7[\s\S]*?<\/article>/)[0];
+  const cifraDeLaFicha = tarjeta.match(/<strong class="dn-pago-cifra">([^<]*)<\/strong>/)[1];
+  assert.equal(cifraDeLaFicha, 'Q600.00', 'la ficha dice lo que salió de sus manos');
+
+  const modelo = armarComprobante(entradaDelComprobante({
+    entrada: entradaDe(vista, 'Ofelia Ramos'), pago: pagoConDescuento, lectura, hoy: HOY,
+  }));
+  assert.equal(dinero(modelo.pagado.entregado), cifraDeLaFicha, 'el papel dice la misma cifra');
+  assert.equal(dinero(modelo.pagado.total), 'Q1,200.00', 'y las rentas, lo que suman');
+  assert.equal(dinero(modelo.pagado.descuento), 'Q600.00', 'igual que la línea de la tarjeta');
+  assert.ok(tarjeta.includes('Las rentas suman Q1,200.00; se descontaron Q600.00'), 'la tarjeta explica la diferencia con las mismas cifras del papel');
+  // Y el pago anterior (sin descuento) dice lo mismo en los dos lados: su monto entero.
+  const tarjeta2 = ficha.match(/<article class="dn-caja dn-pago-hecho">(?:(?!<\/article>)[\s\S])*?Comprobante N\.° 2[\s\S]*?<\/article>/)[0];
+  assert.equal(tarjeta2.match(/<strong class="dn-pago-cifra">([^<]*)<\/strong>/)[1], 'Q2,100.00');
 });
 
 test('H-7: lo que viene de los datos entra escapado, nunca como HTML', () => {

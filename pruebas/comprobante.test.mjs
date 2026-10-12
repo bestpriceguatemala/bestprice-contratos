@@ -1454,6 +1454,22 @@ test('descuento: si lo descontado es todo lo que suman las rentas, el papel dice
   assert.ok(!html.includes('lo que se entregó con este comprobante fue Q0.00'));
 });
 
+test('descuento: con el costo de la renta sin poder leerse, el pie sigue diciendo lo guardado — no depende del costo de hoy', () => {
+  const e = escenarioOfelia();
+  const m = armarComprobante(e.entrada({ costoSinLeer: ['ctr-o22'] }));
+  assert.equal(m.pagado.filas[0].sinCosto, 'leer');
+  assert.equal(m.pagado.filas[0].monto, null, 'la fila dice que falta, no Q0.00');
+  assert.equal(m.pagado.cambiaron, false, 'sin cifra confiable no se compara');
+  const html = htmlComprobante(m);
+  assert.deepEqual(pieDePagado(html), [
+    ['Rentas pagadas con este comprobante', 'Q1,200.00'],
+    ['Menos: lo que ya se le había pagado de más', '-Q600.00'],
+    ['Total pagado', 'Q600.00'],
+  ], 'lo que se pagó ese día se sabe aunque hoy no se pueda leer lo que cuesta');
+  assert.ok(html.includes('No se pudo leer el costo'));
+  assert.equal(notasDe(html).length, 1, 'solo la del descuento');
+});
+
 test('un pago de antes del descuento se imprime como siempre: una sola fila «Total pagado» y sin notas nuevas', () => {
   const m = armarComprobante(entrada());
   assert.equal(m.pagado.descuento, 0);
