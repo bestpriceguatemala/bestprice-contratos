@@ -260,6 +260,42 @@ export function duenoDelContrato({ escogido, buscado = '', nuevo = '' }) {
 }
 
 /**
+ * Lo que la pantalla le pasa a `avisosDeSalida` (nucleo/avisos.js), armado con lo que tiene en memoria. Función
+ * pura y aparte para poder probar el cableado: que se mire lo que se debe mirar, y que NO se mire la reservación
+ * de la que se sale — un error aquí no lo atrapa ninguna prueba de la regla.
+ *
+ * - `contratosDelCliente` son sus contratos ABIERTOS (de ahí sale lo que debe); `contratosDelCarro`, los abiertos de
+ *   este carro. Un carro ajeno (`ajeno`: la casilla marcada) no tiene contratos propios con los que cruzarse, ni es
+ *   una unidad de la flota.
+ * - `reservasDelCarro` son las apartadas para ESTE carro exacto, sin la reservación de la que se está saliendo
+ *   (`reservaId`): sin esto, CADA renta empezada desde «Sacar carro» pintaba un aviso rojo diciendo que el carro está
+ *   apartado... para el mismo cliente que está enfrente. Un aviso que se equivoca siempre enseña a ignorar los que no
+ *   se equivocan, y este sistema ya quitó los avisos de precio y días por esa misma razón.
+ * - Las que solo piden un TIPO no están en esa lista (no tienen carro), así que se mandan TODAS las reservaciones, la
+ *   flota y TODOS los contratos abiertos, y se dice cuál es la reservación de origen: esa tampoco compite contra sí
+ *   misma. `avisosDeSalida` los cruza con la misma regla que el formulario de reservaciones.
+ *
+ * El precio y los días mínimos no se mandan a propósito: el dueño pone el precio que quiere y no quiere avisos.
+ */
+export function entradaDeAvisos({
+  borrador, cliente, carro, ajeno = false, carroId, reservaId = null, flota = [], reservas = [], contratosAbiertos = [], hoy,
+}) {
+  return {
+    cliente,
+    carro: ajeno ? null : carro,
+    contrato: borrador,
+    contratosDelCliente: cliente ? contratosAbiertos.filter((c) => c.clienteId === cliente.id) : [],
+    contratosDelCarro: ajeno || !carroId ? [] : contratosAbiertos.filter((c) => c.carroId === carroId),
+    reservasDelCarro: ajeno || !carroId ? [] : reservas.filter((r) => r.carroId === carroId && r.id !== reservaId),
+    flota,
+    reservas,
+    contratosAbiertos,
+    reservaDeOrigenId: reservaId,
+    hoy,
+  };
+}
+
+/**
  * Los avisos de la salida más, si lo escrito en «Monto» pasa de lo que se debe hoy
  * (`debeHoy`: el total de la salida, menos el anticipo ya pagado), el de cobrar de más,
  * al principio y en rojo. Es la misma frase que ya da «Recibir carro»
@@ -1277,40 +1313,19 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     el('sc-recargo-tarjeta').textContent = dinero(recargoTarjetaCobrado);
     el('sc-garantia').textContent = dinero(borrador.garantiaMonto);
 
-    const contratosDelCliente = clienteSeleccionado
-      ? contratosAbiertos.filter((c) => c.clienteId === clienteSeleccionado.id)
-      : [];
-    const contratosDelCarro = ajeno || !carroId
-      ? []
-      : contratosAbiertos.filter((c) => c.carroId === carroId);
-    // Mismo filtro que contratosDelCarro arriba: solo las reservaciones de
-    // ESTE carro exacto (por placa), no las que piden "un microbús" sin
-    // unidad asignada — avisosDeSalida (avisos.js) es sobre este carro, no
-    // sobre la capacidad del tipo.
-    //
-    // Y se excluye la reservación de la que se está saliendo (`reservaId`),
-    // igual que avisosDeSalida excluye el contrato que se está escribiendo
-    // (`otro.id !== contrato?.id`). Sin esto, CADA renta empezada desde
-    // "Sacar el carro" pintaba un aviso rojo diciendo que el carro está
-    // apartado... para el mismo cliente que está enfrente. Un aviso que se
-    // equivoca siempre enseña a ignorar los que no se equivocan, y este
-    // sistema ya quitó los avisos de precio y días por esa misma razón.
-    const reservasDelCarro = ajeno || !carroId
-      ? []
-      : reservas.filter((r) => r.carroId === carroId && r.id !== reservaId);
-
-    // avisosDeSalida (avisos.js) ya no avisa por precio ni por días mínimos
-    // a propósito — pedido del dueño: "yo pongo el precio que yo quiera" —
-    // así que esta pantalla ni siquiera le manda esos dos campos.
-    const avisos = avisosDeSalida({
+    // Qué listas llegan a los avisos se arma aparte (entradaDeAvisos), para poder probar el cableado.
+    const avisos = avisosDeSalida(entradaDeAvisos({
+      borrador,
       cliente: clienteSeleccionado,
-      carro: ajeno ? null : carroPropio(),
-      contrato: borrador,
-      contratosDelCliente,
-      contratosDelCarro,
-      reservasDelCarro,
+      carro: carroPropio(),
+      ajeno,
+      carroId,
+      reservaId,
+      flota,
+      reservas,
+      contratosAbiertos,
       hoy: hoyISO(),
-    });
+    }));
     // avisosDeSalida arma una lista nueva en cada llamada, así que agregarle aquí no toca nada ajeno.
     const delAnticipo = avisoAnticipoDeMas(totalSalida, reservaOrigen);
     if (delAnticipo) avisos.unshift({ nivel: 'alto', mensaje: delAnticipo });
