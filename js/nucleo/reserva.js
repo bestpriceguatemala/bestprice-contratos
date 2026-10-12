@@ -11,6 +11,7 @@ import {
 } from './fechas.js';
 import { q, textoDosDecimales } from './dinero.js';
 import { estadoContrato, estaAtrasado, finDelContrato } from './estados.js';
+import { maximoConCarro, LIMITE_DE_PASOS } from './asignacion.js';
 
 /**
  * Construye el objeto reservación para guardar, preservando campos que no
@@ -203,22 +204,114 @@ export function textoAnticipo(r) {
 
 const alto = (mensaje) => ({ nivel: 'alto', mensaje });
 
+// ---------------------------------------------------------------------------
+// La capacidad por tipo (H-5)
+//
+// «Tengo 2 sedanes y 2 compromisos de sedán» NO quiere decir que no quede un sedán: depende de CUÁNDO. Una
+// reservación por tipo (sin carro elegido) termina con un carro de ese tipo, el mismo todos sus días; un
+// compromiso con carro exacto ya lo tiene; y un carro no puede estar en dos compromisos que se cruzan. La
+// pregunta de verdad es: ¿puede cada compromiso que se cruza con este, más este, tener un carro propio?
+// Contar cuántos tocan las fechas se equivoca para los dos lados (avisa de más cuando no coinciden el mismo
+// día, y calla cuando un carro exacto le quita la única unidad a uno por tipo), y contar el máximo de
+// coincidencias tampoco alcanza: un carro ocupado del 1 al 5 y otro del 6 al 10 no dejan ninguno libre del 1
+// al 10 aunque nunca haya más de uno ocupado a la vez. Es un problema de asignación; la parte matemática
+// vive en asignacion.js y aquí se arma lo que necesita.
+//
+// Qué se le pregunta, exactamente: no «¿caben todos?» (si ya había un exceso antes, culparía a la reservación
+// nueva de lo que no hizo) sino «¿esto deja sin carro a alguien que hoy sí lo tiene?». Se compara el máximo de
+// compromisos por tipo que pueden tener carro CON la reservación nueva contra SIN ella.
+//
+// Dos compromisos clavados al mismo carro que se cruzan entre sí no entran aquí: eso es un aviso de carro
+// exacto y ya sale por su lado. Para esta pregunta un compromiso clavado solo hace una cosa: ocupar su carro
+// esos días.
+// ---------------------------------------------------------------------------
+
+/** Cuándo ocupa una reservación (el rango que apartó) o un contrato (hasta su fin EFECTIVO) un carro. */
+const rangoDeReserva = (r) => ({ desde: r?.fechaSalida, hasta: r?.devolucionPrevista });
+const rangoDeContrato = (c, hoy) => ({ desde: c?.fechaSalida, hasta: finDelContrato(c, hoy) });
+const rangosSeCruzan = (a, b) => seTraslapan(a.desde, a.hasta, b.desde, b.hasta);
+const tieneRango = (rango) => Boolean(rango?.desde && rango?.hasta);
+
 /**
- * El tipo que una reservación o un contrato ya comprometen, para poder
- * restarlo de la capacidad de ese tipo. Si trae carro exacto asignado
- * (carroId), su tipo cuenta aunque nadie haya pedido "un microbús" — un carro
- * apartado por placa deja de estar libre para cualquier otro cliente que pida
- * ese tipo, se haya pedido por nombre o no.
+ * Lo que los compromisos vivos (reservaciones pendientes y contratos que no se han cerrado) le piden a los
+ * carros de UN tipo.
+ *
+ * - `carros`: los de ese tipo que están en servicio (un carro del taller no es una unidad con la que contar).
+ * - `fijos`: los compromisos clavados a uno de esos carros: lo ocupan esos días. Un compromiso clavado a un
+ *   carro de otro tipo, o a uno del taller, no le quita unidades a nadie de aquí.
+ * - `libres`: las reservaciones por tipo, sin carro: necesitan cualquiera de los carros que esté libre.
+ *   Si el carro exacto que traen ya no está en la flota, vale el tipo que pidieron. Un contrato de carro
+ *   ajeno no tiene carro de la flota ni tipo pedido, así que no entra.
+ *
+ * Se excluye la reservación con id `excepto` (la que se está editando: no choca contra sí misma).
  */
-function tipoComprometido(item, flota) {
-  // Si trae carro exacto, manda el tipo REAL de ese carro y no el que quedó escrito en
-  // `tipoVehiculo`: son dos campos del formulario que no se corrigen uno al otro. «Cambiar la
-  // unidad» (§12b) es justo escoger otro carro en la misma reservación, y el tipo se queda como
-  // estaba: una reservación de «Sedán» a la que se le puso la Ranger seguía contando contra los
-  // sedanes (un aviso falso de «ya están comprometidos») y dejaba libre la única pickup, que ya
-  // estaba apartada (prueba del sistema, 7 oct 2026). Sin carro, o con uno que ya no está en la
-  // flota, vale el tipo pedido.
-  return flota.find((c) => c.id === item?.carroId)?.tipo || item?.tipoVehiculo;
+function compromisosDelTipo({
+  tipo, flota, reservas, contratos, excepto, hoy,
+}) {
+  const carros = flota.filter((c) => c.tipo === tipo && !c?.fueraDeServicio);
+  const fijos = [];
+  const libres = [];
+  const clasificar = (compromiso, rango, tipoPedido) => {
+    if (!tieneRango(rango)) return;
+    const delCarro = compromiso?.carroId ? flota.find((c) => c.id === compromiso.carroId) : undefined;
+    if (delCarro) {
+      // Si trae carro exacto manda ESE carro y no el tipo que quedó escrito en la reservación: son dos
+      // campos del formulario que no se corrigen uno al otro (prueba del sistema, 7 oct 2026: una
+      // reservación de «Sedán» a la que se le puso la Ranger).
+      const k = carros.indexOf(delCarro);
+      if (k >= 0) fijos.push({ carro: k, rango });
+      return;
+    }
+    if (tipoPedido === tipo) libres.push({ rango });
+  };
+  reservas.forEach((r) => {
+    if (r?.id !== excepto && estadoReserva(r) === 'pendiente') clasificar(r, rangoDeReserva(r), r?.tipoVehiculo);
+  });
+  contratos.forEach((c) => {
+    if (estadoContrato(c) !== 'cerrado') clasificar(c, rangoDeContrato(c, hoy), undefined);
+  });
+  return { carros, fijos, libres };
+}
+
+/**
+ * ¿Puede lo nuevo tener su carro sin dejar sin carro a una reservación por tipo que hoy sí lo tiene?
+ * `nuevo` es `{ libre: true, rango }` (otra reservación por tipo: necesita un carro suyo) o `{ carro, rango }`
+ * (un compromiso clavado al carro número `carro` de `grupo.carros`: se lo quita a quien lo fuera a usar).
+ * Devuelve `true`, `false`, o `null` si la búsqueda se pasó de su límite y no se pudo saber.
+ *
+ * Solo se mira el grupo conectado con las fechas de lo nuevo: las reservaciones por tipo que se cruzan con
+ * ellas, las que se cruzan con ESAS, y así hasta que no hay más. No basta con las que tocan las fechas:
+ * si lo nuevo manda a una a un carro, esa le quita su lugar a la que sigue, y así en cadena hasta una que ya
+ * ni toca las fechas. Lo que no está conectado no cambia con lo nuevo, así que ni se mira.
+ */
+function cabeEnElTipo({ carros, fijos, libres }, nuevo, limite) {
+  const enGrupo = new Set();
+  const frontera = [nuevo.rango];
+  for (let k = 0; k < frontera.length; k += 1) {
+    libres.forEach((l, i) => {
+      if (enGrupo.has(i) || !rangosSeCruzan(l.rango, frontera[k])) return;
+      enGrupo.add(i);
+      frontera.push(l.rango);
+    });
+  }
+  const delGrupo = libres.filter((_, i) => enGrupo.has(i));
+
+  const preguntar = (compromisos, ocupado) => {
+    const choques = compromisos.map((a) => compromisos.map((b) => a !== b && rangosSeCruzan(a.rango, b.rango)));
+    const vetados = compromisos.map((a) => carros.map((_, c) =>
+      fijos.some((f) => f.carro === c && rangosSeCruzan(f.rango, a.rango))
+      || (ocupado?.carro === c && rangosSeCruzan(ocupado.rango, a.rango))));
+    return maximoConCarro({ carros: carros.length, choques, vetados, limite });
+  };
+
+  const sin = preguntar(delGrupo);
+  if (sin === null) return null;
+  if (nuevo.libre) {
+    const con = preguntar([...delGrupo, { rango: nuevo.rango }]);
+    return con === null ? null : con === sin + 1;
+  }
+  const con = preguntar(delGrupo, nuevo);
+  return con === null ? null : con === sin;
 }
 
 /**
@@ -227,10 +320,14 @@ function tipoComprometido(item, flota) {
  *
  * Dos casos, porque son preguntas distintas:
  * - Carro exacto ("el Montero blanco"): choca contra ESE carro, si otra
- *   reservación o un contrato lo tienen encima de esas fechas.
+ *   reservación o un contrato lo tienen encima de esas fechas. Y además se
+ *   pregunta por las reservaciones que piden solo el tipo de ese carro (la
+ *   Ranger, cuando hay una «Pickup» sin carro que ya cuenta con la única pickup):
+ *   si apartar este carro deja a una sin unidad, se avisa.
  * - Por tipo ("un microbús"): no hay un carro contra el cual comparar. Lo que
- *   importa es la capacidad — cuántos carros de ese tipo hay (sin contar los
- *   del taller) contra cuántos ya están comprometidos esos días.
+ *   importa es si le cabe uno: cada compromiso que se cruza con estas fechas
+ *   (un carro exacto lo tiene ya; uno por tipo toma cualquiera libre) tiene que
+ *   quedarse con su carro, y este también. Ver «La capacidad por tipo» arriba.
  *
  * Solo cuentan los compromisos vivos: una reservación cancelada o ya
  * entregada no aparta nada (estadoReserva), y un contrato cerrado tampoco
@@ -242,33 +339,52 @@ function tipoComprometido(item, flota) {
  * hasta el día que volvió, y uno que sigue afuera pasada su fecha prevista, por
  * lo menos durante hoy (queda libre desde mañana, como pronto). Por eso `hoy` se recibe, igual que en los avisos de
  * salida; sin él, un contrato afuera se mide por su fecha prevista.
+ *
+ * `limiteDeBusqueda` (pasos de la búsqueda de asignaciones) existe para las pruebas; con una flota de verdad
+ * no se acerca. Si se pasa, el aviso dice que no se pudo comprobar: ni se calla ni inventa un choque.
  */
 export function choquesDeReserva({
-  reserva, flota = [], reservas = [], contratos = [], hoy,
+  reserva, flota = [], reservas = [], contratos = [], hoy, limiteDeBusqueda = LIMITE_DE_PASOS,
 }) {
   if (!reserva) return [];
 
-  const reservasVivas = reservas.filter((r) =>
-    r?.id !== reserva.id && estadoReserva(r) === 'pendiente' && seCruzan(reserva, r));
-  const contratosVivos = contratos.filter((c) =>
-    estadoContrato(c) !== 'cerrado' && seCruzanConContrato(reserva, c, hoy));
+  const rango = rangoDeReserva(reserva);
 
   if (reserva.carroId) {
-    const otraReserva = reservasVivas.find((r) => r.carroId === reserva.carroId);
+    const avisos = [];
+    const otraReserva = reservas.find((r) =>
+      r?.id !== reserva.id && estadoReserva(r) === 'pendiente' && seCruzan(reserva, r) && r.carroId === reserva.carroId);
+    const otroContrato = otraReserva ? null : contratos.find((c) =>
+      estadoContrato(c) !== 'cerrado' && seCruzanConContrato(reserva, c, hoy) && c.carroId === reserva.carroId);
     if (otraReserva) {
-      return [alto(`Este carro ya está apartado del ${textoFecha(otraReserva.fechaSalida)} al ${textoFecha(otraReserva.devolucionPrevista)}.`)];
+      avisos.push(alto(`Este carro ya está apartado del ${textoFecha(otraReserva.fechaSalida)} al ${textoFecha(otraReserva.devolucionPrevista)}.`));
+    } else if (otroContrato) {
+      avisos.push(alto(`Este carro tiene un contrato ${textoDeOcupacion(otroContrato, hoy)}.`));
     }
-    const otroContrato = contratosVivos.find((c) => c.carroId === reserva.carroId);
-    if (otroContrato) {
-      return [alto(`Este carro tiene un contrato ${textoDeOcupacion(otroContrato, hoy)}.`)];
+
+    // Y lo que apartar este carro le hace a las reservaciones que solo piden su tipo. Con el carro que no está
+    // en la flota, o el del taller, no hay unidades de las que contar.
+    const delCarro = flota.find((c) => c.id === reserva.carroId);
+    const tipo = delCarro?.tipo;
+    if (tipo && !delCarro.fueraDeServicio && tieneRango(rango)) {
+      const grupo = compromisosDelTipo({ tipo, flota, reservas, contratos, excepto: reserva.id, hoy });
+      const cabe = cabeEnElTipo(grupo, { carro: grupo.carros.indexOf(delCarro), rango }, limiteDeBusqueda);
+      const cuantas = grupo.carros.length;
+      if (cabe === null) {
+        avisos.push(alto(`No se pudo comprobar si apartar este carro le deja sin unidad a otra reservación de ${tipo}: hay demasiadas cruzadas. Revisa las de ese tipo.`));
+      } else if (!cabe) {
+        const cuantasTienes = cuantas === 1 ? 'es la única que tienes' : `tienes ${cuantas} y los ${cuantas} quedan comprometidos`;
+        avisos.push(alto(`Si apartas este carro, otra reservación de ${tipo} (sin carro elegido) se queda sin unidad en esas fechas: ${cuantasTienes}.`));
+      }
     }
-    return [];
+    return avisos;
   }
 
   const tipo = reserva.tipoVehiculo;
   if (!tipo) return [];
 
-  const capacidad = flota.filter((c) => c.tipo === tipo && !c?.fueraDeServicio).length;
+  const grupo = compromisosDelTipo({ tipo, flota, reservas, contratos, excepto: reserva.id, hoy });
+  const capacidad = grupo.carros.length;
 
   // Cero es un problema distinto al de "ya no queda": no es que se hayan
   // acabado, es que nunca hubo. Avisar "0 comprometidos de 0" confunde al
@@ -276,19 +392,20 @@ export function choquesDeReserva({
   if (capacidad === 0) {
     return [alto(`No tienes ninguna unidad ${tipo} en la flota.`)];
   }
+  if (!tieneRango(rango)) return [];
 
-  const comprometidos =
-    reservasVivas.filter((r) => tipoComprometido(r, flota) === tipo).length +
-    contratosVivos.filter((c) => tipoComprometido(c, flota) === tipo).length;
-
-  if (comprometidos >= capacidad) {
-    // Concordancia en singular/plural, igual que hace avisosDeSalida con
-    // "vez"/"veces" — con un solo carro del tipo, "los 1 ya están
-    // comprometidos" suena a error de dedo, no a un aviso serio.
-    if (capacidad === 1) {
-      return [alto(`Solo tienes 1 ${tipo} y ya está comprometido en esas fechas.`)];
-    }
-    return [alto(`Tienes ${capacidad} ${tipo} y los ${comprometidos} ya están comprometidos en esas fechas.`)];
+  const cabe = cabeEnElTipo(grupo, { libre: true, rango }, limiteDeBusqueda);
+  if (cabe === true) return [];
+  if (cabe === null) {
+    return [alto(`No se pudo comprobar si te queda un ${tipo} libre en esas fechas: hay demasiadas reservaciones cruzadas. Revisa las de ese tipo.`)];
   }
-  return [];
+
+  // Ninguno de los carros puede quedarse con esta reservación sin dejar a otra sin el suyo: cada uno está
+  // comprometido en algún momento de esas fechas. Concordancia en singular/plural, igual que hace
+  // avisosDeSalida con "vez"/"veces" — con un solo carro del tipo, "los 1 ya están comprometidos" suena a
+  // error de dedo, no a un aviso serio.
+  if (capacidad === 1) {
+    return [alto(`Solo tienes 1 ${tipo} y ya está comprometido en esas fechas.`)];
+  }
+  return [alto(`Tienes ${capacidad} ${tipo} y los ${capacidad} ya están comprometidos en esas fechas.`)];
 }

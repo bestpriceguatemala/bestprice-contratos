@@ -942,6 +942,25 @@ tranquilo, no para leerlo.
 El aviso de **"este carro ya está comprometido"** pasa a mirar también las
 reservaciones, no solo los contratos: ahí es donde se pierde un cliente.
 
+**La capacidad por tipo es una asignación, no una cuenta** (H-5, 12 oct 2026). Una
+reservación «Pickup» sin carro elegido termina con UN carro de ese tipo, el mismo todos
+sus días, y un carro no puede estar en dos compromisos que se cruzan. El aviso de una
+reservación nueva contesta: *¿esto deja sin carro a alguien que hoy sí lo tiene?* Compara
+el máximo de reservaciones por tipo que pueden tener carro CON la nueva contra SIN ella
+(`choquesDeReserva`, `nucleo/reserva.js`; la búsqueda exacta, `maximoConCarro`, en
+`nucleo/asignacion.js`). Los compromisos con carro exacto (reservaciones y contratos) están
+clavados a su carro; los de solo tipo toman cualquiera libre. Se miran los compromisos
+conectados con las fechas de la nueva, **también los que se cruzan solo con otro que se
+cruza** (un carro que se manda a otro lado le quita su lugar al siguiente, en cadena), y se
+usa la misma regla de cruce de siempre: tocarse no es cruzarse. Contar cuántos tocan las
+fechas avisaba de más (dos sedanes, uno apartado 15–20 y otra por tipo 21–24: no coinciden
+ningún día) y calla de menos (la Ranger exacta no avisaba de la «Pickup» por tipo que ya
+contaba con la única pickup); contar el máximo simultáneo tampoco sirve (un carro ocupado
+1–5 y otro 6–10 no dejan ninguno libre 1–10). Un carro clavado a uno del taller o de otro
+tipo no gasta unidades de este. Si la búsqueda se pasara de su límite, el aviso lo dice en
+vez de callar o adivinar. Un carro exacto que apartas también pregunta lo mismo al revés:
+si dejarías sin unidad a una reservación por tipo.
+
 ### Mantenimiento de la flota propia
 
 Cada carro propio lleva el control de sus servicios: **aceite y filtro, pastillas
