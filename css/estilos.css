@@ -1655,6 +1655,19 @@ body {
   font-size: 13px;
 }
 
+/*
+ * Un pago a un dueño anulado (dinero.js: anularElPago) sigue en «Ya pagado» con su número,
+ * porque ese dueño tiene el papel. Se apaga y solo la cifra se tacha: el número del
+ * comprobante y «Anulado el …» tienen que poder leerse, que es para lo que se queda.
+ */
+.dn-pago-anulado {
+  color: var(--gris);
+}
+
+.dn-pago-anulado .dn-pago-cifra {
+  text-decoration: line-through;
+}
+
 /* Enlazar contratos viejos a un dueño de la lista. */
 .dn-enlace-fila {
   display: flex;

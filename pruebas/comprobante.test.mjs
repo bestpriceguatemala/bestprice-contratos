@@ -35,7 +35,7 @@ import { dinero, fecha } from '../js/ui.js';
 import { construirContrato } from '../js/pantallas/sacarCarro.js';
 import {
   agregarPago, anularPago, contratoParaGuardar, conCostoDelDueno, costoDelDocumento,
-  construirPagoDueno, pagoDuenoParaGuardar,
+  construirPagoDueno, pagoDuenoParaGuardar, anularPagoDueno,
 } from '../js/datos.js';
 
 const AHORA = 1790000000000;
@@ -553,6 +553,28 @@ test('sin «hoy» no hay papel: lo pendiente es «al día de hoy» y el papel ti
 test('sin la lista costoSinLeer no hay papel: «no sé qué costos se leyeron» no es «todos se leyeron»', () => {
   assert.throws(() => armarComprobante(entrada({ costoSinLeer: undefined })), /costoSinLeer/);
   assert.throws(() => armarComprobante(entrada({ costoSinLeer: 'ctr-a2' })), /costoSinLeer/);
+});
+
+// H-6: un pago a un dueño que se ANULÓ ya no pagó nada (sus rentas volvieron a «por pagar»). Reimprimir
+// su comprobante diría «Le pagué … Total pagado» sobre algo que el sistema sabe que no está pagado, y
+// ese papel sale de la empresa. El número se conserva, pero el papel no se arma.
+test('un pago ANULADO no tiene comprobante: lanza, y dice que está anulado y desde cuándo', () => {
+  const anulado = pagoDuenoParaGuardar(anularPagoDueno(PAGO_7, { fecha: '2026-10-02' }), { ahora: AHORA + 60000 });
+  assert.throws(
+    () => armarComprobante(entrada({ pago: anulado, pagos: [PAGO_5, anulado] })),
+    { message: /N° 7 está anulado desde el 2 oct 2026/ },
+  );
+  // Y sin la fecha de la anulación, igual se niega (el pago dice anulado, la fecha es un detalle).
+  assert.throws(() => armarComprobante(entrada({ pago: { ...anulado, anuladoEn: undefined } })), { message: /N° 7 está anulado:/ });
+});
+
+test('anulado el pago N° 7, las rentas que cubría ya no salen en «Le pagué» de otro comprobante: vuelven a «Queda pendiente»', () => {
+  const anulado = pagoDuenoParaGuardar(anularPagoDueno(PAGO_7, { fecha: '2026-10-02' }), { ahora: AHORA + 60000 });
+  const m = armarComprobante(entrada({ pago: PAGO_5, pagos: [PAGO_5, anulado] }));
+  assert.deepEqual(placasDe(m.pagado.filas), ['P-777GGG'], 'el comprobante N° 5 sigue siendo el suyo: solo A6');
+  const pendientes = placasDe(m.pendiente.filas);
+  for (const placas of ['P-111AAA', 'P-222BBB', 'P-333CCC']) assert.ok(pendientes.includes(placas), `${placas} vuelve a pendiente`);
+  assert.equal(m.pendiente.total, 3600 + 4100, 'y la deuda se suma completa: Q3,600 de antes + los Q4,100 que se anularon');
 });
 
 test('si falta alguna de las rentas que cubre el pago, lanza: una tabla a medias es un papel falso', () => {

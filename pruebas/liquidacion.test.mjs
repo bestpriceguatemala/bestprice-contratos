@@ -17,7 +17,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   costoDelSubarriendo, esPagableAlDueno, cuentaDeDueno, agruparPorDueno, totalSeleccionado,
-  elegirParaPago, totalGeneral,
+  elegirParaPago, totalGeneral, pagoAnulado,
 } from '../js/nucleo/liquidacion.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
 import { resumen } from '../js/nucleo/contrato.js';
@@ -26,6 +26,7 @@ import { sumarDias } from '../js/nucleo/fechas.js';
 import { construirContrato } from '../js/pantallas/sacarCarro.js';
 import {
   agregarPago, anularPago, contratoParaGuardar, conCostoDelDueno, costoDelDocumento,
+  anularPagoDueno, construirPagoDueno, pagoDuenoParaGuardar,
 } from '../js/datos.js';
 
 const AHORA = 1790000000000;
@@ -1202,4 +1203,145 @@ test('totalGeneral: si las cuentas no llegaron, lanza en vez de decir que no se 
   for (const mala of [undefined, null, 'x', 5, {}]) {
     assert.throws(() => totalGeneral(mala), TypeError, `con ${String(mala)}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Un pago a un dueño ANULADO (H-6, prueba del sistema del 7 de octubre).
+//
+// Si registra las rentas equivocadas o la forma equivocada, esas rentas salen de
+// «por pagar» —una deuda real que se lee como cero— y no había cómo deshacerlo.
+// Decisión de él: se ANULA, dejando rastro, como un pago del cliente. El pago
+// conserva su número (ese dueño ya tiene el papel) pero deja de contar como pagado:
+// sus rentas vuelven a «por pagar». Esa aritmética vive aquí, en un solo lugar.
+//
+// Los pagos se arman con los mismos constructores que los reales
+// (`construirPagoDueno` + `pagoDuenoParaGuardar`) y se anulan con `anularPagoDueno`:
+// ninguno lleva `anulado` escrito a mano.
+// ---------------------------------------------------------------------------
+
+/** Un pago real a un dueño, armado y sellado como lo hace la pantalla. */
+function pagoReal({
+  id, numero, contratos, idsMarcados, pagos = [], fecha = '2026-09-20', ahora = AHORA,
+}) {
+  return pagoDuenoParaGuardar(
+    construirPagoDueno({
+      duenoId: 'd1', fecha, forma: 'transferencia', contratos, pagos, idsMarcados,
+    }),
+    { id, numero, ahora },
+  );
+}
+/** Lo que queda en la nube después de anularlo: `anularPagoDueno` y el sellado de `guardarPagoDueno`. */
+const anuladoReal = (pago, { fecha = '2026-10-02', ahora = AHORA + 60000 } = {}) => (
+  pagoDuenoParaGuardar(anularPagoDueno(pago, { fecha }), { ahora })
+);
+
+test('pagoAnulado: solo un pago marcado con anulado lo está', () => {
+  const pago = pagoReal({ id: 'p1', numero: 1, contratos: [cerrado('c1')], idsMarcados: ['c1'] });
+  assert.equal(pagoAnulado(pago), false);
+  assert.equal(pagoAnulado(anuladoReal(pago)), true);
+  assert.equal(pagoAnulado(undefined), false);
+  assert.equal(pagoAnulado(null), false);
+});
+
+test('un pago anulado ya no cubre sus rentas: vuelven a «por pagar» y la deuda reaparece completa', () => {
+  const contratos = [cerrado('c1'), cerradoConAtraso('c2')]; // 1,200 + 1,800
+  const pago = pagoReal({ id: 'p1', numero: 1, contratos, idsMarcados: ['c1', 'c2'] });
+  assert.equal(pago.monto, 3000);
+
+  const pagado = cuentaDeDueno({ contratos, pagos: [pago] });
+  assert.equal(pagado.totalPorPagar, 0, 'el escenario: pagado, no se debe nada');
+  assert.deepEqual(ids(pagado.pagados), ['c1', 'c2']);
+
+  const anulado = cuentaDeDueno({ contratos, pagos: [anuladoReal(pago)] });
+  assert.deepEqual(ids(anulado.porPagar), ['c1', 'c2'], 'las dos rentas vuelven a «por pagar»');
+  assert.deepEqual(anulado.pagados, []);
+  assert.equal(anulado.totalPorPagar, 3000, 'y la deuda reaparece donde él la ve (antes: Q0.00)');
+  assert.deepEqual(anulado.gruposDePago, [], 'un pago anulado no forma ningún grupo: no pagó nada');
+});
+
+test('un pago anulado conserva su número, su monto y sus rentas, y no muta el original', () => {
+  const contratos = [cerrado('c1')];
+  const pago = pagoReal({ id: 'p1', numero: 7, contratos, idsMarcados: ['c1'] });
+  const copia = structuredClone(pago);
+  const anulado = anuladoReal(pago, { fecha: '2026-10-02' });
+  assert.equal(anulado.numero, 7, 'ese dueño ya tiene el papel con el N.° 7');
+  assert.equal(anulado.monto, 1200);
+  assert.deepEqual(anulado.contratos, ['c1']);
+  assert.equal(anulado.anuladoEn, '2026-10-02');
+  assert.deepEqual(pago, copia, 'el pago de antes ni se enteró');
+  // y la cuenta no lo muta tampoco
+  cuentaDeDueno({ contratos, pagos: [anulado] });
+  assert.equal(anulado.monto, 1200);
+});
+
+test('solo el anulado suelta sus rentas: el otro pago sigue cubriendo las suyas', () => {
+  const contratos = [cerrado('c1'), cerrado('c2')];
+  const p1 = pagoReal({ id: 'p1', numero: 1, contratos, idsMarcados: ['c1'] });
+  const p2 = pagoReal({ id: 'p2', numero: 2, contratos, idsMarcados: ['c2'], pagos: [p1] });
+  const cuenta = cuentaDeDueno({ contratos, pagos: [p1, anuladoReal(p2)] });
+  assert.deepEqual(ids(cuenta.pagados), ['c1']);
+  assert.deepEqual(ids(cuenta.porPagar), ['c2']);
+  assert.equal(cuenta.totalPorPagar, 1200);
+});
+
+test('las rentas de un pago anulado se pueden volver a escoger y pagar, con un pago nuevo y su propio número', () => {
+  const contratos = [cerrado('c1'), cerrado('c2')];
+  const equivocado = anuladoReal(pagoReal({ id: 'p1', numero: 1, contratos, idsMarcados: ['c1', 'c2'] }));
+  const cuenta = cuentaDeDueno({ contratos, pagos: [equivocado] });
+  const elegido = elegirParaPago(cuenta, ['c1', 'c2']);
+  assert.deepEqual(elegido.contratos, ['c1', 'c2']);
+  assert.equal(elegido.monto, 2400);
+  const bueno = pagoReal({ id: 'p2', numero: 2, contratos, idsMarcados: ['c1', 'c2'], pagos: [equivocado] });
+  assert.equal(bueno.monto, 2400, 'construirPagoDueno ya no ve las rentas como pagadas');
+  assert.equal(cuentaDeDueno({ contratos, pagos: [equivocado, bueno] }).totalPorPagar, 0, 'queda a mano, y el anulado no cuenta doble');
+});
+
+test('la copia vieja y la nueva del mismo pago: gana la más nueva, que es la anulada', () => {
+  const contratos = [cerrado('c1')];
+  const viejo = pagoReal({ id: 'p1', numero: 1, contratos, idsMarcados: ['c1'] });
+  const nuevo = anuladoReal(viejo);
+  assert.ok(nuevo.actualizado > viejo.actualizado, 'el escenario: anular vuelve a sellar');
+  for (const pagos of [[viejo, nuevo], [nuevo, viejo]]) {
+    const cuenta = cuentaDeDueno({ contratos, pagos });
+    assert.equal(cuenta.totalPorPagar, 1200, 'se cuenta como anulado en cualquier orden');
+    assert.deepEqual(cuenta.pagados, []);
+  }
+});
+
+test('anular el pago de una DIFERENCIA deja el pago original: la diferencia reaparece', () => {
+  const crecida = corregido('r41'); // ahora Q2,100
+  const p7 = pagoReal({ id: 'p7', numero: 7, contratos: [cerradoConDias('r41', 1)], idsMarcados: ['r41'] }); // Q1,500, como se pagó
+  const p9 = pagoReal({ id: 'p9', numero: 9, contratos: [crecida], idsMarcados: [cuentaDeDueno({ contratos: [crecida], pagos: [p7] }).diferencias[0].clave], pagos: [p7] });
+  assert.equal(p9.monto, 600, 'el escenario: p9 paga la diferencia');
+  assert.equal(cuentaDeDueno({ contratos: [crecida], pagos: [p7, p9] }).totalPorPagar, 0, 'con los dos pagos, a mano');
+
+  const cuenta = cuentaDeDueno({ contratos: [crecida], pagos: [p7, anuladoReal(p9)] });
+  assert.equal(cuenta.totalPorPagar, 600, 'la diferencia de Q600 vuelve a deberse');
+  assert.equal(cuenta.diferencias.length, 1);
+  assert.deepEqual(cuenta.diferencias[0].pagos.map((p) => p.numero), [7], 'y solo viene del comprobante N.° 7');
+  assert.deepEqual(ids(cuenta.pagados), ['r41'], 'la renta sigue pagada por el N.° 7');
+});
+
+test('anular el pago ORIGINAL cuando ya hay uno de diferencia: el grupo se compara contra lo que ese solo pagó', () => {
+  const crecida = corregido('r41'); // ahora Q2,100
+  const p7 = pagoReal({ id: 'p7', numero: 7, contratos: [cerradoConDias('r41', 1)], idsMarcados: ['r41'] }); // Q1,500, como se pagó
+  const dif = cuentaDeDueno({ contratos: [crecida], pagos: [p7] }).diferencias[0].clave;
+  const p9 = pagoReal({ id: 'p9', numero: 9, contratos: [crecida], idsMarcados: [dif], pagos: [p7] });
+  const cuenta = cuentaDeDueno({ contratos: [crecida], pagos: [anuladoReal(p7), p9] });
+  assert.equal(cuenta.totalPorPagar, 1500, 'Q2,100 que cuesta hoy menos los Q600 que sí cubre el N.° 9');
+  assert.equal(cuenta.diferencias[0].pagado, 600);
+});
+
+test('agruparPorDueno: el total de un dueño también ignora el pago anulado', () => {
+  const mario = enlazado(cerrado('c1'), 'd1');
+  const pago = pagoReal({ id: 'p1', numero: 1, contratos: [mario], idsMarcados: ['c1'] });
+  assert.equal(agruparPorDueno([mario], [pago])[0].cuenta.totalPorPagar, 0);
+  assert.equal(agruparPorDueno([mario], [anuladoReal(pago)])[0].cuenta.totalPorPagar, 1200);
+});
+
+test('un pago anulado DAÑADO (sin su lista de rentas) también lanza: nunca se lee como «no cubre nada»', () => {
+  const contratos = [cerrado('c1')];
+  const anulado = { ...anuladoReal(pagoReal({ id: 'p1', numero: 1, contratos, idsMarcados: ['c1'] })), contratos: undefined };
+  assert.throws(() => cuentaDeDueno({ contratos, pagos: [anulado] }), { name: 'TypeError', message: /contratos/ });
+  assert.throws(() => agruparPorDueno(contratos, [anulado]), { name: 'TypeError', message: /contratos/ });
 });

@@ -37,7 +37,9 @@
 // El PDF lo hace el navegador (ADR-003): esta hoja se imprime con
 // Cmd + P → Guardar como PDF, y css/estilos.css (@media print) esconde todo lo
 // que no sea ella.
-import { costoDelSubarriendo, agruparPorDueno, totalSeleccionado } from '../nucleo/liquidacion.js';
+import {
+  costoDelSubarriendo, agruparPorDueno, totalSeleccionado, pagoAnulado,
+} from '../nucleo/liquidacion.js';
 import { atrasoDe } from '../nucleo/contrato.js';
 import { q, suma } from '../nucleo/dinero.js';
 import { diasEntre, esFechaISO } from '../nucleo/fechas.js';
@@ -165,6 +167,7 @@ const cuantas = (filas, motivo) => filas.filter((f) => f.sinCosto === motivo).le
  * - `pago`: el pago a un dueño ya guardado (`id`, `fecha`, `forma`, `monto`,
  *   `contratos[]`, `numero`; §7 del diseño). Sin `numero` no hay papel: el
  *   correlativo es lo que lo vuelve un comprobante y no una hoja cualquiera.
+ *   Un pago ANULADO tampoco: ya no pagó nada (ver `pagoAnulado`) y el papel lo afirmaría.
  * - `dueno`: el registro del dueño (`nombre`, `telefono`, `nit`) o `null` para
  *   el grupo de contratos viejos con el dueño escrito a mano; ahí el nombre es el
  *   que se escribió en los contratos, y teléfono y NIT salen en blanco en vez de
@@ -190,6 +193,15 @@ export function armarComprobante({
   }
   if (!pago.numero) {
     throw new Error('Este pago todavía no tiene número de comprobante: sin número el papel no prueba nada. Guarda el pago primero.');
+  }
+  // Un pago anulado ya no pagó nada: sus rentas volvieron a «por pagar». Un papel que dijera
+  // «Le pagué … Total pagado» sobre él afirmaría lo contrario de lo que el sistema sabe, y saldría
+  // de la empresa. El número se conserva (ese dueño tiene el papel viejo), pero no se reimprime.
+  if (pagoAnulado(pago)) {
+    throw new Error(
+      `El pago N° ${pago.numero} está anulado${esFechaISO(pago.anuladoEn) ? ` desde el ${fecha(pago.anuladoEn)}` : ''}: `
+      + 'ya no cuenta como pagado, y un comprobante de pago diría lo contrario.',
+    );
   }
   if (!esFechaISO(pago.fecha)) {
     throw new Error(`El pago N° ${pago.numero} no trae una fecha válida: sin ella el comprobante no dice cuándo se pagó.`);

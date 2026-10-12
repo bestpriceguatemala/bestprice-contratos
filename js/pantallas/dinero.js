@@ -31,7 +31,7 @@
 //    puede calcular pero quedó corto (rentas sin costo, o con el costo sin leer),
 //    se dice en pantalla, junto al total, que está corto.
 import {
-  agruparPorDueno, cuentaDeDueno, costoDelSubarriendo, elegirParaPago, esPagableAlDueno, totalGeneral,
+  agruparPorDueno, cuentaDeDueno, costoDelSubarriendo, elegirParaPago, esPagableAlDueno, totalGeneral, pagoAnulado,
 } from '../nucleo/liquidacion.js';
 import { estadoContrato, pendientesDe } from '../nucleo/estados.js';
 import { atrasoDe } from '../nucleo/contrato.js';
@@ -40,7 +40,7 @@ import { hoyISO, esFechaISO, diasEntre } from '../nucleo/fechas.js';
 import { entrarADinero, salirDeDinero, sesionDeDinero } from '../dinero-sesion.js';
 import {
   cargarContratosParaDinero, cargarPagosDueno, cargarDuenos, guardarDueno, nuevoIdPagoDueno, altaConIdFijo, nuevoIdDueno,
-  siguienteNumeroComprobante, construirPagoDueno, guardarPagoDueno, anotarCostoDelDueno,
+  siguienteNumeroComprobante, construirPagoDueno, guardarPagoDueno, anularPagoDueno, anotarCostoDelDueno,
   enlazarContratosAlDueno, conCostoDelDueno, costoDelDocumento, migrarCostosDelDueno, mensajeDeMigracion,
   MENSAJE_PAGO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS, MENSAJE_PAGO_SIN_MONTO, MENSAJE_PAGO_SIN_ID,
   MENSAJE_COSTO_SIN_DINERO, MENSAJE_COSTO_SIN_VALOR, MENSAJE_COSTO_YA_ANOTADO, MENSAJE_COSTO_SIN_COMPROBAR,
@@ -111,18 +111,23 @@ export const MENSAJE_PAGO_CAMBIO = 'Mientras tanto cambió la cuenta de este due
  * una que no existe —el año con cinco dígitos que el campo de fecha deja teclear, un 30 de
  * febrero— se manda a revisar. Función pura. Sin esto el pago se guardaba, gastaba su
  * número de comprobante y el papel nunca se podía armar («no trae una fecha válida»), y no
- * hay dónde corregir un pago ya guardado (prueba del sistema, 7 oct 2026).
+ * había dónde corregir un pago ya guardado (prueba del sistema, 7 oct 2026). Ahora sí lo hay:
+ * se anula (`anularElPago`), pero el número gastado se queda como anulado — por eso se revisa
+ * ANTES, y no se deja pasar una fecha mala para "arreglarla después".
  */
 export function problemaDeLaFechaDelPago(fechaDelPago, hoy) {
   if (!fechaDelPago) return 'Escribe la fecha del pago.';
   if (!esFechaISO(fechaDelPago)) return 'La fecha del pago no es válida. Revisa el año.';
   // Un pago que se registra ya se hizo: no puede ser de mañana. Con «2062» por «2026» el comprobante salía
-  // fechado en 2062 y, como no hay dónde corregir un pago ya guardado, se quedaba así. Solo se revisa si quien
-  // llama dice qué día es hoy.
+  // fechado en 2062 y no había cómo corregirlo (hoy hay que anularlo, y el número queda gastado). Solo se
+  // revisa si quien llama dice qué día es hoy.
   if (hoy && diasEntre(hoy, fechaDelPago) > 0) return 'La fecha del pago todavía no llega. Revisa la fecha.';
   return null;
 }
 
+export const MENSAJE_ANULAR_SIN_COMPROBAR = 'No se pudo comprobar si este pago sigue como lo ves, y anularlo sin saberlo podría pisar una anulación que ya se hizo. Revisa tu internet e intenta de nuevo; no se anuló nada.';
+export const MENSAJE_ANULAR_NO_ESTA = 'Este pago ya no está en la lista de pagos. No se anuló nada; la lista ya está al día, revísala.';
+export const MENSAJE_ANULAR_FALLO = 'No se pudo anular el pago. Revisa tu internet y vuelve a intentarlo: si ya había quedado anulado, no se anula dos veces.';
 export const MENSAJE_PAGO_FALLO = 'No se pudo registrar el pago. Revisa tu internet y vuelve a apretar «Guardar pago»: si ya había quedado guardado, no se duplica. '
   + 'Si sigue sin conectar, recarga la página y revisa «Ya pagado» antes de intentarlo otra vez.';
 export const MENSAJE_COSTO_FALLO = 'No se pudo guardar el costo. Revisa tu internet e intenta de nuevo.';
@@ -304,6 +309,7 @@ const FRASES_CONOCIDAS = new Set([
   MENSAJE_PAGO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS, MENSAJE_PAGO_SIN_MONTO, MENSAJE_PAGO_SIN_ID,
   MENSAJE_COSTO_SIN_DINERO, MENSAJE_COSTO_SIN_VALOR, MENSAJE_COSTO_YA_ANOTADO, MENSAJE_COSTO_SIN_COMPROBAR,
   MENSAJE_MIGRAR_SIN_DINERO, MENSAJE_SIN_COMPROBAR, MENSAJE_SIN_COMPROBAR_RENTAS, MENSAJE_PAGO_CAMBIO,
+  MENSAJE_ANULAR_SIN_COMPROBAR,
   'La nube no respondió a tiempo.',
   'Solo se puede anotar el costo en un contrato de carro ajeno que ya esté guardado.',
   'Falta escoger a qué dueño de la lista se enlazan los contratos.',
@@ -658,6 +664,66 @@ export async function registrarElPago({
   enCurso.numero ??= await nuevoNumero();
   const guardado = await guardar({ ...pago, id: enCurso.id, numero: enCurso.numero });
   return { tipo: 'guardado', pago: guardado, pagos: [...frescos.datos, guardado], contratos: rentas };
+}
+
+// ---------------------------------------------------------------------------
+// Anular un pago a un dueño (H-6)
+// ---------------------------------------------------------------------------
+//
+// Si registra las rentas equivocadas o la forma equivocada, esas rentas salen de «por pagar»
+// y la deuda se lee como cero. La salida es la misma que ya tiene un pago del cliente
+// (`anularPago`, datos.js; el detalle del contrato): se ANULA, dejando rastro. El pago se
+// queda con su número —ese dueño tiene el papel— y sigue en «Ya pagado», marcado; y las
+// rentas que cubría vuelven a «por pagar», porque `cuentaDeDueno` ya no lo cuenta como pagado.
+
+/**
+ * El mensaje del confirm() antes de anular un pago a un dueño: a QUIÉN, cuánto, cuál
+ * comprobante y cuántas rentas, igual que `textoConfirmarAnular` (contratos.js) nombra el
+ * monto y la fecha de un pago del cliente. Anular el pago equivocado por un diálogo vago es
+ * justo lo que este mensaje existe para evitar. Función pura.
+ *
+ * `entrada` es la cuenta de la ficha. Si otro pago vigente comparte rentas con este (se
+ * pagó una diferencia aparte, ver `gruposDePago`), las rentas NO vuelven completas a «por
+ * pagar»: lo que reaparece es lo que falte para completar lo que cuestan hoy, y el mensaje
+ * lo dice así en vez de prometer algo que no va a pasar. Quién comparte lo dice el núcleo
+ * (`cuenta.gruposDePago`); aquí no se decide.
+ */
+export function textoConfirmarAnularPagoDueno(pago, entrada) {
+  const rentas = new Set((Array.isArray(pago?.contratos) ? pago.contratos : []).filter(Boolean)).size;
+  const grupo = (entrada?.cuenta?.gruposDePago ?? []).find((g) => g.pagos.some((p) => p?.id && p.id === pago?.id));
+  const otros = grupo ? grupo.pagos.filter((p) => p?.id !== pago?.id) : [];
+  const efecto = otros.length
+    ? `Esas rentas también están en ${textoDeComprobantes(otros)}: al anularlo solo vuelve a «Por pagar» lo que falte para completar lo que cuestan hoy.`
+    : `${rentas === 1 ? 'Esa renta vuelve' : 'Esas rentas vuelven'} a «Por pagar».`;
+  return `¿Anular el pago de ${dinero(pago?.monto)} a ${entrada?.nombre ?? 'este dueño'} (comprobante N.° ${pago?.numero ?? '—'}, del ${fecha(pago?.fecha)})? `
+    + `Cubre ${rentas} ${palabraRentas(rentas)}. ${efecto} `
+    + 'El pago queda marcado como anulado, con su número, y no desaparece de «Ya pagado».';
+}
+
+/**
+ * Anula un pago a un dueño. Las dependencias se reciben para probar todo el recorrido sin red.
+ *
+ * Vuelve a LEER los pagos antes de escribir, como `registrarElPago`: la copia que la pantalla
+ * tiene es la de cuando se abrió. Si otra pestaña ya lo anuló, no se escribe nada — se
+ * devuelve ese, con la fecha de la primera anulación, que un segundo clic no debe pisar. Y lo
+ * que se escribe es el pago TAL COMO ESTÁ AHORA en la nube, no la copia de la pantalla.
+ * Si no se pueden leer, no se anula: sin saber cómo está, se podría pisar algo.
+ *
+ * Devuelve `{ tipo, pagos, pago? }`, con `tipo` en 'anulado', 'ya-anulado' o 'no-esta' (el pago
+ * ya no existe): `pagos` es la lista leída (con el pago anulado ya puesto), que la pantalla toma
+ * como la nueva verdad. `hoy` se recibe y es la fecha de la anulación (`anuladoEn`).
+ */
+export async function anularElPago({
+  pago, hoy, leerPagos = cargarPagosDueno, guardar = guardarPagoDueno,
+}) {
+  if (!esFechaISO(hoy)) throw new Error('Falta la fecha de hoy: la anulación queda fechada y no se adivina.');
+  const frescos = await leerPagos();
+  if (frescos.fallo || !Array.isArray(frescos.datos)) throw new Error(MENSAJE_ANULAR_SIN_COMPROBAR);
+  const actual = frescos.datos.find((p) => p?.id && p.id === pago?.id);
+  if (!actual) return { tipo: 'no-esta', pagos: frescos.datos };
+  if (pagoAnulado(actual)) return { tipo: 'ya-anulado', pago: actual, pagos: frescos.datos };
+  const anulado = await guardar(anularPagoDueno(actual, { fecha: hoy }));
+  return { tipo: 'anulado', pago: anulado, pagos: frescos.datos.map((p) => (p.id === anulado.id ? anulado : p)) };
 }
 
 /**
@@ -1015,13 +1081,22 @@ function htmlBloqueYaPagado(ctx) {
         ? `<li>${esc(fecha(c.fechaSalida))} · ${esc(c.carroPlacas || '—')} · ${esc(c.clienteNombre || '—')} · ${htmlDeDias(c)}</li>`
         : '<li class="dn-gris">Una renta que ya no está en el sistema.</li>';
     }).join('');
-    return `
-      <article class="dn-caja dn-pago-hecho">
-        <div class="dn-pago-cabecera">
-          <div><strong>Comprobante N.° ${esc(p.numero ?? '—')}</strong> · ${esc(fecha(p.fecha))} · ${esc(etiquetaDeForma(p.forma))}</div>
-          <div class="dn-pago-monto">
-            <strong class="dn-pago-cifra">${esc(dinero(p.monto))}</strong>
+    // Un pago anulado NO desaparece (ese dueño tiene el papel con su número): se ve apagado, con la
+    // cifra tachada y «Anulado el …», como un pago anulado del cliente. Sin botones: un papel de pago
+    // sobre algo que ya no está pagado diría lo contrario, y no hay nada más que anular.
+    const anulado = pagoAnulado(p);
+    const etiquetaAnulado = anulado
+      ? `<span class="etiqueta-anulado">Anulado${p.anuladoEn ? ` el ${esc(fecha(p.anuladoEn))}` : ''}</span>`
+      : '';
+    const botones = anulado ? '' : `
             <button type="button" class="btn" data-dn="comprobante" data-id="${esc(p.id)}">Ver comprobante</button>
+            <button type="button" class="btn" data-dn="anular-pago" data-id="${esc(p.id)}">Anular</button>`;
+    return `
+      <article class="dn-caja dn-pago-hecho${anulado ? ' dn-pago-anulado' : ''}">
+        <div class="dn-pago-cabecera">
+          <div><strong>Comprobante N.° ${esc(p.numero ?? '—')}</strong> · ${esc(fecha(p.fecha))} · ${esc(etiquetaDeForma(p.forma))}${etiquetaAnulado}</div>
+          <div class="dn-pago-monto">
+            <strong class="dn-pago-cifra">${esc(dinero(p.monto))}</strong>${botones}
           </div>
         </div>
         <ul class="dn-pago-rentas">${rentas}</ul>
@@ -1495,13 +1570,38 @@ async function pintarCuentas(contenedor, claveDeFicha) {
   function verComprobante(pagoId) {
     const leida = lector.actual;
     const pago = leida?.pagos.datos.find((p) => p.id === pagoId);
-    if (!pago) return;
+    if (!pago || pagoAnulado(pago)) return;
     try {
       pintarComprobante(raiz, entradaDelComprobante({ entrada, pago, lectura: leida, hoy }), { alVolver: dibujar });
     } catch (error) {
       console.error(error);
       aviso(MENSAJE_COMPROBANTE_FALLO, 'error');
     }
+  }
+
+  // ----- Anular un pago a un dueño -----
+  async function anularPagoDeDueno(pagoId) {
+    if (ui.ocupado || !haySesion()) return;
+    const pago = lector.actual?.pagos.datos.find((p) => p.id === pagoId);
+    if (!pago || pagoAnulado(pago) || !entrada) return;
+    if (!window.confirm(textoConfirmarAnularPagoDueno(pago, entrada))) return;
+    ui.ocupado = true;
+    try {
+      const r = await anularElPago({ pago, hoy: hoyISO() });
+      if (!lector.actual) return;
+      lector.actual.pagos.datos = r.pagos;
+      if (r.tipo === 'no-esta') aviso(MENSAJE_ANULAR_NO_ESTA, 'error');
+      else {
+        aviso(r.tipo === 'ya-anulado'
+          ? `Ese pago ya estaba anulado (comprobante N.° ${r.pago.numero}).`
+          : `Pago anulado. El comprobante N.° ${r.pago.numero} queda en «Ya pagado», marcado como anulado.`, 'exito');
+      }
+    } catch (error) {
+      aviso(mensajeSeguro(error, MENSAJE_ANULAR_FALLO), 'error');
+    } finally {
+      ui.ocupado = false;
+    }
+    dibujar();
   }
 
   // ----- La migración del costo, una vez y a mano -----
@@ -1547,6 +1647,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
         case 'enlazar': enlazar({ crear: false }); return;
         case 'crear-y-enlazar': enlazar({ crear: true }); return;
         case 'comprobante': verComprobante(id); return;
+        case 'anular-pago': anularPagoDeDueno(id); return;
         case 'migrar': migrar(accion); return;
         default: return;
       }

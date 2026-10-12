@@ -1899,6 +1899,9 @@ export function construirPagoDueno({
  *   lista de rentas no se puede leer después: `cuentaDeDueno` lanza). Una lista
  *   que no es lista se guarda como `[]`, y `guardarPagoDueno` no deja guardar un
  *   pago sin rentas, así que esa vía no llega a la nube.
+ * - `anulado` y `anuladoEn` (ver `anularPagoDueno`) viajan con el resto del pago:
+ *   se copia `...pago` y aquí no se pregunta por ellos. Un pago anulado se guarda
+ *   por este mismo camino y conserva su `numero`, su `monto` y sus `contratos`.
  */
 export function pagoDuenoParaGuardar(pago, { id, numero, ahora = Date.now() } = {}) {
   return {
@@ -1909,6 +1912,31 @@ export function pagoDuenoParaGuardar(pago, { id, numero, ahora = Date.now() } = 
     contratos: Array.isArray(pago?.contratos) ? [...pago.contratos] : [],
     actualizado: ahora,
   };
+}
+
+/**
+ * Anula un pago a un dueño mal registrado, sin borrarlo. Función **pura** (sin
+ * Firestore) — quien llama guarda el resultado con `guardarPagoDueno()`, igual que
+ * `anularPago` (el del cliente) se guarda con `guardarContrato()`. Es la misma forma,
+ * con los mismos nombres de campo (§7b: `anulado`, `anuladoEn`), a propósito: un
+ * segundo modo de anular sería un segundo lugar donde equivocarse.
+ *
+ * Por qué se queda y no se borra (decisión del dueño, tal cual): ese dueño de carro
+ * YA tiene un papel con el número del comprobante. Borrar el pago dejaría ese número
+ * sin respaldo en el sistema, y un número de comprobante no se reutiliza ni se pierde.
+ * Por eso conserva su `numero`, su `monto` y sus `contratos[]` sin tocarlos, y solo
+ * agrega `anulado: true` y `anuladoEn` (la fecha de la anulación, no la del pago).
+ *
+ * El único lugar donde cambia la aritmética es `cuentaDeDueno` (nucleo/liquidacion.js),
+ * que no cuenta un pago anulado como pagado: sus rentas vuelven a «por pagar». Aquí
+ * solo se marca.
+ *
+ * Un pago que ya estaba anulado no cambia — así un doble clic, o una pestaña que no
+ * se enteró, no le pisa la fecha a la primera anulación. Tampoco lo que no es un pago.
+ */
+export function anularPagoDueno(pago, { fecha = hoyISO() } = {}) {
+  if (!pago || typeof pago !== 'object' || pago.anulado) return pago;
+  return { ...pago, anulado: true, anuladoEn: fecha };
 }
 
 /**

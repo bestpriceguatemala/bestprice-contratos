@@ -551,7 +551,15 @@ La lista viva sigue siendo lo que arma `construirContrato`
 (`js/datos.js`), igual que `CAMPOS_CLIENTE` lo es para el cliente.
 
 **De un pago:**
-`monto`, `forma`, `porcentajeTarjeta`, `fecha`.
+`monto`, `forma`, `porcentajeTarjeta`, `fecha`, y los dos de la anulación,
+`anulado` y `anuladoEn` (agregados el 11 de octubre: `anularPago` los escribe
+desde que existe el botón «Anular» y esta lista no los nombraba).
+- `anulado` es `true` en un pago que se anuló, y no existe en uno que no. El pago
+  **no se borra ni se le toca el monto**: dinero recibido y luego revertido es
+  algo que el dueño puede tener que explicarle a un cliente. `resumen()`
+  (`nucleo/contrato.js`) es el único lugar donde un pago anulado deja de contar.
+- `anuladoEn` es la fecha (ISO) en que se anuló, no la del pago. Un pago que ya
+  estaba anulado no vuelve a cambiar su fecha.
 
 **Del cierre:**
 `fechaReal`, `horaReal`, `lugarEntrada`, `kmEntrada`, `combustible`, `danos`,
@@ -601,7 +609,22 @@ contrato es `carroAjeno.dueno`, el texto de ese día; y la ficha de la lista es 
 colección `duenos`, a la que apunta `duenoId`.
 
 **Del pago a un dueño** (colección `pagosDueno`; agregado el 5 de octubre):
-`duenoId`, `fecha`, `forma`, `monto`, `contratos[]`, `numero`, `actualizado`.
+`duenoId`, `fecha`, `forma`, `monto`, `contratos[]`, `numero`, `actualizado`, y
+los dos de la anulación, `anulado` y `anuladoEn` (agregados el 11 de octubre).
+
+- `anulado` y `anuladoEn` se llaman **igual que en un pago del cliente** (arriba), a
+  propósito: es la misma idea y la misma forma, y un segundo nombre sería un segundo
+  lugar donde equivocarse. `anularPagoDueno` (`js/datos.js`) los escribe y no toca
+  nada más: **el pago conserva su `numero`, su `monto` y sus `contratos[]`**. Se
+  anula en vez de borrar porque ese dueño ya tiene un papel con el número del
+  comprobante, y un número de comprobante no se reutiliza ni se pierde. Un pago
+  anulado sigue en «Ya pagado», marcado, y su comprobante no se vuelve a armar.
+- Un pago anulado **deja de cubrir sus rentas**: `contratos[]` ya no dice que se
+  pagaron, y vuelven a «por pagar». Eso se decide en un solo lugar,
+  `pagoAnulado` en `nucleo/liquidacion.js` (por donde `cuentaDeDueno` y los grupos
+  de pagos reciben los pagos), igual que `resumen()` lo es para el cliente. Si el
+  mismo pago llega dos veces, gana la copia de `actualizado` mayor, que es la
+  anulada: anular vuelve a sellar el pago (`pagoDuenoParaGuardar`).
 
 - `contratos[]` son los ids de los contratos que ese pago cubre, y **es lo único
   que dice que un contrato ya se le pagó al dueño del carro**. El contrato no

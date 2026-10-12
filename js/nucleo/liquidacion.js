@@ -64,27 +64,47 @@ export function esPagableAlDueno(contrato) {
 const queLlego = (valor) => (valor === null ? 'null' : typeof valor);
 
 /**
- * Los ids de contrato que algún pago a un dueño ya cubrió.
+ * ¿Este pago a un dueño se anuló? Es la marca `anulado` que le pone `anularPagoDueno`
+ * (datos.js), con el mismo nombre que ya usa un pago del cliente (§7b).
  *
- * LANZA si `pagos` no es una lista, o si el `contratos` de algún pago no lo es.
- * No devuelve un conjunto vacío «por si acaso»: vacío y fallido no son lo
- * mismo. Si la lectura de `pagosDueno` falló y aquí se leyera como «nadie ha
- * cobrado», cada contrato ya pagado reaparecería como deuda y el dueño del
- * negocio le pagaría dos veces a quien ya le pagó. Una función del núcleo no
- * puede saber si la lectura falló, así que no adivina: un error fuerte se ve
- * y se arregla, una deuda inflada en silencio se paga. (La misma regla que
+ * Un pago anulado NO desaparece: conserva su número, su monto y sus rentas, y se
+ * sigue viendo en «Ya pagado» — el dueño del carro tiene el papel con ese número.
+ * Lo único que cambia es aquí: ya no cuenta como pagado. Es el mismo lugar único
+ * que `resumen()` es para un pago del cliente; ninguna pantalla vuelve a decidirlo.
+ */
+export function pagoAnulado(pago) {
+  return Boolean(pago?.anulado);
+}
+
+/**
+ * Los pagos que de verdad cuentan: sin repetidos y sin los anulados. Es por donde
+ * entran los pagos a toda la cuenta, así «qué rentas ya se pagaron» y «contra qué se
+ * compara lo que cuestan hoy» (`gruposDePago`) parten de la misma lista y no pueden
+ * contradecirse.
+ *
+ * LANZA si `pagos` no es una lista, o si el `contratos` de algún pago no lo es —
+ * también el de uno anulado. No devuelve una lista vacía «por si acaso»: vacío y
+ * fallido no son lo mismo. Si la lectura de `pagosDueno` falló y aquí se leyera
+ * como «nadie ha cobrado», cada contrato ya pagado reaparecería como deuda y el
+ * dueño del negocio le pagaría dos veces a quien ya le pagó. Una función del
+ * núcleo no puede saber si la lectura falló, así que no adivina: un error fuerte
+ * se ve y se arregla, una deuda inflada en silencio se paga. (La misma regla que
  * evitó pintar una lectura fallida de la flota como «todos disponibles».)
+ *
+ * Los repetidos se quitan ANTES de mirar quién está anulado: si el mismo pago llega
+ * dos veces —la copia vieja y la que se anuló después—, gana la de `actualizado`
+ * más nuevo (la regla de `sinIdsRepetidos`), que es la anulada. Al revés, la copia
+ * vieja haría que un pago anulado siguiera cubriendo sus rentas.
  *
  * Una lista vacía sí es válida: significa que no se le ha pagado a nadie.
  */
-function idsCubiertos(pagos) {
+function pagosVigentes(pagos) {
   if (!Array.isArray(pagos)) {
     throw new TypeError(
       `liquidacion: «pagos» debe ser una lista y llegó ${queLlego(pagos)}. Sin ella no se sabe qué ya se pagó, `
       + 'y suponer que nada está pagado inflaría lo que se le debe a cada dueño.',
     );
   }
-  const cubiertos = new Set();
   for (const pago of pagos) {
     if (!Array.isArray(pago?.contratos)) {
       throw new TypeError(
@@ -92,16 +112,13 @@ function idsCubiertos(pagos) {
         + 'Un pago dañado no se lee como «no cubre nada».',
       );
     }
-    for (const id of pago.contratos) {
-      if (id) cubiertos.add(id);
-    }
   }
-  return cubiertos;
+  return sinIdsRepetidos(pagos).filter((pago) => !pagoAnulado(pago));
 }
 
 /**
  * La lista de contratos, o un error si no es una lista. Es la otra mitad de
- * `idsCubiertos` y la que más importa no ablandar.
+ * `pagosVigentes` y la que más importa no ablandar.
  *
  * Si `contratos` no llegó (la lectura falló) y aquí se leyera como «no hay
  * ninguno», la pantalla diría «no le debes nada a nadie» con toda confianza. Un
@@ -188,6 +205,11 @@ export function sinIdsRepetidos(contratos) {
  *
  * Un pago que llega repetido (misma `id`) cuenta una sola vez: si contara dos,
  * `pagado` se inflaría y una deuda real se leería como saldada.
+ *
+ * Recibe los pagos VIGENTES (`pagosVigentes`): uno anulado ya no pagó nada, así que ni
+ * suma a `pagado` ni junta rentas en un grupo. Si se anula el pago de una diferencia, el
+ * grupo vuelve a ser el del pago original y la diferencia reaparece; si se anula el
+ * original y queda el de la diferencia, el grupo se compara contra lo que ese solo pagó.
  */
 function gruposDePago(contratos, pagos) {
   const porId = new Map(contratos.filter((c) => c?.id).map((c) => [c.id, c]));
@@ -247,6 +269,11 @@ function gruposDePago(contratos, pagos) {
  * - `pagados`: cubiertos por un pago (`pagos[].contratos` guarda sus ids).
  *   Se revisan primero: un contrato ya pagado sigue pagado aunque después
  *   cambie de estado, y nunca debe volver a pagarse completo.
+ *
+ *   Un pago ANULADO (`pagoAnulado`) no cubre nada: sus rentas vuelven a
+ *   `porPagar` (o a `aunNoCierra` si ya no cierran) y la deuda reaparece donde
+ *   él la ve. El pago sigue existiendo —con su número y su monto, que ese dueño
+ *   ya tiene en un papel— pero ya no cuenta como pagado, aquí y en los grupos.
  * - `diferencias`: lo que se le debe de más por rentas YA PAGADAS cuyo monto
  *   creció después del pago (se corrigió el cierre y el carro estuvo más días
  *   afuera). Una por grupo de pagos (ver `gruposDePago`):
@@ -282,7 +309,7 @@ function gruposDePago(contratos, pagos) {
  *   decir «sin costo anotado» en vez de pasar por buena una cifra que nadie
  *   escribió. El contrato sigue en su lista y no cambia el total.
  *
- * `pagos` y `contratos` DEBEN ser listas (ver `idsCubiertos` y
+ * `pagos` y `contratos` DEBEN ser listas (ver `pagosVigentes` y
  * `exigirContratos`): si no llegaron, esto lanza. Pagos ausentes contarían como
  * «sin pagar» lo que quizá ya se pagó; contratos ausentes dirían «no se le debe
  * nada» a quien quizá sí se le debe.
@@ -292,7 +319,8 @@ function gruposDePago(contratos, pagos) {
  * contrato que llegue repetido cuenta una sola vez (ver `sinIdsRepetidos`).
  */
 export function cuentaDeDueno({ contratos, pagos } = {}) {
-  const cubiertos = idsCubiertos(pagos);
+  const vigentes = pagosVigentes(pagos);
+  const cubiertos = new Set(vigentes.flatMap((p) => p.contratos.filter(Boolean)));
   const porPagar = [];
   const aunNoCierra = [];
   const pagados = [];
@@ -311,7 +339,7 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
     else aunNoCierra.push(c);
   }
 
-  const grupos = gruposDePago(ajenos, pagos);
+  const grupos = gruposDePago(ajenos, vigentes);
   // Con los ids de las rentas en la clave, y no con los de los pagos: no cambia
   // cuando se paga una parte, y no se parece a ningún id de contrato (para marcarla
   // en la misma lista que las rentas).
@@ -376,7 +404,7 @@ export function cuentaDeDueno({ contratos, pagos } = {}) {
  * llegó lanza, porque `[]` aquí significaría «no le debes a nadie».
  */
 export function agruparPorDueno(contratos, pagos) {
-  idsCubiertos(pagos);
+  pagosVigentes(pagos);
   const grupos = new Map();
 
   // Antes de repartir, y no solo dentro de cada cuenta: el mismo contrato entregado

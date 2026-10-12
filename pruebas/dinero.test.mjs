@@ -19,6 +19,7 @@ import {
   parchearMarcado, notasDelTotalGeneral, textoDeComprobantes, diferenciaBloqueada, rentasCortas,
   cerrarElDinero, cerrarElDineroOReiniciar, salirDelSistema, crearVigilante, crearLector, mensajeSeguro,
   htmlEntrada, htmlFallo, htmlLista, htmlFicha, htmlMigracion, entradaDelComprobante, problemaDeLaFechaDelPago,
+  textoConfirmarAnularPagoDueno, anularElPago, MENSAJE_ANULAR_SIN_COMPROBAR, MENSAJE_ANULAR_NO_ESTA, MENSAJE_ANULAR_FALLO,
 } from '../js/pantallas/dinero.js';
 import { armarComprobante } from '../js/pantallas/comprobante.js';
 import { htmlListaDeDuenos, htmlFormularioDeDueno } from '../js/pantallas/duenos.js';
@@ -27,11 +28,13 @@ import { construirCierre } from '../js/nucleo/cierre.js';
 import { resumen } from '../js/nucleo/contrato.js';
 import { estadoContrato, pendientesDe } from '../js/nucleo/estados.js';
 import { sumarDias } from '../js/nucleo/fechas.js';
-import { cuentaDeDueno, agruparPorDueno, totalSeleccionado } from '../js/nucleo/liquidacion.js';
+import {
+  cuentaDeDueno, agruparPorDueno, totalSeleccionado, pagoAnulado,
+} from '../js/nucleo/liquidacion.js';
 import { mensajeDeErrorDeDinero } from '../js/dinero-sesion.js';
 import {
   agregarPago, contratoParaGuardar, conCostoDelDueno, costoDelDocumento, construirPagoDueno, pagoDuenoParaGuardar,
-  guardarPagoDueno, anotarCostoDelDueno, enlazarContratosAlDueno, nuevoIdPagoDueno,
+  guardarPagoDueno, anotarCostoDelDueno, enlazarContratosAlDueno, nuevoIdPagoDueno, anularPagoDueno,
   MENSAJE_COSTO_SIN_VALOR, MENSAJE_COSTO_SIN_DINERO, MENSAJE_COSTO_YA_ANOTADO, MENSAJE_COSTO_SIN_COMPROBAR, MENSAJE_PAGO_SIN_RENTAS,
 } from '../js/datos.js';
 
@@ -1837,8 +1840,10 @@ function todoElHtmlDeDinero() {
   const fichas = ['Mario López Alvarado', 'Lucía Barrios', 'Don Mario', 'Zacarías Sin Rentas']
     .flatMap((nombre) => [fichaDe(nombre, { vista, lectura }), fichaDe(nombre, { vista, lectura, ui })]);
   const vacia = armarVista(lecturaOk({ contratos: { datos: [], fallo: false, costoSinLeer: [] }, pagos: { datos: [], fallo: false }, duenos: { datos: [], fallo: false } }));
+  const conAnulado = lecturaConAnulado();
   return [
     ...htmlConDiferencias(),
+    fichaDe('Lucía Barrios', { vista: armarVista(conAnulado), lectura: conAnulado }),
     htmlEntrada(), htmlEntrada({ mensaje: MENSAJE_INACTIVIDAD }),
     htmlFallo({ problemas: ['contratos', 'pagos', 'datos'] }),
     htmlLista(vista), htmlLista(vista, { migracion: htmlMigracion({ mensaje: 'Se movieron 3 contratos.', problema: false }) }),
@@ -2341,4 +2346,307 @@ test('guardarPago() le pregunta a problemaDeLaFechaDelPago antes de gastar un n�
   const registra = cuerpo.indexOf('registrarElPago(');
   assert.ok(pregunta > 0, 'se pregunta por la fecha');
   assert.ok(registra > pregunta, 'y se pregunta ANTES de registrar el pago');
+});
+
+// ===========================================================================
+// H-6: anular un pago a un dueño
+// ===========================================================================
+//
+// Prueba del sistema (7 oct 2026): «Registrar pago» con las rentas o la forma equivocadas sacaba esas
+// rentas de «por pagar» —una deuda real que se leía como cero— y la única salida era tocar Firestore a
+// mano. Decisión de él: ANULAR, dejando rastro, como un pago del cliente. El pago conserva su número
+// (ese dueño ya tiene el papel con él), sigue en «Ya pagado» marcado como anulado, y sus rentas vuelven a
+// «por pagar». El diálogo nombra a QUIÉN, cuánto y cuántas rentas: anular el pago equivocado por un
+// diálogo vago es justo lo que no puede pasar.
+
+/** El pago N.° 3 a Lucía, anulado el 2 de octubre: tal como queda después de `anularPagoDueno` + guardarlo. */
+const ANULADO_A_LUCIA = pagoDuenoParaGuardar(
+  anularPagoDueno(PAGO_A_LUCIA, { fecha: '2026-10-02' }),
+  { id: PAGO_A_LUCIA.id, numero: PAGO_A_LUCIA.numero, ahora: AHORA + 60000 },
+);
+const lecturaConAnulado = () => lecturaOk({ pagos: { datos: [ANULADO_A_LUCIA], fallo: false } });
+const luciaDe = (lectura) => entradaDe(armarVista(lectura), 'Lucía Barrios');
+
+test('el escenario del anulado: conserva el N.° 3, su monto y su renta, y Lucía vuelve a deber lo que se le había pagado', () => {
+  assert.equal(pagoAnulado(ANULADO_A_LUCIA), true);
+  assert.equal(ANULADO_A_LUCIA.numero, 3);
+  assert.equal(ANULADO_A_LUCIA.monto, 1250);
+  assert.deepEqual(ANULADO_A_LUCIA.contratos, ['l3']);
+  assert.equal(ANULADO_A_LUCIA.anuladoEn, '2026-10-02');
+  assert.equal(luciaDe(lecturaOk()).cuenta.totalPorPagar, 750, 'con el pago vigente solo debe L1');
+  const sin = luciaDe(lecturaConAnulado()).cuenta;
+  assert.deepEqual(sin.porPagar.map((c) => c.id), ['l1', 'l3']);
+  assert.equal(sin.totalPorPagar, 2000, 'Q750 + los Q1,250 que habían salido de «por pagar»');
+});
+
+// ---------- El diálogo ----------
+
+test('textoConfirmarAnularPagoDueno: nombra a QUIÉN, cuánto, cuál comprobante, cuándo y cuántas rentas', () => {
+  const lucia = luciaDe(lecturaOk());
+  const texto = textoConfirmarAnularPagoDueno(PAGO_A_LUCIA, lucia);
+  assert.ok(texto.startsWith('¿Anular el pago de Q1,250.00 a Lucía Barrios'), texto);
+  assert.ok(texto.includes('comprobante N.° 3'), 'cuál papel es');
+  assert.ok(texto.includes('20 sep 2026'), 'de cuándo');
+  assert.ok(texto.includes('Cubre 1 renta'), 'cuántas rentas, en singular');
+  assert.ok(texto.includes('Esa renta vuelve a «Por pagar»'), 'y qué pasa con ella');
+  assert.ok(texto.includes('marcado como anulado, con su número, y no desaparece de «Ya pagado»'), 'y que deja rastro');
+});
+
+test('textoConfirmarAnularPagoDueno: con varias rentas lo dice en plural, y nombra al dueño de ESA cuenta', () => {
+  const pago = pagoDuenoParaGuardar(
+    construirPagoDueno({ duenoId: 'd1', fecha: '2026-09-21', forma: 'efectivo', contratos: TODOS, pagos: [], idsMarcados: ['m1', 'm2'] }),
+    { id: 'pg-mario', numero: 4, ahora: AHORA },
+  );
+  const lectura = lecturaOk({ pagos: { datos: [PAGO_A_LUCIA, pago], fallo: false } });
+  const texto = textoConfirmarAnularPagoDueno(pago, entradaDe(armarVista(lectura), 'Mario López Alvarado'));
+  assert.ok(texto.includes('Q3,000.00 a Mario López Alvarado'), texto);
+  assert.ok(texto.includes('Cubre 2 rentas'), texto);
+  assert.ok(texto.includes('Esas rentas vuelven a «Por pagar»'), texto);
+  assert.ok(!texto.includes('Lucía'), 'ni el nombre de otro dueño');
+});
+
+test('textoConfirmarAnularPagoDueno: un pago de un grupo sin enlazar nombra el texto escrito a mano', () => {
+  const pago = pagoDuenoParaGuardar(
+    construirPagoDueno({ duenoId: null, fecha: '2026-09-21', forma: 'efectivo', contratos: TODOS, pagos: [], idsMarcados: ['t1'] }),
+    { id: 'pg-don', numero: 5, ahora: AHORA },
+  );
+  const lectura = lecturaOk({ pagos: { datos: [PAGO_A_LUCIA, pago], fallo: false } });
+  assert.ok(textoConfirmarAnularPagoDueno(pago, entradaDe(armarVista(lectura), 'Don Mario')).includes('Q400.00 a Don Mario'));
+});
+
+test('textoConfirmarAnularPagoDueno: si el pago comparte rentas con otro (una diferencia), NO promete que vuelven a «Por pagar»', () => {
+  const lectura = lecturaDe41();
+  const entrada = marioDe(lectura);
+  const clave = entrada.cuenta.diferencias[0].clave;
+  const p9 = pagoDuenoParaGuardar(
+    construirPagoDueno({ duenoId: 'd1', fecha: '2026-09-25', forma: 'efectivo', contratos: [R41_CRECIDA], pagos: [PAGO_7], idsMarcados: [clave] }),
+    { id: 'pg-dif', numero: 9, ahora: AHORA },
+  );
+  const conAmbos = lecturaDe41({ pagos: [PAGO_7, p9] });
+  const texto = textoConfirmarAnularPagoDueno(p9, marioDe(conAmbos));
+  assert.ok(texto.includes('Q600.00 a Mario López Alvarado') && texto.includes('comprobante N.° 9'), texto);
+  assert.ok(texto.includes('también están en el comprobante N.° 7'), 'dice con cuál comparte');
+  assert.ok(texto.includes('solo vuelve a «Por pagar» lo que falte'), texto);
+  assert.ok(!texto.includes('vuelve a «Por pagar».') && !texto.includes('vuelven a «Por pagar».'), 'no promete lo que no pasa');
+});
+
+// ---------- Anular: el recorrido ----------
+
+/** Dependencias de `anularElPago` con la nube de mentira: lo que hay en `pagos` y lo que se guarda. */
+function depsDeAnular({ pagos = [PAGO_A_LUCIA], fallaLectura = false, fallaGuardar = false } = {}) {
+  const orden = [];
+  return {
+    orden,
+    leerPagos: async () => {
+      orden.push('leer');
+      return fallaLectura ? { datos: null, fallo: true } : { datos: structuredClone(pagos), fallo: false };
+    },
+    guardar: async (pago) => {
+      orden.push(['guardar', pago.id, pago.numero, pago.anuladoEn]);
+      if (fallaGuardar) throw new Error('sin internet');
+      return { ...pago, actualizado: AHORA + 1 };
+    },
+  };
+}
+
+test('anularElPago: lee los pagos, y guarda el pago anulado con la fecha de hoy y su MISMO número', async () => {
+  const deps = depsDeAnular();
+  const r = await anularElPago({ pago: PAGO_A_LUCIA, hoy: '2026-10-11', ...deps });
+  assert.equal(r.tipo, 'anulado');
+  assert.deepEqual(deps.orden, ['leer', ['guardar', 'pg-lucia', 3, '2026-10-11']]);
+  assert.equal(r.pago.anulado, true);
+  assert.equal(r.pago.numero, 3, 'el número se queda: ese dueño tiene el papel');
+  assert.equal(r.pago.monto, 1250);
+  assert.deepEqual(r.pago.contratos, ['l3']);
+  assert.deepEqual(r.pagos.map((p) => p.id), ['pg-lucia'], 'la lista queda al día, sin duplicar el pago');
+  assert.equal(pagoAnulado(r.pagos[0]), true, 'y con el pago ya anulado adentro');
+  // Y con esa lista, la cuenta de Lucía vuelve a deber la renta.
+  assert.equal(luciaDe(lecturaOk({ pagos: { datos: r.pagos, fallo: false } })).cuenta.totalPorPagar, 2000);
+});
+
+test('anularElPago: si otra pestaña ya lo anuló, NO escribe nada y respeta la fecha de la primera anulación', async () => {
+  const deps = depsDeAnular({ pagos: [ANULADO_A_LUCIA] });
+  const r = await anularElPago({ pago: PAGO_A_LUCIA, hoy: '2026-10-11', ...deps });
+  assert.equal(r.tipo, 'ya-anulado');
+  assert.deepEqual(deps.orden, ['leer'], 'no se escribió nada');
+  assert.equal(r.pago.anuladoEn, '2026-10-02', 'la fecha de la primera anulación, no la de hoy');
+});
+
+test('anularElPago: guarda el pago como está AHORA en la nube, no la copia vieja de la pantalla', async () => {
+  const deAhora = { ...PAGO_A_LUCIA, forma: 'cheque', actualizado: AHORA + 5 };
+  const deps = depsDeAnular({ pagos: [deAhora] });
+  const r = await anularElPago({ pago: PAGO_A_LUCIA, hoy: '2026-10-11', ...deps });
+  assert.equal(r.pago.forma, 'cheque', 'lo de la nube, no lo que la pantalla tenía');
+});
+
+test('anularElPago: si el pago ya no está en la nube, no escribe nada y lo dice', async () => {
+  const deps = depsDeAnular({ pagos: [] });
+  const r = await anularElPago({ pago: PAGO_A_LUCIA, hoy: '2026-10-11', ...deps });
+  assert.equal(r.tipo, 'no-esta');
+  assert.deepEqual(deps.orden, ['leer']);
+  assert.ok(MENSAJE_ANULAR_NO_ESTA.includes('No se anuló nada'));
+});
+
+test('anularElPago: si no se pueden leer los pagos NO anula: sin saber cómo está, se podría pisar algo', async () => {
+  const deps = depsDeAnular({ fallaLectura: true });
+  await assert.rejects(anularElPago({ pago: PAGO_A_LUCIA, hoy: '2026-10-11', ...deps }), { message: MENSAJE_ANULAR_SIN_COMPROBAR });
+  assert.deepEqual(deps.orden, ['leer']);
+});
+
+test('anularElPago: si guardar falla, el fallo sale tal cual (no se finge que se anuló), y repetirlo es seguro', async () => {
+  const deps = depsDeAnular({ fallaGuardar: true });
+  await assert.rejects(anularElPago({ pago: PAGO_A_LUCIA, hoy: '2026-10-11', ...deps }), /sin internet/);
+  // Reintento: si el primer intento sí había llegado, el pago se lee anulado y no se vuelve a escribir.
+  const reintento = depsDeAnular({ pagos: [ANULADO_A_LUCIA] });
+  assert.equal((await anularElPago({ pago: PAGO_A_LUCIA, hoy: '2026-10-11', ...reintento })).tipo, 'ya-anulado');
+});
+
+test('anularElPago: sin la fecha de hoy se niega, no la adivina', async () => {
+  const deps = depsDeAnular();
+  await assert.rejects(anularElPago({ pago: PAGO_A_LUCIA, ...deps }), /fecha de hoy/);
+  await assert.rejects(anularElPago({ pago: PAGO_A_LUCIA, hoy: '20261-10-11', ...deps }), /fecha de hoy/);
+  assert.deepEqual(deps.orden, [], 'ni siquiera leyó');
+});
+
+test('de punta a punta con guardarPagoDueno de verdad: anular deja UN documento, el mismo número, y la anulación escrita', async () => {
+  const docs = new Map([['pagosDueno/pg-lucia', structuredClone(PAGO_A_LUCIA)]]);
+  const fsMod = {
+    doc: (db, coleccion, id) => ({ ruta: `${coleccion}/${id}`, id }),
+    setDoc: async (ref, datos) => { docs.set(ref.ruta, { ...(docs.get(ref.ruta) ?? {}), ...structuredClone(datos) }); },
+  };
+  const entorno = { iniciar: async () => ({ db: {}, fsMod }), dbDinero: () => ({ esDinero: true }) };
+  const hacer = () => anularElPago({
+    pago: PAGO_A_LUCIA,
+    hoy: '2026-10-11',
+    leerPagos: async () => ({ datos: [...docs].map(([ruta, d]) => ({ ...d, id: ruta.split('/')[1] })), fallo: false }),
+    guardar: (pago) => guardarPagoDueno(pago, { ...entorno, numeroNuevo: async () => assert.fail('el número ya viene puesto') }),
+  });
+  assert.equal((await hacer()).tipo, 'anulado');
+  assert.deepEqual([...docs.keys()], ['pagosDueno/pg-lucia'], 'un solo documento');
+  const guardado = docs.get('pagosDueno/pg-lucia');
+  assert.equal(guardado.numero, 3);
+  assert.equal(guardado.anulado, true);
+  assert.equal(guardado.anuladoEn, '2026-10-11');
+  assert.equal(guardado.monto, 1250);
+  assert.equal((await hacer()).tipo, 'ya-anulado', 'el doble clic no hace nada la segunda vez');
+  assert.equal(docs.get('pagosDueno/pg-lucia').anuladoEn, '2026-10-11');
+});
+
+test('mensajeSeguro: la frase de «no se pudo comprobar» al anular pasa tal cual; un error de Firebase no', () => {
+  assert.equal(mensajeSeguro(new Error(MENSAJE_ANULAR_SIN_COMPROBAR), MENSAJE_ANULAR_FALLO), MENSAJE_ANULAR_SIN_COMPROBAR);
+  assert.equal(mensajeSeguro(new Error('Missing or insufficient permissions.'), MENSAJE_ANULAR_FALLO), MENSAJE_ANULAR_FALLO);
+});
+
+// ---------- Lo que se ve en la ficha ----------
+
+test('«Ya pagado»: un pago anulado SIGUE ahí, con su número, «Anulado el …» y sin botones; el vigente lleva «Ver comprobante» y «Anular»', () => {
+  const vigente = entre(fichaDe('Lucía Barrios'), '<h2>Ya pagado</h2>');
+  assert.ok(vigente.includes('data-dn="comprobante"') && vigente.includes('data-dn="anular-pago" data-id="pg-lucia"'));
+  assert.ok(!vigente.includes('Anulado'));
+
+  const lectura = lecturaConAnulado();
+  const anulado = entre(fichaDe('Lucía Barrios', { vista: armarVista(lectura), lectura }), '<h2>Ya pagado</h2>');
+  assert.ok(anulado.includes('Comprobante N.° 3'), 'no desaparece: el número se queda');
+  assert.ok(anulado.includes('Anulado el 2 oct 2026'), 'marcado como anulado, con la fecha de la anulación');
+  assert.ok(anulado.includes('Q1,250.00') && anulado.includes('P-CCC333'), 'y con su monto y su renta: es el rastro');
+  assert.ok(anulado.includes('class="dn-caja dn-pago-hecho dn-pago-anulado"'));
+  assert.ok(!anulado.includes('data-dn="comprobante"'), 'sin «Ver comprobante»: un papel de pago sobre algo que ya no está pagado diría lo contrario');
+  assert.ok(!anulado.includes('data-dn="anular-pago"'), 'ni «Anular» otra vez');
+  assert.ok(!anulado.includes('Todavía no se le ha pagado nada'), 'no es "nada pagado": hay un pago, anulado');
+});
+
+test('las rentas de un pago anulado vuelven a «Por pagar» en la ficha, con su casilla, y el total las incluye', () => {
+  const lectura = lecturaConAnulado();
+  const ficha = fichaDe('Lucía Barrios', { vista: armarVista(lectura), lectura });
+  const porPagar = entre(ficha, '<h2>Por pagar</h2>', '<h2>Aún no cierra</h2>');
+  assert.ok(porPagar.includes('P-CCC333') && porPagar.includes('Q1,250.00'));
+  assert.ok(casilla(porPagar, 'l3'), 'se puede marcar otra vez para pagarla bien');
+  assert.doesNotMatch(casilla(porPagar, 'l3'), /disabled/);
+  assert.match(porPagar, /class="dn-total">Q2,000\.00</, 'Q750 + Q1,250');
+  // Antes de anular, esa renta no estaba en «Por pagar».
+  assert.ok(!entre(fichaDe('Lucía Barrios'), '<h2>Por pagar</h2>', '<h2>Aún no cierra</h2>').includes('P-CCC333'));
+});
+
+test('la lista de dueños también ve la deuda que volvió: Lucía pasa de Q750.00 a Q2,000.00', () => {
+  const antes = entre(htmlLista(armarVista(lecturaOk())), '>Lucía Barrios</a>', '</tr>');
+  assert.ok(antes.includes('Q750.00') && !antes.includes('Q2,000.00'));
+  const despues = entre(htmlLista(armarVista(lecturaConAnulado())), '>Lucía Barrios</a>', '</tr>');
+  assert.ok(despues.includes('Q2,000.00'));
+});
+
+test('lo anulado y lo vigente conviven: se anula uno de dos pagos y solo ese suelta sus rentas', () => {
+  const otro = pagoDuenoParaGuardar(
+    construirPagoDueno({ duenoId: 'd2', fecha: '2026-09-22', forma: 'cheque', contratos: [L1, L2, L3], pagos: [PAGO_A_LUCIA], idsMarcados: ['l1'] }),
+    { id: 'pg-lucia-2', numero: 4, ahora: AHORA },
+  );
+  const lectura = lecturaOk({ pagos: { datos: [ANULADO_A_LUCIA, otro], fallo: false } });
+  const lucia = luciaDe(lectura);
+  assert.deepEqual(lucia.cuenta.pagados.map((c) => c.id), ['l1']);
+  assert.deepEqual(lucia.cuenta.porPagar.map((c) => c.id), ['l3']);
+  const ya = entre(fichaDe('Lucía Barrios', { vista: armarVista(lectura), lectura }), '<h2>Ya pagado</h2>');
+  assert.equal((ya.match(/data-dn="anular-pago"/g) || []).length, 1, 'solo el N.° 4 se puede anular');
+  assert.equal((ya.match(/Anulado el/g) || []).length, 1);
+  assert.ok(ya.indexOf('Comprobante N.° 4') < ya.indexOf('Comprobante N.° 3'), 'el más reciente primero, como siempre');
+});
+
+test('rehacer el pago: tras anular, las mismas rentas se pagan con un pago NUEVO y su propio número, y la cuenta queda a mano', async () => {
+  const lectura = lecturaConAnulado();
+  const entrada = luciaDe(lectura);
+  const marcadas = resumenDeMarcadas(entrada, new Set(['l3']), []);
+  assert.deepEqual(marcadas, { ids: ['l3'], cuantas: 1, total: 1250 });
+  const deps = depsDePago({ pagos: [ANULADO_A_LUCIA], contratos: TODOS });
+  const r = await registrarElPago({
+    entrada, idsMarcados: marcadas.ids, forma: 'efectivo', fecha: HOY, enCurso: {}, ...deps,
+  });
+  assert.equal(r.tipo, 'guardado');
+  assert.equal(r.pago.numero, 101, 'un comprobante nuevo: el N.° 3 no se reutiliza');
+  assert.equal(r.pago.forma, 'efectivo');
+  assert.deepEqual(r.pago.contratos, ['l3']);
+  assert.deepEqual(r.pagos.map((p) => p.numero), [3, 101], 'el anulado sigue en la lista, intacto');
+  const despues = luciaDe(lecturaOk({ pagos: { datos: r.pagos, fallo: false } }));
+  assert.deepEqual(despues.cuenta.pagados.map((c) => c.id), ['l3']);
+  assert.equal(despues.cuenta.totalPorPagar, 750, 'como antes del error: solo L1');
+});
+
+// ---------- El comprobante de un pago anulado ----------
+
+test('el comprobante de un pago ANULADO no se arma: el papel diría «Le pagué» sobre algo que ya no está pagado', () => {
+  const lectura = lecturaConAnulado();
+  assert.throws(
+    () => armarComprobante(entradaDelComprobante({ entrada: luciaDe(lectura), pago: ANULADO_A_LUCIA, lectura, hoy: HOY })),
+    /está anulado desde el 2 oct 2026/,
+  );
+});
+
+test('el comprobante de otro pago de la misma cuenta no se enreda con el anulado', () => {
+  const otro = pagoDuenoParaGuardar(
+    construirPagoDueno({ duenoId: 'd2', fecha: '2026-09-22', forma: 'cheque', contratos: [L1, L2, L3], pagos: [ANULADO_A_LUCIA], idsMarcados: ['l3'] }),
+    { id: 'pg-lucia-2', numero: 4, ahora: AHORA },
+  );
+  const lectura = lecturaOk({ pagos: { datos: [ANULADO_A_LUCIA, otro], fallo: false } });
+  const modelo = armarComprobante(entradaDelComprobante({ entrada: luciaDe(lectura), pago: otro, lectura, hoy: HOY }));
+  assert.equal(modelo.numero, 4);
+  assert.equal(modelo.pagado.total, 1250);
+  assert.deepEqual(modelo.pagado.anteriores, [], 'el N.° 3 anulado no es "un comprobante anterior que este completa"');
+  assert.equal(modelo.pagado.cambiaron, false);
+});
+
+// ---------- El cableado ----------
+
+test('el cableado: «Anular» confirma con el texto de a quién y cuánto ANTES de anular, y anular pasa por anularElPago', () => {
+  const codigo = sinComentarios(PANTALLA);
+  const cuerpo = codigo.slice(codigo.indexOf('async function anularPagoDeDueno('), codigo.indexOf('async function migrar('));
+  const confirma = cuerpo.indexOf('window.confirm(textoConfirmarAnularPagoDueno(pago, entrada))');
+  const anula = cuerpo.indexOf('anularElPago(');
+  assert.ok(confirma > 0, 'pregunta con el texto que nombra al dueño, el monto y las rentas');
+  assert.ok(anula > confirma, 'y pregunta ANTES de anular');
+  assert.match(cuerpo, /hoy: hoyISO\(\)/, 'la fecha de la anulación es la de hoy, leída al hacer clic');
+  assert.match(codigo, /case 'anular-pago': anularPagoDeDueno\(id\); return;/);
+  assert.match(cuerpo, /pagoAnulado\(pago\)/, 'un pago ya anulado no vuelve a preguntar');
+});
+
+test('el cableado: «Ver comprobante» tampoco se abre a la fuerza para un pago anulado', () => {
+  const codigo = sinComentarios(PANTALLA);
+  const cuerpo = codigo.slice(codigo.indexOf('function verComprobante('), codigo.indexOf('async function anularPagoDeDueno('));
+  assert.match(cuerpo, /pagoAnulado\(pago\)/);
 });

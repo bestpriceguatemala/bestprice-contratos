@@ -11,6 +11,7 @@ import {
   migrarCostosDelDueno, mensajeDeMigracion, MENSAJE_MIGRAR_SIN_DINERO,
   pagoDuenoParaGuardar, construirPagoDueno, guardarPagoDueno, cargarPagosDueno, siguienteNumeroComprobante,
   nuevoIdPagoDueno, MENSAJE_PAGO_SIN_DINERO, MENSAJE_PAGO_SIN_RENTAS, MENSAJE_PAGO_SIN_ID, MENSAJE_PAGO_SIN_MONTO,
+  anularPagoDueno,
 } from '../js/datos.js';
 import { CAMPOS_DUENO } from '../js/nucleo/dueno.js';
 import { mezclar } from '../js/cache.js';
@@ -1836,6 +1837,43 @@ test('guardarPagoDueno: si no se pudo tomar el número, falla y no guarda un pag
   const nube = nubeEnMemoria({ fallan: [{ op: 'tx.get' }] });
   await assert.rejects(guardarCon(nube, pagoBase).promesa, /sin internet/);
   assert.equal(nube.escrituras().length, 0);
+});
+
+// H-6: anular un pago a un dueño se guarda POR EL MISMO camino que guardarlo (`guardarPagoDueno`),
+// con la base de dinero. Lo que hay que fijar: es el MISMO documento (no un segundo comprobante),
+// conserva su número sin gastar uno nuevo, y la anulación queda escrita en la nube.
+test('guardarPagoDueno: un pago ANULADO se guarda en su mismo documento, con su número, sin gastar otro', async () => {
+  const nube = nubeEnMemoria({ contadores: { comprobantes: { ultimo: 6 } } });
+  const original = await guardarCon(nube, pagoBase).promesa;
+  assert.equal(original.numero, 7);
+
+  const g = guardarCon(nube, anularPagoDueno(original, { fecha: '2026-10-02' }));
+  const anulado = await g.promesa;
+
+  assert.equal(anulado.id, original.id, 'el mismo documento: el comprobante N.° 7 no desaparece ni se duplica');
+  assert.equal(anulado.numero, 7);
+  assert.equal(g.numeros.pedidos, 0, 'no se pidió ningún número nuevo');
+  assert.equal(nube.leer('contadores/comprobantes').ultimo, 7, 'y el contador no avanzó');
+  assert.equal([...nube.docs.keys()].filter((r) => r.startsWith('pagosDueno/')).length, 1);
+
+  const enLaNube = nube.leer(`pagosDueno/${original.id}`);
+  assert.equal(enLaNube.anulado, true);
+  assert.equal(enLaNube.anuladoEn, '2026-10-02');
+  assert.equal(enLaNube.monto, 2350, 'el monto sigue ahí: es el rastro');
+  assert.deepEqual(enLaNube.contratos, ['c1', 'c2']);
+  const escrituras = nube.escrituras(`pagosDueno/${original.id}`);
+  assert.equal(escrituras.at(-1)[4], 'dinero', 'con la credencial de dinero, como cualquier pago a un dueño');
+  assert.deepEqual(g.avisos, [], 'y sin copia local');
+});
+
+test('guardarPagoDueno: anular sin sesión de dinero se niega y no escribe nada', async () => {
+  const nube = nubeEnMemoria({ contadores: { comprobantes: { ultimo: 6 } } });
+  const original = await guardarCon(nube, pagoBase).promesa;
+  const antes = nube.escrituras().length;
+  const g = guardarCon(nube, anularPagoDueno(original, { fecha: '2026-10-02' }), { dbDinero: () => null });
+  await assert.rejects(g.promesa, (e) => e.message === MENSAJE_PAGO_SIN_DINERO);
+  assert.equal(nube.escrituras().length, antes);
+  assert.equal(nube.leer(`pagosDueno/${original.id}`).anulado, undefined, 'el pago sigue como estaba');
 });
 
 // Dinero no se copia a IndexedDB (ver la nota de la sección). Si algún día
