@@ -1753,9 +1753,13 @@ test('comprobante.js no suma ni resta dinero por su cuenta: el descuento y lo en
 
 test('estilos.css: el pie de tres renglones tiene su forma, y al imprimir la cuenta no se parte de su total', () => {
   const css = readFileSync(new URL('../css/estilos.css', import.meta.url), 'utf8');
+  // Sin comentarios: una regla comentada no es una regla. Cada renglón tiene que tener un bloque con declaraciones.
+  const reglas = css.replace(/\/\*[^]*?\*\//g, '');
   for (const clase of ['.comp-pie-suma', '.comp-pie-menos', '.comp-pie-total']) {
-    assert.ok(css.includes(clase), `falta ${clase}`);
+    assert.match(reglas, new RegExp(`\\${clase}[^{}]*{[^}]*:[^}]*}`), `falta la regla de ${clase}`);
   }
+  assert.match(reglas, /\.comp-pie-total td\s*{[^}]*border-top/, 'el total lleva su raya');
+  assert.match(reglas, /\.comp-pie-suma td[^{}]*{[^}]*font-weight:\s*400/, 'los dos renglones de cuenta no van en negrita');
   const impresion = css.slice(css.indexOf('@media print'));
   assert.match(impresion, /\.comp-pie-suma,\s*\.comp-pie-menos\s*{[^}]*break-after:\s*avoid/, 'los dos renglones de arriba no se separan del total');
   // Las clases que usa el HTML son las que el CSS conoce (ni un renglón sin estilo ni un estilo sin renglón).

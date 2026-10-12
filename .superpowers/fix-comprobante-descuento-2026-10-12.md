@@ -52,3 +52,16 @@
   no agregué una tercera comparación ni moví la del papel. Lo que SÍ sigue separándolos, con o sin descuento, es una renta pagada que se REABRE: el papel dice
   «cambiaron» (cuenta solo rentas cerradas, `totalSeleccionado`) y el grupo dice a mano (`ahora` no pregunta por «cerrada»). Hay una prueba vieja que fija ese
   comportamiento a propósito, no es de este cambio, y no lo toqué.
+
+## Pruebas y mutaciones
+
+- Base 1449 → 1473 con el primer commit (+24: 20 en `comprobante.test.mjs`, 4 en `liquidacion.test.mjs`), y las dos pruebas de llaves permitidas
+  se actualizaron (`.pagado.descuento`, `.pagado.entregado`, `.pagado.acumuladoDescuento`: cifras del propio dueño del carro, decididas con la lista a la vista).
+- **Contra el código de `9261878` (sin mis cambios de producción) fallan 17 de las pruebas de `comprobante.test.mjs`** y `liquidacion.test.mjs` ni carga
+  (no existe `descuentoInvalido`): cada cambio tiene una prueba que se cae sin él.
+- 41 mutaciones sobre `comprobante.js`, `liquidacion.js` y `estilos.css` (cada condición, cada cifra, el signo de la resta, las etiquetas, el orden de las
+  notas, el orden de la cadena, la forma de pago en cero, los topes del descuento imposible, la clase de cada renglón, el `break-after` de impresión):
+  **40 matan**. La que sobrevive es un equivalente: quitar `crudo === ''` de `descuentoInvalido` no cambia nada porque `Number('')` ya es 0.
+  La mutación del CSS sobrevivía al principio (la prueba solo buscaba el nombre de la clase) y pidió endurecer la prueba: ahora exige la regla con sus declaraciones.
+- **Tres fugas inyectadas a propósito en la nota del descuento** (la palabra «descuento», una garantía de Q4,321.00, quién rentó) las ve la prueba nueva de lo
+  prohibido; las pruebas de lo prohibido que ya había NO las ven, porque ninguna imprime un pago con descuento. Por eso la batería se repite sobre este escenario.
