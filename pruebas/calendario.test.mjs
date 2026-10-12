@@ -27,6 +27,17 @@ test('febrero de un año bisiesto trae 29 días, sin tabla de meses', () => {
   assert.equal(diasDelMes('2028-02').length, 29);
 });
 
+// H-10: `#/calendario/2026-13-45` abría «el mes 13» con 31 días (Date.UTC rueda el mes 13 a enero del
+// año siguiente). Un mes que no existe no tiene días, ni cuadrícula: lo que se dibuja de él no puede
+// verse como un mes de verdad.
+test('un mes que no existe no tiene días ni cuadrícula (el 13 no es enero del año siguiente)', () => {
+  assert.deepEqual(diasDelMes('2026-13'), []);
+  assert.deepEqual(diasDelMes('2026-00'), []);
+  assert.deepEqual(diasDelMes('2026-99'), []);
+  assert.deepEqual(cuadriculaDelMes('2026-13'), []);
+  assert.equal(diasDelMes('2026-12').length, 31, 'diciembre sigue siendo diciembre');
+});
+
 test('un mes que empieza en lunes no lleva huecos al principio', () => {
   // Junio 2026 empieza en lunes.
   const semanas = cuadriculaDelMes('2026-06');

@@ -46,6 +46,18 @@ const datosBase = () => ({
   porcentajeComision: 5,
 });
 
+// H-10: «Devolución prevista: 31 oct 2026» con 0 días. La línea de la pantalla dibuja
+// `borrador.devolucionPrevista` y pone «—» cuando viene vacío; construirContrato es quien lo decide,
+// así que con 0 días (o sin días) tiene que venir VACÍO. Con días de verdad, la fecha de siempre.
+test('construirContrato: sin días que valgan NO hay devolución prevista (la pantalla pone «—»)', () => {
+  for (const dias of [0, '', undefined, -1, 2.5]) {
+    const contrato = construirContrato({ ...datosBase(), fechaSalida: '2026-10-31', dias });
+    assert.equal(contrato.devolucionPrevista, '', `dias=${JSON.stringify(dias)}`);
+  }
+  const bueno = construirContrato({ ...datosBase(), fechaSalida: '2026-10-31', dias: 4 });
+  assert.equal(bueno.devolucionPrevista, '2026-11-04', 'cruza el fin de mes');
+});
+
 test('el ejemplo del diseño: 4 días a Q700, carta poder Q350 y 12% de tarjeta dan Q3,528.00 a cobrar', () => {
   const contrato = construirContrato(datosBase());
   assert.equal(resumen(contrato).pagado, 3528, 'el ejemplo del diseño y de la pantalla');

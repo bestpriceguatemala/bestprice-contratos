@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import {
   esFechaValida, mesDeFecha, mesSiguiente, mesAnterior, tituloMes,
   descripcionVehiculoReserva, textoSaldoContrato, botonSacarCarro,
+  pedidoDeLaRuta, htmlFechaNoValida, pintarCalendario,
 } from '../js/pantallas/calendario.js';
 
 // ---------- esFechaValida / mesDeFecha ----------
@@ -33,6 +34,63 @@ test('mesDeFecha: saca el mes de una fecha válida, vacío si no lo es', () => {
   assert.equal(mesDeFecha('2026-09-29'), '2026-09');
   assert.equal(mesDeFecha('nueva'), '');
   assert.equal(mesDeFecha(null), '');
+});
+
+// H-10: `#/calendario/2026-13-45` abría un mes que no existe (31 días, sin título) porque la forma
+// «cuatro dígitos, guion, dos, guion, dos» bastaba. Una fecha válida es una que existe en el calendario
+// (la misma regla que ya usan Sacar carro, Recibir carro y los pagos: esFechaISO, en fechas.js).
+test('esFechaValida: una fecha que no existe en el calendario no es una fecha', () => {
+  assert.equal(esFechaValida('2026-13-45'), false, 'el mes 13 y el día 45 de la prueba del sistema');
+  assert.equal(esFechaValida('2026-13-01'), false);
+  assert.equal(esFechaValida('2026-00-10'), false);
+  assert.equal(esFechaValida('2026-10-32'), false);
+  assert.equal(esFechaValida('2026-02-30'), false);
+  assert.equal(esFechaValida('2027-02-29'), false, 'febrero de un año que no es bisiesto');
+  assert.equal(esFechaValida('2028-02-29'), true, 'y el bisiesto sí');
+  assert.equal(esFechaValida('2026-12-31'), true);
+});
+
+test('mesDeFecha: de una fecha que no existe no sale ningún mes', () => {
+  assert.equal(mesDeFecha('2026-13-45'), '');
+  assert.equal(mesDeFecha('2026-02-30'), '');
+});
+
+test('pedidoDeLaRuta: sin fecha es el mes de hoy; una buena es esa fecha; lo demás se rechaza', () => {
+  assert.deepEqual(pedidoDeLaRuta(undefined), { tipo: 'hoy' }, '#/calendario a secas');
+  assert.deepEqual(pedidoDeLaRuta(''), { tipo: 'hoy' });
+  assert.deepEqual(pedidoDeLaRuta('2026-10-21'), { tipo: 'fecha', fecha: '2026-10-21' });
+  assert.deepEqual(pedidoDeLaRuta('2026-13-45'), { tipo: 'no-valida', texto: '2026-13-45' });
+  assert.deepEqual(pedidoDeLaRuta('nueva'), { tipo: 'no-valida', texto: 'nueva' },
+    'tampoco se ignora en silencio lo que no se entiende para abrir el mes de hoy');
+  assert.deepEqual(pedidoDeLaRuta('2026-02-30'), { tipo: 'no-valida', texto: '2026-02-30' });
+});
+
+test('htmlFechaNoValida: dice en español qué fecha no sirve, cómo se escribe una y adónde ir; escapa lo escrito', () => {
+  const html = htmlFechaNoValida('2026-13-45');
+  assert.match(html, /Esa fecha no es válida/);
+  assert.match(html, /2026-13-45/, 'nombra lo que se escribió, para que se vea el desliz');
+  assert.match(html, /año-mes-día/, 'y cómo se escribe');
+  assert.match(html, /href="#\/calendario"/, 'con un camino al calendario de verdad');
+  assert.doesNotMatch(html, /cal-dia|Mes anterior|Mes siguiente/, 'ningún mes dibujado');
+
+  const hostil = htmlFechaNoValida('<img src=x onerror=alert(1)>"&');
+  assert.doesNotMatch(hostil, /<img/, 'lo escrito en la dirección no entra como HTML');
+  assert.match(hostil, /&lt;img/);
+});
+
+test('pintarCalendario con una fecha que no existe: se niega, no dibuja ningún mes y no lee nada', async () => {
+  // El enrutador (router.js) le pasa el pedazo de la dirección tal cual se escribió.
+  globalThis.location = { hash: '#/calendario/2026-13-45' };
+  try {
+    const caja = { innerHTML: '' };
+    await pintarCalendario(caja, '2026-13-45');
+    assert.match(caja.innerHTML, /Esa fecha no es válida/);
+    assert.match(caja.innerHTML, /2026-13-45/);
+    assert.doesNotMatch(caja.innerHTML, /data-fecha|cal-dia/, 'ni una celda de día: el mes 13 no tiene días');
+    assert.doesNotMatch(caja.innerHTML, /Cargando/, 'y no se queda cargando para siempre');
+  } finally {
+    delete globalThis.location;
+  }
 });
 
 // ---------- mesSiguiente / mesAnterior: que el mes no derive ----------

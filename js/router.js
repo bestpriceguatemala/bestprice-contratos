@@ -14,6 +14,20 @@ export function registrarPantalla(ruta, fn) {
 }
 
 /**
+ * Decodifica un pedazo de la dirección. Una dirección escrita a mano con un «%» suelto no se puede
+ * decodificar, y `decodeURIComponent` lanza: sin esto el cambio de dirección moría en silencio y seguía a la
+ * vista la pantalla de antes. Se devuelve el pedazo tal cual se escribió, y la pantalla de esa ruta decide
+ * qué hace con algo que no entiende (el calendario dice que esa fecha no es válida).
+ */
+function decodificar(pedazo) {
+  try {
+    return decodeURIComponent(pedazo);
+  } catch {
+    return pedazo;
+  }
+}
+
+/**
  * Compara una ruta real contra un patrón registrado (por ejemplo
  * '#/sacar/:carroId'). Devuelve los valores capturados en el orden del
  * patrón, o null si no calza. Función pura, sin tocar el DOM, para poder
@@ -27,7 +41,7 @@ export function emparejar(ruta, patron) {
   for (let i = 0; i < partesPatron.length; i++) {
     if (partesPatron[i].startsWith(':')) {
       if (!partesRuta[i]) return null; // un ":carroId" vacío no es un id
-      valores.push(decodeURIComponent(partesRuta[i]));
+      valores.push(decodificar(partesRuta[i]));
     } else if (partesPatron[i] !== partesRuta[i]) {
       return null;
     }

@@ -10,7 +10,7 @@
 import { cuadriculaDelMes, movimientosParaPintar } from '../nucleo/calendario.js';
 import { textoAnticipo } from '../nucleo/reserva.js';
 import { resumen } from '../nucleo/contrato.js';
-import { diasEntre, hoyISO, textoFecha } from '../nucleo/fechas.js';
+import { diasEntre, hoyISO, textoFecha, esFechaISO } from '../nucleo/fechas.js';
 import { cargarReservas, cargarContratosAbiertos, cargarFlota } from '../datos.js';
 import { dinero } from '../ui.js';
 
@@ -30,11 +30,13 @@ const pluralDias = (n) => `${n} día${n === 1 ? '' : 's'}`;
 // Separadas de todo lo que dibuja HTML para poder probarlas sin DOM, igual
 // que en reservas.js (queSeAparto, reservasVisibles...).
 
-const RE_FECHA = /^\d{4}-\d{2}-\d{2}$/;
-
-/** ¿Es una fecha ISO 'YYYY-MM-DD' con forma válida? */
+/**
+ * ¿Es una fecha de calendario de verdad, 'YYYY-MM-DD'? Es la regla de todo el sistema (esFechaISO, en
+ * fechas.js) y no una copia: antes aquí bastaba con que TUVIERA la forma de cuatro dígitos, guion, dos,
+ * guion, dos, y `#/calendario/2026-13-45` abría un mes que no existe, con 31 días y sin título (H-10).
+ */
 export function esFechaValida(fecha) {
-  return typeof fecha === 'string' && RE_FECHA.test(fecha);
+  return esFechaISO(fecha);
 }
 
 /** El mes ('YYYY-MM') de una fecha ISO válida, o '' si la fecha no lo es. */
@@ -69,6 +71,36 @@ export function mesAnterior(mes) {
   const anterior = numeroMes === 1 ? 12 : numeroMes - 1;
   const anioAnterior = numeroMes === 1 ? anio - 1 : anio;
   return `${anioAnterior}-${String(anterior).padStart(2, '0')}`;
+}
+
+/**
+ * Qué pide la dirección `#/calendario/:fecha`: ninguna fecha (el mes de hoy), una fecha buena (ese mes con
+ * ese día elegido) o algo que NO es una fecha. Lo último no se ignora para abrir el mes de hoy como si
+ * nada: quien escribe una dirección a mano y ve un mes distinto del que pidió no sabe que se equivocó. Se
+ * rechaza y se dice (htmlFechaNoValida). Función pura.
+ */
+export function pedidoDeLaRuta(parametro) {
+  if (parametro === undefined || parametro === null || parametro === '') return { tipo: 'hoy' };
+  if (esFechaValida(parametro)) return { tipo: 'fecha', fecha: parametro };
+  return { tipo: 'no-valida', texto: String(parametro) };
+}
+
+/**
+ * La pantalla cuando la fecha de la dirección no existe: lo que se escribió, cómo se escribe una fecha
+ * y un camino al calendario de verdad. Lo escrito se escapa (viene de la barra de direcciones) y se
+ * recorta si es larguísimo. Mismo molde que «No se encontró esta cuenta» del área de dinero.
+ */
+export function htmlFechaNoValida(texto) {
+  const escrito = String(texto ?? '');
+  const visto = escrito.length > 30 ? `${escrito.slice(0, 30)}…` : escrito;
+  return `
+    <div class="carros-contenido">
+      <div class="carros-encabezado">
+        <h1>Calendario</h1>
+      </div>
+      <p class="pendiente">Esa fecha no es válida: «${esc(visto)}». Una fecha se escribe año-mes-día, por ejemplo 2026-10-21.
+        <a href="#/calendario">Ver el calendario de este mes</a></p>
+    </div>`;
 }
 
 const NOMBRES_MES = [
@@ -335,8 +367,15 @@ export async function pintarCalendario(contenedor, fecha) {
   const miToken = ++ultimoToken;
   const sigoVigente = () => location.hash.startsWith('#/calendario') && miToken === ultimoToken;
 
+  // Una fecha que no existe se rechaza ANTES de leer nada: no hay mes que dibujar ni datos que esperar.
+  const pedido = pedidoDeLaRuta(fecha);
+  if (pedido.tipo === 'no-valida') {
+    contenedor.innerHTML = htmlFechaNoValida(pedido.texto);
+    return;
+  }
+
   const hoy = hoyISO();
-  const fechaInicial = esFechaValida(fecha) ? fecha : null;
+  const fechaInicial = pedido.tipo === 'fecha' ? pedido.fecha : null;
 
   let mesActual = mesDeFecha(fechaInicial) || mesDeFecha(hoy);
   let diaSeleccionado = fechaInicial;

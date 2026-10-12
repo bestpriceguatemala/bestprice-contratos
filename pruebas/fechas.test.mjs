@@ -26,7 +26,40 @@ test('cuenta días entre fechas, incluso en año bisiesto', () => {
 
 test('la devolución prevista es la salida más los días', () => {
   assert.equal(devolucionPrevista('2026-08-20', 4), '2026-08-24');
-  assert.equal(devolucionPrevista('2026-08-20', 0), '2026-08-20');
+  assert.equal(devolucionPrevista('2026-08-20', 1), '2026-08-21', 'un día de renta: vuelve al día siguiente');
+  assert.equal(devolucionPrevista('2026-08-20', '4'), '2026-08-24', 'los días del formulario llegan como texto');
+});
+
+// Prueba del sistema, H-10 (7 oct 2026): «Devolución prevista: 31 oct 2026» salía con 0 días, con
+// aspecto de dato real, en la reservación y en la salida. Esta prueba antes AFIRMABA ese 0 días =
+// «la misma fecha de salida»: era el hueco mismo. Un número de días que no es una renta (cero, vacío,
+// negativo, con decimales, o tan grande que se sale del calendario) no tiene fecha de regreso, y la
+// respuesta es vacío, que las pantallas ya pintan como «—». Nunca una fecha inventada.
+test('devolucionPrevista: sin días que valgan, NO hay fecha de regreso (vacío), no la fecha de salida', () => {
+  assert.equal(devolucionPrevista('2026-10-31', 0), '', '0 días es el caso que se veía como dato real');
+  assert.equal(devolucionPrevista('2026-10-31', '0'), '');
+  assert.equal(devolucionPrevista('2026-10-31', ''), '', 'el campo de días todavía vacío');
+  assert.equal(devolucionPrevista('2026-10-31', undefined), '');
+  assert.equal(devolucionPrevista('2026-10-31', null), '');
+  assert.equal(devolucionPrevista('2026-10-31', 'abc'), '');
+  assert.equal(devolucionPrevista('2026-10-31', NaN), '');
+  assert.equal(devolucionPrevista('2026-10-31', -3), '', 'una devolución ANTES de salir no existe');
+  assert.equal(devolucionPrevista('2026-10-31', 2.5), '', 'los días son enteros: 2.5 no se redondea a 2 en silencio');
+});
+
+test('devolucionPrevista: una salida que no es una fecha de verdad tampoco da fecha de regreso', () => {
+  assert.equal(devolucionPrevista('', 3), '');
+  assert.equal(devolucionPrevista(undefined, 3), '');
+  assert.equal(devolucionPrevista('2026-02-30', 3), '', 'el 30 de febrero no existe: antes daba el 5 de marzo');
+  assert.equal(devolucionPrevista('20261-10-21', 3), '', 'el año con cinco dígitos que el campo deja teclear');
+});
+
+test('devolucionPrevista: días tan grandes que el resultado se sale del calendario no revientan ni dan basura', () => {
+  // Antes: new Date(...).toISOString() lanzaba RangeError con 1e12 días (y la pantalla se quedaba con la
+  // fecha anterior, que parecía de verdad), y con 3,000,000 días daba «+010000-…» con el año de cinco dígitos.
+  assert.equal(devolucionPrevista('2026-10-31', 1e12), '');
+  assert.equal(devolucionPrevista('2026-10-31', 3000000), '');
+  assert.equal(devolucionPrevista('2026-10-31', Infinity), '');
 });
 
 test('el atraso nunca es negativo', () => {

@@ -23,7 +23,9 @@ export function diasDelMes(mes) {
   const [anioTexto, mesTexto] = String(mes || '').split('-');
   const anio = Number(anioTexto);
   const numeroMes = Number(mesTexto);
-  if (!anio || !numeroMes) return [];
+  // Un mes que no existe no tiene días. Sin esta guarda, el mes 13 rodaba a enero del año siguiente
+  // (Date.UTC lo permite) y la pantalla dibujaba 31 días sin título (H-10).
+  if (!anio || !numeroMes || numeroMes < 1 || numeroMes > 12) return [];
 
   const ultimoDia = new Date(Date.UTC(anio, numeroMes, 0)).getUTCDate();
   const fechas = [];

@@ -27,6 +27,16 @@ test('la devolución prevista se calcula sola', () => {
   assert.equal(r.devolucionPrevista, '2026-10-14');
 });
 
+// H-10: el formulario de reservación dibuja `devolucionPrevista` del borrador tal cual; con 0 días
+// (o sin días) tiene que quedar VACÍO para que la pantalla ponga «—», no la fecha de salida.
+test('sin días que valgan la reservación NO trae devolución prevista (la pantalla pone «—»)', () => {
+  for (const dias of [0, '', '0', undefined, -2, 1.5]) {
+    const r = construirReserva({}, { ...campos, dias });
+    assert.equal(r.devolucionPrevista, '', `dias=${JSON.stringify(dias)}`);
+  }
+  assert.equal(construirReserva({}, { ...campos, dias: '3' }).devolucionPrevista, '2026-10-13', 'con días de verdad sí');
+});
+
 test('cambiar la unidad no pierde la reservación', () => {
   // Lo que él pidió: "me gustaría poder cambiar la unidad en dado caso cambie
   // el plan". Es la misma reservación; solo cambia qué carro la cumple.
