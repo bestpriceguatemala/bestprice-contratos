@@ -12,3 +12,11 @@ Estado: LEYENDO (nada commiteado todavía). Este archivo se actualiza conforme a
   `read: haySesion()`) para poder sellarlo en el contrato; moverlo del contrato no cierra nada mientras esa lectura exista.
 - La lista de empleados NO lleva copia local (IndexedDB sigue en versión 3): una copia local se lee sin credencial, y el
   porcentaje sellado en un contrato tiene que ser el de AHORA, no el de la última vez que esta computadora sincronizó.
+
+## Avance (commits en main)
+
+- `4936787` núcleo del empleado (`js/nucleo/empleado.js`): código, nombre, porcentaje que puede ser 0.
+- `c5f73d5` cuenta de comisiones (`js/nucleo/comisiones.js`): solo lo firme se paga; `empleadoId` en el contrato.
+- `edf84c3` datos: `empleados` (lee el mostrador, escribe solo dinero), `pagosComision`, enlazar rentas viejas.
+- siguiente: «Sacar carro» (el campo del % desaparece; se escoge al empleado por código o nombre).
+- Pendiente: pantallas Empleados y Comisiones, §7b, verificación en navegador, ADR-002.
