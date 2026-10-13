@@ -23,13 +23,13 @@ import { q, suma, recargoTarjeta } from '../nucleo/dinero.js';
 import {
   cargarFlota, cargarContratosAbiertos, cargarReservas, cargarAjustes, cargarClientes,
   guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato, agregarPago,
-  cargarDuenos, guardarDueno, CODIGO_RESERVACION_CAMBIO, altaConIdFijo, nuevoIdCliente, nuevoIdDueno,
+  cargarDuenos, guardarDueno, cargarEmpleados, CODIGO_RESERVACION_CAMBIO, altaConIdFijo, nuevoIdCliente, nuevoIdDueno,
 } from '../datos.js';
 import {
   dinero, fecha, aviso, hora24, htmlAvisoRepetido,
 } from '../ui.js';
 import { textoAvisoSobrecobro } from './recibirCarro.js';
-import { filtrar, textoDeCliente } from '../nucleo/busqueda.js';
+import { filtrar, textoDeCliente, normalizar } from '../nucleo/busqueda.js';
 import { avisoDeClienteRepetido } from '../nucleo/repetidos.js';
 // El alta rápida de aquí y la ficha de clientes.js tienen que pedir
 // exactamente los mismos campos (Tarea 7) — por eso esta pantalla ya no
@@ -46,19 +46,13 @@ import {
 import {
   CAMPOS_DUENO, construirDueno, faltaAlgoEnDueno, textoDeDueno,
 } from '../nucleo/dueno.js';
+// Quién rentó el carro se escoge de la lista de empleados (por código o por nombre), y el contrato se queda con el
+// porcentaje que ese empleado tenga guardado: el mostrador ni lo escribe, ni lo ve, ni lo cambia (§12b del diseño).
+import {
+  textoDeEmpleado, buscarEmpleados, estaActivo, datosDelContratoPara, porcentajeAnotado,
+} from '../nucleo/empleado.js';
 
-// El diseño (§5) dice: "el porcentaje por defecto es 5 %". Este plan todavía
-// no tiene una lista de empleados con su propio porcentaje (eso es de un
-// plan futuro), así que el mostrador escribe quién rentó y puede ajustar el
-// porcentaje a mano. En pantalla el campo arranca con el de cargarAjustes()
-// (datos.js) en cuanto llega; esta constante es el respaldo de
-// construirContrato() — una función pura, sin acceso a los ajustes ya
-// cargados — para que, si el campo llegara vacío por cualquier motivo,
-// nunca se guarde el contrato sin porcentajeComision.
-const PORCENTAJE_COMISION_DEFECTO = 5;
-
-// Mismo respaldo que PORCENTAJE_COMISION_DEFECTO, pero para el recargo de
-// tarjeta (§5 del diseño: "12 % de tarjeta"). Sin este valor el campo nacía
+// Respaldo del recargo de tarjeta (§5 del diseño: "12 % de tarjeta"). Sin este valor el campo nacía
 // vacío en la plantilla y, si el mostrador elegía "Tarjeta" y guardaba antes
 // de que cargarAjustes() (datos.js) contestara, el recargo se leía como 0 —
 // cada renta pagada con tarjeta se cobraba de menos por ese 12 % (hallazgo
@@ -154,12 +148,11 @@ export function construirContrato(datos) {
     }]
     : [];
 
-  // Nunca se guarda un contrato sin porcentajeComision: sin él la comisión
-  // saldría en cero sin avisar (T4, comision.js). Un campo vacío no es lo
-  // mismo que un 0 % a propósito, así que solo el vacío cae al default.
-  const porcentajeComisionNum = (porcentajeComision === '' || porcentajeComision === undefined || porcentajeComision === null)
-    ? PORCENTAJE_COMISION_DEFECTO
-    : q(porcentajeComision);
+  // El porcentaje de comisión es el que traía el empleado escogido el día que se rentó (`datosDelContratoPara`), y aquí
+  // se sella tal cual: un 0 es un 0 (Wilder no gana comisión). Si NO llega uno legible se guarda `null` y no un 5 %
+  // inventado: la cuenta de comisiones (nucleo/comisiones.js) aparta un contrato así en vez de pagarlo o darlo por
+  // cero. Desde la pantalla no puede pasar: sin un empleado con porcentaje, `motivoParaNoGuardar` no deja guardar.
+  const porcentajeComisionNum = porcentajeAnotado(porcentajeComision);
 
   return {
     id: id || null,
@@ -369,8 +362,8 @@ export function textoFalloAlGuardarElContrato(error) {
  *   precio de «-700» se guardaban con un total negativo.
  */
 export function motivoParaNoGuardar({
-  hayCliente, ajeno, hayCarroPropio, falloFlota = false, placasAjeno, fechaSalida, dias, precioDia, rentadoPor,
-  cobrosExtra = {},
+  hayCliente, ajeno, hayCarroPropio, falloFlota = false, placasAjeno, fechaSalida, dias, precioDia, empleado = null,
+  listaDeEmpleados = { leida: true, fallo: false, cantidad: 1 }, cobrosExtra = {},
 }) {
   if (!hayCliente) return 'Elige o da de alta un cliente antes de guardar.';
   if (!ajeno && !hayCarroPropio) {
@@ -390,7 +383,31 @@ export function motivoParaNoGuardar({
   // en una línea de cobro.
   const negativos = Object.entries(ETIQUETAS_COBROS_EXTRA).filter(([campo]) => cobrosExtra[campo] < 0).map(([, etiqueta]) => etiqueta);
   if (negativos.length) return `No pueden ser negativos: ${negativos.join(', ')}.`;
-  if (!rentadoPor) return 'Falta quién lo rentó.';
+  return motivoDelEmpleado(empleado, listaDeEmpleados);
+}
+
+/**
+ * Por qué no se puede guardar por el empleado que rentó, o `null` si está bien. «Quién lo rentó» se escoge de la
+ * lista de empleados y de ella sale el porcentaje de comisión que se sella en el contrato, así que no hay forma de
+ * guardar sin escoger a alguien — y las razones de que no haya a quién escoger son distintas y piden cosas distintas:
+ * la lista no llegó (revisa tu conexión: no se sabe a quién se le acredita ni con qué porcentaje), no hay empleados
+ * todavía (el dueño los da de alta), o el escogido no tiene porcentaje (el dueño lo anota).
+ *
+ * `listaDeEmpleados` es `{ leida, fallo, cantidad }` de la lista de activos. Una lectura fallida NO se dice «no hay
+ * empleados»: no se sabe, y mandar a quien rentó a pedir que den de alta a quien ya existe es lo contrario de ayudar.
+ */
+function motivoDelEmpleado(empleado, { leida, fallo, cantidad }) {
+  if (!empleado) {
+    if (!leida) return 'Todavía se está leyendo la lista de empleados. Espera un momento y escoge quién lo rentó.';
+    if (fallo && !cantidad) {
+      return 'No se pudo leer la lista de empleados, así que no se sabe quién puede rentar ni con qué porcentaje. Revisa tu conexión e intenta de nuevo.';
+    }
+    if (!cantidad) return 'Todavía no hay empleados registrados. El dueño los da de alta en Dinero, en Empleados.';
+    return 'Falta quién lo rentó.';
+  }
+  if (datosDelContratoPara(empleado) === null) {
+    return `A ${String(empleado.nombre ?? '').trim() || 'este empleado'} le falta el porcentaje de comisión. El dueño lo anota en Dinero, en Empleados.`;
+  }
   return null;
 }
 
@@ -431,13 +448,16 @@ export function lectorDeCampos(el) {
  *
  * `lector` es `lectorDeCampos(el)`; `estado` trae lo que la pantalla recuerda
  * fuera de los campos: `contratoId`, `cliente`, `carro` (el de la flota que
- * dice la URL), `duenoEscogido` y `tarjetas` (ya leídas, ver `leerTarjetas`).
+ * dice la URL), `duenoEscogido`, `empleadoEscogido` y `tarjetas` (ya leídas, ver `leerTarjetas`).
  */
 export function leerFormularioDe({ texto, num, marcado }, estado, numero) {
   const {
-    contratoId, cliente, carro, duenoEscogido, tarjetas,
+    contratoId, cliente, carro, duenoEscogido, empleadoEscogido, tarjetas,
   } = estado;
   const ajeno = marcado('sc-ajeno');
+  // Del empleado escogido salen el id, el nombre de ese día y el porcentaje de ese día; no se lee ningún campo: el
+  // mostrador no escribe ni ve el porcentaje (§12b). Sin empleado (o sin porcentaje) quedan vacíos y no se guarda.
+  const delEmpleado = datosDelContratoPara(empleadoEscogido) ?? { empleadoId: null, rentadoPor: '', porcentajeComision: null };
   const dueno = duenoDelContrato({
     escogido: duenoEscogido, buscado: texto('sc-dueno-buscar'), nuevo: texto('sc-nd-nombre'),
   });
@@ -481,8 +501,9 @@ export function leerFormularioDe({ texto, num, marcado }, estado, numero) {
     forma: texto('sc-pago-forma') || 'efectivo',
     porcentajeTarjeta: num('sc-pago-porcentaje'),
     montoPago: num('sc-pago-monto'),
-    rentadoPor: texto('sc-rentado-por'),
-    porcentajeComision: texto('sc-porcentaje-comision'),
+    rentadoPor: delEmpleado.rentadoPor,
+    empleadoId: delEmpleado.empleadoId,
+    porcentajeComision: delEmpleado.porcentajeComision,
     conductorAdicional: {
       nombre: texto('sc-conductor-nombre'),
       licencia: texto('sc-conductor-licencia'),
@@ -556,10 +577,28 @@ export function conAnticipoComoPago(contrato, reserva, { forma, porcentajeTarjet
 /** Cuántos resultados se dibujan a lo más. */
 const MAX_RESULTADOS = 8;
 
-/** Lo que cambia entre un buscador y otro: cómo se nombra la lista y qué se busca en cada ficha. */
+/**
+ * Lo que cambia entre un buscador y otro: cómo se nombra la lista, qué se busca en cada ficha y, solo en quien lo
+ * necesite, cómo se busca (`buscar`) y qué se le dice (`frases`).
+ *
+ * Los empleados buscan por código o por nombre, con el código exacto primero (`buscarEmpleados`), y no se dan de alta
+ * aquí —solo el dueño, detrás de su contraseña—, así que sus frases no mandan a «darlo de alta abajo». Su lista tampoco
+ * tiene copia local: una lectura fallida no tiene «lista de este equipo, que puede estar desactualizada».
+ */
 const LISTAS = {
   clientes: { plural: 'clientes', singular: 'cliente', textoDe: textoDeCliente },
   duenos: { plural: 'dueños', singular: 'dueño', textoDe: textoDeDueno },
+  empleados: {
+    plural: 'empleados',
+    singular: 'empleado',
+    textoDe: textoDeEmpleado,
+    buscar: buscarEmpleados,
+    frases: {
+      sinLecturaResultados: 'No se pudo leer la lista de empleados, así que no se sabe quién puede rentar. Revisa tu conexión e intenta de nuevo.',
+      sinResultados: 'Sin resultados. Si es un empleado nuevo, el dueño lo da de alta en Dinero, en Empleados.',
+      avisoSinLista: 'No se pudo leer la lista de empleados, así que no se sabe quién puede rentar el carro. Vuelve a intentar.',
+    },
+  },
 };
 
 /**
@@ -578,16 +617,18 @@ const LISTAS = {
 export function resultadosDeLista({
   tipo, items, fallo, leida, consulta,
 }) {
-  const { plural, textoDe } = LISTAS[tipo];
+  const {
+    plural, textoDe, buscar, frases = {},
+  } = LISTAS[tipo];
   if (!String(consulta ?? '').trim()) return { filas: [], mensaje: '' };
   if (!leida) return { filas: [], mensaje: `Leyendo la lista de ${plural}...` };
 
   const lista = Array.isArray(items) ? items : [];
-  const filas = filtrar(lista, consulta, textoDe).slice(0, MAX_RESULTADOS);
+  const filas = (buscar ? buscar(lista, consulta) : filtrar(lista, consulta, textoDe)).slice(0, MAX_RESULTADOS);
   if (filas.length) return { filas, mensaje: '' };
 
   if (fallo && !lista.length) {
-    return { filas, mensaje: `No se pudo leer la lista de ${plural}, así que no se sabe si ya está registrado.` };
+    return { filas, mensaje: frases.sinLecturaResultados ?? `No se pudo leer la lista de ${plural}, así que no se sabe si ya está registrado.` };
   }
   if (fallo) {
     return {
@@ -595,7 +636,7 @@ export function resultadosDeLista({
       mensaje: 'No aparece en la lista de este equipo, que puede estar desactualizada: puede que sí esté registrado.',
     };
   }
-  return { filas, mensaje: 'Sin resultados. Puedes darlo de alta abajo.' };
+  return { filas, mensaje: frases.sinResultados ?? 'Sin resultados. Puedes darlo de alta abajo.' };
 }
 
 /**
@@ -613,10 +654,10 @@ export function resultadosDeLista({
 export function avisoDeLista({
   tipo, leida, fallo, cantidad, elegido = false,
 }) {
-  const { plural, singular } = LISTAS[tipo];
+  const { plural, singular, frases = {} } = LISTAS[tipo];
   if (elegido || !leida || !fallo) return '';
   if (!cantidad) {
-    return `No se pudo leer la lista de ${plural}, así que no se sabe si el ${singular} ya está registrado. `
+    return frases.avisoSinLista ?? `No se pudo leer la lista de ${plural}, así que no se sabe si el ${singular} ya está registrado. `
       + 'Vuelve a intentar antes de dar de alta a uno nuevo.';
   }
   return `No se pudo actualizar la lista de ${plural}. Se usa la de este equipo, que puede estar desactualizada.`;
@@ -766,8 +807,21 @@ export function crearListaDeSesion({ cargar }) {
   };
 }
 
+/**
+ * Los empleados que trabajan aquí, como `{ datos, fallo }` para `crearListaDeSesion`: los de baja no salen al escoger
+ * quién rentó (siguen en la ficha y en sus contratos viejos). Una lectura fallida sigue siendo un fallo con `datos`
+ * en `null` (`cargarEmpleados`): jamás se vuelve «no hay empleados».
+ */
+export async function cargarEmpleadosActivos(_alLlegar, { leer = cargarEmpleados } = {}) {
+  const r = await leer();
+  if (r?.fallo || !Array.isArray(r?.datos)) return { datos: null, fallo: true };
+  return { datos: r.datos.filter(estaActivo), fallo: false };
+}
+
 // Las listas de la sesión: viven en el módulo, no en la pantalla, y por eso
-// sobreviven de una apertura a otra.
+// sobreviven de una apertura a otra. La de EMPLEADOS no está aquí a propósito: se lee de nuevo en cada apertura
+// (ver `listaDeEmpleados` en pintarSacarCarro), porque de ella sale el porcentaje que se sella en el contrato y tiene
+// que ser el de ahora, no el de la primera vez que se abrió esta pantalla en la sesión.
 const listaDeClientes = crearListaDeSesion({ cargar: cargarClientes });
 const listaDeDuenos = crearListaDeSesion({ cargar: cargarDuenos });
 
@@ -1025,8 +1079,22 @@ export function plantilla() {
         <section class="sc-bloque">
           <h2>6. Cierre del formulario</h2>
           <div class="sc-campos">
-            ${campo('sc-rentado-por', '¿Quién lo rentó?')}
-            ${campo('sc-porcentaje-comision', 'Porcentaje de comisión', { tipo: 'number', paso: '0.01', minimo: '0', valor: String(PORCENTAJE_COMISION_DEFECTO) })}
+            <div class="sc-campo ancho" id="sc-empleado">
+              <div id="sc-empleado-aviso" class="sc-carro-info sc-carro-aviso" hidden>
+                <span id="sc-empleado-aviso-texto"></span>
+                <button type="button" id="sc-empleado-reintentar" class="btn" hidden>Volver a intentar</button>
+              </div>
+              <div class="sc-cliente-buscar">
+                <label class="sc-campo ancho">¿Quién lo rentó? — escribe su código o su nombre
+                  <input type="search" id="sc-empleado-buscar" placeholder="Código o nombre..." autocomplete="off">
+                </label>
+                <ul id="sc-empleado-resultados" class="sc-cliente-resultados" hidden></ul>
+              </div>
+              <div id="sc-empleado-elegido" class="sc-cliente-elegido" hidden>
+                <span id="sc-empleado-elegido-nombre"></span>
+                <button type="button" id="sc-empleado-cambiar" class="btn">Cambiar</button>
+              </div>
+            </div>
             ${campo('sc-conductor-nombre', 'Conductor adicional — nombre')}
             ${campo('sc-conductor-licencia', 'Conductor adicional — licencia')}
             ${campo('sc-conductor-identificacion', 'Conductor adicional — identificación')}
@@ -1130,6 +1198,38 @@ function filaDueno(d) {
   return `<li data-id="${esc(d.id)}"><strong>${esc(nombre)}</strong>${detalle ? `<span>${esc(detalle)}</span>` : ''}</li>`;
 }
 
+/**
+ * Una fila de los resultados de empleados: su nombre y su código, y NADA MÁS. El porcentaje de comisión no se muestra
+ * en el mostrador (§12b del diseño): lo sella el contrato desde la ficha del empleado y solo se ve y se cambia en el
+ * área de dinero. Se exporta para que una prueba fije que ni aquí ni en el recuadro del escogido aparece.
+ */
+export function filaEmpleado(e) {
+  const nombre = (e?.nombre || '').trim() || 'Sin nombre';
+  const codigo = String(e?.codigo ?? '').trim();
+  return `<li data-id="${esc(e.id)}"><strong>${esc(nombre)}</strong>${codigo ? `<span>Código ${esc(codigo)}</span>` : ''}</li>`;
+}
+
+/** Lo que dice el recuadro del empleado ya escogido: código y nombre. Igual que la fila, sin el porcentaje. */
+export function textoDelEmpleadoEscogido(e) {
+  const nombre = (e?.nombre || '').trim() || 'Empleado sin nombre';
+  const codigo = String(e?.codigo ?? '').trim();
+  return codigo ? `${codigo} · ${nombre}` : nombre;
+}
+
+/**
+ * El empleado que se escoge al pulsar Enter en la caja de búsqueda, o `null` si Enter no debe escoger a nadie. Es lo
+ * que hace rápido el mostrador: teclear `6` y Enter. Escoge al que tiene EXACTAMENTE ese código, o al único que
+ * quedó en la lista; con varios y ninguno exacto no adivina (Enter no envía el formulario ni escoge a quien no se pidió).
+ */
+export function empleadoParaEnter(filas, consulta) {
+  const lista = Array.isArray(filas) ? filas : [];
+  const buscado = normalizar(consulta);
+  if (!buscado || !lista.length) return null;
+  const exactos = lista.filter((e) => normalizar(e?.codigo) === buscado);
+  if (exactos.length) return exactos[0];
+  return lista.length === 1 ? lista[0] : null;
+}
+
 const PREFIJO_RUTA = '#/sacar/';
 let ultimoToken = 0;
 
@@ -1154,8 +1254,10 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // primera vez que se marca "carro ajeno", no al abrir la pantalla: la
   // mayoría de las salidas son de carros propios y no la usan.
   let duenoSeleccionado = null;
+  // El empleado que rentó, escogido de la lista de activos (por código o por nombre). De él salen el id, el nombre y el
+  // porcentaje de comisión que se sellan en el contrato; el mostrador no los escribe ni ve el porcentaje (§12b).
+  let empleadoSeleccionado = null;
   let montoPagoTocado = false;
-  let comisionTocada = false;
   let tarjetaTocada = false;
   let anticipoTarjetaTocada = false;
   let guardando = false;
@@ -1182,6 +1284,10 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // intento, y un reintento tras un tiempo vencido cae en la misma ficha (H-2). Se sueltan al salir bien.
   const altaDeCliente = altaConIdFijo(nuevoIdCliente);
   const altaDeDueno = altaConIdFijo(nuevoIdDueno);
+  // La lista de empleados se lee de la nube en CADA apertura, no una vez por sesión como las de clientes y dueños: es
+  // chica, no tiene copia local, y el porcentaje que se sella en el contrato tiene que ser el de ahora. Una lectura que
+  // falle no se recuerda: `crearListaDeSesion` la vuelve a pedir.
+  const listaDeEmpleados = crearListaDeSesion({ cargar: (alLlegar) => cargarEmpleadosActivos(alLlegar) });
 
   contenedor.innerHTML = plantilla();
 
@@ -1190,6 +1296,11 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // poder probar, con los mismos ids, lo que de verdad llega al contrato.
   const { val, num, texto, marcado } = lectorDeCampos(el);
   const carroPropio = () => flota.find((c) => c.id === carroId) || null;
+  // Lo que `motivoParaNoGuardar` necesita saber de la lista de empleados: si llegó, si falló y cuántos hay.
+  const estadoDeLaListaDeEmpleados = () => {
+    const { items, fallo, leida } = listaDeEmpleados.estado();
+    return { leida, fallo, cantidad: items.length };
+  };
 
   function leerTarjetas() {
     // ADR-001: este es el único lugar de todo el archivo donde se leen los
@@ -1225,6 +1336,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       cliente: clienteSeleccionado,
       carro: carroPropio(),
       duenoEscogido: duenoSeleccionado,
+      empleadoEscogido: empleadoSeleccionado,
       tarjetas: leerTarjetas(),
     },
     numero,
@@ -1518,6 +1630,8 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       },
       registrarAlta: (ficha) => lista.registrarAlta(ficha),
       porId: (id) => ultimos.find((r) => r.id === id),
+      /** Las filas que se ven ahora, para quien las necesite sin volver a buscar (Enter en la caja de empleados). */
+      mostrados: () => (el(`sc-${prefijo}-resultados`).hidden ? [] : ultimos),
     };
   }
 
@@ -1532,6 +1646,9 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   });
   const buscadorDuenos = crearBuscador({
     tipo: 'duenos', prefijo: 'dueno', lista: listaDeDuenos, fila: filaDueno, hayElegido: () => Boolean(duenoSeleccionado),
+  });
+  const buscadorEmpleados = crearBuscador({
+    tipo: 'empleados', prefijo: 'empleado', lista: listaDeEmpleados, fila: filaEmpleado, hayElegido: () => Boolean(empleadoSeleccionado),
   });
 
   /**
@@ -1617,6 +1734,20 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     }
   }
 
+  // ---------- Quién lo rentó: escoger al empleado, por código o por nombre ----------
+  //
+  // Sin alta rápida a propósito: dar de alta a un empleado fija su porcentaje de comisión, y eso solo lo hace el dueño
+  // detrás de su contraseña (§12b). Aquí solo se escoge.
+
+  function elegirEmpleado(e) {
+    empleadoSeleccionado = e;
+    el('sc-empleado-resultados').hidden = true;
+    el('sc-empleado-buscar').value = '';
+    el('sc-empleado-elegido').hidden = false;
+    el('sc-empleado-elegido-nombre').textContent = textoDelEmpleadoEscogido(e);
+    buscadorEmpleados.pintar();
+  }
+
   // ---------- Dueño del carro ajeno: buscar, elegir, alta rápida ----------
   //
   // Es el mismo buscador y la misma alta rápida que el cliente, por la misma
@@ -1693,7 +1824,8 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       fechaSalida: texto('sc-fecha-salida'),
       dias: num('sc-dias'),
       precioDia: num('sc-precio-dia'),
-      rentadoPor: texto('sc-rentado-por'),
+      empleado: empleadoSeleccionado,
+      listaDeEmpleados: estadoDeLaListaDeEmpleados(),
       cobrosExtra: {
         seguroDia: num('sc-seguro-dia'),
         seguroTercerosDia: num('sc-seguro-terceros-dia'),
@@ -1758,7 +1890,6 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
 
   el('sc-form').addEventListener('input', (ev) => {
     if (ev.target.id === 'sc-pago-monto') montoPagoTocado = true;
-    if (ev.target.id === 'sc-porcentaje-comision') comisionTocada = true;
     if (ev.target.id === 'sc-pago-porcentaje') tarjetaTocada = true;
     if (ev.target.id === 'sc-anticipo-porcentaje') anticipoTarjetaTocada = true;
     recalcular();
@@ -1826,6 +1957,25 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   sinEnviarConEnter(el('sc-dueno-buscar'));
   sinEnviarConEnter(el('sc-dueno-alta'), guardarDuenoNuevo);
 
+  el('sc-empleado-buscar').addEventListener('input', () => buscadorEmpleados.pintar());
+  el('sc-empleado-resultados').addEventListener('click', (ev) => {
+    const li = ev.target.closest('li[data-id]');
+    if (!li) return;
+    const e = buscadorEmpleados.porId(li.dataset.id);
+    if (e) elegirEmpleado(e);
+  });
+  el('sc-empleado-cambiar').addEventListener('click', () => {
+    empleadoSeleccionado = null;
+    el('sc-empleado-elegido').hidden = true;
+    buscadorEmpleados.pintar();
+  });
+  alReintentar('sc-empleado-reintentar', buscadorEmpleados);
+  // Teclear `6` y Enter escoge a quien tiene ese código; Enter nunca manda el formulario (ver sinEnviarConEnter).
+  sinEnviarConEnter(el('sc-empleado-buscar'), () => {
+    const elegido = empleadoParaEnter(buscadorEmpleados.mostrados(), el('sc-empleado-buscar').value);
+    if (elegido) elegirEmpleado(elegido);
+  });
+
   refrescarCarro();
   recalcular();
   // El cliente se busca en CADA salida, así que su lista se pide al abrir (la
@@ -1834,6 +1984,8 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // Fuera del Promise.all de abajo a propósito: una nube lenta no debe retrasar
   // el resto de la pantalla.
   buscadorClientes.pedir();
+  // La de empleados también se pide al abrir: sin ella no se puede guardar la salida (hace falta saber quién rentó).
+  buscadorEmpleados.pedir();
 
   // cargarFlota/cargarContratosAbiertos/cargarReservas sirven la copia local
   // al instante y nunca rechazan (T9), igual que en flota.js; entregan
@@ -1884,13 +2036,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     // a mano, como cualquier otra.
     aviso('No se encontró la reservación de origen. Puedes seguir llenando el formulario a mano.', 'error');
   }
-  // El % de comisión del formulario arranca en el default fijo de esta
-  // pantalla (por si la nube tarda); en cuanto llegan los ajustes reales se
-  // actualiza al de verdad, salvo que el mostrador ya lo haya cambiado a mano.
-  if (!comisionTocada && ajustes.porcentajeComision !== undefined) {
-    el('sc-porcentaje-comision').value = ajustes.porcentajeComision;
-  }
-  // Mismo mecanismo para el recargo de tarjeta (hallazgo crítico de la
+  // El recargo de tarjeta (hallazgo crítico de la
   // revisión final): el campo arranca en PORCENTAJE_TARJETA_DEFECTO (por si
   // la nube tarda) y se actualiza al valor real de cargarAjustes() en cuanto
   // llega, salvo que el mostrador ya lo haya tocado a mano — para que su

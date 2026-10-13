@@ -11,7 +11,9 @@ import {
   resultadosDeLista, avisoDeLista, conAltasDeHoy,
   vistaDeBuscador, crearListaDeSesion, duenoDelContrato, lectorDeCampos, leerFormularioDe, plantilla, motivoParaNoGuardar,
   textoCarroPropioNoEncontrado, avisosConSobrecobro, avisoAnticipoDeMas, htmlAvisoDeDocumentoEnAlta,
+  filaEmpleado, textoDelEmpleadoEscogido, empleadoParaEnter, cargarEmpleadosActivos,
 } from '../js/pantallas/sacarCarro.js';
+import { EMPLEADOS } from './fixtures/rentasConComision.mjs';
 import { resumen } from '../js/nucleo/contrato.js';
 import { construirReserva } from '../js/nucleo/reserva.js';
 import { estadoContrato } from '../js/nucleo/estados.js';
@@ -93,9 +95,16 @@ test('guarda el estado, la garantía y la comisión que otras tareas dan por hec
   assert.equal(contrato.porcentajeComision, 5);
 });
 
-test('nunca guarda un contrato sin porcentajeComision: usa el 5% por defecto si viene vacío', () => {
-  const contrato = construirContrato({ ...datosBase(), porcentajeComision: '' });
-  assert.equal(contrato.porcentajeComision, 5);
+// §12b: el porcentaje sale de la ficha del empleado escogido, y el mostrador no lo escribe. Ya no hay un 5 % de
+// respaldo: un contrato que llegara sin porcentaje legible lo guardaba como 5 sin que nadie lo decidiera, y para
+// quien no gana comisión (Wilder, 0 %) eso es una comisión inventada. Se guarda `null`, que la cuenta de comisiones
+// aparta en vez de pagar, y el 0 se conserva como 0.
+test('construirContrato no inventa un porcentaje: vacío o ilegible se guarda null, y el 0 de Wilder sigue siendo 0', () => {
+  for (const vacio of ['', undefined, null, 'cinco']) {
+    assert.strictEqual(construirContrato({ ...datosBase(), porcentajeComision: vacio }).porcentajeComision, null, JSON.stringify(vacio));
+  }
+  assert.strictEqual(construirContrato({ ...datosBase(), porcentajeComision: 0 }).porcentajeComision, 0);
+  assert.strictEqual(construirContrato({ ...datosBase(), porcentajeComision: '7.5' }).porcentajeComision, 7.5);
 });
 
 test('ADR-001: el contrato guardado no tiene el número completo de la tarjeta ni el CBC', () => {
@@ -609,8 +618,6 @@ const formularioDeCarroAjeno = (extra = {}) => ({
   'sc-fecha-salida': '2026-09-23',
   'sc-dias': '4',
   'sc-precio-dia': '700',
-  'sc-rentado-por': 'Ana',
-  'sc-porcentaje-comision': '5',
   'sc-pago-forma': 'efectivo',
   'sc-pago-monto': '2800',
   ...extra,
@@ -618,10 +625,10 @@ const formularioDeCarroAjeno = (extra = {}) => ({
 
 // Lo que pasa al pulsar "Guardar" con esos campos: lo que se lee del formulario
 // (`datos`), el contrato armado y el que de verdad se guarda.
-const contratoDeLosCampos = (valores, { duenoEscogido = null, carro = null } = {}) => {
+const contratoDeLosCampos = (valores, { duenoEscogido = null, carro = null, empleadoEscogido = EMPLEADOS.ana } = {}) => {
   const { el } = camposDeMentira(valores);
   const datos = leerFormularioDe(lectorDeCampos(el), {
-    contratoId: 'c1', cliente: clienteJuan(), carro, duenoEscogido, tarjetas: [],
+    contratoId: 'c1', cliente: clienteJuan(), carro, duenoEscogido, empleadoEscogido, tarjetas: [],
   }, 12);
   const armado = construirContrato(datos);
   return { datos, armado, guardado: contratoParaGuardar(armado, { id: 'c1', numero: 12, ahora: 1790000000300 }) };
@@ -709,7 +716,9 @@ test('leerFormularioDe pasa el resto del formulario al contrato con los ids de l
   assert.equal(guardado.carroDescripcion, 'Ford 2019');
   assert.equal(guardado.dias, 4);
   assert.equal(guardado.precioDia, 700);
-  assert.equal(guardado.rentadoPor, 'Ana');
+  assert.equal(guardado.rentadoPor, 'Ana López', 'el nombre del empleado escogido, tal como se vio ese día');
+  assert.equal(guardado.empleadoId, 'e1');
+  assert.equal(guardado.porcentajeComision, 5, 'el que ese empleado tiene guardado');
   assert.equal(guardado.pagos[0].monto, 2800);
   assert.equal(armado.carroAjeno.costoDia, 400, 'el costo del dueño sigue llegando a construirContrato');
   assert.equal(resumen(guardado).totalSalida, 2800);
@@ -721,7 +730,7 @@ test('leerFormularioDe solo lee campos que existen en la plantilla (un id mal es
   // marcado y se exige que cada uno exista en la plantilla de la pantalla.
   const { el, pedidos } = camposDeMentira(formularioDeCarroAjeno());
   leerFormularioDe(lectorDeCampos(el), {
-    contratoId: null, cliente: null, carro: null, duenoEscogido: null, tarjetas: [],
+    contratoId: null, cliente: null, carro: null, duenoEscogido: null, empleadoEscogido: null, tarjetas: [],
   }, null);
   const html = plantilla();
   assert.ok(pedidos.has('sc-dueno-buscar') && pedidos.has('sc-nd-nombre'), 'lee los dos campos del dueño');
@@ -990,7 +999,7 @@ test('la plantilla pone el aviso rojo ARRIBA de cada caja de búsqueda: la lista
   // `position: absolute` justo debajo de la caja (css/estilos.css) se vio en el
   // navegador. Con el aviso debajo de la caja, esa lista lo tapaba.
   const html = plantilla();
-  for (const prefijo of ['cliente', 'dueno']) {
+  for (const prefijo of ['cliente', 'dueno', 'empleado']) {
     const aviso = html.indexOf(`id="sc-${prefijo}-aviso"`);
     const caja = html.indexOf(`id="sc-${prefijo}-buscar"`);
     const lista = html.indexOf(`id="sc-${prefijo}-resultados"`);
@@ -1099,7 +1108,7 @@ test('sin hora de salida el contrato se guarda igual, con la hora vacía', () =>
 
 const salidaLista = () => ({
   hayCliente: true, ajeno: false, hayCarroPropio: true, placasAjeno: '',
-  fechaSalida: '2026-10-21', dias: 3, precioDia: 700, rentadoPor: 'Ana',
+  fechaSalida: '2026-10-21', dias: 3, precioDia: 700, empleado: EMPLEADOS.ana,
 });
 
 test('motivoParaNoGuardar: una salida completa no tiene motivo', () => {
@@ -1113,7 +1122,7 @@ test('motivoParaNoGuardar: conserva, palabra por palabra, los cinco avisos de si
   assert.equal(motivoParaNoGuardar({ ...salidaLista(), ajeno: true, hayCarroPropio: false, placasAjeno: '' }), 'Completa al menos las placas del carro ajeno.');
   assert.equal(motivoParaNoGuardar({ ...salidaLista(), dias: 0 }), 'Faltan los días o el precio por día.');
   assert.equal(motivoParaNoGuardar({ ...salidaLista(), precioDia: 0 }), 'Faltan los días o el precio por día.');
-  assert.equal(motivoParaNoGuardar({ ...salidaLista(), rentadoPor: '' }), 'Falta quién lo rentó.');
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), empleado: null }), 'Falta quién lo rentó.');
 });
 
 test('motivoParaNoGuardar: un carro ajeno con placas no necesita carro de la flota', () => {
@@ -1338,4 +1347,185 @@ test('sin empleado, empleadoId queda en null (no ausente), como duenoId', () => 
   const contrato = construirContrato(datosBase());
   assert.equal('empleadoId' in contrato, true);
   assert.equal(contrato.empleadoId, null);
+});
+
+// ---------------------------------------------------------------------------
+// §12b: el porcentaje de comisión NO se toca en el mostrador
+// ---------------------------------------------------------------------------
+//
+// El dueño lo dijo probando el sistema publicado (24-sep-2026): el porcentaje es un control suyo. El campo editable
+// de «Sacar carro» (5 % por defecto) desaparece; en su lugar se escoge al empleado de una lista —por código o por
+// nombre— y el contrato se queda con el porcentaje que ese empleado tenga guardado, sin mostrarlo ni dejarlo cambiar.
+// Estas pruebas fijan la AUSENCIA del campo: es lo que una comodidad posterior pondría de vuelta sin que nada falle.
+
+test('§12b: la plantilla no tiene el campo de porcentaje de comisión ni el texto libre de «quién lo rentó»', () => {
+  const html = plantilla();
+  assert.equal(html.includes('sc-porcentaje-comision'), false, 'ni el id');
+  assert.doesNotMatch(html, /[Pp]orcentaje de comisi[oó]n/, 'ni la etiqueta');
+  assert.doesNotMatch(html, /[Cc]omisi[oó]n/, 'ninguna palabra de comisión en la pantalla del mostrador');
+  assert.equal(html.includes('sc-rentado-por'), false, 'el nombre ya no se escribe a mano: se escoge');
+  // En su lugar: la caja de búsqueda del empleado y el recuadro del escogido, sin botón de alta.
+  for (const id of ['sc-empleado-buscar', 'sc-empleado-resultados', 'sc-empleado-elegido', 'sc-empleado-cambiar', 'sc-empleado-aviso', 'sc-empleado-reintentar']) {
+    assert.ok(html.includes(`id="${id}"`), id);
+  }
+  assert.equal(html.includes('sc-empleado-nuevo'), false, 'dar de alta a un empleado fija su porcentaje: solo el dueño, con su contraseña');
+});
+
+test('§12b: el código de la pantalla no lee ningún campo de porcentaje, ni los ajustes, ni tiene un 5 % por defecto', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/sacarCarro.js', import.meta.url), 'utf8');
+  const sinComentarios = fuente.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.equal(sinComentarios.includes('porcentaje-comision'), false);
+  assert.equal(sinComentarios.includes('sc-rentado-por'), false);
+  assert.equal(sinComentarios.includes('PORCENTAJE_COMISION_DEFECTO'), false);
+  assert.equal(/ajustes\.porcentajeComision/.test(sinComentarios), false, 'los ajustes ya no son una segunda fuente del porcentaje');
+  assert.equal(/comisionTocada/.test(sinComentarios), false);
+});
+
+test('§12b: el campo sale aunque lo teclee alguien: lo que el formulario lleva al contrato sale del empleado, nunca de un campo', () => {
+  // Un valor tecleado en los ids de antes no cambia nada: ni se lee.
+  const { el, pedidos } = camposDeMentira(formularioDeCarroAjeno({ 'sc-porcentaje-comision': '50', 'sc-rentado-por': 'Pedro' }));
+  const datos = leerFormularioDe(lectorDeCampos(el), {
+    contratoId: 'c1', cliente: clienteJuan(), carro: null, duenoEscogido: null, empleadoEscogido: EMPLEADOS.ana, tarjetas: [],
+  }, 12);
+  assert.equal(pedidos.has('sc-porcentaje-comision'), false);
+  assert.equal(pedidos.has('sc-rentado-por'), false);
+  assert.equal(datos.porcentajeComision, 5);
+  assert.equal(datos.rentadoPor, 'Ana López');
+});
+
+test('§12b: lo que se ve del empleado en el mostrador es su código y su nombre, nunca su porcentaje', () => {
+  const e = { id: 'e9', codigo: '9', nombre: 'Rosa Tum', porcentajeComision: 7.77 };
+  for (const html of [filaEmpleado(e), textoDelEmpleadoEscogido(e)]) {
+    assert.doesNotMatch(html, /7\.77|7,77|%|[Cc]omisi/, html);
+    assert.match(html, /Rosa Tum/);
+  }
+  assert.match(filaEmpleado(e), /Código 9/);
+  assert.equal(textoDelEmpleadoEscogido(e), '9 · Rosa Tum');
+  assert.match(filaEmpleado({ ...e, nombre: '<b>x</b>' }), /&lt;b&gt;/, 'el nombre se escapa como todo texto libre');
+});
+
+test('cargarAjustes ya no trae un porcentaje de comisión por defecto: cada empleado tiene el suyo', async () => {
+  const { cargarAjustes } = await import('../js/datos.js');
+  const ajustes = await cargarAjustes(); // sin Firebase en Node: son los valores por defecto
+  assert.equal('porcentajeComision' in ajustes, false);
+  assert.equal(ajustes.porcentajeTarjeta, 12);
+});
+
+// ---------- El contrato sale con lo del empleado escogido (y el 0 de Wilder) ----------
+
+test('escoger a Ana: el contrato guarda empleadoId, su nombre de ese día y su 5 %', () => {
+  const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno(), { empleadoEscogido: EMPLEADOS.ana });
+  assert.equal(guardado.empleadoId, 'e1');
+  assert.equal(guardado.rentadoPor, 'Ana López');
+  assert.strictEqual(guardado.porcentajeComision, 5);
+});
+
+test('escoger a Wilder: el contrato guarda su 0 % como 0 — ni el 5 % de antes ni null', () => {
+  const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno(), { empleadoEscogido: EMPLEADOS.wilder });
+  assert.equal(guardado.empleadoId, 'e6');
+  assert.equal(guardado.rentadoPor, 'Wilder');
+  assert.strictEqual(guardado.porcentajeComision, 0);
+});
+
+test('el porcentaje sellado es el de HOY del empleado: subirlo después no cambia el contrato ya guardado', () => {
+  const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno(), { empleadoEscogido: { ...EMPLEADOS.ana, porcentajeComision: 5 } });
+  const despues = contratoDeLosCampos(formularioDeCarroAjeno(), { empleadoEscogido: { ...EMPLEADOS.ana, porcentajeComision: 10 } }).guardado;
+  assert.equal(guardado.porcentajeComision, 5);
+  assert.equal(despues.porcentajeComision, 10);
+});
+
+test('sin empleado el formulario no inventa nada: id null, nombre vacío y porcentaje null', () => {
+  const { datos } = contratoDeLosCampos(formularioDeCarroAjeno(), { empleadoEscogido: null });
+  assert.equal(datos.empleadoId, null);
+  assert.equal(datos.rentadoPor, '');
+  assert.equal(datos.porcentajeComision, null);
+});
+
+// ---------- No se guarda sin empleado, y cada razón dice lo suyo ----------
+
+const lista = (extra = {}) => ({ leida: true, fallo: false, cantidad: 2, ...extra });
+
+test('motivoParaNoGuardar: sin escoger a nadie, «Falta quién lo rentó» (la lista está bien)', () => {
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), empleado: null, listaDeEmpleados: lista() }), 'Falta quién lo rentó.');
+});
+
+test('motivoParaNoGuardar: la lista de empleados todavía en camino se dice así, no como si faltara escoger', () => {
+  const motivo = motivoParaNoGuardar({ ...salidaLista(), empleado: null, listaDeEmpleados: lista({ leida: false, cantidad: 0 }) });
+  assert.match(motivo, /Todavía se está leyendo la lista de empleados/);
+});
+
+test('motivoParaNoGuardar: una lista que NO se pudo leer no se dice «no hay empleados»: se manda a revisar la conexión', () => {
+  const motivo = motivoParaNoGuardar({ ...salidaLista(), empleado: null, listaDeEmpleados: lista({ fallo: true, cantidad: 0 }) });
+  assert.match(motivo, /No se pudo leer la lista de empleados/);
+  assert.match(motivo, /conexión/);
+  assert.doesNotMatch(motivo, /Todavía no hay empleados/);
+});
+
+test('motivoParaNoGuardar: sin empleados registrados, dice que el dueño los da de alta (y dónde)', () => {
+  const motivo = motivoParaNoGuardar({ ...salidaLista(), empleado: null, listaDeEmpleados: lista({ cantidad: 0 }) });
+  assert.match(motivo, /Todavía no hay empleados registrados/);
+  assert.match(motivo, /dueño/);
+});
+
+test('motivoParaNoGuardar: un empleado escogido que no tiene porcentaje legible NO deja guardar, ni con 5 % ni con 0 %', () => {
+  for (const malo of [undefined, '', 'cinco', null]) {
+    const motivo = motivoParaNoGuardar({ ...salidaLista(), empleado: { ...EMPLEADOS.ana, porcentajeComision: malo } });
+    assert.match(motivo, /A Ana López le falta el porcentaje de comisión/, JSON.stringify(malo));
+  }
+});
+
+test('motivoParaNoGuardar: Wilder, con su 0 %, SÍ se puede guardar: un cero no es un porcentaje que falta', () => {
+  assert.equal(motivoParaNoGuardar({ ...salidaLista(), empleado: EMPLEADOS.wilder }), null);
+});
+
+test('la pantalla le pasa a motivoParaNoGuardar el empleado y el estado de la lista, y al formulario el empleado escogido', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/sacarCarro.js', import.meta.url), 'utf8');
+  assert.match(fuente, /empleado: empleadoSeleccionado,\s*listaDeEmpleados: estadoDeLaListaDeEmpleados\(\)/);
+  assert.match(fuente, /empleadoEscogido: empleadoSeleccionado/);
+  // La lista de empleados es de CADA apertura (el porcentaje sellado tiene que ser el de ahora), no una por sesión.
+  assert.match(fuente, /const listaDeEmpleados = crearListaDeSesion\(/);
+  assert.equal(/^const listaDeEmpleados/m.test(fuente), false, 'no vive en el módulo');
+});
+
+// ---------- Buscar al empleado: por código o por nombre ----------
+
+const ACTIVOS = [EMPLEADOS.luis, EMPLEADOS.ana, EMPLEADOS.wilder];
+
+test('buscador de empleados: «6» da a Wilder primero; «wilder» lo da por nombre; ni uno ni otro piden un dueño', () => {
+  const porCodigo = vistaDeBuscador({ tipo: 'empleados', items: ACTIVOS, fallo: false, leida: true, consulta: '6' });
+  assert.equal(porCodigo.filas[0].id, 'e6');
+  const porNombre = vistaDeBuscador({ tipo: 'empleados', items: ACTIVOS, fallo: false, leida: true, consulta: 'WILDER' });
+  assert.deepEqual(porNombre.filas.map((e) => e.id), ['e6']);
+});
+
+test('buscador de empleados: sin coincidencias manda al dueño, no a «darlo de alta abajo» (aquí no hay alta)', () => {
+  const v = vistaDeBuscador({ tipo: 'empleados', items: ACTIVOS, fallo: false, leida: true, consulta: 'zzz' });
+  assert.match(v.mensaje, /el dueño lo da de alta/);
+  assert.doesNotMatch(v.mensaje, /abajo/);
+});
+
+test('buscador de empleados: una lectura fallida nunca es «Sin resultados», y se puede reintentar', () => {
+  const v = vistaDeBuscador({ tipo: 'empleados', items: [], fallo: true, leida: true, consulta: 'wilder' });
+  assert.doesNotMatch(v.mensaje, /Sin resultados/);
+  assert.match(v.mensaje, /No se pudo leer la lista de empleados/);
+  assert.match(v.aviso, /No se pudo leer la lista de empleados/);
+  assert.doesNotMatch(v.aviso, /dar de alta|darlo de alta/, 'no empuja a dar de alta a quien quizá ya existe');
+  assert.equal(v.reintentar, true);
+});
+
+test('Enter en la caja de empleados: escoge al del código exacto, o al único que quedó; con varios no adivina', () => {
+  assert.equal(empleadoParaEnter([EMPLEADOS.wilder, EMPLEADOS.luis], '6').id, 'e6', 'el código exacto aunque haya más');
+  assert.equal(empleadoParaEnter([EMPLEADOS.ana], 'ana').id, 'e1', 'el único');
+  assert.equal(empleadoParaEnter([EMPLEADOS.ana, EMPLEADOS.luis], 'l'), null, 'con varios y ninguno exacto no escoge');
+  assert.equal(empleadoParaEnter([], '6'), null);
+  assert.equal(empleadoParaEnter([EMPLEADOS.ana], ''), null, 'sin nada escrito, Enter no escoge a nadie');
+});
+
+test('cargarEmpleadosActivos: los dados de baja no salen; una lectura fallida es fallo con datos null, nunca «no hay empleados»', async () => {
+  const baja = { ...EMPLEADOS.luis, activo: false };
+  const r = await cargarEmpleadosActivos(undefined, { leer: async () => ({ datos: [EMPLEADOS.ana, baja, { id: 'x', nombre: 'Viejo' }], fallo: false }) });
+  assert.deepEqual(r.datos.map((e) => e.id), ['e1', 'x'], 'sin la llave `activo` sí trabaja aquí');
+  assert.equal(r.fallo, false);
+  assert.deepEqual(await cargarEmpleadosActivos(undefined, { leer: async () => ({ datos: null, fallo: true }) }), { datos: null, fallo: true });
+  assert.deepEqual(await cargarEmpleadosActivos(undefined, { leer: async () => ({ datos: [], fallo: false }) }), { datos: [], fallo: false });
 });

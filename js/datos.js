@@ -413,14 +413,17 @@ export async function cargarContrato(id) {
 // se usan estos, que son los que confirmó el dueño. El precio por día NO
 // lleva mínimo aquí a propósito: él lo pone caso por caso y el sistema no
 // opina ("yo pongo el precio que yo quiera").
+//
+// El porcentaje de comisión YA NO está aquí: cada empleado tiene el suyo (`empleados`, js/nucleo/empleado.js) y el
+// contrato lo sella desde esa ficha. Un «porcentaje por defecto» general en los ajustes sería una segunda fuente del
+// mismo dato, que alguien volvería a leer para el contrato de quien no gana comisión.
 const AJUSTES_POR_DEFECTO = {
   porcentajeTarjeta: 12,
-  porcentajeComision: 5,
 };
 
 /**
- * La configuración general del negocio que usa "Sacar carro": porcentaje de
- * tarjeta y de comisión por defecto. Una lectura simple, sin copia local ni
+ * La configuración general del negocio que usa "Sacar carro": el porcentaje de
+ * tarjeta por defecto. Una lectura simple, sin copia local ni
  * sincronía de fondo (a diferencia de cargarFlota/cargarContratosAbiertos):
  * es un solo documento chico que casi no cambia, y si la nube no responde o
  * el documento todavía no existe, los valores del dueño sirven igual.
