@@ -274,7 +274,7 @@ test('estructura: todo `guardar*` de datos.js pasa por guardarEnNubeYLocal y nin
     .map((m) => m[1]).filter((n) => n !== 'guardarEnNubeYLocal');
   assert.deepEqual(
     guardados.sort(),
-    ['guardarCliente', 'guardarContrato', 'guardarDueno', 'guardarPagoDueno', 'guardarReserva', 'guardarVehiculo'],
+    ['guardarCliente', 'guardarContrato', 'guardarDueno', 'guardarEmpleado', 'guardarPagoComision', 'guardarPagoDueno', 'guardarReserva', 'guardarVehiculo'],
     'hay un guardado nuevo (o uno menos): decidir si debe pasar por guardarEnNubeYLocal y actualizar esta lista',
   );
   for (const nombre of guardados) {

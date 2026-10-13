@@ -12,6 +12,8 @@ import { dbDeDinero } from './dinero-sesion.js';
 import { mezclar, guardarLocal, leerLocal, idsQueSobran, borrarLocales, depurarLocal } from './cache.js';
 import { filtrar, textoDeCliente } from './nucleo/busqueda.js';
 import { textoDeDueno } from './nucleo/dueno.js';
+import { problemasDeEmpleado, porcentajeAnotado } from './nucleo/empleado.js';
+import { cuentaDeEmpleado, elegirParaPagoDeComision } from './nucleo/comisiones.js';
 import { estadoContrato } from './nucleo/estados.js';
 import {
   cuentaDeDueno, elegirParaPago, descuentoMaximo, totalPagadoDeMas,
@@ -2088,13 +2090,254 @@ export async function guardarPagoDueno(pago, {
  * de contratos) no se «arregla» aquí, para que `cuentaDeDueno` lo siga viendo.
  */
 export async function cargarPagosDueno({ iniciar = iniciarFirebase, dbDinero = dbDeDinero } = {}) {
+  return cargarPagosDe('pagosDueno', { iniciar, dbDinero });
+}
+
+/**
+ * La lectura de pagos que comparten `cargarPagosDueno` y `cargarPagosComision`: de `coleccion`, con la credencial
+ * de dinero, sin copia local, y con `datos: null` (nunca `[]`) cuando falla. Una sola función para las dos para que
+ * la regla «un fallo no es una lista vacía» no pueda quedar en una y olvidarse en la otra.
+ */
+async function cargarPagosDe(coleccion, { iniciar = iniciarFirebase, dbDinero = dbDeDinero } = {}) {
   const db = dbDinero();
   if (!db) return { datos: null, fallo: true };
   try {
     const { fsMod } = await iniciar();
-    const instantanea = await conLimiteDeTiempo(fsMod.getDocs(fsMod.collection(db, 'pagosDueno')));
+    const instantanea = await conLimiteDeTiempo(fsMod.getDocs(fsMod.collection(db, coleccion)));
     return { datos: instantanea.docs.map((d) => ({ id: d.id, ...d.data() })), fallo: false };
   } catch {
     return { datos: null, fallo: true };
   }
+}
+
+// ---------- Los empleados, y lo que se les paga de comisión ----------
+//
+// Los empleados (`empleados`) se LEEN con la sesión normal —el mostrador tiene que escoger quién rentó el
+// carro, y para sellar el porcentaje en el contrato tiene que leer el del empleado— pero se ESCRIBEN solo con la
+// credencial de dinero: es la regla de Firestore (`empleados`, firestore.rules) y la decisión del dueño, que el
+// porcentaje de comisión es suyo y no del mostrador (§6 y §12b del diseño). Por eso `guardarEmpleado` va con
+// `dbDeDinero` aunque el empleado no sea un secreto.
+//
+// Y ninguna de las dos va a la copia local, cada una por su razón:
+// - `empleados`: una copia local se lee sin credencial, y el porcentaje que se sella en el contrato tiene que ser el
+//   de AHORA, no el de la última vez que esta computadora sincronizó. La lista es chica (unos cuantos empleados), así
+//   que leerla de la nube cada vez que se abre «Sacar carro» cuesta poco y no deja un porcentaje viejo escrito en el
+//   navegador del mostrador.
+// - `pagosComision`: lo que se le paga a cada empleado, como lo que se le paga a cada dueño (ADR-002), no se copia
+//   donde se lee sin contraseña.
+
+/** Lo que lee el dueño si intenta guardar un empleado sin haber entrado al área de dinero. */
+export const MENSAJE_EMPLEADO_SIN_DINERO = 'Primero entra al área de dinero: sin esa contraseña no se puede guardar un empleado.';
+
+/**
+ * Todos los empleados, como `{ datos, fallo }`, SIN copia local (ver arriba). Cuando la lectura falla,
+ * `datos` es `null`, no `[]`, igual que `cargarPagosDueno`: una lista vacía de empleados se lee como «nadie
+ * puede rentar» o, peor, como «no hay a quién pagarle», y una lectura fallida no es eso. Con `null`, quien se
+ * olvide de mirar `fallo` choca en vez de dibujar un «no hay empleados» que no es cierto.
+ */
+export async function cargarEmpleados({ iniciar = iniciarFirebase } = {}) {
+  try {
+    return { datos: await leerRemoto('empleados', iniciar), fallo: false };
+  } catch {
+    return { datos: null, fallo: true };
+  }
+}
+
+/** Un id nuevo para un empleado, sin escribir nada. Ver «Un alta decide su id antes de guardar». */
+export const nuevoIdEmpleado = (opciones) => idNuevoEn('empleados', opciones);
+
+/**
+ * Arma el documento que de verdad se guarda para un empleado. Función **pura**, mismo patrón que
+ * `duenoParaGuardar`: el `id` y `actualizado` los sella esta función; un empleado que ya tiene id nunca lo
+ * pierde (`id ?? empleado?.id`: un guardado sin id es un documento nuevo, o sea un empleado duplicado). El
+ * porcentaje pasa por `q()`: el dinero nunca se redondea a mano. Lo que el formulario no conoce se arrastra tal cual.
+ */
+export function empleadoParaGuardar(empleado, { id, ahora = Date.now() } = {}) {
+  const porcentaje = porcentajeAnotado(empleado?.porcentajeComision);
+  return {
+    ...empleado,
+    id: id ?? empleado?.id,
+    ...(porcentaje === null ? {} : { porcentajeComision: porcentaje }),
+    actualizado: ahora,
+  };
+}
+
+/**
+ * Guarda un empleado en la nube, con la credencial de dinero y sin copia local. **Trae su `id`** (ver
+ * `guardarCliente`). Se niega, sin escribir nada, si no hay sesión de dinero o si el empleado no se puede guardar
+ * (sin nombre, sin código o sin un porcentaje legible: ver `problemasDeEmpleado`). Que dos empleados no compartan
+ * código lo comprueba la pantalla, que tiene la lista; aquí no se sabe.
+ */
+export async function guardarEmpleado(empleado, {
+  iniciar = iniciarFirebase, dbDinero = dbDeDinero, avisar = avisarCopiaLocal,
+} = {}) {
+  const db = dbDinero();
+  if (!db) throw new Error(MENSAJE_EMPLEADO_SIN_DINERO);
+  exigirId(empleado);
+  const [problema] = problemasDeEmpleado(empleado, []);
+  if (problema) throw new Error(problema);
+  return guardarEnNubeYLocal(
+    'empleados',
+    empleado,
+    (id) => empleadoParaGuardar(empleado, { id }),
+    {
+      // La base es la de dinero; de `iniciar` solo se toma el módulo de Firebase, que es el mismo.
+      iniciar: async () => ({ db, fsMod: (await iniciar()).fsMod }),
+      guardarCopia: async () => {},
+      avisar,
+    },
+  );
+}
+
+/** Lo que lee el dueño si intenta registrar un pago de comisión sin haber entrado al área de dinero. */
+export const MENSAJE_COMISION_SIN_DINERO = 'Primero entra al área de dinero: sin esa contraseña no se puede registrar el pago.';
+
+/** Lo que lee el dueño si intenta registrar un pago de comisión sin ninguna renta marcada. */
+export const MENSAJE_COMISION_SIN_RENTAS = 'Marca al menos una renta que ya regresó para registrar el pago.';
+
+/** Lo que lee quien intente guardar un pago de comisión que sale en Q0.00: un pago en cero no prueba que se pagó nada. */
+export const MENSAJE_COMISION_SIN_MONTO = 'Este pago saldría en Q0.00, y un pago en cero no prueba que se pagó nada. '
+  + 'Marca rentas que tengan comisión.';
+
+/** Lo que lee quien (programando) intente guardar un pago de comisión sin el id que se decide antes del primer intento. */
+export const MENSAJE_COMISION_SIN_ID = 'Este pago no tiene su identificador todavía, y sin él repetir el intento crearía un segundo pago por las mismas rentas. '
+  + 'Pídelo con nuevoIdPagoComision() antes del primer intento y úsalo en todos los reintentos.';
+
+/**
+ * Un id nuevo para un pago de comisión, sin escribir nada todavía: es `nuevoIdPagoDueno` para estos pagos y por
+ * la misma razón (un doble clic, o un reintento después de que el primer intento venció, tiene que caer en el
+ * mismo documento y no crear un segundo pago por las mismas rentas). Con la base de DINERO, la misma en la que
+ * luego se escribe.
+ */
+export async function nuevoIdPagoComision({ iniciar = iniciarFirebase, dbDinero = dbDeDinero } = {}) {
+  const db = dbDinero();
+  if (!db) throw new Error(MENSAJE_COMISION_SIN_DINERO);
+  const { fsMod } = await iniciar();
+  return fsMod.doc(fsMod.collection(db, 'pagosComision')).id;
+}
+
+/**
+ * Arma el pago de lo que el dueño marcó, y es el ÚNICO lugar donde `monto` y `contratos` nacen: salen de la misma
+ * elección (`elegirParaPagoDeComision`, sobre la cuenta de `cuentaDeEmpleado`), así que no pueden contradecirse, y
+ * lo que él ve sumar mientras marca casillas es exactamente lo que se guarda. Lo que no es pagable (una renta cuyo
+ * carro aún no regresa, una ya pagada, una de otra cuenta) no entra, ni con su dinero ni con su id, aunque su casilla
+ * siga marcada: pagar un estimado es pagar sobre una cifra que se mueve.
+ *
+ * LANZA si `contratos` o `pagos` no son listas (lo hace `cuentaDeEmpleado`): una lectura fallida de `pagosComision`
+ * no se puede tomar por «nada pagado», o se le pagaría dos veces a quien ya se le pagó.
+ *
+ * `fecha` llega de afuera (la pantalla arranca en hoy): una regla no mira qué día es. `empleadoId` puede ser null
+ * —el grupo de rentas viejas con el nombre escrito a mano—, y se guarda null y no `undefined`, que Firestore
+ * rechaza. Con nada pagable marcado devuelve `monto: 0` y `contratos: []`, y `guardarPagoComision` se niega.
+ */
+export function construirPagoComision({
+  empleadoId, fecha, forma, contratos, pagos, idsMarcados,
+} = {}) {
+  const cuenta = cuentaDeEmpleado({ contratos, pagos });
+  const { contratos: ids, monto } = elegirParaPagoDeComision(cuenta, idsMarcados);
+  return { empleadoId: empleadoId ?? null, fecha, forma, monto, contratos: ids };
+}
+
+/**
+ * Arma el documento que de verdad se guarda para un pago de comisión. Función **pura**, mismo patrón que
+ * `pagoDuenoParaGuardar` pero sin número de comprobante (no hay papel que entregar): `id` y `actualizado` los sella
+ * esta función; un pago que ya existe conserva su `id`; `monto` pasa por `q()`; `contratos` nunca queda `undefined`.
+ * `anulado` y `anuladoEn` viajan con el resto del pago: uno anulado se guarda por este mismo camino y conserva su
+ * `monto` y sus `contratos`.
+ */
+export function pagoComisionParaGuardar(pago, { id, ahora = Date.now() } = {}) {
+  return {
+    ...pago,
+    id: id ?? pago?.id,
+    monto: q(pago?.monto),
+    contratos: Array.isArray(pago?.contratos) ? [...pago.contratos] : [],
+    actualizado: ahora,
+  };
+}
+
+/**
+ * Anula un pago de comisión mal registrado, sin borrarlo: la misma forma, con los mismos nombres de campo
+ * (`anulado`, `anuladoEn`, §7b), que `anularPagoDueno` y `anularPago`, porque un segundo modo de anular sería un
+ * segundo lugar donde equivocarse. Conserva su `monto` y sus `contratos`; lo único que cambia es que
+ * `cuentaDeEmpleado` ya no lo cuenta como pagado, y sus rentas vuelven a «por pagar». Un pago ya anulado no cambia.
+ */
+export function anularPagoComision(pago, opciones) {
+  return anularPagoDueno(pago, opciones);
+}
+
+/**
+ * Guarda un pago de comisión en la nube, con la credencial de dinero y sin copia local. Se niega ANTES de escribir
+ * si no hay sesión de dinero, si el pago no cubre ninguna renta, si sale en Q0.00 o si no trae el `id` que se decide
+ * antes del primer intento. Mismo recorrido que `guardarPagoDueno`, sin el número de comprobante.
+ *
+ * Lo que esto NO cubre: dos pestañas, o dos computadoras, que registran cada una su propio pago (con su propio id) de
+ * la misma renta. `registrarElPagoDeComision` (la pantalla) vuelve a leer los pagos justo antes de escribir, que es
+ * lo que lo acota.
+ */
+export async function guardarPagoComision(pago, {
+  iniciar = iniciarFirebase, dbDinero = dbDeDinero, avisar = avisarCopiaLocal,
+} = {}) {
+  if (!Array.isArray(pago?.contratos) || pago.contratos.length === 0) throw new Error(MENSAJE_COMISION_SIN_RENTAS);
+  if (!(q(pago.monto) > 0)) throw new Error(MENSAJE_COMISION_SIN_MONTO);
+  const db = dbDinero();
+  if (!db) throw new Error(MENSAJE_COMISION_SIN_DINERO);
+  if (!pago.id) throw new Error(MENSAJE_COMISION_SIN_ID);
+  return guardarEnNubeYLocal(
+    'pagosComision',
+    pago,
+    (id) => pagoComisionParaGuardar(pago, { id }),
+    {
+      iniciar: async () => ({ db, fsMod: (await iniciar()).fsMod }),
+      guardarCopia: async () => {},
+      avisar,
+    },
+  );
+}
+
+/**
+ * Todos los pagos de comisión, como `{ datos, fallo }`, con la credencial de dinero y sin copia local. Igual que
+ * `cargarPagosDueno`, y por la misma razón: cuando la lectura falla, `datos` es `null` y no `[]`, porque una lista
+ * vacía de pagos se lee como «a nadie se le ha pagado» y cada renta ya pagada reaparecería como deuda.
+ */
+export async function cargarPagosComision({ iniciar = iniciarFirebase, dbDinero = dbDeDinero } = {}) {
+  return cargarPagosDe('pagosComision', { iniciar, dbDinero });
+}
+
+/**
+ * Enlaza rentas viejas —las que solo traen el nombre del empleado escrito a mano— a un empleado de la lista: les
+ * escribe `empleadoId`. Es la salida del grupo «sin enlazar» de `agruparPorEmpleado`, como `enlazarContratosAlDueno`
+ * lo es para los dueños, con el mismo cuidado: escribe SOLO lo que cambia y el sello `actualizado`, con `update` y
+ * no con el contrato entero (reescribirlo desde una copia atrasada pisaría `pagos`), por lotes, y sin tocar
+ * `rentadoPor`, que se queda con el nombre tal como se escribió ese día.
+ *
+ * Opcional, y solo si él lo pide: `idsConPorcentaje` son las rentas (entre `ids`) a las que además se les pone
+ * `porcentajeComision`, el del empleado de hoy (`porcentajeComision`). Es para las rentas de antes cuyo porcentaje
+ * fue el 5 % que traía el formulario y no uno que alguien decidiera —el caso de Wilder, que no gana comisión—. El
+ * porcentaje de una renta NO se mueve solo al enlazar: sellado es sellado, y quien llama decide cuáles (la pantalla
+ * ofrece solo las que no están pagadas: lo ya pagado no se toca).
+ */
+export async function enlazarContratosAlEmpleado(ids, empleadoId, {
+  idsConPorcentaje = [], porcentajeComision, iniciar = iniciarFirebase, ahora = Date.now(),
+} = {}) {
+  const lista = [...new Set((Array.isArray(ids) ? ids : []).filter(Boolean))];
+  if (!empleadoId) throw new Error('Falta escoger a qué empleado de la lista se enlazan las rentas.');
+  if (!lista.length) throw new Error('No hay rentas que enlazar.');
+  const conPorcentaje = new Set((Array.isArray(idsConPorcentaje) ? idsConPorcentaje : []).filter((id) => lista.includes(id)));
+  const porcentaje = porcentajeAnotado(porcentajeComision);
+  if (conPorcentaje.size && porcentaje === null) {
+    throw new Error('Falta el porcentaje del empleado: sin él no se puede cambiar el de las rentas.');
+  }
+  const { db, fsMod } = await iniciar();
+  for (let desde = 0; desde < lista.length; desde += CONTRATOS_POR_LOTE) {
+    const lote = fsMod.writeBatch(db);
+    for (const id of lista.slice(desde, desde + CONTRATOS_POR_LOTE)) {
+      lote.update(fsMod.doc(db, 'contratos', id), {
+        empleadoId,
+        actualizado: ahora,
+        ...(conPorcentaje.has(id) ? { porcentajeComision: porcentaje } : {}),
+      });
+    }
+    await conLimiteDeTiempo(lote.commit());
+  }
+  return lista;
 }

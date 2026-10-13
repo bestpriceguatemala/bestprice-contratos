@@ -28,12 +28,14 @@ function fusionar(destino, origen) {
  * `ruta`, falla esa operación en cualquier documento).
  */
 export function nubeEnMemoria({
-  contratos = [], privados = {}, fallan = [], demoraMs = 0, pagosDueno = [], contadores = {},
+  contratos = [], privados = {}, fallan = [], demoraMs = 0, pagosDueno = [], contadores = {}, empleados = [], pagosComision = [],
 } = {}) {
   const docs = new Map();
   for (const c of contratos) docs.set(`contratos/${c.id}`, structuredClone(sinId(c)));
   for (const [id, datos] of Object.entries(privados)) docs.set(`contratos/${id}/privado/dinero`, structuredClone(datos));
   for (const p of pagosDueno) docs.set(`pagosDueno/${p.id}`, structuredClone(p));
+  for (const e of empleados) docs.set(`empleados/${e.id}`, structuredClone(sinId(e)));
+  for (const p of pagosComision) docs.set(`pagosComision/${p.id}`, structuredClone(sinId(p)));
   for (const [id, datos] of Object.entries(contadores)) docs.set(`contadores/${id}`, structuredClone(datos));
   // Cuántas veces se escribió cada documento: lo que `runTransaction` mira para
   // saber si alguien más lo tocó entre su lectura y su escritura.
@@ -78,8 +80,8 @@ export function nubeEnMemoria({
       const cumple = (datos) => (col.restricciones ?? []).every(({ campo, operador, valor }) => (
         operador === '>=' ? datos[campo] >= valor : datos[campo] <= valor
       ));
-      // Las reglas: `pagosDueno` solo se lee con la credencial de dinero.
-      if (col.coleccion === 'pagosDueno' && !col.db.esDinero) {
+      // Las reglas: `pagosDueno` y `pagosComision` solo se leen con la credencial de dinero (`empleados` se lee con cualquier sesión).
+      if (['pagosDueno', 'pagosComision'].includes(col.coleccion) && !col.db.esDinero) {
         throw Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' });
       }
       return {
@@ -92,8 +94,8 @@ export function nubeEnMemoria({
     setDoc: async (ref, datos, opciones) => {
       llamadas.push(['setDoc', ref.ruta, structuredClone(datos), opciones, ref.db.nombre]);
       if (falla('setDoc', ref.ruta)) throw new Error('sin internet');
-      // Las reglas: `pagosDueno` solo se escribe con la credencial de dinero.
-      if (ref.ruta.startsWith('pagosDueno/') && !ref.db.esDinero) {
+      // Las reglas: `pagosDueno`, `pagosComision` y `empleados` solo se escriben con la credencial de dinero.
+      if (['pagosDueno/', 'pagosComision/', 'empleados/'].some((p) => ref.ruta.startsWith(p)) && !ref.db.esDinero) {
         throw Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' });
       }
       if (opciones?.merge && docs.has(ref.ruta)) fusionar(docs.get(ref.ruta), structuredClone(datos));
@@ -150,6 +152,28 @@ export function nubeEnMemoria({
       }
     },
     deleteField: () => BORRAR,
+    /** Un lote de `update`, como `writeBatch` de verdad: todo o nada al confirmar, y falla si algún documento no existe. */
+    writeBatch: (db) => {
+      const operaciones = [];
+      return {
+        update: (ref, cambios) => { operaciones.push([ref, cambios]); },
+        commit: async () => {
+          llamadas.push(['commit', operaciones.map(([ref]) => ref.ruta), db.nombre]);
+          if (falla('commit')) throw new Error('sin internet');
+          if (operaciones.some(([ref]) => !docs.has(ref.ruta))) throw new Error('El documento no existe.');
+          for (const [ref, cambios] of operaciones) {
+            for (const [camino, valor] of Object.entries(cambios)) {
+              const partes = camino.split('.');
+              let nodo = docs.get(ref.ruta);
+              for (const parte of partes.slice(0, -1)) nodo = nodo[parte];
+              if (valor === BORRAR) delete nodo[partes.at(-1)];
+              else nodo[partes.at(-1)] = structuredClone(valor);
+            }
+            subir(ref.ruta);
+          }
+        },
+      };
+    },
   };
 
   return {
