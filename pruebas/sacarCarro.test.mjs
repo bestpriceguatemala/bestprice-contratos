@@ -1320,3 +1320,22 @@ test('el alta rápida tiene su lugar para el aviso pegado al campo del documento
   const guardar = fuente.match(/async function guardarClienteNuevo\(\) \{[\s\S]*?\n  \}\n/)[0];
   assert.doesNotMatch(guardar, /htmlAvisoDeDocumentoEnAlta|mostrarAvisoDeDocumentoEnAlta|Repetid|repetid/, 'guardar el cliente no mira si hay repetido');
 });
+
+// ---------------------------------------------------------------------------
+// El empleado que rentó es una referencia a la lista, como el dueño (empleadoId junto a rentadoPor)
+// ---------------------------------------------------------------------------
+
+test('construirContrato guarda empleadoId junto al nombre de ese día y al porcentaje de ese día', () => {
+  const contrato = construirContrato({
+    ...datosBase(), empleadoId: 'e6', rentadoPor: 'Wilder', porcentajeComision: 0,
+  });
+  assert.equal(contrato.empleadoId, 'e6');
+  assert.equal(contrato.rentadoPor, 'Wilder');
+  assert.strictEqual(contrato.porcentajeComision, 0, 'el 0 % de Wilder se guarda como 0: no cae al 5 % de respaldo');
+});
+
+test('sin empleado, empleadoId queda en null (no ausente), como duenoId', () => {
+  const contrato = construirContrato(datosBase());
+  assert.equal('empleadoId' in contrato, true);
+  assert.equal(contrato.empleadoId, null);
+});

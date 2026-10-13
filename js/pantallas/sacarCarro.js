@@ -128,7 +128,7 @@ export function construirContrato(datos) {
     seguroDia, seguroTercerosDia, seguroMenoresDia, seguroPaiDia, deducible, deducibleBajo,
     cartaPoderDestino, cartaPoderPrecio, variosDescripcion, variosPrecio,
     tarjetas = [], forma, porcentajeTarjeta, montoPago,
-    rentadoPor, porcentajeComision,
+    rentadoPor, empleadoId, porcentajeComision,
     conductorAdicional, observaciones,
   } = datos;
 
@@ -225,6 +225,11 @@ export function construirContrato(datos) {
     pagos,
 
     rentadoPor: rentadoPor || '',
+    // El empleado escogido de la lista (js/nucleo/empleado.js). `rentadoPor` (arriba) se queda con su nombre tal
+    // como se vio ese día —un dato de ESTE contrato, como `carroAjeno.dueno`—, y `porcentajeComision` con el
+    // porcentaje que tenía ese día. Es null (y no ausente) cuando no hay empleado, y los contratos de antes de
+    // este campo ni siquiera traen la llave: nada de lo que lo lea puede exigirlo.
+    empleadoId: empleadoId || null,
     porcentajeComision: porcentajeComisionNum,
     conductorAdicional: { ...conductorAdicional },
     observaciones: observaciones || '',
