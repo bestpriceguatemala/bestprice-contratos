@@ -177,7 +177,8 @@
 
 /* La casilla cuya posición no se midió en Excel (derivada): raya de trazos largos y negra, para que se mire con más atención. */
 .hp-caja.hp-derivada { border: 0.4mm dashed #000; }
-.hp-caja.hp-derivada span { color: #000; font-weight: bold; }
+/* el nombre baja de renglón: cortado, perdería justo la palabra «derivada» */
+.hp-caja.hp-derivada span { color: #000; font-weight: bold; white-space: normal; overflow: visible; }
 /* el círculo con el número queda sobre la esquina: el nombre de la casilla se corre para que no lo tape */
 .hp-caja.hp-hito-caja span { left: 3mm; color: #000; }
 

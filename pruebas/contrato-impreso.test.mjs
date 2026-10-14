@@ -1621,6 +1621,7 @@ test('lo que tiene que verse en la hoja de prueba no depende de «Gráficos de f
   assert.match(bloqueDesde(css, css.indexOf('\n.hp-caja.hp-hito-caja {')), /border:\s*0\.5mm solid #000;/);
   assert.match(bloqueDesde(css, css.indexOf('\n.hp-hito {')), /border:\s*0\.4mm solid #000;/);
   assert.match(bloqueDesde(css, css.indexOf('\n.hp-caja.hp-derivada {')), /border:\s*0\.4mm dashed #000;/);
+  assert.match(bloqueDesde(css, css.indexOf('\n.hp-caja.hp-derivada span {')), /white-space:\s*normal;\s*overflow:\s*visible;/);
   for (const regla of ['\n.hp-marca-x {', '\n.hp-marca-y {', '\n.hp-cruz {']) {
     assert.ok(!/background/.test(bloqueDesde(css, css.indexOf(regla))), `${regla.trim()} no debe llevar fondo`);
   }
