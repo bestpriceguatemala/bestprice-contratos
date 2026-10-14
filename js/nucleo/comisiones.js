@@ -134,7 +134,11 @@ const porSalida = (a, b) => (
  * - `sinPorcentaje`: cerradas y sin pagar, pero el contrato no trae un porcentaje legible. No se pagan: no se sabe
  *   cuánto es. (Un contrato guardado por «Sacar carro» siempre lo trae; esto es por un documento dañado.)
  * - `totalPorPagar`: lo que suman las `porPagar`, con `comisionDe` y `suma` (que redondea con `q()`).
- * - `totalEstimado`: lo que sumarían las `noFirmes` si cerraran como están. Es aparte a propósito: no es deuda.
+ * - `totalEstimado`: lo que sumarían las `noFirmes` cuyo carro NO ha regresado ('estimada'): un estimado de verdad, que un día de
+ *   atraso sube y un descuento baja. Aparte a propósito: no es deuda.
+ * - `totalPorCerrar`: lo que suman las `noFirmes` cuyo carro SÍ regresó y solo esperan a que cierre el contrato
+ *   ('sin-cerrar'): su monto ya se conoce, no es un estimado. Las dos cifras no se mezclan: sumarlas bajo la palabra
+ *   «estimado» borraría la diferencia entre lo que puede cambiar y lo que solo está esperando.
  * - `pagosQueCambiaron`: pagos vigentes cuyas rentas hoy suman otra cosa que lo que se pagó (se corrigió un
  *   cierre después de pagar). `{ pago, pagado, ahora, diferencia }`. No afirma nada si el pago cubre una renta
  *   que ya no está en esta cuenta, o si alguna de las que cubre dejó de ser firme: ahí la comparación no es de
@@ -150,6 +154,8 @@ export function cuentaDeEmpleado({ contratos, pagos } = {}) {
   const todos = sinIdsRepetidos(exigirContratos(contratos));
   const porPagar = [];
   const noFirmes = [];
+  const estimadas = [];
+  const porCerrar = [];
   const pagados = [];
   const sinComision = [];
   const sinPorcentaje = [];
@@ -157,7 +163,10 @@ export function cuentaDeEmpleado({ contratos, pagos } = {}) {
   for (const c of todos) {
     if (cubiertos.has(c?.id)) { pagados.push(c); continue; }
     const estado = estadoDeComision(c);
-    if (estado === 'estimada' || estado === 'sin-cerrar') noFirmes.push(c);
+    if (estado === 'estimada' || estado === 'sin-cerrar') {
+      noFirmes.push(c);
+      (estado === 'estimada' ? estimadas : porCerrar).push(c);
+    }
     else if (estado === 'sin-porcentaje') sinPorcentaje.push(c);
     else if (estado === 'sin-comision') sinComision.push(c);
     else porPagar.push(c);
@@ -182,7 +191,8 @@ export function cuentaDeEmpleado({ contratos, pagos } = {}) {
     sinComision: sinComision.sort(porRegreso),
     sinPorcentaje: sinPorcentaje.sort(porRegreso),
     totalPorPagar: suma(...porPagar.map(montoDe)),
-    totalEstimado: suma(...noFirmes.map(montoDe)),
+    totalEstimado: suma(...estimadas.map(montoDe)),
+    totalPorCerrar: suma(...porCerrar.map(montoDe)),
     pagosQueCambiaron,
   };
 }

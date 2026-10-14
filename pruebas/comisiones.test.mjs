@@ -47,7 +47,8 @@ test('el carro volvió pero el cliente todavía DEBE: no es pagable, está en «
   assert.deepEqual(cuenta.porPagar.map((c) => c.id), ['c2']);
   assert.deepEqual(cuenta.noFirmes.map((c) => c.id), ['c1']);
   assert.equal(cuenta.totalPorPagar, 140, 'la del cliente que debe no suma');
-  assert.equal(cuenta.totalEstimado, 140);
+  assert.equal(cuenta.totalEstimado, 0, 'NO es un estimado: el carro volvió y su monto ya es ese');
+  assert.equal(cuenta.totalPorCerrar, 140, 'es lo que solo espera a que el contrato cierre');
   assert.deepEqual(elegirParaPagoDeComision(cuenta, ['c1']), { rentas: [], contratos: [], monto: 0 }, 'ni marcándola a la fuerza');
 });
 
@@ -492,4 +493,35 @@ test('lo que queda SIN MARCAR es el complemento exacto de lo marcado, con su tot
   assert.deepEqual(sinMarcarDeComision(cuenta, ['a1', 'a2', 'a3']), { rentas: [], contratos: [], monto: 0 });
   assert.deepEqual(sinMarcarDeComision(cuenta, ['no-existe']).contratos.length, 3, 'una casilla que no corresponde a nada no quita nada');
   assert.deepEqual(sinMarcarDeComision(undefined, undefined), { rentas: [], contratos: [], monto: 0 });
+});
+
+test('lo que puede cambiar y lo que solo espera a cerrar se suman APARTE: la que sigue afuera es estimado, la que volvió debiendo no', () => {
+  const afuera = abierta('afuera');
+  const debiendo = renta({ id: 'debe', recibidoEl: '2026-10-05', danos: 200, cerrada: false });
+  const conGarantia = renta({ id: 'garantia', recibidoEl: '2026-10-05', garantiaSinLiberar: true, empleado: luis });
+  const cuenta = cuentaDeEmpleado({ contratos: [afuera, debiendo, conGarantia], pagos: [] });
+  assert.deepEqual(cuenta.noFirmes.map((c) => c.id).sort(), ['afuera', 'debe', 'garantia']);
+  assert.equal(cuenta.totalEstimado, 140, 'solo la que sigue afuera (4 días × Q700 × 5 %)');
+  assert.equal(cuenta.totalPorCerrar, 140 + 210, 'las dos que ya volvieron: Q140 de Ana y Q210 de Luis al 7.5 %');
+  assert.equal(cuenta.totalPorPagar, 0, 'ninguna es deuda todavía');
+  assert.equal(estadoDeComision(afuera), 'estimada');
+  assert.equal(estadoDeComision(debiendo), 'sin-cerrar');
+});
+
+test('los períodos salen del más viejo al más nuevo aunque la cuenta que se les pase venga desordenada', () => {
+  const nov = regresa('n1', '2026-11-20');
+  const sep = regresa('s1', '2026-09-02');
+  const oct = regresa('o1', '2026-10-17');
+  assert.deepEqual(periodosDePago({ porPagar: [nov, sep, oct] }).map((m) => m.mes), ['2026-09', '2026-10', '2026-11']);
+  assert.deepEqual(periodosDePago({ porPagar: [oct, nov, sep] }).map((m) => m.mes), ['2026-09', '2026-10', '2026-11']);
+});
+
+test('el total de un período se suma por q(): 0.10 + 0.20 es 0.30, no 0.30000000000000004', () => {
+  const diez = regresa('c1', '2026-10-03', { dias: 1, precioDia: 2, fechaSalida: '2026-10-02' });
+  const veinte = regresa('c2', '2026-10-04', { dias: 1, precioDia: 4, fechaSalida: '2026-10-03' });
+  assert.deepEqual([comisionDe(diez).monto, comisionDe(veinte).monto], [0.1, 0.2]);
+  const [oct] = periodosDePago(cuentaDeEmpleado({ contratos: [diez, veinte], pagos: [] }));
+  assert.strictEqual(oct.total, 0.3);
+  assert.strictEqual(oct.quincenas[0].total, 0.3);
+  assert.strictEqual(sinMarcarDeComision(cuentaDeEmpleado({ contratos: [diez, veinte], pagos: [] }), []).monto, 0.3);
 });
