@@ -90,3 +90,11 @@ test('si el navegador no trae los flujos de compresión, lo dice en español y n
     globalThis.CompressionStream = original;
   }
 });
+
+test('una parte guardada SIN comprimir con un byte cambiado también se niega: solo el CRC la delata', async () => {
+  const zip = await escribirZip([['nota.txt', enBytes('hola, soy una parte corta')]]);
+  const inicio = 30 + 'nota.txt'.length; // justo después de la cabecera local: ahí empiezan los datos
+  const dañado = Uint8Array.from(zip);
+  dañado[inicio + 3] ^= 0x01;
+  await assert.rejects(() => leerZip(dañado), /dañad/i);
+});
