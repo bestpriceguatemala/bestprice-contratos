@@ -60,3 +60,20 @@ lectura exige la credencial de dinero.
 ## Links
 - Diseño general §7, §7b, §11: `docs/superpowers/specs/2026-09-23-sistema-contratos-best-price-design.md`
 - Diseño de la liquidación §7: `docs/superpowers/specs/2026-09-29-liquidacion-a-duenos-design.md`
+
+## Actualización del 13 de octubre de 2026: la pregunta abierta del porcentaje de comisión
+
+Esta decisión movió el costo del dueño del carro y dejó abierta la otra mitad de lo que §7 del diseño general pedía:
+`porcentajeComision`, que sigue en el documento del contrato. Al construir los empleados y sus comisiones se decidió y
+**no se movió**. Resumen (el detalle está en «Pendientes conocidos del dinero», §7b del diseño general):
+
+- **El mostrador tiene que leer el porcentaje del empleado para poder sellarlo en el contrato**, y ese número vive en
+  `empleados`, que la regla deja leer a cualquier sesión. Mover solo el campo del contrato no oculta nada.
+- **El hueco que pesa es la escritura, no la lectura.** `contratos/{id}` y `contratos/{id}/privado/{doc}` los escribe
+  cualquier sesión, así que mover el campo tampoco impediría que alguien cambiara el porcentaje de sus propios contratos.
+  Lo que lo cierra es una regla (el porcentaje de un contrato no cambia al actualizarlo, salvo con la credencial de
+  dinero, y al crearlo es el del empleado que dice `empleadoId`), no un cambio de lugar.
+- **Antes de que un empleado use el mostrador** hay que decidir esa regla. Hoy él es el único usuario.
+
+La lección de esta decisión es la misma de arriba, aplicada a otro campo: un candado se mide por lo que queda afuera, y
+antes de mover un dato conviene preguntar quién lo lee **y quién lo escribe**.
