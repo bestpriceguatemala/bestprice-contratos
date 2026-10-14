@@ -21,12 +21,20 @@
 //    se dibuja lo que se puede (lo que se debe sale de las rentas y los pagos) y se dice.
 //
 // Lo que esta pantalla hace distinto de la de los dueños, por lo que es una comisión y no un costo:
-// - SOLO SE PAGA LO FIRME: una comisión queda firme cuando el carro regresó. La de una renta que sigue afuera es un
-//   estimado (un día de atraso la sube, un descuento la baja): se ve, aparte, y no se puede marcar.
+// - SOLO SE PAGA LO FIRME, Y FIRME ES UN CONTRATO CERRADO (el dueño, 14 de octubre de 2026: «Lo miro cuando el contrato está
+//   cerrado y tengo que pagar quincena o final de mes. Yo decido cuándo lo pago.»): la misma regla con la que se le paga al
+//   dueño de un carro ajeno, y se le pregunta al núcleo (`estadoDeComision`, que pregunta a `estadoContrato`). Una renta cuyo
+//   carro sigue afuera es un estimado (un día de atraso la sube, un descuento la baja); una cuyo carro ya volvió pero cuyo
+//   cliente debe saldo, o tiene la garantía sin liberar, ya tiene su monto y solo espera a cerrar. Las dos se ven, aparte, con
+//   SU razón (`razonDeNoCierre`, las mismas palabras que la ficha del dueño) y sin casilla.
+// - EL DUEÑO PAGA POR QUINCENA Y POR FIN DE MES y decide él cuándo: la ficha deja marcar un período de un clic. No pone plazos, no
+//   dice qué lleva días sin pagarse ni pinta nada de rojo por no haber pagado; solo agrupa lo que hay por la fecha en que regresó
+//   el carro. Nada se marca en silencio: lo que queda fuera de lo marcado sigue a la vista, con su total.
 // - Un empleado con 0 % (Wilder) no tiene nada que pagarle: sus rentas no ofrecen casilla, y se dice cuántas son.
 import { comisionDe } from '../nucleo/comision.js';
 import {
-  agruparPorEmpleado, cuentaDeEmpleado, elegirParaPagoDeComision, totalGeneralDeComisiones, rentasSinPagar,
+  agruparPorEmpleado, cuentaDeEmpleado, elegirParaPagoDeComision, totalGeneralDeComisiones, rentasSinPagar, estadoDeComision,
+  periodosDePago, sinMarcarDeComision,
 } from '../nucleo/comisiones.js';
 import { pagoAnulado } from '../nucleo/liquidacion.js';
 import { porcentajeAnotado, estaActivo, ordenarEmpleados } from '../nucleo/empleado.js';
@@ -42,6 +50,7 @@ import { dinero, fecha, aviso } from '../ui.js';
 import { mostrar } from '../router.js';
 import {
   FORMAS_DE_PAGO, etiquetaDeForma, crearLector, problemaDeLaFechaDelPago, parchearMarcado, alOlvidarElDinero, enElAreaDeDinero,
+  razonDeNoCierre,
 } from './dinero.js';
 
 // El texto libre (nombres, placas, el nombre escrito a mano) se escapa antes de entrar al HTML, igual que en las demás pantallas.
@@ -414,7 +423,7 @@ export function htmlListaDeComisiones(vista) {
         <a href="#/dinero/empleados" class="btn">Empleados</a>
       </div>
       ${vista.falloEmpleados ? barraRoja([MENSAJE_FALLO_EMPLEADOS]) : ''}
-      <p class="dn-explica">Solo se paga la comisión de una renta cuyo carro ya regresó: mientras sigue afuera es un estimado, porque un día de atraso la sube y un descuento la baja.</p>
+      <p class="dn-explica">Solo se paga la comisión de una renta cuyo contrato ya cerró: el carro regresó, no se debe saldo y la garantía está liberada. Es la misma regla con la que se le paga al dueño de un carro ajeno.</p>
       <table class="tabla-carros">
         <thead>
           <tr><th>Empleado</th><th>Porcentaje</th><th>Rentas por pagar</th><th class="dn-derecha">Se le debe</th></tr>
@@ -422,6 +431,75 @@ export function htmlListaDeComisiones(vista) {
         <tbody>${filas}</tbody>${pie}
       </table>
     </div>`;
+}
+
+const NOMBRES_DE_MES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
+/** «octubre 2026» a partir de «2026-10». Solo da nombre a lo que el núcleo ya agrupó. */
+export function nombreDelMes(mes) {
+  const [anio, numero] = String(mes ?? '').split('-').map(Number);
+  return NOMBRES_DE_MES[numero - 1] ? `${NOMBRES_DE_MES[numero - 1]} ${anio}` : String(mes ?? '');
+}
+
+/**
+ * Cómo se llama un período en su botón: «Todo octubre 2026», «1.ª quincena (1–15)» o «2.ª quincena (16–31)». `quincena` es
+ * 0 para el mes completo, 1 o 2. El último día de la segunda quincena es el último del mes (28, 29, 30 o 31).
+ */
+export function etiquetaDelPeriodo(mes, quincena) {
+  if (!quincena) return `Todo ${nombreDelMes(mes)}`;
+  if (quincena === 1) return '1.ª quincena (1–15)';
+  const [anio, numero] = String(mes).split('-').map(Number);
+  return `2.ª quincena (16–${new Date(Date.UTC(anio, numero, 0)).getUTCDate()})`;
+}
+
+/** Los ids de un período (`quincena` 0 es el mes completo), o `[]` si ya no existe. Se pregunta al núcleo cada vez: nunca una lista vieja. */
+export function idsDelPeriodo(cuenta, mes, quincena) {
+  const delMes = periodosDePago(cuenta).find((p) => p.mes === mes);
+  if (!delMes) return [];
+  if (!quincena) return delMes.contratos;
+  return delMes.quincenas.find((x) => x.quincena === quincena)?.contratos ?? [];
+}
+
+/**
+ * «Marcar un período»: por cada mes con algo por pagar, una fila con el botón del mes completo y el de cada quincena que
+ * tenga algo, cada uno con cuántas rentas y cuánto suman. Un clic marca ese período (reemplaza lo marcado), y lo de ese
+ * período que ya no se puede pagar ni aparece. Los períodos los arma el núcleo (`periodosDePago`); aquí solo se dibujan.
+ * No dice nada de plazos ni de lo que lleva sin pagar: el dueño decide cuándo paga. Vacío si no hay nada por pagar.
+ */
+export function htmlPeriodos(cuenta) {
+  const periodos = periodosDePago(cuenta);
+  if (!periodos.length) return '';
+  const boton = (mes, quincena, p) => `<button type="button" class="btn dn-boton-chico" data-cm="periodo" data-mes="${esc(mes)}" data-quincena="${quincena}">${esc(`${etiquetaDelPeriodo(mes, quincena)} · ${p.cuantas} ${palabraRentas(p.cuantas)} · ${dinero(p.total)}`)}</button>`;
+  const filas = periodos.map((p) => `
+      <div class="dn-periodo-fila">
+        <span class="dn-periodo-mes">${esc(nombreDelMes(p.mes))}</span>
+        ${boton(p.mes, 0, p)}${p.quincenas.map((x) => boton(p.mes, x.quincena, x)).join('')}
+      </div>`).join('');
+  return `
+    <div class="dn-periodos">
+      <p class="dn-explica-chica dn-sin-margen">Marcar un período de un clic:</p>${filas}
+    </div>`;
+}
+
+/**
+ * Lo que dice la línea «Sin marcar»: cuántas rentas por pagar quedaron fuera de lo marcado y cuánto suman, para que se vea que
+ * se escogió una parte y no todo. Vacía —y escondida— si no hay nada marcado (entonces «Por pagar en total» ya lo dice todo) o
+ * si lo marcado es todo. Las cifras salen del núcleo (`sinMarcarDeComision`); aquí solo se dicen.
+ */
+export function textoDeSinMarcar(marcadas, sinMarcar) {
+  const n = sinMarcar.contratos.length;
+  if (!marcadas.cuantas || !n) return '';
+  return `Sin marcar: ${n} ${palabraRentas(n)} · ${dinero(sinMarcar.monto)}`;
+}
+
+/** Pone la línea «Sin marcar» en la ficha YA DIBUJADA, sin redibujarla: la plantilla dice lo mismo con los mismos datos. */
+export function parchearSinMarcar(raiz, texto) {
+  const nodo = raiz.querySelector('#cm-sin-marcar');
+  if (!nodo) return;
+  nodo.textContent = texto;
+  nodo.hidden = !texto;
 }
 
 function htmlFilaPorPagar(contrato, ctx) {
@@ -449,7 +527,7 @@ function htmlBloquePorPagar(ctx) {
   const hayPorPagar = cuenta.porPagar.length > 0;
   const filas = hayPorPagar
     ? cuenta.porPagar.map((c) => htmlFilaPorPagar(c, ctx)).join('')
-    : '<tr><td colspan="9" class="pendiente dn-vacio dn-sin-clic">No hay comisiones firmes por pagar.</td></tr>';
+    : '<tr><td colspan="9" class="pendiente dn-vacio dn-sin-clic">No hay comisiones por pagar.</td></tr>';
 
   const formulario = ui.pagando ? `
     <div id="dn-pago-form" class="dn-caja dn-pago-form">
@@ -470,17 +548,20 @@ function htmlBloquePorPagar(ctx) {
       <p id="dn-mensaje-pago" class="barra-lectura-fallida dn-mensaje" role="alert" ${ui.mensajePago ? '' : 'hidden'}>${esc(ui.mensajePago)}</p>
     </div>` : '';
 
-  // Las que ya regresaron y no generan comisión (el 0 % de Wilder, o una base que el descuento se comió): no hay nada que
-  // pagarles ni marcar. Se cuentan para que no se pierdan de vista sin llenar la pantalla de filas en cero.
+  // Las que ya cerraron y no generan comisión (el 0 % de Wilder, o una base que el descuento se comió): no hay nada que pagarles
+  // ni marcar. Se cuentan para que no se pierdan de vista sin llenar la pantalla de filas en cero.
   const n = cuenta.sinComision.length;
   const gana0 = entrada.registro && porcentajeAnotado(entrada.registro.porcentajeComision) === 0;
   const sinComision = n
-    ? `<p class="dn-explica-chica">${n} ${n === 1 ? 'renta ya regresó y no genera' : 'rentas ya regresaron y no generan'} comisión${gana0 ? ': su porcentaje es 0 %' : ' (Q0.00)'}.</p>`
+    ? `<p class="dn-explica-chica">${n} ${n === 1 ? 'renta ya cerró y no genera' : 'rentas ya cerraron y no generan'} comisión${gana0 ? ': su porcentaje es 0 %' : ' (Q0.00)'}.</p>`
     : '';
+  // Lo que quedó fuera de lo marcado, con su total (ver `textoDeSinMarcar`): se ve que se escogió una parte, no todo.
+  const textoSinMarcar = textoDeSinMarcar(marcadas, sinMarcarDeComision(cuenta, marcadas.ids));
 
   return `
     <section class="carro-seccion">
       <h2>Por pagar</h2>
+      ${htmlPeriodos(cuenta)}
       <table class="tabla-carros">
         <thead>
           <tr>
@@ -495,7 +576,8 @@ function htmlBloquePorPagar(ctx) {
       <div class="dn-caja dn-resumen">
         <div>Por pagar en total<br><strong class="dn-total">${esc(dinero(cuenta.totalPorPagar))}</strong></div>
         <div id="dn-marcado" class="dn-marcado">Marcado: <strong id="dn-marcadas">${marcadas.cuantas}</strong> <span id="dn-marcadas-palabra">${palabraRentas(marcadas.cuantas)}</span><br>
-          <span class="dn-rotulo">Total marcado</span> <strong id="dn-total-marcado" class="dn-total-marcado">${esc(dinero(marcadas.total))}</strong></div>
+          <span class="dn-rotulo">Total marcado</span> <strong id="dn-total-marcado" class="dn-total-marcado">${esc(dinero(marcadas.total))}</strong>
+          <br><span id="cm-sin-marcar" class="dn-gris"${textoSinMarcar ? '' : ' hidden'}>${esc(textoSinMarcar)}</span></div>
         <button type="button" class="btn btn-primario dn-boton-suelto" id="dn-registrar" data-cm="registrar" ${marcadas.cuantas === 0 || ui.pagando ? 'disabled' : ''}>Registrar pago</button>
       </div>
       ${formulario}
@@ -503,10 +585,15 @@ function htmlBloquePorPagar(ctx) {
 }
 
 /**
- * Lo que no es una comisión firme todavía, o no se puede pagar: las rentas cuyo carro sigue afuera (con su estimado) y las
- * que no traen un porcentaje legible. Se ven pero no se pueden marcar ni suman al total.
+ * Lo que todavía no se paga: las rentas cuyo contrato no ha cerrado —el carro sigue afuera (con su estimado), o ya volvió y el
+ * cliente debe saldo o falta liberar la garantía— y las que no traen un porcentaje legible. Se ven pero no se pueden marcar ni
+ * suman al total, y cada una dice POR QUÉ con las mismas palabras que la ficha del dueño de un carro ajeno (`razonDeNoCierre`):
+ * un renglón en gris que no dice su razón obliga a buscarla en otra pantalla.
+ *
+ * Lo que puede cambiar y lo que solo espera a cerrar no se mezclan ni en la fila ni en los totales de abajo: «estimada» es solo de
+ * la que sigue afuera (`estadoDeComision`), y la que ya volvió tiene su monto y lo único que le falta es cerrar.
  */
-function htmlBloqueAunNoEsFirme(ctx) {
+function htmlBloqueTodaviaNoSePaga(ctx) {
   const { cuenta } = ctx.entrada;
   const filasNoFirmes = cuenta.noFirmes.map((c) => `
     <tr class="es-fuera dn-sin-clic" data-id="${esc(c.id)}">
@@ -515,8 +602,8 @@ function htmlBloqueAunNoEsFirme(ctx) {
       <td>${esc(c.carroPlacas || '—')}</td>
       <td>${esc(c.clienteNombre || '—')}</td>
       <td>${htmlDeDias(c)}</td>
-      <td class="dn-derecha">${esc(dinero(comisionDe(c).monto))} <span class="dn-gris">estimada</span></td>
-      <td>El carro todavía no regresa.</td>
+      <td class="dn-derecha">${esc(dinero(comisionDe(c).monto))}${estadoDeComision(c) === 'estimada' ? ' <span class="dn-gris">estimada</span>' : ''}</td>
+      <td>${esc(razonDeNoCierre(c))}</td>
     </tr>`);
   const filasSinPorcentaje = cuenta.sinPorcentaje.map((c) => `
     <tr class="es-fuera dn-sin-clic" data-id="${esc(c.id)}">
@@ -529,20 +616,25 @@ function htmlBloqueAunNoEsFirme(ctx) {
       <td><span class="dn-alerta">Esta renta no trae un porcentaje de comisión legible, así que no se sabe cuánto es.</span></td>
     </tr>`);
   const filas = [...filasNoFirmes, ...filasSinPorcentaje];
-  const estimado = cuenta.noFirmes.length
-    ? `<p class="dn-explica-chica">Estimado de las que siguen afuera: ${esc(dinero(cuenta.totalEstimado))}. No es deuda todavía: puede subir con un día de atraso o bajar con un descuento.</p>`
+  const hayEstimadas = cuenta.noFirmes.some((c) => estadoDeComision(c) === 'estimada');
+  const hayPorCerrar = cuenta.noFirmes.some((c) => estadoDeComision(c) === 'sin-cerrar');
+  const estimado = hayEstimadas
+    ? `<p class="dn-explica-chica">De las que siguen afuera, estimado: ${esc(dinero(cuenta.totalEstimado))}. No es deuda todavía: puede subir con un día de atraso o bajar con un descuento.</p>`
+    : '';
+  const porCerrar = hayPorCerrar
+    ? `<p class="dn-explica-chica">De las que ya regresaron, el monto ya es ese: ${esc(dinero(cuenta.totalPorCerrar))}. Solo falta que cierre el contrato.</p>`
     : '';
   return `
     <section class="carro-seccion">
-      <h2>Aún no es firme</h2>
-      <p class="dn-explica-chica">Estas rentas se ven pero no se pueden marcar ni suman al total: la comisión se fija cuando el carro regresa.</p>
+      <h2>Todavía no se paga</h2>
+      <p class="dn-explica-chica">Estas rentas se ven pero no se pueden marcar ni suman al total: la comisión se paga cuando el contrato cierra.</p>
       <table class="tabla-carros dn-tabla-gris">
         <thead>
           <tr><th>Salida</th><th>Contrato</th><th>Placas</th><th>Cliente</th><th>Días</th><th class="dn-derecha">Comisión</th><th>Por qué no se paga</th></tr>
         </thead>
-        <tbody>${filas.length ? filas.join('') : '<tr><td colspan="7" class="pendiente dn-vacio dn-sin-clic">Ninguna renta está esperando que regrese su carro.</td></tr>'}</tbody>
+        <tbody>${filas.length ? filas.join('') : '<tr><td colspan="7" class="pendiente dn-vacio dn-sin-clic">Ninguna renta está esperando a que cierre su contrato.</td></tr>'}</tbody>
       </table>
-      ${estimado}
+      ${estimado}${porCerrar}
     </section>`;
 }
 
@@ -662,7 +754,7 @@ export function htmlFichaDeComisiones(ctx) {
       ${htmlPagosQueCambiaron(ctx)}
       ${entrada.sinEnlazar ? htmlEnlace(ctx) : ''}
       ${htmlBloquePorPagar(ctx)}
-      ${htmlBloqueAunNoEsFirme(ctx)}
+      ${htmlBloqueTodaviaNoSePaga(ctx)}
       ${htmlBloqueYaPagado(ctx)}
     </div>`;
 }
@@ -789,7 +881,17 @@ async function pintarCuentas(contenedor, claveDeFicha) {
   // ----- Marcar rentas: solo se mueve el total, no se redibuja nada -----
   function actualizarMarcado() {
     if (!entrada) return;
-    parchearMarcado(raiz, resumenDeMarcadasDeComision(entrada, ui.marcados), { pagando: ui.pagando });
+    const marcadas = resumenDeMarcadasDeComision(entrada, ui.marcados);
+    parchearMarcado(raiz, marcadas, { pagando: ui.pagando });
+    parchearSinMarcar(raiz, textoDeSinMarcar(marcadas, sinMarcarDeComision(entrada.cuenta, marcadas.ids)));
+  }
+
+  // Las casillas de las filas (y la de «marcar todas») siguen a lo marcado: sin redibujar, para no mover la página.
+  function sincronizarCasillas() {
+    const filas = [...raiz.querySelectorAll('[data-cm="marcar"]')];
+    for (const fila of filas) fila.checked = ui.marcados.has(fila.dataset.id);
+    const todas = raiz.querySelector('[data-cm="marcar-todas"]');
+    if (todas) todas.checked = filas.length > 0 && filas.every((fila) => fila.checked);
   }
 
   // ----- Registrar el pago -----
@@ -917,6 +1019,12 @@ async function pintarCuentas(contenedor, claveDeFicha) {
         case 'guardar-pago': guardarPago(); return;
         case 'enlazar': enlazar(); return;
         case 'anular-pago': anularPago(accion.dataset.id); return;
+        case 'periodo':
+          // Un clic marca el período entero (reemplaza lo marcado); lo que quedó fuera sigue a la vista, con su total.
+          ui.marcados = new Set(idsDelPeriodo(entrada.cuenta, accion.dataset.mes, Number(accion.dataset.quincena)));
+          sincronizarCasillas();
+          actualizarMarcado();
+          return;
         default: return;
       }
     }
@@ -930,14 +1038,15 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     if (caja.matches?.('[data-cm="marcar"]')) {
       if (caja.checked) ui.marcados.add(caja.dataset.id);
       else ui.marcados.delete(caja.dataset.id);
+      sincronizarCasillas();
       actualizarMarcado();
     } else if (caja.matches?.('[data-cm="marcar-todas"]')) {
       // La casilla del encabezado marca o desmarca todas las que se pueden pagar, y cada casilla de fila la sigue.
       for (const fila of raiz.querySelectorAll('[data-cm="marcar"]')) {
-        fila.checked = caja.checked;
         if (caja.checked) ui.marcados.add(fila.dataset.id);
         else ui.marcados.delete(fila.dataset.id);
       }
+      sincronizarCasillas();
       actualizarMarcado();
     } else if (caja.id === 'dn-forma') {
       ui.forma = caja.value;

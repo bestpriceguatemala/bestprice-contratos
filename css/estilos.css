@@ -1605,6 +1605,25 @@ body {
   margin-bottom: 16px;
 }
 
+/* «Marcar un período» en la ficha de comisiones: por cada mes, una fila con su nombre y los botones del mes y de sus quincenas. */
+.dn-periodos {
+  margin: 0 0 16px;
+}
+
+.dn-periodo-fila {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.dn-periodo-mes {
+  min-width: 110px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
 /* La casilla de «enlazar» en la ficha de comisiones: pegada a su frase, debajo de la fila del selector. */
 .dn-casilla-enlace {
   display: flex;

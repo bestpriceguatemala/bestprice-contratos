@@ -11,12 +11,14 @@ import {
   armarVistaDeComisiones, resumenDeMarcadasDeComision, pagosDeLaCuentaDeComision, registrarElPagoDeComision, anularElPagoDeComision,
   textoConfirmarAnularPagoDeComision, htmlListaDeComisiones, htmlFichaDeComisiones, htmlFalloDeComisiones, mensajeSeguroDeComision,
   rutaDeComisiones, textoDePagoQueCambio, porcentajesDeLasRentas, textoDeLaTasa, textoConfirmarEnlazar,
+  htmlPeriodos, idsDelPeriodo, etiquetaDelPeriodo, nombreDelMes, textoDeSinMarcar, parchearSinMarcar,
   MENSAJE_FALLO_RENTAS, MENSAJE_FALLO_PAGOS_DE_COMISION, MENSAJE_FALLO_EMPLEADOS, MENSAJE_COMISION_SIN_COMPROBAR,
   MENSAJE_COMISION_SIN_COMPROBAR_RENTAS, MENSAJE_ANULAR_COMISION_SIN_COMPROBAR, MENSAJE_COMISION_FALLO,
 } from '../js/pantallas/comisiones.js';
-import { cerrarElDinero, parchearMarcado, alOlvidarElDinero } from '../js/pantallas/dinero.js';
+import { cerrarElDinero, parchearMarcado, alOlvidarElDinero, razonDeNoCierre } from '../js/pantallas/dinero.js';
 import { MENSAJE_COMISION_SIN_RENTAS, MENSAJE_COMISION_SIN_DINERO } from '../js/datos.js';
 import { comisionDe } from '../js/nucleo/comision.js';
+import { cuentaDeEmpleado, sinMarcarDeComision } from '../js/nucleo/comisiones.js';
 import { renta, rentaDeAntes, pagoDeComision, EMPLEADOS } from './fixtures/rentasConComision.mjs';
 
 const { ana, wilder, luis } = EMPLEADOS;
@@ -154,9 +156,9 @@ test('Wilder: su ficha no ofrece ninguna casilla ni botón de pagar, y dice cuá
   assert.doesNotMatch(html, /data-cm="marcar"/, 'ninguna casilla de fila');
   assert.doesNotMatch(html, /data-cm="marcar-todas"/, 'ni la de marcar todas');
   assert.match(html, /id="dn-registrar"[^>]*disabled/, 'Registrar pago apagado');
-  assert.match(texto(html), /2 rentas ya regresaron y no generan comisión: su porcentaje es 0 %/);
+  assert.match(texto(html), /2 rentas ya cerraron y no generan comisión: su porcentaje es 0 %/);
   assert.match(texto(html), /Por pagar en total Q0\.00/);
-  assert.match(texto(html), /No hay comisiones firmes por pagar/);
+  assert.match(texto(html), /No hay comisiones por pagar/);
   // La que sigue afuera se ve como estimada en Q0.00, no como deuda.
   assert.match(texto(html), /Q0\.00 estimada/);
 });
@@ -183,13 +185,13 @@ test('lo marcado suma lo mismo que se guardaría, y una renta no firme no entra 
 // La ficha: tres bloques, en este orden
 // ---------------------------------------------------------------------------
 
-test('la ficha de Ana: por pagar (con casillas y de dónde sale cada número), aún no es firme y ya pagado, en ese orden', () => {
+test('la ficha de Ana: por pagar (con casillas y de dónde sale cada número), todavía no se paga y ya pagado, en ese orden', () => {
   const lectura = lecturaOk({
     contratos: [firme('a1', { numero: 7 }), abierta('a2', { numero: 8 }), firme('a3', { numero: 9 })],
     pagos: [pagoDeComision({ id: 'p1', monto: 140, contratos: ['a3'] })],
   });
   const html = ficha('Ana López', { lectura });
-  const posiciones = ['Por pagar', 'Aún no es firme', 'Ya pagado'].map((t) => html.indexOf(`<h2>${t}</h2>`));
+  const posiciones = ['Por pagar', 'Todavía no se paga', 'Ya pagado'].map((t) => html.indexOf(`<h2>${t}</h2>`));
   assert.ok(posiciones.every((p) => p > -1) && posiciones[0] < posiciones[1] && posiciones[1] < posiciones[2], posiciones.join(','));
   const porPagar = html.slice(posiciones[0], posiciones[1]);
   assert.match(porPagar, /data-cm="marcar" data-id="a1"/);
@@ -205,7 +207,7 @@ test('la ficha de Ana: por pagar (con casillas y de dónde sale cada número), a
 test('el total «Por pagar» de la ficha es el de la cuenta, y el estimado se dice aparte sin llamarlo deuda', () => {
   const html = ficha('Ana López', { lectura: lecturaOk({ contratos: [firme('a1'), abierta('a2')] }) });
   assert.match(texto(html), /Por pagar en total Q140\.00/);
-  assert.match(texto(html), /Estimado de las que siguen afuera: Q140\.00\. No es deuda todavía/);
+  assert.match(texto(html), /De las que siguen afuera, estimado: Q140\.00\. No es deuda todavía/);
 });
 
 test('la ficha no pone casillas de las comisiones no firmes, y la de «marcar todas» solo existe si hay algo por pagar', () => {
@@ -249,7 +251,7 @@ test('«Ya pagado»: un pago anulado sigue ahí, apagado y sin botón, con «Anu
   assert.equal((pagado.match(/data-cm="anular-pago"/g) ?? []).length, 1, 'solo el vigente tiene botón');
   assert.match(pagado, /data-cm="anular-pago" data-id="p1"/);
   // Y el de la anulada volvió a «Por pagar».
-  assert.match(html.slice(0, html.indexOf('<h2>Aún no es firme</h2>')), /data-cm="marcar" data-id="a2"/);
+  assert.match(html.slice(0, html.indexOf('<h2>Todavía no se paga</h2>')), /data-cm="marcar" data-id="a2"/);
 });
 
 test('«Ya pagado» sin pagos dice que todavía no se le ha pagado nada', () => {
@@ -267,7 +269,7 @@ test('si lo pagado ya no coincide con lo que suman esas rentas (se corrigió un 
   assert.doesNotMatch(texto(ficha('Ana López', { lectura: lecturaOk({ contratos: [firme('a1')], pagos: [pagoDeComision({ id: 'p1', monto: 140, contratos: ['a1'] })] }) })), /hoy esas rentas suman/);
 });
 
-test('una renta sin porcentaje legible sale en «Aún no es firme» con su razón y sin casilla, y la lista avisa cuántas son', () => {
+test('una renta sin porcentaje legible sale en «Todavía no se paga» con su razón y sin casilla, y la lista avisa cuántas son', () => {
   const sin = { ...firme('a1'), porcentajeComision: '' };
   const lectura = lecturaOk({ contratos: [sin, firme('a2')] });
   const html = ficha('Ana López', { lectura });
@@ -635,7 +637,9 @@ test('marcar una casilla parcha «Marcado: N», el total y los botones con la mi
     for (const antes of casos) {
       for (const despues of casos) {
         const pagina = paginaFalsa(ficha('Ana López', { lectura, ui: uiVacia({ marcados: new Set(antes), pagando }) }));
-        parchearMarcado(pagina.raiz, resumenDeMarcadasDeComision(anaDe(lectura), new Set(despues)), { pagando });
+        const marcadas = resumenDeMarcadasDeComision(anaDe(lectura), new Set(despues));
+        parchearMarcado(pagina.raiz, marcadas, { pagando });
+        parchearSinMarcar(pagina.raiz, textoDeSinMarcar(marcadas, sinMarcarDeComision(anaDe(lectura).cuenta, marcadas.ids)));
         const desdeCero = paginaFalsa(ficha('Ana López', { lectura, ui: uiVacia({ marcados: new Set(despues), pagando }) })).visible();
         assert.equal(pagina.visible(), desdeCero, `de ${antes.length} a ${despues.length}, formulario ${pagando ? 'abierto' : 'cerrado'}`);
       }
@@ -729,4 +733,228 @@ test('el enlace «Comisiones» y «Empleados» están en el área de dinero (la 
 test('las comisiones sí usan comisionDe para cada cifra que dibujan', () => {
   assert.match(PANTALLA, /comisionDe\(contrato\)/);
   assert.equal(comisionDe(firme('x')).monto, 140);
+});
+
+// ---------------------------------------------------------------------------
+// «Firme» es un contrato CERRADO: lo que todavía no se paga dice SU razón
+// ---------------------------------------------------------------------------
+
+const debiendo = (id, extra = {}) => renta({ id, recibidoEl: '2026-10-05', danos: 200, cerrada: false, ...extra });
+const conGarantia = (id, extra = {}) => renta({ id, recibidoEl: '2026-10-05', garantiaSinLiberar: true, ...extra });
+const todoLoQueNoSePaga = (html) => html.slice(html.indexOf('<h2>Todavía no se paga</h2>'), html.indexOf('<h2>Ya pagado</h2>'));
+
+test('una renta con el carro de vuelta y el cliente debiendo NO es pagable y dice «Saldo pendiente», no que el carro sigue afuera', () => {
+  const lectura = lecturaOk({ contratos: [debiendo('d1', { numero: 21 }), firme('a2', { numero: 22 })] });
+  const html = ficha('Ana López', { lectura });
+  assert.doesNotMatch(html.slice(0, html.indexOf('<h2>Todavía no se paga</h2>')), /data-cm="marcar" data-id="d1"/, 'sin casilla');
+  const abajo = texto(todoLoQueNoSePaga(html));
+  assert.match(abajo, /21 P-21AAA Juan Pérez 4 días Q140\.00 Saldo pendiente: Q200\.00\./, 'su fila, con SU razón');
+  assert.doesNotMatch(abajo, /El carro todavía no regresa/, 'el carro NO está afuera: está en el patio');
+  assert.match(texto(html), /Por pagar en total Q140\.00/, 'solo suma la que sí cerró');
+});
+
+test('la razón de una renta con la garantía sin liberar es esa, con la cifra', () => {
+  const abajo = texto(todoLoQueNoSePaga(ficha('Ana López', { lectura: lecturaOk({ contratos: [conGarantia('g1')] }) })));
+  assert.match(abajo, /Garantía sin liberar: Q5,000\.00\./);
+  assert.doesNotMatch(abajo, /El carro todavía no regresa/);
+});
+
+test('las razones salen de razonDeNoCierre: las mismas palabras que la ficha del dueño de un carro ajeno, para el mismo contrato', () => {
+  for (const c of [debiendo('d1'), conGarantia('g1'), abierta('a1')]) {
+    const abajo = texto(todoLoQueNoSePaga(ficha('Ana López', { lectura: lecturaOk({ contratos: [c] }) })));
+    assert.ok(abajo.includes(razonDeNoCierre(c)), `${c.id}: ${razonDeNoCierre(c)}`);
+  }
+});
+
+test('lo que puede cambiar y lo que solo espera a cerrar NO se suman bajo la palabra «estimado»: dos frases, dos cifras', () => {
+  const lectura = lecturaOk({ contratos: [abierta('afuera'), debiendo('debe'), conGarantia('garantia', { empleado: { ...ana, porcentajeComision: 10 } })] });
+  const abajo = texto(todoLoQueNoSePaga(ficha('Ana López', { lectura })));
+  assert.match(abajo, /De las que siguen afuera, estimado: Q140\.00\. No es deuda todavía: puede subir con un día de atraso o bajar con un descuento\./);
+  assert.match(abajo, /De las que ya regresaron, el monto ya es ese: Q420\.00\. Solo falta que cierre el contrato\./, 'Q140 de la que debe + Q280 de la de garantía al 10 %');
+  assert.equal((abajo.match(/estimada/g) ?? []).length, 1, 'solo la que sigue afuera dice «estimada»');
+  assert.match(abajo, /Q140\.00 estimada El carro todavía no regresa/);
+});
+
+test('con nada que esperar no hay frases de estimado ni de «ya regresaron»', () => {
+  const abajo = texto(todoLoQueNoSePaga(ficha('Ana López', { lectura: lecturaOk({ contratos: [firme('a1')] }) })));
+  assert.match(abajo, /Ninguna renta está esperando a que cierre su contrato/);
+  assert.doesNotMatch(abajo, /estimado|el monto ya es ese/);
+});
+
+test('el título ya no dice «firme» por una mitad que sí lo es, ni «regrese» donde la condición es que cierre', () => {
+  const html = ficha('Ana López', { lectura: lecturaOk({ contratos: [firme('a1'), debiendo('d1')] }) });
+  assert.doesNotMatch(html, /Aún no es firme|esperando que regrese|comisiones firmes/);
+  assert.match(html, /<h2>Todavía no se paga<\/h2>/);
+  assert.match(texto(html), /la comisión se paga cuando el contrato cierra/);
+  assert.match(texto(htmlListaDeComisiones(armarVistaDeComisiones(lecturaOk({ contratos: [firme('a1')] })))), /contrato ya cerró: el carro regresó, no se debe saldo y la garantía está liberada/);
+});
+
+test('cuando el cliente paga y el contrato cierra, la renta pasa de «todavía no se paga» a «por pagar» con la misma comisión', () => {
+  const antes = ficha('Ana López', { lectura: lecturaOk({ contratos: [debiendo('d1')] }) });
+  const despues = ficha('Ana López', { lectura: lecturaOk({ contratos: [renta({ id: 'd1', recibidoEl: '2026-10-05', danos: 200 })] }) });
+  assert.doesNotMatch(antes, /data-cm="marcar" data-id="d1"/);
+  assert.match(despues, /data-cm="marcar" data-id="d1"/);
+  assert.match(texto(despues), /Por pagar en total Q140\.00/);
+});
+
+test('registrar: si mientras armaba el pago el cliente volvió a deber (el contrato dejó de estar cerrado), no se paga: «cambio»', async () => {
+  const d = deps({ contratos: [debiendo('a1'), firme('a2')] });
+  const r = await registrar(d);
+  assert.equal(r.tipo, 'cambio');
+  assert.equal(d.estado.guardados.length, 0, 'ni siquiera la que sí cerró: él vio un monto y se guardaría otro');
+});
+
+// ---------------------------------------------------------------------------
+// Marcar un período de un clic (el dueño paga por quincena y por fin de mes)
+// ---------------------------------------------------------------------------
+
+const regresaEl = (id, regreso, extra = {}) => {
+  const salida = new Date(`${regreso}T12:00:00Z`);
+  salida.setUTCDate(salida.getUTCDate() - 2);
+  return renta({ id, fechaSalida: salida.toISOString().slice(0, 10), dias: 2, recibidoEl: regreso, ...extra });
+};
+/** Cinco rentas de Ana de 2 días (Q70 cada una): dos en la 1.ª quincena de octubre, tres en la 2.ª. */
+const deOctubre = () => [
+  regresaEl('o1', '2026-10-03'), regresaEl('o2', '2026-10-15'), regresaEl('o3', '2026-10-16'), regresaEl('o4', '2026-10-31'), regresaEl('o5', '2026-10-31'),
+];
+const cuentaDeAna = (contratos, pagos = []) => cuentaDeEmpleado({ contratos, pagos });
+
+test('los nombres: «octubre 2026», «Todo octubre 2026», «1.ª quincena (1–15)» y «2.ª quincena (16–31)» con el último día del mes de verdad', () => {
+  assert.equal(nombreDelMes('2026-10'), 'octubre 2026');
+  assert.equal(nombreDelMes('2026-01'), 'enero 2026');
+  assert.equal(nombreDelMes('2026-12'), 'diciembre 2026');
+  assert.equal(etiquetaDelPeriodo('2026-10', 0), 'Todo octubre 2026');
+  assert.equal(etiquetaDelPeriodo('2026-10', 1), '1.ª quincena (1–15)');
+  assert.equal(etiquetaDelPeriodo('2026-10', 2), '2.ª quincena (16–31)');
+  assert.equal(etiquetaDelPeriodo('2026-11', 2), '2.ª quincena (16–30)');
+  assert.equal(etiquetaDelPeriodo('2026-02', 2), '2.ª quincena (16–28)');
+  assert.equal(etiquetaDelPeriodo('2028-02', 2), '2.ª quincena (16–29)', 'bisiesto');
+});
+
+test('la ficha ofrece, por mes, el botón del mes completo y de cada quincena, con cuántas rentas y cuánto suman', () => {
+  const html = ficha('Ana López', { lectura: lecturaOk({ contratos: deOctubre() }) });
+  const periodos = html.slice(html.indexOf('class="dn-periodos"'), html.indexOf('<table'));
+  assert.match(texto(periodos), /Marcar un período de un clic: octubre 2026 Todo octubre 2026 · 5 rentas · Q350\.00 1\.ª quincena \(1–15\) · 2 rentas · Q140\.00 2\.ª quincena \(16–31\) · 3 rentas · Q210\.00/);
+  assert.match(periodos, /data-cm="periodo" data-mes="2026-10" data-quincena="0"/);
+  assert.match(periodos, /data-cm="periodo" data-mes="2026-10" data-quincena="1"/);
+  assert.match(periodos, /data-cm="periodo" data-mes="2026-10" data-quincena="2"/);
+});
+
+test('un mes sin nada en una quincena no ofrece ese botón, y sin nada por pagar no hay bloque de períodos', () => {
+  const soloPrimera = htmlPeriodos(cuentaDeAna([regresaEl('o1', '2026-10-03')]));
+  assert.match(soloPrimera, /data-quincena="1"/);
+  assert.doesNotMatch(soloPrimera, /data-quincena="2"/);
+  assert.equal(htmlPeriodos(cuentaDeAna([abierta('a1'), debiendo('d1')])), '', 'lo que no cierra no tiene período');
+  assert.equal(htmlPeriodos(cuentaDeAna([])), '');
+  assert.doesNotMatch(ficha('Ana López', { lectura: lecturaOk({ contratos: [abierta('a1')] }) }), /dn-periodos/);
+});
+
+test('los meses salen del más viejo al más nuevo, cada uno con su nombre', () => {
+  const html = htmlPeriodos(cuentaDeAna([regresaEl('n1', '2026-11-20'), regresaEl('s1', '2026-09-02'), regresaEl('o1', '2026-10-17')]));
+  const nombres = [...html.matchAll(/<span class="dn-periodo-mes">([^<]+)</g)].map((m) => m[1]);
+  assert.deepEqual(nombres, ['septiembre 2026', 'octubre 2026', 'noviembre 2026']);
+});
+
+test('idsDelPeriodo: el mes completo, una quincena, y nada si ya no existe; siempre de la cuenta de AHORA', () => {
+  const cuenta = cuentaDeAna(deOctubre());
+  assert.deepEqual(idsDelPeriodo(cuenta, '2026-10', 0).sort(), ['o1', 'o2', 'o3', 'o4', 'o5']);
+  assert.deepEqual(idsDelPeriodo(cuenta, '2026-10', 1).sort(), ['o1', 'o2']);
+  assert.deepEqual(idsDelPeriodo(cuenta, '2026-10', 2).sort(), ['o3', 'o4', 'o5']);
+  assert.deepEqual(idsDelPeriodo(cuenta, '2026-11', 0), []);
+  assert.deepEqual(idsDelPeriodo(cuenta, '2026-10', 3), []);
+  const yaPagada = cuentaDeAna(deOctubre(), [pagoDeComision({ id: 'p', monto: 140, contratos: ['o1', 'o2'] })]);
+  assert.deepEqual(idsDelPeriodo(yaPagada, '2026-10', 1), [], 'lo ya pagado no se vuelve a ofrecer');
+});
+
+test('marcar una quincena suma EXACTO lo que dice su botón, y es lo que se guardaría', () => {
+  const lectura = lecturaOk({ contratos: deOctubre() });
+  const entrada = anaDe(lectura);
+  const ids = idsDelPeriodo(entrada.cuenta, '2026-10', 2);
+  const marcadas = resumenDeMarcadasDeComision(entrada, new Set(ids));
+  assert.deepEqual([marcadas.cuantas, marcadas.total], [3, 210]);
+  assert.match(ficha('Ana López', { lectura }), /2\.ª quincena \(16–31\) · 3 rentas · Q210\.00/);
+});
+
+test('NADA SE MARCA EN SILENCIO: tras marcar una quincena, lo que quedó fuera sigue a la vista con su total', () => {
+  const lectura = lecturaOk({ contratos: deOctubre() });
+  const entrada = anaDe(lectura);
+  const marcados = new Set(idsDelPeriodo(entrada.cuenta, '2026-10', 1));
+  const html = ficha('Ana López', { lectura, ui: uiVacia({ marcados }) });
+  assert.match(texto(html), /Marcado: 2 rentas Total marcado Q140\.00 Sin marcar: 3 rentas · Q210\.00/);
+  assert.doesNotMatch(html, /id="cm-sin-marcar"[^>]*hidden/, 'la línea se ve');
+  // Las filas de lo no marcado siguen estando, con su casilla sin marcar.
+  const casilla = (id) => new RegExp(`<input[^>]*data-cm="marcar" data-id="${id}"[^>]*>`).exec(html)?.[0] ?? '';
+  for (const id of ['o3', 'o4', 'o5']) {
+    assert.ok(casilla(id), `${id} sigue en la lista, con su casilla`);
+    assert.doesNotMatch(casilla(id), /checked/, `${id} no está marcada`);
+  }
+  for (const id of ['o1', 'o2']) assert.match(casilla(id), /checked/, `${id} sí`);
+  assert.match(texto(html), /Por pagar en total Q350\.00/, 'el total de lo que se debe no cambia al marcar');
+});
+
+test('la línea «Sin marcar» solo aparece cuando se escogió una parte: sin nada marcado, o con todo marcado, no dice nada', () => {
+  const lectura = lecturaOk({ contratos: deOctubre() });
+  const entrada = anaDe(lectura);
+  const todas = new Set(idsDelPeriodo(entrada.cuenta, '2026-10', 0));
+  for (const marcados of [new Set(), todas]) {
+    const html = ficha('Ana López', { lectura, ui: uiVacia({ marcados }) });
+    assert.match(html, /id="cm-sin-marcar" class="dn-gris" hidden><\/span>/, `${marcados.size} marcadas`);
+    assert.doesNotMatch(texto(html), /Sin marcar/);
+  }
+  const algunas = resumenDeMarcadasDeComision(entrada, new Set(['o1']));
+  assert.equal(textoDeSinMarcar(algunas, sinMarcarDeComision(entrada.cuenta, algunas.ids)), 'Sin marcar: 4 rentas · Q280.00');
+  assert.equal(textoDeSinMarcar({ cuantas: 0 }, { contratos: ['a'], monto: 70 }), '');
+  assert.equal(textoDeSinMarcar({ cuantas: 2 }, { contratos: [], monto: 0 }), '');
+  assert.equal(textoDeSinMarcar({ cuantas: 1 }, { contratos: ['a'], monto: 70 }), 'Sin marcar: 1 renta · Q70.00', 'singular');
+});
+
+test('parchearSinMarcar pone el texto y lo muestra, o lo vacía y lo esconde', () => {
+  const nodo = { textContent: '', hidden: true };
+  const raiz = { querySelector: (id) => (id === '#cm-sin-marcar' ? nodo : null) };
+  parchearSinMarcar(raiz, 'Sin marcar: 3 rentas · Q210.00');
+  assert.deepEqual(nodo, { textContent: 'Sin marcar: 3 rentas · Q210.00', hidden: false });
+  parchearSinMarcar(raiz, '');
+  assert.deepEqual(nodo, { textContent: '', hidden: true });
+  assert.doesNotThrow(() => parchearSinMarcar({ querySelector: () => null }, 'x'), 'sin la línea en la página no revienta');
+});
+
+test('el parche y la plantilla dicen lo mismo marcando un período (con la línea «Sin marcar» incluida)', () => {
+  const lectura = lecturaOk({ contratos: deOctubre() });
+  const entrada = anaDe(lectura);
+  const periodos = [[], idsDelPeriodo(entrada.cuenta, '2026-10', 1), idsDelPeriodo(entrada.cuenta, '2026-10', 2), idsDelPeriodo(entrada.cuenta, '2026-10', 0)];
+  for (const antes of periodos) {
+    for (const despues of periodos) {
+      const pagina = paginaFalsa(ficha('Ana López', { lectura, ui: uiVacia({ marcados: new Set(antes) }) }));
+      const marcadas = resumenDeMarcadasDeComision(entrada, new Set(despues));
+      parchearMarcado(pagina.raiz, marcadas, { pagando: false });
+      parchearSinMarcar(pagina.raiz, textoDeSinMarcar(marcadas, sinMarcarDeComision(entrada.cuenta, marcadas.ids)));
+      assert.equal(pagina.visible(), paginaFalsa(ficha('Ana López', { lectura, ui: uiVacia({ marcados: new Set(despues) }) })).visible(), `de ${antes.length} a ${despues.length}`);
+    }
+  }
+});
+
+test('los períodos no ponen plazos ni avisos: nada de «atrasado», «vencido», «lleva días» ni rojo por no haber pagado', () => {
+  const viejo = [regresaEl('v1', '2026-01-03'), regresaEl('v2', '2026-01-20'), regresaEl('o1', '2026-10-03')];
+  const html = ficha('Ana López', { lectura: lecturaOk({ contratos: viejo }) });
+  const periodos = html.slice(html.indexOf('class="dn-periodos"'), html.indexOf('<table'));
+  assert.doesNotMatch(texto(periodos), /atras|venc|lleva|desde hace|recuerd|urgente|falta pagar|sin pagar|pendiente|plazo/i);
+  assert.doesNotMatch(periodos, /dn-alerta|barra-lectura-fallida|role="alert"/);
+  assert.match(texto(periodos), /enero 2026/, 'un mes viejo se ofrece igual que uno nuevo: sin distinguirlo');
+  assert.doesNotMatch(html, /barra-lectura-fallida/, 'y la ficha entera no se pinta de rojo por lo viejo');
+});
+
+test('el clic de un período reemplaza lo marcado, sincroniza las casillas y suma a la vista: lo dice el código de la pantalla', () => {
+  const clic = PANTALLA.slice(PANTALLA.indexOf("case 'periodo':"), PANTALLA.indexOf("default: return;"));
+  assert.match(clic, /ui\.marcados = new Set\(idsDelPeriodo\(entrada\.cuenta, accion\.dataset\.mes, Number\(accion\.dataset\.quincena\)\)\)/);
+  assert.match(clic, /sincronizarCasillas\(\);\s*actualizarMarcado\(\);/);
+  assert.match(PANTALLA, /parchearSinMarcar\(raiz, textoDeSinMarcar\(marcadas, sinMarcarDeComision\(entrada\.cuenta, marcadas\.ids\)\)\)/);
+  assert.match(PANTALLA, /todas\.checked = filas\.length > 0 && filas\.every/);
+});
+
+test('la pantalla no arma los períodos ni decide «quincena»: se los pide al núcleo', () => {
+  assert.match(PANTALLA, /periodosDePago\(/);
+  assert.ok(!/slice\(8,\s*10\)|slice\(0,\s*7\)|getUTCDate\(\)\s*<=|<=\s*15\b/.test(PANTALLA.replace(/'[^']*'/g, "''")), 'ni parte la fecha ni compara contra 15');
+  assert.ok(!/estadoContrato|pendientesDe/.test(PANTALLA), 'y lo que cierra y lo que no se lo pregunta al núcleo');
+  assert.match(PANTALLA, /razonDeNoCierre\(c\)/);
+  assert.match(PANTALLA, /estadoDeComision\(c\) === 'estimada'/);
 });
