@@ -167,9 +167,40 @@ el porcentaje de tarjeta. El porcentaje por defecto es 5 % y **cada empleado pue
 tener el suyo**. Cada contrato guarda el porcentaje que estaba vigente el día
 que se hizo, para que un cambio de porcentaje no mueva los meses ya pagados.
 
-La comisión **queda firme al recibir el carro**, que es cuando se conocen los
-días de atraso y el descuento, y se cuenta en el mes de esa fecha de
-devolución. Un contrato que sigue rentado todavía no genera comisión.
+La comisión **se conoce al recibir el carro**, que es cuando se saben los días de
+atraso y el descuento, y se cuenta en el mes de esa fecha de devolución. Un
+contrato que sigue rentado todavía no genera comisión, solo un estimado: un día
+de atraso la sube y un descuento la baja.
+
+**Se paga cuando el contrato está CERRADO, no cuando el carro vuelve** (14 de
+octubre de 2026). Este diseño decía antes que la comisión «queda firme al recibir
+el carro», y el dueño lo corrigió al preguntársele cuándo mira lo que le debe a
+cada empleado: *«Lo miro cuando el contrato está cerrado y tengo que pagar
+quincena o final de mes. Yo decido cuándo lo pago.»* Por eso una comisión solo es
+pagable con **la misma regla con la que se le paga al dueño de un carro ajeno**:
+`estadoContrato(c) === 'cerrado'` (`nucleo/estados.js`), que ya exige que el carro
+haya vuelto, que no se deba saldo y que la garantía esté liberada. Esa regla vive
+en un solo lugar y las dos cuentas le preguntan ahí; ninguna la repite. Dos cosas
+que se parecen y no son la misma: `comisionDe(c).firme` (`nucleo/comision.js`) dice
+si el MONTO ya se conoce (el carro volvió) y sirve para llamarla «estimada» o no;
+lo que decide si se PAGA es que el contrato cierre. Una renta cuyo carro volvió
+pero cuyo cliente todavía debe tiene su monto y no se paga todavía, y la pantalla
+dice por qué con las mismas palabras que la ficha del dueño de un carro ajeno
+(«Saldo pendiente: Q200.00.», «Garantía sin liberar: Q5,000.00.»).
+
+**El dueño paga por quincena y por fin de mes, y decide él cuándo** (14 de octubre
+de 2026). Eso no estaba en este diseño. La primera quincena es del 1 al 15 y la
+segunda del 16 al fin de mes; una renta cuenta en el período de la fecha en que
+**regresó** el carro (`cierre.fechaReal`), no en el de la fecha en que cerró el
+contrato, que no se guarda: una renta que regresó el 10 y cerró el 18, cuando el
+cliente pagó, vuelve a salir en la primera quincena aunque ya se haya pagado esa
+quincena. La ficha ofrece, por mes, un botón para el mes completo y uno para cada
+quincena con algo, y **marcar un período es un clic** (`periodosDePago`,
+`nucleo/comisiones.js`). Tres cosas que «yo decido cuándo» exige: el sistema **no
+pone plazos**, no dice que algo lleve días sin pagarse y no pinta nada de rojo por
+no haber pagado; **nada se marca en silencio** (lo que queda fuera de lo marcado
+sigue a la vista con su total, «Sin marcar: N rentas · Q…»); y el total de lo
+marcado se suma a la vista antes de registrar nada.
 
 ## 6. Pantallas
 
@@ -255,6 +286,8 @@ Se abre con contraseña y se cierra sola por inactividad o al salir del sistema.
   dónde sale cada número. **Casillas para seleccionar** qué contratos se van a
   pagar, con el total de lo seleccionado y el botón de pagar; queda registrada
   la fecha. Los pagados se separan de los pendientes. Se baja en Excel y PDF.
+  Solo se paga lo de un contrato cerrado, y un período (quincena o mes) se marca
+  de un clic: ver §5, «Comisión del empleado».
 - **Dueños de carros ajenos**: lo que se le debe a cada uno, contrato por
   contrato, con las mismas casillas de selección y marcado de pago.
 - **Empleados**: alta, baja y el porcentaje de comisión de cada uno. Se ven
@@ -741,14 +774,15 @@ entrega, y a un empleado no se le imprime nada.
   se reconoce por las rentas que cubre (`contratos[]`), no por este campo.
 - `monto` y `contratos[]` nacen juntos, de la misma lista y en un solo lugar,
   `construirPagoComision`, que toma de `elegirParaPagoDeComision`
-  (`nucleo/comisiones.js`) lo que se paga. **Solo entra una renta firme**: aquella cuyo
-  carro ya regresó (`cierre.fechaReal`). Mientras el carro sigue afuera, un día de
-  atraso sube la comisión y un descuento la baja, así que la de una renta abierta es
-  un estimado y no se paga; es la misma lógica por la que a un dueño de carro solo se
-  le paga sobre un contrato cerrado. («Firme» aquí es solo que el carro volvió: no
-  espera a que el cliente liquide todo, como dice §5.) Una renta con comisión de
-  Q0.00 (el 0 % de Wilder, o una base que el descuento se comió) tampoco entra: un
-  pago en cero no prueba que se pagó nada, y `guardarPagoComision` se niega.
+  (`nucleo/comisiones.js`) lo que se paga. **Solo entra una renta de un contrato
+  CERRADO** (§5, corregido el 14 de octubre de 2026): `estadoContrato(c) ===
+  'cerrado'`, la misma pregunta que decide si se le puede pagar al dueño de un carro
+  ajeno. Una renta cuyo carro sigue afuera (su comisión es un estimado: un día de
+  atraso la sube y un descuento la baja) o que volvió pero cuyo cliente todavía debe
+  saldo o tiene la garantía sin liberar no entra, ni con su dinero ni con su id,
+  aunque su casilla siga marcada. Una renta con comisión de Q0.00 (el 0 % de Wilder, o
+  una base que el descuento se comió) tampoco entra: un pago en cero no prueba que se
+  pagó nada, y `guardarPagoComision` se niega.
 - `forma` es efectivo, transferencia o cheque (`FORMAS_DE_PAGO`), el mismo conjunto que
   el pago a un dueño. Sin `porcentajeTarjeta`.
 - `anulado` y `anuladoEn` se llaman **igual que en un pago del cliente y en uno a un
