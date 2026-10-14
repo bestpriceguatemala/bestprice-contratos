@@ -1605,6 +1605,27 @@ body {
   margin-bottom: 16px;
 }
 
+/* La casilla de «enlazar» en la ficha de comisiones: pegada a su frase, debajo de la fila del selector. */
+.dn-casilla-enlace {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+/* La casilla «Trabaja aquí» de la ficha de un empleado: una fila con la casilla chica, no un campo de texto. */
+.carro-campo.dn-casilla {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.carro-campo.dn-casilla input {
+  padding: 0;
+  width: auto;
+}
+
 /* Anotar el costo: el campo y sus dos botones, en la misma celda. */
 .dn-costo-edicion {
   display: inline-flex;

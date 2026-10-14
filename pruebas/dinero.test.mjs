@@ -1601,11 +1601,16 @@ test('app.js: NINGUNA llamada suelta a salirDeDinero (disparar y olvidar): el re
   assert.ok(usos.some((l) => /salir = salirDeDinero/.test(l)));
 });
 
-test('app.js: las cuatro rutas del área de dinero pasan por la puerta de la contraseña', () => {
+test('app.js: las ocho rutas del área de dinero (dueños, empleados y comisiones) pasan por la puerta de la contraseña', () => {
   const rutas = [...sinComentarios(APP).matchAll(/registrarPantalla\('(#\/dinero[^']*)', ([^;]+)\);/g)];
-  assert.deepEqual(rutas.map((r) => r[1]), ['#/dinero', '#/dinero/cuenta/:clave', '#/dinero/duenos', '#/dinero/duenos/:duenoId']);
+  assert.deepEqual(rutas.map((r) => r[1]), [
+    '#/dinero', '#/dinero/cuenta/:clave', '#/dinero/duenos', '#/dinero/duenos/:duenoId',
+    '#/dinero/empleados', '#/dinero/empleados/:empleadoId', '#/dinero/comisiones', '#/dinero/comisiones/:clave',
+  ]);
   for (const [, ruta, funcion] of rutas) assert.match(funcion, /^conPuertaDeDinero\(\w+\)$/, `${ruta} sin puerta: ${funcion}`);
   assert.ok(sinComentarios(APP).includes("import { pintarDuenos } from './pantallas/duenos.js';"));
+  assert.ok(sinComentarios(APP).includes("import { pintarEmpleados } from './pantallas/empleados.js';"));
+  assert.ok(sinComentarios(APP).includes("import { pintarComisiones, pintarComisionesDeEmpleado } from './pantallas/comisiones.js';"));
 });
 
 test('index.html: el enlace a Dinero ya no está escondido, y Ajustes sí (todavía no tiene pantalla)', () => {
@@ -1877,7 +1882,8 @@ test('cada clase dn-* que dibujan las pantallas de dinero está definida en css/
 });
 
 test('ninguna clase dn-* del CSS sobra: todas las definidas se usan en las pantallas', () => {
-  const fuente = sinComentarios(PANTALLA) + sinComentarios(DUENOS_FUENTE);
+  const fuente = sinComentarios(PANTALLA) + sinComentarios(DUENOS_FUENTE)
+    + sinComentarios(leer('../js/pantallas/empleados.js')) + sinComentarios(leer('../js/pantallas/comisiones.js'));
   const definidas = new Set([...CSS.matchAll(/\.(dn-[a-z0-9-]+)/g)].map((m) => m[1]));
   assert.ok(definidas.size >= 30);
   for (const clase of definidas) {

@@ -178,6 +178,15 @@ export function cuentaDeEmpleado({ contratos, pagos } = {}) {
 }
 
 /**
+ * Las rentas de la cuenta que NO están pagadas, de cualquier tipo (por pagar, no firmes, sin comisión, sin porcentaje).
+ * Es la lista a la que se le puede cambiar el porcentaje al enlazar rentas viejas a un empleado: lo ya pagado no se
+ * toca nunca, porque se le pagó a alguien sobre ese porcentaje y cambiarlo después movería lo ya ganado.
+ */
+export function rentasSinPagar(cuenta) {
+  return [...(cuenta?.porPagar ?? []), ...(cuenta?.noFirmes ?? []), ...(cuenta?.sinComision ?? []), ...(cuenta?.sinPorcentaje ?? [])];
+}
+
+/**
  * Lo que de verdad entra a un pago cuando se marcan casillas: las rentas por pagar marcadas, con los ids que el
  * pago va a cubrir y lo que suma. Es el único lugar que decide qué cubre un pago y cuánto vale: lo que la pantalla
  * enseña antes de registrar, lo que `construirPagoComision` guarda y lo que se compara al registrar salen de aquí,
@@ -202,7 +211,8 @@ export function elegirParaPagoDeComision(cuenta, idsMarcados) {
  * dejaría fuera: él vería un total menor de lo que de verdad debe. Es preferible un grupo desordenado a un monto
  * que desaparece.
  *
- * Cada entrada es `{ empleadoId, nombre, sinEnlazar, cuenta }`:
+ * Cada entrada es `{ clave, empleadoId, nombre, sinEnlazar, cuenta }`:
+ * - `clave` es la del grupo (`id:<empleadoId>` o `texto:<texto>`): única, y es la que viaja en la dirección de la ficha.
  * - `sinEnlazar` es `true` (y `empleadoId` es `null`) cuando el grupo sale del texto escrito a mano: la señal para
  *   que la pantalla ofrezca enlazarlo a un empleado de la lista.
  * - `nombre` es el que se escribió en el contrato ese día, sin espacios sobrantes. En un grupo enlazado es solo un
@@ -249,8 +259,7 @@ export function agruparPorEmpleado(contratos, pagos) {
       b.cuenta.totalPorPagar - a.cuenta.totalPorPagar
       || a.nombre.localeCompare(b.nombre, 'es')
       || porCodigo(a.clave, b.clave)
-    ))
-    .map(({ clave: _clave, ...entrada }) => entrada);
+    ));
 }
 
 /**

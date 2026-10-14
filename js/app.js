@@ -9,12 +9,15 @@ import { pintarRecibirCarro } from './pantallas/recibirCarro.js';
 import { pintarCarros } from './pantallas/carros.js';
 import { pintarClientes } from './pantallas/clientes.js';
 import { pintarContratos } from './pantallas/contratos.js';
+import { pintarImpresionDeContrato, pintarCalibracion } from './pantallas/contratoImpreso.js';
 import { pintarReservas } from './pantallas/reservas.js';
 import { pintarCalendario } from './pantallas/calendario.js';
 import {
   pintarDinero, pintarCuentaDeDueno, conPuertaDeDinero, enElAreaDeDinero, cerrarElDineroOReiniciar, salirDelSistema,
 } from './pantallas/dinero.js';
 import { pintarDuenos } from './pantallas/duenos.js';
+import { pintarEmpleados } from './pantallas/empleados.js';
+import { pintarComisiones, pintarComisionesDeEmpleado } from './pantallas/comisiones.js';
 import { vigilarVersion } from './version.js';
 import { limpiarCopiaLocalDelCosto } from './datos.js';
 
@@ -34,6 +37,10 @@ registrarPantalla('#/clientes', pintarClientes);
 registrarPantalla('#/clientes/:clienteId', pintarClientes);
 registrarPantalla('#/contratos', pintarContratos);
 registrarPantalla('#/contratos/:contratoId', pintarContratos);
+// El contrato sobre el papel preimpreso (§8 del diseño) y la calibración de la impresora. Rutas aparte de '#/contratos' a propósito:
+// la hoja de imprimir no es una ficha, y '#/contratos/:contratoId' es de contratos.js.
+registrarPantalla('#/imprimir/:contratoId', pintarImpresionDeContrato);
+registrarPantalla('#/impresion/calibrar', (caja) => pintarCalibracion(caja));
 // '#/reservas/nueva' y '#/reservas/:id' comparten el mismo patrón con
 // parámetro, mismo motivo que clientes.js arriba: pintarReservas(contenedor,
 // 'nueva') necesita ese 'nueva' capturado para saber que es alta y no edición.
@@ -53,6 +60,13 @@ registrarPantalla('#/dinero', conPuertaDeDinero(pintarDinero));
 registrarPantalla('#/dinero/cuenta/:clave', conPuertaDeDinero(pintarCuentaDeDueno));
 registrarPantalla('#/dinero/duenos', conPuertaDeDinero(pintarDuenos));
 registrarPantalla('#/dinero/duenos/:duenoId', conPuertaDeDinero(pintarDuenos));
+// Los empleados y sus comisiones (§6 del diseño) viven en el mismo lugar y detrás de la misma puerta. Las dos tienen su
+// ruta con parámetro por el mismo motivo que los dueños: '#/dinero/empleados/nuevo' llega a pintarEmpleados con 'nuevo'
+// capturado, y la clave de una cuenta de comisiones (`id:…` o `texto:…`) viaja escapada en la dirección.
+registrarPantalla('#/dinero/empleados', conPuertaDeDinero(pintarEmpleados));
+registrarPantalla('#/dinero/empleados/:empleadoId', conPuertaDeDinero(pintarEmpleados));
+registrarPantalla('#/dinero/comisiones', conPuertaDeDinero(pintarComisiones));
+registrarPantalla('#/dinero/comisiones/:clave', conPuertaDeDinero(pintarComisionesDeEmpleado));
 
 const pantallaEntrada = document.getElementById('entrada');
 const pantallaApp = document.getElementById('app');

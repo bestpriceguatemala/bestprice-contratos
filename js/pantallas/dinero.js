@@ -93,7 +93,7 @@ export const FORMAS_DE_PAGO = [
   { valor: 'cheque', etiqueta: 'Cheque' },
 ];
 
-const etiquetaDeForma = (forma) => {
+export const etiquetaDeForma = (forma) => {
   const limpia = String(forma ?? '').trim();
   if (!limpia) return '—';
   return FORMAS_DE_PAGO.find((f) => f.valor === limpia.toLowerCase())?.etiqueta
@@ -176,9 +176,24 @@ let ultimoToken = 0;
 // Lo que la entrada le dice al dueño la próxima vez que se dibuje (por ejemplo, que se cerró sola).
 let mensajeDeEntrada = '';
 
+// Otras pantallas del área de dinero (las comisiones) guardan lo que leyeron en su propia memoria, y es dinero igual:
+// cuando la sesión de dinero se cierra, por la vía que sea, también lo sueltan. Se registran aquí para que cerrar la
+// sesión tenga UN solo camino (`cerrarElDinero`) y una pantalla nueva del área no pueda olvidarse de sumarse a él.
+const olvidadores = new Set();
+
+/** Registra qué hace una pantalla del área de dinero cuando la sesión se cierra (soltar lo leído, vaciar su caja). */
+export function alOlvidarElDinero(olvidar) {
+  olvidadores.add(olvidar);
+  return () => olvidadores.delete(olvidar);
+}
+
 function olvidarLosDatos() {
   lector.olvidar();
   repintarActual = null;
+  for (const olvidar of olvidadores) {
+    // Que una pantalla falle al soltar lo suyo no debe dejar a las demás con dinero en memoria.
+    try { olvidar(); } catch (error) { console.error('Una pantalla del área de dinero no pudo soltar lo que leyó:', error); }
+  }
   // Lo ya dibujado también es dinero: quien abriera la consola lo leería de la
   // página aunque la sesión ya estuviera cerrada. Si la pantalla ya cambió, la
   // caja está suelta y no hay nada que vaciar.
@@ -938,6 +953,8 @@ export function htmlLista(vista, { migracion = '' } = {}) {
         <h1>Dinero</h1>
         <button type="button" class="btn" data-dn="actualizar">Actualizar</button>
         <a href="#/dinero/duenos" class="btn">Dueños</a>
+        <a href="#/dinero/comisiones" class="btn">Comisiones</a>
+        <a href="#/dinero/empleados" class="btn">Empleados</a>
       </div>
       ${vista.falloDuenos ? barraRoja([MENSAJE_FALLO_DUENOS]) : ''}
       <table class="tabla-carros">

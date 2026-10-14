@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  cuentaDeEmpleado, agruparPorEmpleado, elegirParaPagoDeComision, totalGeneralDeComisiones, estadoDeComision,
+  cuentaDeEmpleado, agruparPorEmpleado, elegirParaPagoDeComision, totalGeneralDeComisiones, estadoDeComision, rentasSinPagar,
 } from '../js/nucleo/comisiones.js';
 import { comisionDe } from '../js/nucleo/comision.js';
 import { q } from '../js/nucleo/dinero.js';
@@ -341,4 +341,20 @@ test('las listas salen en un orden fijo: por fecha de regreso (el mes en que cue
   const ids = (xs) => cuentaDeEmpleado({ contratos: xs, pagos: [] }).porPagar.map((c) => c.id);
   assert.deepEqual(ids([tarde, pronto, mismoDia]), ['c', 'b', 'a']);
   assert.deepEqual(ids([mismoDia, tarde, pronto]), ['c', 'b', 'a']);
+});
+
+test('cada grupo trae su clave (la de la dirección de su ficha): `id:` si está enlazado y `texto:` si lo escribió a mano', () => {
+  const grupos = agruparPorEmpleado([firme('c1'), rentaDeAntes({ id: 'v1', rentadoPor: 'Pedro', recibidoEl: '2026-09-29' })], []);
+  assert.deepEqual(grupos.map((g) => g.clave).sort(), ['id:e1', 'texto:Pedro']);
+  assert.equal(new Set(grupos.map((g) => g.clave)).size, grupos.length, 'únicas');
+});
+
+test('rentasSinPagar: todo lo que no está pagado, de cualquier tipo — y nunca lo ya pagado (a eso no se le cambia el porcentaje)', () => {
+  const contratos = [
+    firme('porpagar'), abierta('afuera'), renta({ id: 'cero', empleado: wilder, recibidoEl: '2026-10-05' }),
+    { ...firme('sinpct'), porcentajeComision: '' }, firme('pagada'),
+  ];
+  const cuenta = cuentaDeEmpleado({ contratos, pagos: [pagoDeComision({ id: 'p1', monto: 140, contratos: ['pagada'] })] });
+  assert.deepEqual(rentasSinPagar(cuenta).map((c) => c.id).sort(), ['afuera', 'cero', 'porpagar', 'sinpct']);
+  assert.deepEqual(rentasSinPagar(undefined), []);
 });

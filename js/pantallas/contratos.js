@@ -672,6 +672,23 @@ function botonDeRecibo(c) {
   return `<a class="${clase}" href="${esc(accion.ruta)}" data-accion="${accion.clave}"${titulo}>${esc(accion.texto)}</a>`;
 }
 
+/**
+ * El enlace a imprimir el contrato sobre el papel preimpreso (§8 del diseño): `{ ruta, texto }`, o null sin id (un
+ * enlace a `#/imprimir/undefined` no lleva a ningún lado). Función pura. La hoja (pantallas/contratoImpreso.js) tiene
+ * su propia ruta: esta ficha solo apunta a ella.
+ */
+export function accionDeImpresion(c) {
+  if (!c?.id) return null;
+  return { ruta: `#/imprimir/${c.id}`, texto: 'Imprimir contrato' };
+}
+
+// Un enlace y no un <button>, igual que el de recibir: navega por sí solo.
+function botonDeImpresion(c) {
+  const accion = accionDeImpresion(c);
+  if (!accion) return '';
+  return `<a class="btn" href="${esc(accion.ruta)}" data-accion="imprimir" title="Imprimir el contrato sobre el papel preimpreso">${esc(accion.texto)}</a>`;
+}
+
 // Se exporta solo para probar lo que dibuja la ficha (los botones del encabezado) sin DOM.
 export function plantillaDetalle(c) {
   const r = resumen(c);
@@ -683,6 +700,7 @@ export function plantillaDetalle(c) {
           <h1>Contrato N.° ${esc(c?.numero ?? '—')}</h1>
           <div class="carros-acciones">
             ${botonDeRecibo(c)}
+            ${botonDeImpresion(c)}
             <button type="button" id="ct-volver" class="btn">Volver</button>
           </div>
         </div>
