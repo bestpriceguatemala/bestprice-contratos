@@ -55,6 +55,15 @@ test('la vista junta por empleado, de lo que más se le debe a lo que menos, y s
   assert.equal(vista.falloEmpleados, false);
 });
 
+test('el total de todos se suma por q(): los centavos no se arrastran (0.10 + 0.20 es 0.30, no 0.30000000000000004)', () => {
+  const centavos = (id, precioDia) => renta({ id, dias: 1, precioDia, fechaSalida: '2026-10-01', recibidoEl: '2026-10-02' });
+  const vista = armarVistaDeComisiones(lecturaOk({ contratos: [centavos('c1', 2), renta({ id: 'c2', empleado: luis, dias: 1, precioDia: 2, recibidoEl: '2026-10-02' })] }));
+  assert.equal(comisionDe(centavos('c1', 2)).monto, 0.1);
+  assert.strictEqual(vista.total, 0.25, '0.10 de Ana + 0.15 de Luis (7.5 % de 2)');
+  const dos = armarVistaDeComisiones(lecturaOk({ contratos: [centavos('c1', 2), centavos('c2', 4)] }));
+  assert.strictEqual(dos.total, 0.3);
+});
+
 test('una lectura fallida de las RENTAS o de los PAGOS no arma ninguna cuenta: jamás «no le debes nada a nadie»', () => {
   const sinRentas = armarVistaDeComisiones({ ...lecturaOk(), contratos: { datos: [firme('a1')], fallo: true } });
   assert.deepEqual([sinRentas.ok, sinRentas.problemas], [false, ['rentas']]);
@@ -499,6 +508,13 @@ test('anular: guarda el pago TAL COMO ESTÁ en la nube, con anulado y la fecha d
   assert.equal(r.tipo, 'anulado');
   assert.deepEqual(d.guardados[0], { ...PAGO_A_ANA, anulado: true, anuladoEn: HOY });
   assert.equal(r.pagos.find((p) => p.id === 'p1').anulado, true);
+});
+
+test('anular guarda el pago como está AHORA en la nube, no la copia que la pantalla tenía de cuando se abrió', async () => {
+  const enLaNube = { ...PAGO_A_ANA, contratos: ['a1'], monto: 140, forma: 'cheque' }; // otra pestaña lo corrigió a un solo contrato
+  const d = depsDeAnular({ pagos: [enLaNube] });
+  await anularElPagoDeComision({ pago: PAGO_A_ANA, hoy: HOY, ...d });
+  assert.deepEqual(d.guardados[0], { ...enLaNube, anulado: true, anuladoEn: HOY });
 });
 
 test('anular un pago que otra pestaña ya anuló no escribe nada ni pisa la fecha de la primera anulación', async () => {
