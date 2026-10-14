@@ -1,0 +1,166 @@
+/* El contrato impreso sobre el papel preimpreso (§8 del diseño, ADR-003).
+
+   Reglas de esta hoja:
+   - Todo está posicionado en MILÍMETROS, en la carta, desde su esquina de arriba a la izquierda (nucleo/hojaContrato.js).
+   - La calibración de la impresora es UN solo `transform` en `.hc-lienzo`, y nunca otra cosa mueve un campo.
+   - Al imprimir sale SOLO la hoja, sin margen: el papel ya trae todo lo demás. */
+
+/* La página sin margen para este papel. Chrome respeta la página con nombre; Safari y los demás, la que pone
+   pantallas/contratoImpreso.js mientras la pantalla está abierta (ver ponerPaginaSinMargen). */
+@page contrato-papel {
+  size: 215.9mm 279.4mm;
+  margin: 0;
+}
+
+.hc-pantalla {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.hc-tarjetas,
+.hc-calibracion {
+  margin: 12px 0;
+}
+
+.hc-tarjeta {
+  display: inline-flex;
+  gap: 12px;
+  align-items: end;
+  margin: 0 12px 8px 0;
+  border: 1px solid var(--borde, #ccc);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.hc-tarjeta label {
+  display: grid;
+  gap: 4px;
+}
+
+/* ---------- La hoja ---------- */
+
+.hoja-contrato {
+  position: relative;
+  width: 215.9mm;
+  height: 279.4mm;
+  overflow: hidden;
+  background: #fff;
+  color: #000;
+  page: contrato-papel;
+  break-after: avoid;
+}
+
+.hc-lienzo {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 215.9mm;
+  height: 279.4mm;
+}
+
+.hc-campo {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  /* Excel deja 3 unidades (0.94 mm a 89 %) antes del texto en cada lado. */
+  padding: 0 0.942mm;
+  line-height: 1.15;
+}
+
+.hc-arial { font-family: Arial, 'Liberation Sans', Helvetica, sans-serif; }
+.hc-narrow { font-family: 'Arial Narrow', 'Liberation Sans Narrow', 'Helvetica Neue', Arial, sans-serif; font-stretch: condensed; }
+
+.hc-izq { justify-content: flex-start; text-align: left; }
+.hc-centro { justify-content: center; text-align: center; }
+.hc-der { justify-content: flex-end; text-align: right; }
+.hc-arriba { align-items: flex-start; }
+.hc-medio { align-items: center; }
+.hc-abajo { align-items: flex-end; }
+
+/* Sin ajuste: el texto sigue derecho, aunque pase de su casilla (un dato cortado en un contrato es peor que uno largo). */
+.hc-t { display: block; white-space: nowrap; }
+.hc-ajusta .hc-t { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+/* Las fechas con espacios entre sus partes: esos espacios caen en las casillas DD / MM / AAAA del papel. */
+.hc-pre .hc-t { white-space: pre; }
+
+/* ---------- La hoja de prueba ---------- */
+
+.hp-regla { position: absolute; inset: 0; pointer-events: none; }
+.hp-marca { position: absolute; background: #000; }
+.hp-marca-x { top: 0; width: 0.15mm; height: 2mm; }
+.hp-marca-x.hp-larga { height: 4mm; }
+.hp-marca-y { left: 0; height: 0.15mm; width: 2mm; }
+.hp-marca-y.hp-larga { width: 4mm; }
+.hp-num { position: absolute; font: 5pt Arial, Helvetica, sans-serif; line-height: 1; }
+.hp-num-x { top: 4.5mm; transform: translateX(-50%); }
+.hp-num-y { left: 4.5mm; transform: translateY(-50%); }
+.hp-rotulo { position: absolute; left: 14mm; top: 8mm; margin: 0; font: 7pt Arial, Helvetica, sans-serif; }
+.hp-marco { position: absolute; box-sizing: border-box; border: 0.2mm solid #000; }
+.hp-cruz {
+  position: absolute;
+  width: 6mm;
+  height: 6mm;
+  margin: -3mm 0 0 -3mm;
+  background:
+    linear-gradient(#000, #000) center / 0.2mm 100% no-repeat,
+    linear-gradient(#000, #000) center / 100% 0.2mm no-repeat;
+}
+.hp-caja { position: absolute; box-sizing: border-box; border: 0.15mm solid #444; }
+.hp-caja.hp-no { border-style: dotted; border-color: #888; }
+.hp-caja span { position: absolute; left: 0.3mm; top: 0.1mm; font: 4pt Arial, Helvetica, sans-serif; line-height: 1; color: #444; }
+
+/* ---------- En pantalla: la hoja se ve chica, sobre un papel gris ---------- */
+
+@media screen {
+  .hc-vista {
+    background: #e4e4e4;
+    padding: 12px;
+    border-radius: 8px;
+    /* La hoja se achica con transform, que no libera el espacio: se reserva a mano. */
+    height: calc(279.4mm * 0.62 + 24px);
+    overflow: auto;
+  }
+
+  .hc-vista .hoja-contrato {
+    transform: scale(0.62);
+    transform-origin: top left;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* ---------- Al imprimir: SOLO la hoja, de la carta entera, sin margen ---------- */
+
+@media print {
+  body:has(.hoja-contrato) *:not(:has(.hoja-contrato)):not(.hoja-contrato):not(.hoja-contrato *) {
+    display: none !important;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  #app,
+  #pantalla,
+  .hc-pantalla,
+  .hc-vista {
+    display: block;
+    min-height: 0;
+    height: auto;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    background: none;
+    border-radius: 0;
+  }
+
+  .hoja-contrato {
+    transform: none;
+    box-shadow: none;
+    margin: 0;
+  }
+}

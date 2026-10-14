@@ -1,0 +1,870 @@
+{
+ "A10": {
+  "casillaMm": {
+   "x": 0.31,
+   "y": 42.07,
+   "ancho": 120.88,
+   "alto": 4.08
+  },
+  "lineaBaseMm": {
+   "x": 57.77,
+   "y": 45.21
+  },
+  "pt": 9.79,
+  "blanca": false
+ },
+ "A13": {
+  "casillaMm": {
+   "x": 0.31,
+   "y": 52.12,
+   "ancho": 34.54,
+   "alto": 12.56
+  },
+  "lineaBaseMm": {
+   "x": 14.13,
+   "y": 59.34
+  },
+  "pt": 10.68,
+  "blanca": false
+ },
+ "A23": {
+  "casillaMm": {
+   "x": 0.31,
+   "y": 100.79,
+   "ancho": 42.7,
+   "alto": 6.91
+  },
+  "lineaBaseMm": {
+   "x": 0.94,
+   "y": 107.06
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "A25": {
+  "casillaMm": {
+   "x": 0.31,
+   "y": 108.01,
+   "ancho": 120.88,
+   "alto": 4.71
+  },
+  "lineaBaseMm": {
+   "x": 58.71,
+   "y": 111.15
+  },
+  "pt": 7.12,
+  "blanca": false
+ },
+ "A31": {
+  "casillaMm": {
+   "x": 0.31,
+   "y": 139.4,
+   "ancho": 120.88,
+   "alto": 7.54
+  },
+  "lineaBaseMm": {
+   "x": 57.77,
+   "y": 144.11
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "A33": {
+  "casillaMm": {
+   "x": 0.31,
+   "y": 147.25,
+   "ancho": 34.54,
+   "alto": 6.28
+  },
+  "lineaBaseMm": {
+   "x": 14.76,
+   "y": 152.59
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "A38": {
+  "casillaMm": {
+   "x": 0.31,
+   "y": 167.66,
+   "ancho": 59.03,
+   "alto": 6.28
+  },
+  "lineaBaseMm": {
+   "x": 26.69,
+   "y": 173.0
+  },
+  "pt": 12.46,
+  "blanca": false
+ },
+ "A41": {
+  "casillaMm": {
+   "x": 0.31,
+   "y": 181.16,
+   "ancho": 59.03,
+   "alto": 6.59
+  },
+  "lineaBaseMm": {
+   "x": 26.37,
+   "y": 186.81
+  },
+  "pt": 14.24,
+  "blanca": false
+ },
+ "B15": {
+  "casillaMm": {
+   "x": 10.68,
+   "y": 64.99,
+   "ancho": 56.83,
+   "alto": 7.22
+  },
+  "lineaBaseMm": {
+   "x": 35.16,
+   "y": 70.02
+  },
+  "pt": 12.46,
+  "blanca": false
+ },
+ "B17": {
+  "casillaMm": {
+   "x": 10.68,
+   "y": 72.53,
+   "ancho": 64.99,
+   "alto": 5.34
+  },
+  "lineaBaseMm": {
+   "x": 40.19,
+   "y": 77.24
+  },
+  "pt": 9.79,
+  "blanca": false
+ },
+ "B19": {
+  "casillaMm": {
+   "x": 10.68,
+   "y": 78.18,
+   "ancho": 56.83,
+   "alto": 10.36
+  },
+  "lineaBaseMm": {
+   "x": 35.16,
+   "y": 87.6
+  },
+  "pt": 12.46,
+  "blanca": false
+ },
+ "B21": {
+  "casillaMm": {
+   "x": 10.68,
+   "y": 88.85,
+   "ancho": 56.83,
+   "alto": 11.62
+  },
+  "lineaBaseMm": {
+   "x": 35.16,
+   "y": 96.08
+  },
+  "pt": 12.46,
+  "blanca": false
+ },
+ "C11": {
+  "casillaMm": {
+   "x": 18.84,
+   "y": 46.47,
+   "ancho": 16.01,
+   "alto": 2.51
+  },
+  "lineaBaseMm": {
+   "x": 23.86,
+   "y": 48.98
+  },
+  "pt": 9.79,
+  "blanca": false
+ },
+ "C8": {
+  "casillaMm": {
+   "x": 18.84,
+   "y": 31.08,
+   "ancho": 16.01,
+   "alto": 3.45
+  },
+  "lineaBaseMm": {
+   "x": 25.12,
+   "y": 33.6
+  },
+  "pt": 10.68,
+  "blanca": false
+ },
+ "D6": {
+  "casillaMm": {
+   "x": 27.0,
+   "y": 23.86,
+   "ancho": 94.19,
+   "alto": 6.91
+  },
+  "lineaBaseMm": {
+   "x": 72.21,
+   "y": 29.83
+  },
+  "pt": 10.68,
+  "blanca": false
+ },
+ "D9": {
+  "casillaMm": {
+   "x": 27.0,
+   "y": 34.85,
+   "ancho": 94.19,
+   "alto": 6.91
+  },
+  "lineaBaseMm": {
+   "x": 72.21,
+   "y": 40.82
+  },
+  "pt": 10.68,
+  "blanca": false
+ },
+ "E13": {
+  "casillaMm": {
+   "x": 35.16,
+   "y": 52.12,
+   "ancho": 86.03,
+   "alto": 12.56
+  },
+  "lineaBaseMm": {
+   "x": 75.04,
+   "y": 59.65
+  },
+  "pt": 9.79,
+  "blanca": false
+ },
+ "E27": {
+  "casillaMm": {
+   "x": 35.16,
+   "y": 113.03,
+   "ancho": 32.34,
+   "alto": 18.21
+  },
+  "lineaBaseMm": {
+   "x": 35.79,
+   "y": 130.3
+  },
+  "pt": 8.9,
+  "blanca": true
+ },
+ "F23": {
+  "casillaMm": {
+   "x": 43.33,
+   "y": 100.79,
+   "ancho": 77.87,
+   "alto": 6.91
+  },
+  "lineaBaseMm": {
+   "x": 113.97,
+   "y": 106.75
+  },
+  "pt": 10.68,
+  "blanca": false
+ },
+ "H11": {
+  "casillaMm": {
+   "x": 59.65,
+   "y": 46.47,
+   "ancho": 16.01,
+   "alto": 2.51
+  },
+  "lineaBaseMm": {
+   "x": 64.68,
+   "y": 48.98
+  },
+  "pt": 9.79,
+  "blanca": false
+ },
+ "H38": {
+  "casillaMm": {
+   "x": 59.65,
+   "y": 167.66,
+   "ancho": 24.18,
+   "alto": 6.28
+  },
+  "lineaBaseMm": {
+   "x": 69.07,
+   "y": 171.74
+  },
+  "pt": 8.01,
+  "blanca": false
+ },
+ "H41": {
+  "casillaMm": {
+   "x": 59.65,
+   "y": 181.16,
+   "ancho": 24.18,
+   "alto": 4.71
+  },
+  "lineaBaseMm": {
+   "x": 69.39,
+   "y": 184.3
+  },
+  "pt": 7.12,
+  "blanca": false
+ },
+ "H8": {
+  "casillaMm": {
+   "x": 59.65,
+   "y": 31.08,
+   "ancho": 16.01,
+   "alto": 3.45
+  },
+  "lineaBaseMm": {
+   "x": 65.62,
+   "y": 34.22
+  },
+  "pt": 12.46,
+  "blanca": false
+ },
+ "I27": {
+  "casillaMm": {
+   "x": 67.82,
+   "y": 113.03,
+   "ancho": 53.38,
+   "alto": 18.21
+  },
+  "lineaBaseMm": {
+   "x": 92.31,
+   "y": 130.3
+  },
+  "pt": 8.9,
+  "blanca": true
+ },
+ "I33": {
+  "casillaMm": {
+   "x": 67.82,
+   "y": 147.25,
+   "ancho": 53.38,
+   "alto": 6.28
+  },
+  "lineaBaseMm": {
+   "x": 92.31,
+   "y": 152.59
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "J5": {
+  "casillaMm": {
+   "x": 75.98,
+   "y": 19.15,
+   "ancho": 38.93,
+   "alto": 4.4
+  },
+  "lineaBaseMm": {
+   "x": 93.56,
+   "y": 22.61
+  },
+  "pt": 10.68,
+  "blanca": false
+ },
+ "K38": {
+  "casillaMm": {
+   "x": 84.14,
+   "y": 167.66,
+   "ancho": 37.05,
+   "alto": 6.28
+  },
+  "lineaBaseMm": {
+   "x": 100.16,
+   "y": 173.0
+  },
+  "pt": 8.01,
+  "blanca": false
+ },
+ "K41": {
+  "casillaMm": {
+   "x": 84.14,
+   "y": 181.16,
+   "ancho": 37.05,
+   "alto": 6.59
+  },
+  "lineaBaseMm": {
+   "x": 100.79,
+   "y": 183.67
+  },
+  "pt": 7.12,
+  "blanca": true
+ },
+ "M32": {
+  "casillaMm": {
+   "x": 121.51,
+   "y": 144.11,
+   "ancho": 12.56,
+   "alto": 6.59
+  },
+  "lineaBaseMm": {
+   "x": 124.65,
+   "y": 148.51
+  },
+  "pt": 8.9,
+  "blanca": true
+ },
+ "N10": {
+  "casillaMm": {
+   "x": 121.51,
+   "y": 42.07,
+   "ancho": 33.6,
+   "alto": 4.08
+  },
+  "lineaBaseMm": {
+   "x": 135.32,
+   "y": 45.21
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "N11": {
+  "casillaMm": {
+   "x": 121.51,
+   "y": 46.47,
+   "ancho": 33.6,
+   "alto": 5.34
+  },
+  "lineaBaseMm": {
+   "x": 134.69,
+   "y": 50.86
+  },
+  "pt": 10.68,
+  "blanca": false
+ },
+ "N23": {
+  "casillaMm": {
+   "x": 121.51,
+   "y": 100.79,
+   "ancho": 12.56,
+   "alto": 9.42
+  },
+  "lineaBaseMm": {
+   "x": 124.96,
+   "y": 106.44
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "N35": {
+  "casillaMm": {
+   "x": 121.51,
+   "y": 153.85,
+   "ancho": 36.73,
+   "alto": 17.27
+  },
+  "lineaBaseMm": {
+   "x": 137.21,
+   "y": 170.17
+  },
+  "pt": 8.01,
+  "blanca": true
+ },
+ "N39": {
+  "casillaMm": {
+   "x": 121.51,
+   "y": 171.43,
+   "ancho": 36.73,
+   "alto": 9.42
+  },
+  "lineaBaseMm": {
+   "x": 136.89,
+   "y": 179.91
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "N4": {
+  "casillaMm": {
+   "x": 121.51,
+   "y": 13.81,
+   "ancho": 33.6,
+   "alto": 9.73
+  },
+  "lineaBaseMm": {
+   "x": 136.26,
+   "y": 19.78
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "N6": {
+  "casillaMm": {
+   "x": 121.51,
+   "y": 23.86,
+   "ancho": 33.6,
+   "alto": 6.91
+  },
+  "lineaBaseMm": {
+   "x": 136.26,
+   "y": 28.26
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "N8": {
+  "casillaMm": {
+   "x": 121.51,
+   "y": 31.08,
+   "ancho": 33.6,
+   "alto": 10.68
+  },
+  "lineaBaseMm": {
+   "x": 135.95,
+   "y": 34.54
+  },
+  "pt": 10.68,
+  "blanca": false
+ },
+ "O14": {
+  "casillaMm": {
+   "x": 128.1,
+   "y": 56.2,
+   "ancho": 27.0,
+   "alto": 14.44
+  },
+  "lineaBaseMm": {
+   "x": 138.46,
+   "y": 70.02
+  },
+  "pt": 8.9,
+  "blanca": true
+ },
+ "O46": {
+  "casillaMm": {
+   "x": 128.1,
+   "y": 195.29,
+   "ancho": 27.0,
+   "alto": 4.08
+  },
+  "lineaBaseMm": {
+   "x": 138.46,
+   "y": 198.43
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "O47": {
+  "casillaMm": {
+   "x": 128.1,
+   "y": 199.69,
+   "ancho": 27.0,
+   "alto": 4.4
+  },
+  "lineaBaseMm": {
+   "x": 138.46,
+   "y": 203.14
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "P32": {
+  "casillaMm": {
+   "x": 134.38,
+   "y": 144.11,
+   "ancho": 23.86,
+   "alto": 6.59
+  },
+  "lineaBaseMm": {
+   "x": 143.49,
+   "y": 148.51
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "Q29": {
+  "casillaMm": {
+   "x": 142.54,
+   "y": 131.55,
+   "ancho": 32.03,
+   "alto": 12.24
+  },
+  "lineaBaseMm": {
+   "x": 153.22,
+   "y": 138.78
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "R21": {
+  "casillaMm": {
+   "x": 155.42,
+   "y": 88.85,
+   "ancho": 33.6,
+   "alto": 11.62
+  },
+  "lineaBaseMm": {
+   "x": 168.6,
+   "y": 95.76
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "T58": {
+  "casillaMm": {
+   "x": 166.72,
+   "y": 221.04,
+   "ancho": 16.01,
+   "alto": 10.36
+  },
+  "lineaBaseMm": {
+   "x": 172.06,
+   "y": 227.32
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "T7": {
+  "casillaMm": {
+   "x": 166.72,
+   "y": 27.63,
+   "ancho": 30.46,
+   "alto": 6.91
+  },
+  "lineaBaseMm": {
+   "x": 192.46,
+   "y": 31.71
+  },
+  "pt": 12.46,
+  "blanca": false
+ },
+ "T9": {
+  "casillaMm": {
+   "x": 166.72,
+   "y": 34.85,
+   "ancho": 22.29,
+   "alto": 6.91
+  },
+  "lineaBaseMm": {
+   "x": 175.82,
+   "y": 38.93
+  },
+  "pt": 12.46,
+  "blanca": false
+ },
+ "U30": {
+  "casillaMm": {
+   "x": 174.88,
+   "y": 136.89,
+   "ancho": 34.22,
+   "alto": 6.91
+  },
+  "lineaBaseMm": {
+   "x": 189.01,
+   "y": 141.29
+  },
+  "pt": 8.9,
+  "blanca": true
+ },
+ "U36": {
+  "casillaMm": {
+   "x": 174.88,
+   "y": 158.56,
+   "ancho": 34.22,
+   "alto": 8.79
+  },
+  "lineaBaseMm": {
+   "x": 188.38,
+   "y": 162.01
+  },
+  "pt": 10.68,
+  "blanca": false
+ },
+ "V10": {
+  "casillaMm": {
+   "x": 183.05,
+   "y": 42.07,
+   "ancho": 26.06,
+   "alto": 9.73
+  },
+  "lineaBaseMm": {
+   "x": 193.09,
+   "y": 48.04
+  },
+  "pt": 9.79,
+  "blanca": false
+ },
+ "V13": {
+  "casillaMm": {
+   "x": 183.05,
+   "y": 52.12,
+   "ancho": 26.06,
+   "alto": 12.56
+  },
+  "lineaBaseMm": {
+   "x": 201.57,
+   "y": 55.57
+  },
+  "pt": 10.68,
+  "blanca": false
+ },
+ "V23": {
+  "casillaMm": {
+   "x": 183.05,
+   "y": 100.79,
+   "ancho": 26.06,
+   "alto": 6.91
+  },
+  "lineaBaseMm": {
+   "x": 183.67,
+   "y": 107.06
+  },
+  "pt": 8.9,
+  "blanca": true
+ },
+ "V25": {
+  "casillaMm": {
+   "x": 183.05,
+   "y": 108.01,
+   "ancho": 26.06,
+   "alto": 4.71
+  },
+  "lineaBaseMm": {
+   "x": 201.57,
+   "y": 111.77
+  },
+  "pt": 8.9,
+  "blanca": true
+ },
+ "V27": {
+  "casillaMm": {
+   "x": 183.05,
+   "y": 113.03,
+   "ancho": 26.06,
+   "alto": 9.73
+  },
+  "lineaBaseMm": {
+   "x": 192.78,
+   "y": 121.82
+  },
+  "pt": 10.68,
+  "blanca": false
+ },
+ "V28": {
+  "casillaMm": {
+   "x": 183.05,
+   "y": 123.08,
+   "ancho": 26.06,
+   "alto": 8.16
+  },
+  "lineaBaseMm": {
+   "x": 192.78,
+   "y": 128.1
+  },
+  "pt": 10.68,
+  "blanca": false
+ },
+ "V32": {
+  "casillaMm": {
+   "x": 183.05,
+   "y": 144.11,
+   "ancho": 26.06,
+   "alto": 2.83
+  },
+  "lineaBaseMm": {
+   "x": 194.03,
+   "y": 146.31
+  },
+  "pt": 6.23,
+  "blanca": true
+ },
+ "V33": {
+  "casillaMm": {
+   "x": 183.05,
+   "y": 147.25,
+   "ancho": 26.06,
+   "alto": 3.45
+  },
+  "lineaBaseMm": {
+   "x": 193.09,
+   "y": 150.08
+  },
+  "pt": 8.9,
+  "blanca": true
+ },
+ "V34": {
+  "casillaMm": {
+   "x": 183.05,
+   "y": 151.02,
+   "ancho": 26.06,
+   "alto": 7.22
+  },
+  "lineaBaseMm": {
+   "x": 193.09,
+   "y": 154.16
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "W21": {
+  "casillaMm": {
+   "x": 189.33,
+   "y": 88.85,
+   "ancho": 19.78,
+   "alto": 11.62
+  },
+  "lineaBaseMm": {
+   "x": 195.92,
+   "y": 95.76
+  },
+  "pt": 8.9,
+  "blanca": false
+ },
+ "W9": {
+  "casillaMm": {
+   "x": 189.33,
+   "y": 34.85,
+   "ancho": 37.36,
+   "alto": 6.91
+  },
+  "lineaBaseMm": {
+   "x": 220.72,
+   "y": 38.93
+  },
+  "pt": 12.46,
+  "blanca": false
+ },
+ "X7": {
+  "casillaMm": {
+   "x": 197.49,
+   "y": 27.63,
+   "ancho": 29.2,
+   "alto": 6.91
+  },
+  "lineaBaseMm": {
+   "x": 221.35,
+   "y": 32.03
+  },
+  "pt": 13.35,
+  "blanca": false
+ },
+ "Z7": {
+  "casillaMm": {
+   "x": 227.0,
+   "y": 27.63,
+   "ancho": 23.23,
+   "alto": 6.91
+  },
+  "lineaBaseMm": {
+   "x": 245.21,
+   "y": 31.08
+  },
+  "pt": 10.68,
+  "blanca": false
+ },
+ "Z9": {
+  "casillaMm": {
+   "x": 227.0,
+   "y": 34.85,
+   "ancho": 23.23,
+   "alto": 11.3
+  },
+  "lineaBaseMm": {
+   "x": 245.21,
+   "y": 38.3
+  },
+  "pt": 10.68,
+  "blanca": false
+ }
+}
