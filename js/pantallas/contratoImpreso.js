@@ -35,7 +35,7 @@ import { q } from '../nucleo/dinero.js';
 import {
   CAMPOS, ESCALA_EXCEL, ORIGEN_MM, PAPEL, HOJA_MM, cajaDeRango, campoPorId, fechaParaPapel, textoSeSale,
   transformacionCss, textoDeCalibracion, aplicarTecla, calibracionActiva, guardarCalibracion,
-  leerCalibraciones, CALIBRACION_DE_FABRICA, calibracionValida, camposQueSeImprimen, TARIFAS_DEL_PAPEL, PASOS,
+  leerCalibraciones, CALIBRACION_DE_FABRICA, calibracionValida, camposQueSeImprimen, TARIFAS_DEL_PAPEL, PASOS, camposFueraDeLaCarta,
 } from '../nucleo/hojaContrato.js';
 import { dinero } from '../ui.js';
 import { cargarContrato, cargarClientes, cargarFlota } from '../datos.js';
@@ -398,6 +398,14 @@ export const PASOS_DE_CALIBRAR = [
 ];
 
 /**
+ * Cómo se llama una casilla en la hoja de prueba: con las palabras del dueño («Placas», «Fecha de salida»), no con el nombre que
+ * le damos en el código. Un texto fijo de Excel se muestra con su propio texto.
+ */
+function nombreEnLaPrueba(campo) {
+  return campo.tipo === 'etiqueta' ? campo.texto.trim() : campo.etiqueta;
+}
+
+/**
  * La hoja de prueba: lo que se imprime en papel blanco y se pone contra la luz sobre el formulario preimpreso para
  * que calce.
  *   - Una regla en los bordes de la carta, en milímetros. No se corre con la calibración: dice dónde mete la
@@ -415,7 +423,7 @@ export function htmlHojaDePrueba(cal = CALIBRACION_DE_FABRICA, { impresora = nul
     const imprime = c.imprime !== false;
     const h = hito.get(c.id);
     const clase = `hp-caja${imprime ? '' : ' hp-no'}${h ? ' hp-hito-caja' : ''}`;
-    return `<div class="${clase}" data-campo="${esc(c.id)}" style="${estiloDeCaja(c).replace(/font-size:[^;]+;/, '')}"><span>${esc(c.id)}</span></div>`;
+    return `<div class="${clase}" data-campo="${esc(c.id)}" style="${estiloDeCaja(c).replace(/font-size:[^;]+;/, '')}"><span>${esc(nombreEnLaPrueba(c))}</span></div>`;
   }).join('\n    ');
   const insignias = HITOS.map((h) => {
     const caja = cajaDeRango(campoPorId(h.id).rango);
@@ -423,7 +431,7 @@ export function htmlHojaDePrueba(cal = CALIBRACION_DE_FABRICA, { impresora = nul
   }).join('');
   const esquina = (x, y, clase) => `<i class="hp-cruz ${clase}" style="left:${mm(ORIGEN_MM.x + x)};top:${mm(ORIGEN_MM.y + y)}"></i>`;
   const marco = `<div class="hp-marco" style="left:${mm(ORIGEN_MM.x)};top:${mm(ORIGEN_MM.y)};width:${mm(HOJA_MM.ancho)};height:${mm(HOJA_MM.alto)}"></div>`;
-  const rotulo = `<strong>HOJA DE PRUEBA</strong> (no es el contrato)${impresora ? ` · impresora «${esc(impresora)}»` : ''} · ${esc(textoDeCalibracion(cal))}`;
+  const rotulo = `<strong>HOJA DE PRUEBA</strong> (no es el contrato)${impresora ? ` · impresora «${esc(impresora)}»` : ''} · ${esc(textoDeCalibracion(cal))}<br>Cada rectángulo marca dónde se escribirá un dato. Los cuatro con número y borde grueso son con los que se compara. Las reglas de los bordes están en milímetros.`;
   const pasos = PASOS_DE_CALIBRAR.map((p, i) => `<li><b>${i + 1}.</b> ${esc(p.corto)}</li>`).join('');
   return `<article class="hoja-contrato hoja-de-prueba" aria-label="Hoja de prueba">
   <div class="hp-regla">${reglaHtml()}</div>
@@ -494,6 +502,18 @@ function quitarPaginaSinMargen() {
 const textoDeImpresora = ({ nombre, cal, calibrada }) => (calibrada
   ? `Impresora «${esc(nombre)}»: ${esc(textoDeCalibracion(cal))}.`
   : `Esta computadora todavía no tiene una impresora calibrada: el primer papel sale corrido. ${esc(textoDeCalibracion(cal))}.`);
+
+/** Lo que se dice cuando una calibración dejaría casillas fuera de la carta. */
+function textoDeCortadas(ids) {
+  const nombres = ids.map((id) => campoPorId(id).etiqueta).join(', ');
+  return `Con la calibración de esta impresora ${ids.length === 1 ? 'una casilla se sale' : `${ids.length} casillas se salen`} de la carta y se cortarían en el papel: ${nombres}. Achica la hoja en «Calibrar impresora» (tecla −).`;
+}
+
+/** El renglón de «Ajuste: …» de la pantalla de calibrar, con el aviso si el ajuste deja casillas fuera de la carta. */
+function lecturaDe(cal, prefijo = '') {
+  const cortadas = camposFueraDeLaCarta(cal);
+  return `${prefijo}Ajuste: ${textoDeCalibracion(cal)}.${cortadas.length ? ` ${textoDeCortadas(cortadas)}` : ''}`;
+}
 
 const AYUDA_DE_IMPRIMIR = 'En el diálogo de imprimir: tamaño Carta, escala 100 % (no «Ajustar a la página»), márgenes «Ninguno» y sin encabezados ni pies de página.';
 const AVISO_DE_TARJETA = 'Este papel lleva el número completo de la tarjeta y el CBC: imprímelo directo a la impresora. NO lo guardes como PDF: quedaría un archivo con la tarjeta en la computadora (ADR-001).';
@@ -595,8 +615,11 @@ export function pintarContratoImpreso(contenedor, entrada, {
 
   function pintarAvisos() {
     const caja = el('[data-pieza="avisos"]');
-    caja.innerHTML = modelo.avisos.length
-      ? `<div class="barra-lectura-fallida no-imprimir" role="alert">${modelo.avisos.map((a) => `<p>${esc(a)}</p>`).join('')}</div>`
+    // Con la calibración de esta impresora, ¿alguna casilla que lleva dato se saldría de la carta? Se cortaría en el papel.
+    const cortadas = camposFueraDeLaCarta(impresora.cal).filter((id) => modelo.valores[id]);
+    const avisos = cortadas.length ? [...modelo.avisos, textoDeCortadas(cortadas)] : modelo.avisos;
+    caja.innerHTML = avisos.length
+      ? `<div class="barra-lectura-fallida no-imprimir" role="alert">${avisos.map((a) => `<p>${esc(a)}</p>`).join('')}</div>`
       : '';
   }
 
@@ -751,7 +774,7 @@ export function pintarCalibracion(contenedor, {
 
   const el = (id) => contenedor.querySelector(id);
   function pintar() {
-    el('[data-pieza="lectura"]').textContent = `Ajuste: ${textoDeCalibracion(cal)}.`;
+    el('[data-pieza="lectura"]').textContent = lecturaDe(cal);
     el('[data-pieza="vista"]').innerHTML = htmlHojaDePrueba(cal, { impresora: nombre || null });
   }
   pintar();
@@ -782,7 +805,7 @@ export function pintarCalibracion(contenedor, {
       cal = { ...existente };
       pintar();
     } else {
-      el('[data-pieza="lectura"]').textContent = `Ajuste: ${textoDeCalibracion(cal)}.`;
+      el('[data-pieza="lectura"]').textContent = lecturaDe(cal);
     }
   });
   el('[data-accion="imprimir-prueba"]')?.addEventListener('click', () => imprimirConTitulo('Hoja de prueba', imprimir));
@@ -790,7 +813,7 @@ export function pintarCalibracion(contenedor, {
   el('[data-accion="guardar"]')?.addEventListener('click', () => {
     try {
       guardarCalibracion(almacen, nombre, cal);
-      el('[data-pieza="lectura"]').textContent = `Guardado para «${nombre.trim()}». Ajuste: ${textoDeCalibracion(cal)}.`;
+      el('[data-pieza="lectura"]').textContent = lecturaDe(cal, `Guardado para «${nombre.trim()}». `);
     } catch (error) {
       el('[data-pieza="lectura"]').textContent = error.message;
     }

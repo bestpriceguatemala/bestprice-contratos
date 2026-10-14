@@ -359,6 +359,21 @@ export function cajaEnPapel(caja, cal) {
   };
 }
 
+/**
+ * Los campos que, con una calibración, se saldrían de la carta (por cualquier lado) y se cortarían en el papel. A tamaño de
+ * Excel la hoja mide 250 mm y la carta 216: con una escala mayor que `ESCALA_QUE_CABE` las últimas columnas (las horas y los
+ * precios de la derecha) caen fuera del papel, y una calibración que lo permitiera sacaría un contrato sin esas casillas sin
+ * avisar. Sirve para decírselo a quien calibra y a quien imprime. Cuenta las cajas (no el texto): lo que se sale de su casilla
+ * ya lo avisa `textoSeSale`.
+ */
+export function camposFueraDeLaCarta(cal) {
+  return camposQueSeImprimen().filter((campo) => {
+    const caja = cajaEnPapel(cajaDeRango(campo.rango), cal);
+    const margen = 1e-6;
+    return caja.x < -margen || caja.y < -margen || caja.x + caja.ancho > PAPEL.anchoMm + margen || caja.y + caja.alto > PAPEL.altoMm + margen;
+  }).map((campo) => campo.id);
+}
+
 /** El `transform` de CSS que le hace a TODA la hoja lo mismo que `cajaEnPapel` a una caja: se aplica una sola vez. */
 export function transformacionCss(cal) {
   return `translate(${aMilesimas(cal.dx)}mm, ${aMilesimas(cal.dy)}mm) scale(${aMilesimas(cal.escala)})`;

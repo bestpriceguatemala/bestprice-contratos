@@ -15,7 +15,7 @@ import {
   PAPEL, ESCALA_EXCEL, MM_POR_UNIDAD, ORIGEN_MM, ANCHOS, ALTOS, HOJA_UNIDADES, HOJA_MM, CAMPOS,
   cajaDeRango, campoPorId, camposQueSeImprimen, fechaParaPapel, textoSeSale,
   ESCALA_QUE_CABE, CALIBRACION_DE_FABRICA, LIMITES, PASOS, calibracionValida, limitar, aplicarTecla,
-  cajaEnPapel, transformacionCss, textoDeCalibracion, TARIFAS_DEL_PAPEL,
+  cajaEnPapel, transformacionCss, textoDeCalibracion, TARIFAS_DEL_PAPEL, camposFueraDeLaCarta,
   CLAVE_DE_CALIBRACIONES, leerCalibraciones, guardarCalibracion, calibracionActiva,
 } from '../js/nucleo/hojaContrato.js';
 
@@ -538,6 +538,41 @@ test('cajaEnPapel: la hoja se achica hacia su esquina y el corrimiento se suma d
   // lo que está lejos de la esquina sí se acerca, y el corrimiento NO se multiplica por la escala
   const lejos = cajaEnPapel(caja, { dx: 2, dy: -3, escala: 0.5 });
   assert.deepEqual(lejos, { x: ORIGEN_MM.x + 2 + 50, y: ORIGEN_MM.y - 3 + 25, ancho: 15, alto: 5 });
+});
+
+test('camposFueraDeLaCarta: con la calibración de fábrica todo cabe; más grande de lo que cabe, se cortan las columnas de la derecha', () => {
+  assert.deepEqual(camposFueraDeLaCarta({ ...CALIBRACION_DE_FABRICA }), []);
+  // a tamaño de Excel la hoja mide 250 mm y la carta 216: se salen las horas y los precios de la derecha
+  const alTamanoDeExcel = camposFueraDeLaCarta({ dx: 0, dy: 0, escala: 1 });
+  for (const id of ['horaSalida', 'horaEntrada', 'precioBase', 'seguro', 'deducible']) assert.ok(alTamanoDeExcel.includes(id), id);
+  assert.ok(!alTamanoDeExcel.includes('carroPlacas'), 'lo de la izquierda sigue dentro');
+  // ESCALA_QUE_CABE deja los 5 mm de margen derecho que él le puso a Excel; las cajas todavía caben hasta 0.79 (216 mm menos
+  // 17.9 de margen izquierdo, entre 250 de hoja) y a 0.80 ya se corta la columna de las horas
+  assert.deepEqual(camposFueraDeLaCarta({ dx: 0, dy: 0, escala: ESCALA_QUE_CABE }), []);
+  assert.deepEqual(camposFueraDeLaCarta({ dx: 0, dy: 0, escala: 0.79 }), []);
+  assert.deepEqual(camposFueraDeLaCarta({ dx: 0, dy: 0, escala: 0.8 }), ['horaSalida', 'horaEntrada']);
+});
+
+test('camposFueraDeLaCarta: un corrimiento también puede sacar casillas por cualquier lado', () => {
+  const fabrica = CALIBRACION_DE_FABRICA.escala;
+  assert.ok(camposFueraDeLaCarta({ dx: 8, dy: 0, escala: fabrica }).includes('horaSalida'), 'a la derecha');
+  assert.ok(camposFueraDeLaCarta({ dx: -20, dy: 0, escala: fabrica }).includes('etiquetaAcepto'), 'a la izquierda: la primera columna empieza en 17.9 mm');
+  assert.ok(camposFueraDeLaCarta({ dx: 0, dy: -35, escala: fabrica }).includes('etiquetaAcepto'), 'arriba: la hoja empieza en 18.5 mm y su primera casilla en 29');
+  assert.ok(camposFueraDeLaCarta({ dx: 0, dy: 90, escala: fabrica }).includes('rentadoPor'), 'abajo');
+  // y un corrimiento chico hacia adentro no saca nada
+  assert.deepEqual(camposFueraDeLaCarta({ dx: -1, dy: 1, escala: fabrica }), []);
+});
+
+test('camposFueraDeLaCarta: solo cuenta los campos que se imprimen', () => {
+  const campo = campoPorId('horaSalida');
+  const alTamanoDeExcel = { dx: 0, dy: 0, escala: 1 };
+  assert.ok(camposFueraDeLaCarta(alTamanoDeExcel).includes('horaSalida'));
+  try {
+    campo.imprime = false;
+    assert.ok(!camposFueraDeLaCarta(alTamanoDeExcel).includes('horaSalida'));
+  } finally {
+    delete campo.imprime;
+  }
 });
 
 test('textoDeCalibracion dice la calibración con palabras', () => {

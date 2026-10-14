@@ -695,6 +695,25 @@ test('la hoja de prueba trae una caja por cada campo de la tabla, de puntos las 
   assert.ok(!/class="hp-caja[^"]*"[^>]*font-size/.test(prueba));
 });
 
+test('cada caja de la hoja de prueba se llama con las palabras del dueño, no con el nombre del código', () => {
+  const prueba = htmlHojaDePrueba();
+  const nombreDe = (id) => new RegExp(`data-campo="${id}" style="[^"]*"><span>([^<]*)</span>`).exec(prueba)[1];
+  assert.equal(nombreDe('carroPlacas'), 'Placas');
+  assert.equal(nombreDe('fechaSalida'), 'Fecha de salida');
+  assert.equal(nombreDe('rentadoPor'), 'Rentado por');
+  // un texto fijo se muestra con su propio texto, sin el «Texto fijo:» ni los espacios de Excel
+  assert.equal(nombreDe('etiquetaTarjeta1'), 'TARJETA 1  No:');
+  assert.equal(nombreDe('deducibleIva'), '+ iva');
+  assert.equal(nombreDe('departamento'), 'GUATEMALA');
+  // ningún nombre de código se ve en una casilla (los id viven en data-campo, que no se imprime)
+  const visibles = [...prueba.matchAll(/<span>([^<]*)<\/span>/g)].map((m) => m[1]);
+  assert.equal(visibles.length, CAMPOS.length);
+  for (const texto of visibles) assert.ok(!/^[a-z]+[A-Z][A-Za-z0-9]*$/.test(texto), `«${texto}» es un nombre de código`);
+  // las cuatro con número se corren para que el círculo no tape su nombre
+  const css = readFileSync(new URL('../css/contrato-papel.css', import.meta.url), 'utf8');
+  assert.match(bloqueDesde(css, css.indexOf('\n.hp-caja.hp-hito-caja span {')), /left:\s*3mm;/);
+});
+
 test('las cajas de la prueba están exactamente donde se imprimiría el dato', () => {
   const prueba = htmlHojaDePrueba();
   const hoja = html();
@@ -738,6 +757,8 @@ test('el rótulo de la hoja de prueba dice la impresora (escapada) y la calibrac
   assert.ok(!htmlHojaDePrueba().includes(' · null'));
   // y dice, antes que nada, que NO es el contrato
   assert.match(prueba, /<strong>HOJA DE PRUEBA<\/strong> \(no es el contrato\)/);
+  // y qué es cada cosa de la hoja
+  assert.match(prueba, /Cada rectángulo marca dónde se escribirá un dato\. Los cuatro con número y borde grueso son con los que se compara\. Las reglas de los bordes están en milímetros\./);
 });
 
 test('cuatro casillas con número, una en cada esquina, son con las que se compara', () => {
@@ -902,6 +923,23 @@ test('pintarContratoImpreso dibuja la hoja con las tarjetas enmascaradas y engan
   c.nodo('[data-accion="imprimir"]').oyentes.click();
   assert.equal(impresiones, 1);
   c.nodo('[data-accion="volver"]');
+});
+
+test('una calibración que dejaría casillas fuera de la carta se avisa en la pantalla de imprimir, con los nombres de las casillas', () => {
+  const almacen = almacenEspia();
+  guardarCalibracion(almacen, 'Grande', { dx: 0, dy: 0, escala: 1 });
+  const c = contenedorFalso();
+  pintarContratoImpreso(c, entrada(), { almacen });
+  assert.match(c.avisos(), /casillas se salen de la carta y se cortarían en el papel: [^<]*Hora de salida/);
+  assert.match(c.avisos(), /Achica la hoja en «Calibrar impresora» \(tecla −\)/);
+  // con la de fábrica, ningún aviso de eso
+  const bien = contenedorFalso();
+  pintarContratoImpreso(bien, entrada(), { almacen: almacenEspia() });
+  assert.ok(!/se salen de la carta/.test(bien.avisos()));
+  // y una casilla sin dato no cuenta: no se corta nada que no se vaya a imprimir
+  const sinHoras = contenedorFalso();
+  pintarContratoImpreso(sinHoras, entrada({ contrato: contrato({ horaSalida: '', precioDia: 0, seguroDia: 0, seguroTercerosDia: 0, deducible: 0, deducibleBajo: 0, seguroMenoresDia: 0, seguroPaiDia: 0, cartaPoderPrecio: 0, cartaPoderDestino: '', variosPrecio: 0, variosDescripcion: '', fechaSalida: '2026-08-20' }) }), { almacen });
+  assert.ok(!/Hora de salida/.test(sinHoras.avisos()));
 });
 
 test('un contrato en efectivo no pide número de tarjeta ni CBC', () => {
@@ -1354,6 +1392,26 @@ test('la pantalla de calibrar trae los cinco pasos en palabras, el nombre de la 
   assert.ok(c.innerHTML.includes('id="hc-nombre"'));
 });
 
+test('en la pantalla de calibrar, un ajuste que deja casillas fuera de la carta lo dice en el renglón del ajuste, y se quita al corregirlo', () => {
+  const nav = navegadorFalso();
+  try {
+    const c = contenedorFalso();
+    const pantalla = pintarCalibracion(c, { almacen: almacenEspia() });
+    assert.ok(!/se salen de la carta/.test(c.nodo('[data-pieza="lectura"]').textContent));
+    // + con Ctrl: 0.05 de golpe, hasta pasarse de lo que cabe
+    const tecla = (key, extra = {}) => nav.doc.keydown({ key, target: { matches: () => false }, preventDefault() {}, ...extra });
+    tecla('+', { ctrlKey: true });
+    tecla('+', { ctrlKey: true });
+    assert.ok(pantalla.cal().escala > CALIBRACION_DE_FABRICA.escala);
+    assert.match(c.nodo('[data-pieza="lectura"]').textContent, /casillas se salen de la carta y se cortarían en el papel: .*Achica la hoja/);
+    tecla('-', { ctrlKey: true });
+    tecla('-', { ctrlKey: true });
+    assert.ok(!/se salen de la carta/.test(c.nodo('[data-pieza="lectura"]').textContent), 'de vuelta a lo que cabe, el aviso se va');
+  } finally {
+    nav.restaurar();
+  }
+});
+
 test('guardar sin nombre lo dice y no guarda; con nombre guarda, activa esa impresora y lo confirma', () => {
   const almacen = almacenEspia();
   const c = contenedorFalso();
@@ -1527,7 +1585,7 @@ test('lo que tiene que verse en la hoja de prueba no depende de «Gráficos de f
   // los pasos van fijos al papel, abajo, y no se corren con la calibración
   const pasos = bloqueDesde(css, css.indexOf('\n.hp-pasos {'));
   assert.match(pasos, /position:\s*absolute;/);
-  assert.match(pasos, /top:\s*250mm;/);
+  assert.match(pasos, /top:\s*246mm;/);
   assert.ok(!/transform/.test(pasos));
 });
 
