@@ -1,8 +1,9 @@
 # Comisiones de empleados — informe (13 y 14 de octubre de 2026)
 
-**Estado: hecho y verificado en el navegador.** `npm test`: **1924 pruebas, 0 rojas** (base 1475; en el árbol hay también las pruebas de
-la impresión del contrato y del respaldo en Excel, que escriben otros agentes). De las nuevas, **unas 198 son de este trabajo**: 175 en
-cinco archivos nuevos y 24 en `pruebas/sacarCarro.test.mjs` (una se reemplazó).
+**Estado: hecho y verificado en el navegador, con la regla corregida por el dueño el 14 de octubre (ver «Segunda tanda»).** `npm test`:
+**1996 pruebas, 0 rojas** (base 1475; en el árbol hay también las pruebas de la impresión del contrato y del respaldo en Excel, que
+escriben otros agentes). De las nuevas, **unas 235 son de este trabajo**: cinco archivos nuevos (`empleado` 21, `comisiones` 50,
+`comisiones-datos` 30, `comisiones-pantalla` 86, `empleados-pantalla` 23) y 24 en `pruebas/sacarCarro.test.mjs` (una se reemplazó).
 
 ## Commits
 
@@ -17,8 +18,49 @@ cinco archivos nuevos y 24 en `pruebas/sacarCarro.test.mjs` (una se reemplazó).
 | `35f2398` | glosario §7b y pendientes del dinero; enlazar rentas viejas pasa a la credencial de dinero |
 | `c914062` | ADR-002: actualización con la decisión |
 | `cf9a9b2` | arreglo que encontró el navegador (ver «Lo que encontró el navegador») |
+| `3eff123` | (lo commiteó el coordinador al cortarse mi sesión) la comisión se paga sobre un contrato CERRADO; `periodosDePago`, `sinMarcarDeComision` |
+| `dda7b70` | el estimado y «lo que solo espera a cerrar» se suman aparte (`totalEstimado`, `totalPorCerrar`) |
+| `d7ca1c4` | la pantalla: cada renta que no se paga dice SU razón, y un período se marca de un clic |
+| `7358f20` | §5 del diseño corregido, con la fecha y las palabras del dueño |
 
 No toqué `version.txt` ni `js/version.js`. No hay ningún cambio en `firestore.rules`.
+
+## Segunda tanda (14 de octubre): «firme» es un contrato CERRADO, y la quincena
+
+El dueño contestó mi concern 3 —*«Lo miro cuando el contrato está cerrado y tengo que pagar quincena o final de mes. Yo decido cuándo lo
+pago.»*— y eso cambió la regla y destapó algo que no estaba en el diseño.
+
+**1. Firme = cerrado.** Una comisión se paga si y solo si `estadoContrato(c) === 'cerrado'`, la pregunta con la que ya se le paga a un
+dueño de carro ajeno. No hay una segunda copia: `estadoDeComision` (`nucleo/comisiones.js`) le pregunta a `estadoContrato`, y una prueba
+compara, para seis contratos distintos (afuera, devuelto con saldo, devuelto con garantía, cerrado, con atraso, con descuento), que la
+comisión es pagable exactamente cuando `esPagableAlDueno` dice que sí. Hay cinco estados: `estimada` (el carro sigue afuera), `sin-cerrar`
+(el carro volvió, el monto ya se conoce, falta que cierre), `sin-porcentaje`, `sin-comision` y `por-pagar`. **Lo que separé a propósito:**
+`comisionDe(c).firme` sigue diciendo si el MONTO se conoce (sirve para llamarla «estimada» o no); lo que decide si se PAGA es que cierre.
+- **La pantalla decía una mentira** (lo detectó el coordinador): «Aún no es firme» imprimía fijo «El carro todavía no regresa» también
+  para rentas cuyo carro sí volvió. Ahora el bloque se llama **«Todavía no se paga»** y cada fila dice **su razón** con
+  `razonDeNoCierre`, la misma función de la ficha del dueño: «Saldo pendiente: Q200.00.», «Garantía sin liberar: Q5,000.00.», «El carro
+  todavía no regresa.». «estimada» es solo de la que sigue afuera. Abajo, dos frases con dos cifras (`totalEstimado` y `totalPorCerrar`,
+  que ahora no se mezclan): «De las que siguen afuera, estimado: Q… No es deuda todavía» y «De las que ya regresaron, el monto ya es
+  ese: Q… Solo falta que cierre el contrato.» También corregí «ya regresaron» → «ya cerraron» en la línea de las rentas sin comisión,
+  la explicación de la lista y el mensaje de la tabla vacía. Una prueba fija que la pantalla no mira `estadoContrato` ni `pendientesDe`
+  (se lo pregunta al núcleo).
+- **§5 del diseño** decía «la comisión queda firme al recibir el carro»; ahora dice de dónde salió la regla (palabras del dueño, 14 de
+  octubre de 2026), que es la misma de los pagos a dueños, y la diferencia entre «el monto se conoce» y «se paga» (§7b también).
+
+**2. El dueño paga por quincena y por fin de mes.** `periodosDePago` (núcleo): por mes con algo por pagar, el mes completo y cada quincena
+(1–15 y 16–fin de mes) que tenga algo. **Una renta cuenta en el período de la fecha en que REGRESÓ el carro**, no en el de la fecha en
+que cerró el contrato (esa no se guarda): una que regresó el 10 y cerró el 18 sale en la primera quincena aunque esa ya se haya pagado,
+y el botón de esa quincena solo ofrece lo que falta. En la ficha: una fila por mes con «Todo septiembre 2026 · 4 rentas · Q280.00»,
+«1.ª quincena (1–15) · 2 rentas · Q140.00», «2.ª quincena (16–30) · …»; **un clic marca el período** (reemplaza lo marcado) y
+sincroniza las casillas sin redibujar. Las tres condiciones del coordinador, con prueba cada una:
+- **Ningún aviso nuevo**: sin plazos, sin «lleva días», sin rojo; un mes viejo se ofrece igual que uno nuevo (prueba sobre el texto y
+  sobre las clases `dn-alerta` / `barra-lectura-fallida`).
+- **Nada se marca en silencio**: tras marcar una parte aparece «Sin marcar: 3 rentas · Q210.00» (`sinMarcarDeComision`, el complemento
+  exacto de lo marcado), y las filas no marcadas siguen ahí con su casilla. Sin nada marcado, o con todo marcado, la línea no dice nada.
+  El parche de la página y la plantilla dicen lo mismo (prueba de equivalencia con la línea incluida).
+- **El total de lo marcado suma a la vista** antes de registrar, como ya hacía.
+La regla de «quincena» (`quincenaDe`) vive solo en el núcleo; la pantalla da nombre a lo agrupado (octubre 2026, el último día del mes
+de verdad) y no parte fechas ni compara contra 15 (hay una prueba que lo prohíbe).
 
 ## ADR-002: la pregunta abierta de `porcentajeComision` — decisión
 
@@ -86,16 +128,16 @@ que se sella es el de ahora y no el de la última vez que esa computadora sincro
 
 ## Decisiones mías (no del dueño) y por qué
 
-- **Solo se paga lo firme, y «firme» es que el carro volvió** (`cierre.fechaReal`), no que el cliente haya pagado todo: así lo dice §5 y
-  así lo pidió el encargo. Un contrato `devuelto` con daños sin cobrar sí tiene comisión pagable (los daños no entran a la base).
+- **Solo se paga lo firme, y «firme» es un contrato CERRADO** (decisión del dueño, 14 de octubre; en la primera tanda yo había hecho «el
+  carro volvió», que era lo que decía §5 y el encargo). Ver «Segunda tanda».
 - **Un pago de comisión no lleva `numero`.** El de un pago a un dueño es el correlativo del comprobante que se le entrega; a un
   empleado no se le imprime nada. Tampoco hice comprobante. Los campos son los mismos donde es el mismo dato (`monto`, `forma`,
   `contratos[]`, `anulado`, `anuladoEn`), y `anularPagoComision` delega en `anularPagoDueno`: un solo modo de anular.
 - **Wilder al 0 %** no tiene casilla ni forma de pagar: sus rentas firmes salen como «N rentas ya regresaron y no generan comisión: su
   porcentaje es 0 %», y ni marcándolas a la fuerza se arma un pago (hay prueba). Un 0 sellado en un contrato es un porcentaje; uno que
   falta (`undefined`, `''`, un texto) no es 0 ni 5: es «sin porcentaje», se aparta y se dice.
-- **No hice la agrupación «por mes»** de §6: la lista de «Por pagar» va ordenada por fecha de regreso (el mes en que cuenta la comisión) y
-  trae esa fecha, más «marcar todas». El encargo describía la pantalla sin meses (gemela de la de dueños).
+- **La agrupación «por mes» de §6** quedó cubierta por los períodos de un clic (mes completo y quincenas), además de la lista ordenada por
+  fecha de regreso y «marcar todas».
 - **La lista de empleados no se vuelve a leer al guardar el contrato**, solo al abrir «Sacar carro». Queda una ventana de minutos entre
   que el dueño cambia un porcentaje en otra computadora y que el mostrador que ya tenía la pantalla abierta lo vea. Es chica y tiene
   arreglo barato (releer al guardar) si algún día importa.
@@ -135,6 +177,22 @@ Con clics reales, de punta a punta:
    volver la red, el reintento cargó la lista.
 9. Salir del área de dinero la cierra (vuelve a pedir contraseña). IndexedDB: versión 3, sin tienda `empleados`.
 
+**Segunda tanda, verificada con clics reales** (mismo arnés, resembrado con un escenario de quincenas: Ana y Wilder ya dados de alta, cuatro
+rentas de septiembre cerradas, una de octubre cerrada, una que volvió con Q200 de daños sin cobrar, una que volvió con la garantía de la
+tarjeta sin liberar, una que sigue afuera, y una de Wilder; puerto 4527 comprobado libre y cerrado después; árbol = `git archive 7358f20`):
+- La lista dice **Q350.00 en 5 rentas** (las cinco cerradas): las dos que volvieron pero no cierran no suman.
+- La ficha de Ana, **«Todavía no se paga»**: «Garantía sin liberar: Q5,000.00.», «Saldo pendiente: Q200.00.» y «El carro todavía no regresa.»
+  **cada una con su razón** (la del carro de vuelta ya no dice que el carro está afuera), «estimada» solo en la que sigue afuera, y las dos
+  frases de abajo separadas: estimado Q140.00 y «el monto ya es ese: Q140.00».
+- **Un período de un clic**: botones «Todo septiembre 2026 · 4 rentas · Q280.00», «1.ª quincena (1–15) · 2 rentas · Q140.00»,
+  «2.ª quincena (16–30) · 2 rentas · Q140.00» y octubre. Un clic en la primera quincena de septiembre: 2 casillas marcadas, «Total marcado
+  Q140.00» y **«Sin marcar: 3 rentas · Q210.00»**, con «Por pagar en total Q350.00» sin cambiar. Un clic en «Todo septiembre» reemplazó lo
+  marcado (4 rentas, Q280.00, «Sin marcar: 1 renta · Q70.00»). «Registrar pago» → «Guardar pago de Q280.00»: quedó en `pagosComision` con
+  las cuatro rentas, y los botones se rehicieron con lo que falta (solo octubre).
+- **Cobrar el saldo de Q200 en «Recibir carro»** (botón real) cerró el contrato 6; al volver a Comisiones esa renta **pasó a «Por pagar»**,
+  el botón «1.ª quincena (1–15)» de octubre subió a 2 rentas · Q140.00 y «De las que ya regresaron» bajó a Q70.00 (solo queda la de la
+  garantía).
+
 **Lo que encontró el navegador y las pruebas no** (`cf9a9b2`): con la lista de empleados sin poder leerse, las cuentas de Ana y de
 Wilder salían marcadas «No está en la lista de empleados» —se leía una lectura fallida como un empleado que no existe—. Ahora solo se
 afirma cuando la lista se leyó. Y el confirm de enlazar decía «en 1 renta que aún no se han pagado»: ahora concuerda en plural y se prueba.
@@ -161,10 +219,12 @@ copia de la nube y no la de la pantalla, y que el total de todos pase por `q()` 
 3. **Las rentas de antes de «Wilder» (5 %)**: el formulario de antes traía 5 % por omisión, así que lo que él haya rentado a su nombre
    quedó sellado en 5 %. Enlazarlas **no cambia el porcentaje** (sellado es sellado); si quiere que no cuenten, hay que marcar la casilla
    al enlazar (solo cambia las que no están pagadas). Si no lo hace, esas rentas siguen apareciendo como deuda con Wilder.
-4. **«Firme» no espera al cliente**: una comisión se paga en cuanto el carro volvió, aunque el cliente todavía deba daños. Es lo que dice
-   §5 y lo que pidió el encargo; lo anoto por si el dueño prefiere esperar al cierre del contrato (sería un cambio de una línea en
-   `estadoDeComision`, pero es decisión suya).
-5. Sin comprobante impreso de comisiones, sin número de pago, y sin agrupación por mes (ver arriba). Si lo quiere, es trabajo aparte.
+4. ~~«Firme» no espera al cliente~~ — resuelto el 14 de octubre: ahora sí espera (ver «Segunda tanda»).
+5. Sin comprobante impreso de comisiones ni número de pago. Si lo quiere, es trabajo aparte.
+5 bis. **Un período no distingue quién cerró tarde**: como la fecha de cierre no se guarda, una renta que regresó el 10 y cerró el 18 sale en
+   la primera quincena (ya pagada) y hay que acordarse de marcar esa quincena otra vez para pagarla. El botón solo ofrece lo que falta,
+   así que se ve, pero no se avisa (no se avisa nada, a propósito). Si algún día se guarda la fecha de cierre, el período podría ser el de
+   esa fecha; es un cambio de datos, no de pantalla.
 6. Menor y heredado: en las listas vacías, el botón «Agregar el primero» (clase `dn-boton-ancho-auto` dentro de una celda) sale con poco
    contraste; es el mismo de la lista de dueños y no lo toqué.
 7. Cuando corrí la suite completa hubo un rojo de `pruebas/respaldo-excel.test.mjs` que era trabajo a medias del agente del respaldo
