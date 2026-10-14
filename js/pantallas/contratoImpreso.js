@@ -35,7 +35,7 @@ import { q } from '../nucleo/dinero.js';
 import {
   CAMPOS, ESCALA_EXCEL, ORIGEN_MM, PAPEL, HOJA_MM, cajaDeRango, fechaParaPapel, textoSeSale,
   transformacionCss, textoDeCalibracion, aplicarTecla, calibracionActiva, guardarCalibracion,
-  leerCalibraciones, CALIBRACION_DE_FABRICA, calibracionValida, camposQueSeImprimen,
+  leerCalibraciones, CALIBRACION_DE_FABRICA, calibracionValida, camposQueSeImprimen, TARIFAS_DEL_PAPEL,
 } from '../nucleo/hojaContrato.js';
 import { dinero } from '../ui.js';
 import { cargarContrato, cargarClientes, cargarFlota } from '../datos.js';
@@ -105,6 +105,14 @@ const VALOR = {
   fechaEntrada: ({ contrato }) => fechaParaPapel(contrato.devolucionPrevista, 'corta'),
   // El Excel imprime aquí la hora de SALIDA: un carro rentado por días regresa a la misma hora (ver la nota del campo).
   horaEntrada: ({ contrato }) => limpio(contrato.horaSalida),
+  // Lo que el sistema no guarda (decisión del 14 de octubre de 2026, ver la nota de cada campo): se lee de lo que se
+  // tecleó al imprimir (`papel`), y si no se tocó, de la salida (el lugar) o de las tarifas del código. Un `''` tecleado
+  // es una casilla que se BORRÓ a propósito y sale en blanco: solo `undefined` y `null` caen al valor de siempre.
+  lugarEntrada: ({ contrato, papel }) => limpio(papel.lugarEntrada ?? contrato.lugar),
+  horaTardia: ({ papel }) => monto(papel.horaTardia ?? TARIFAS_DEL_PAPEL.horaTardia),
+  combustiblePrecio: ({ papel }) => monto(papel.combustiblePrecio ?? TARIFAS_DEL_PAPEL.galon),
+  facturarNombre: ({ papel }) => limpio(papel.facturarNombre),
+  facturarNit: ({ papel }) => limpio(papel.facturarNit),
 
   apellido1: ({ cliente }) => nombresResueltos(cliente).apellidos,
   nombre1: ({ cliente }) => nombresResueltos(cliente).nombres,
@@ -185,9 +193,12 @@ const ORIGEN_DE_FECHA = {
  *   `contrato.carroAjeno`. Sin él, tipo, color y modelo de un carro propio salen en blanco y la pantalla avisa.
  * - `tarjetasEfimeras`: `[{ numero, cbc }]`, una por cada tarjeta del contrato, tecleadas para este papel y que
  *   NO se guardan (ADR-001). Opcional: sin ellas el número sale enmascarado.
+ * - `datosDelPapel`: lo que el papel lleva y el sistema no guarda, tecleado o corregido al imprimir y tampoco guardado:
+ *   `{ facturarNombre, facturarNit, lugarEntrada, horaTardia, combustiblePrecio }`. Todo opcional: sin facturar no hay
+ *   a quién; el lugar de entrada es el de salida; las dos tarifas son las de `TARIFAS_DEL_PAPEL`.
  */
 export function armarContratoImpreso({
-  contrato, cliente, carro = null, tarjetasEfimeras = [],
+  contrato, cliente, carro = null, tarjetasEfimeras = [], datosDelPapel = {},
 } = {}) {
   if (!contrato || typeof contrato !== 'object' || !contrato.id) {
     throw new Error('Falta el contrato guardado que se va a imprimir.');
@@ -202,7 +213,10 @@ export function armarContratoImpreso({
   const efimeras = Array.isArray(tarjetasEfimeras) ? tarjetasEfimeras : [];
   const tarjetas = guardadas.map((t, i) => tarjetaParaImprimir(t, efimeras[i]));
 
-  const contexto = { contrato, cliente, carro, tarjetas, ajeno };
+  const papel = datosDelPapel && typeof datosDelPapel === 'object' ? datosDelPapel : {};
+  const contexto = {
+    contrato, cliente, carro, tarjetas, ajeno, papel,
+  };
   const valores = {};
   const avisos = [];
 
@@ -247,7 +261,8 @@ export function armarContratoImpreso({
     }
   });
   for (const campo of camposQueSeImprimen()) {
-    if (textoSeSale(campo, valores[campo.id])) {
+    // Los textos fijos no cuentan: son los de Excel, y varios (como «EXPIRA:») se salen de su celda a propósito hacia la de al lado, que está vacía. Nadie puede corregirlos.
+    if (campo.tipo !== 'etiqueta' && textoSeSale(campo, valores[campo.id])) {
       avisos.push(`«${campo.etiqueta}» es más largo que su casilla del papel y se saldría de ella.`);
     }
   }
@@ -276,9 +291,9 @@ function estiloDeCaja(campo) {
     + `font-size:${Math.round(campo.pt * ESCALA_EXCEL * 1000) / 1000}pt;`;
 }
 
-// Los campos de fecha con espacios entre sus partes (los espacios caen en las casillas DD / MM / AAAA del papel):
-// el navegador no debe juntarlos.
-const CON_ESPACIOS = new Set(['fechaLarga', 'fechaDoc']);
+// Los campos de fecha con espacios entre sus partes (los espacios caen en las casillas DD / MM / AAAA del papel) y los
+// textos fijos de Excel («TARJETA 1  No:», « + iva»): el navegador no debe juntar sus espacios.
+const CON_ESPACIOS = new Set(['fechaLarga', 'fechaDoc', 'etiqueta']);
 
 function claseDeCampo(campo) {
   return [
@@ -431,6 +446,38 @@ function cajasDeTarjetas(contrato) {
   </section>`;
 }
 
+// Lo que el papel lleva y el sistema NO guarda (decisión del 14 de octubre de 2026; ver la nota de cada campo en
+// nucleo/hojaContrato.js): a quién se factura se teclea, y el lugar de entrada y las dos tarifas se precargan y se corrigen
+// aquí mismo. Nada de esto va al contrato, a Firestore ni a ningún almacén: viaja de estas cajas a la hoja y se borra al
+// terminar de imprimir, como el CBC.
+const DATOS_DEL_PAPEL = [
+  { id: 'hc-facturar-nombre', clave: 'facturarNombre', etiqueta: 'Facturar a (persona o empresa)' },
+  { id: 'hc-facturar-nit', clave: 'facturarNit', etiqueta: 'NIT' },
+  { id: 'hc-lugar-entrada', clave: 'lugarEntrada', etiqueta: 'Lugar de entrada' },
+  { id: 'hc-tarifa-hora-tardia', clave: 'horaTardia', etiqueta: 'Hora tardía (Q)', numero: true },
+  { id: 'hc-tarifa-galon', clave: 'combustiblePrecio', etiqueta: 'Combustible a (Q por galón)', numero: true },
+];
+
+/** Con qué se llenan esas cajas al abrir la pantalla y al terminar de imprimir. */
+function inicialesDelPapel(contrato) {
+  return {
+    facturarNombre: '',
+    facturarNit: '',
+    lugarEntrada: limpio(contrato?.lugar),
+    horaTardia: String(TARIFAS_DEL_PAPEL.horaTardia),
+    combustiblePrecio: String(TARIFAS_DEL_PAPEL.galon),
+  };
+}
+
+function cajasDelPapel(contrato) {
+  const inicial = inicialesDelPapel(contrato);
+  const una = (d) => `<label>${esc(d.etiqueta)} <input type="${d.numero ? 'number' : 'text'}" id="${d.id}"${d.numero ? ' step="0.01" min="0"' : ''} value="${esc(inicial[d.clave])}" autocomplete="off" spellcheck="false"></label>`;
+  return `<section class="hc-datos no-imprimir" aria-label="Datos que lleva el papel y el sistema no guarda">
+    <p class="comp-ayuda">Estos datos salen en el papel y NO se guardan en el sistema: se borran al terminar de imprimir. El lugar de entrada y las dos tarifas ya vienen puestos; corrígelos si esta renta es distinta.</p>
+    ${DATOS_DEL_PAPEL.map(una).join('\n    ')}
+  </section>`;
+}
+
 /**
  * Dibuja el contrato impreso en `contenedor`. Devuelve el modelo, o `null` si no se pudo armar.
  *
@@ -473,6 +520,7 @@ export function pintarContratoImpreso(contenedor, entrada, {
   <p class="comp-ayuda no-imprimir" data-pieza="impresora">${textoDeImpresora(impresora)}</p>
   <p class="comp-ayuda no-imprimir">${esc(AYUDA_DE_IMPRIMIR)}</p>
   ${cajasDeTarjetas(entrada.contrato)}
+  ${cajasDelPapel(entrada.contrato)}
   <div data-pieza="avisos"></div>
   <div class="hc-vista" data-pieza="vista"></div>
 </div>`;
@@ -495,8 +543,9 @@ export function pintarContratoImpreso(contenedor, entrada, {
       numero: el(`#hc-t${i}-numero`)?.value ?? '',
       cbc: el(`#hc-t${i}-cbc`)?.value ?? '',
     }));
+    const datosDelPapel = Object.fromEntries(DATOS_DEL_PAPEL.map((d) => [d.clave, el(`#${d.id}`)?.value]));
     try {
-      modelo = armarContratoImpreso({ ...entrada, tarjetasEfimeras });
+      modelo = armarContratoImpreso({ ...entrada, tarjetasEfimeras, datosDelPapel });
     } catch (error) {
       el('[data-pieza="vista"]').innerHTML = '';
       el('[data-pieza="avisos"]').innerHTML = `<div class="barra-lectura-fallida no-imprimir" role="alert"><p>${esc(error.message)}</p></div>`;
@@ -506,14 +555,26 @@ export function pintarContratoImpreso(contenedor, entrada, {
     pintarAvisos();
   }
 
-  /** Borra el número completo y el CBC de las cajas, de la memoria y de la hoja. */
+  /** Deja las cajas de a quién se factura, el lugar y las tarifas como al abrir la pantalla. */
+  function restablecerDatosDelPapel() {
+    const inicial = inicialesDelPapel(entrada.contrato);
+    DATOS_DEL_PAPEL.forEach((d) => { const caja = el(`#${d.id}`); if (caja) caja.value = inicial[d.clave]; });
+  }
+
+  /**
+   * Borra el número completo y el CBC de las cajas, de la memoria y de la hoja, y deja a quién se factura, el lugar y las
+   * tarifas como al abrir (lo corregido para una renta no se queda para la siguiente).
+   */
   function vaciar() {
     tarjetasEfimeras = [];
     contenedor.querySelectorAll('.hc-tarjeta input').forEach((caja) => { caja.value = ''; });
+    restablecerDatosDelPapel();
     redibujar();
   }
 
   contenedor.querySelectorAll('.hc-tarjeta input').forEach((caja) => caja.addEventListener('input', redibujar));
+  contenedor.querySelectorAll('.hc-datos input').forEach((caja) => caja.addEventListener('input', redibujar));
+  restablecerDatosDelPapel();
   redibujar();
   ponerPaginaSinMargen();
   // Al salir de la pantalla se vacía lo tecleado (la hoja ya no está a la vista, pero el DOM podría seguir en memoria).

@@ -15,7 +15,7 @@ import {
   PAPEL, ESCALA_EXCEL, MM_POR_UNIDAD, ORIGEN_MM, ANCHOS, ALTOS, HOJA_UNIDADES, HOJA_MM, CAMPOS,
   cajaDeRango, campoPorId, camposQueSeImprimen, fechaParaPapel, textoSeSale,
   ESCALA_QUE_CABE, CALIBRACION_DE_FABRICA, LIMITES, PASOS, calibracionValida, limitar, aplicarTecla,
-  cajaEnPapel, transformacionCss, textoDeCalibracion,
+  cajaEnPapel, transformacionCss, textoDeCalibracion, TARIFAS_DEL_PAPEL,
   CLAVE_DE_CALIBRACIONES, leerCalibraciones, guardarCalibracion, calibracionActiva,
 } from '../js/nucleo/hojaContrato.js';
 
@@ -174,16 +174,86 @@ test('el tamaño de letra de cada campo es el que Excel imprime (su tamaño por 
   }
 });
 
-test('los campos que Excel imprime en BLANCO son exactamente los que no se imprimen por ese motivo', () => {
+test('los campos de letra BLANCA en Excel son exactamente los que lo dicen, y todos se imprimen por decisión del dueño', () => {
   const blancasEnExcel = new Set(Object.entries(textoMedido).filter(([, v]) => v.blanca).map(([celda]) => celda));
-  const porSuNota = CAMPOS.filter((c) => c.imprime === false && /BLANCA/.test(c.nota ?? ''));
-  const celdasPorNota = new Set(porSuNota.map((c) => c.rango.split(':')[0]));
-  for (const celda of celdasPorNota) assert.ok(blancasEnExcel.has(celda), `${celda} está marcada como blanca pero Excel la imprime visible`);
-  // y ninguna blanca de Excel que tenga fuente en el sistema se perdió sin decirlo (E27 e I27 no significan nada y no están)
-  for (const celda of blancasEnExcel) {
-    if (['E27', 'I27'].includes(celda)) continue;
-    assert.ok(celdasPorNota.has(celda), `${celda} es blanca en Excel y la tabla no lo dice`);
+  assert.equal(blancasEnExcel.size, 11, 'Excel imprime 11 celdas en blanco, no más');
+  const marcadas = CAMPOS.filter((c) => c.blancaEnExcel);
+  const celdasMarcadas = new Set(marcadas.map((c) => c.rango.split(':')[0]));
+  for (const celda of celdasMarcadas) assert.ok(blancasEnExcel.has(celda), `${celda} está marcada como blanca pero Excel la imprime visible`);
+  // Las dos blancas que NO están en la tabla, y por qué: E27 es la ciudad adicional (el dueño dijo el 3 de octubre que la
+  // segunda dirección no se imprime) e I27 es un 0 fijo que no significa nada.
+  const faltan = [...blancasEnExcel].filter((celda) => !celdasMarcadas.has(celda)).sort();
+  assert.deepEqual(faltan, ['E27', 'I27']);
+  assert.equal(marcadas.length, 9);
+  for (const c of marcadas) {
+    assert.notEqual(c.imprime, false, `${c.id}: el dueño decidió que se imprima`);
+    // la decisión queda escrita donde se lee, con su fecha: «¿por qué sale el kilometraje aquí?» tiene respuesta en el código
+    assert.match(c.nota, /14 de octubre de 2026/, c.id);
+    assert.match(c.nota, /NO se veía en el papel que firma el cliente/, c.id);
   }
+  assert.deepEqual(marcadas.map((c) => c.id).sort(), [
+    'conductorNombre', 'deducibleBajo', 'kmSalida', 'licenciaExpira', 'seguroMenores', 'seguroPai', 'tarjeta2Autorizacion',
+    'variosDescripcion', 'variosPrecio',
+  ]);
+});
+
+test('los diez rótulos de Excel (ocho textos distintos: «EXPIRA:» y «CODIGO CBC» van dos veces) se imprimen, con su razón escrita', () => {
+  const esperado = {
+    etiquetaAcepto: 'ACEPTO LOS CARGOS A MI TARJETA NUMERO',
+    etiquetaCodigo: 'CODIGO',
+    etiquetaTarjeta1: 'TARJETA 1  No:',
+    etiquetaExpira1: 'EXPIRA:',
+    etiquetaExpira2: 'EXPIRA:',
+    etiquetaCbc1: 'CODIGO CBC',
+    etiquetaCbc2: 'CODIGO CBC',
+    etiquetaBanco: 'BANCO EMISOR',
+    departamento: 'GUATEMALA',
+    deducibleIva: ' + iva',
+  };
+  const rotulos = CAMPOS.filter((c) => c.tipo === 'etiqueta');
+  assert.deepEqual(Object.fromEntries(rotulos.map((c) => [c.id, c.texto])), esperado);
+  assert.equal(new Set(Object.values(esperado)).size, 8);
+  assert.equal(rotulos.length, 10);
+  for (const c of rotulos) {
+    assert.notEqual(c.imprime, false, `${c.id} se imprime`);
+    assert.equal(c.de, null, `${c.id}: es un texto fijo, no viene de ningún dato`);
+    assert.match(c.nota, /14 de octubre de 2026/);
+    assert.match(c.nota, /su papel NO trae este texto/, 'la razón es lo que dijo el dueño, no una suposición');
+  }
+  // los espacios de Excel se conservan: dos en «TARJETA 1  No:» y uno delante de « + iva»
+  assert.ok(campoPorId('etiquetaTarjeta1').texto.includes('1  No'));
+  assert.ok(campoPorId('deducibleIva').texto.startsWith(' + '));
+});
+
+test('lo que el sistema no guarda: cada decisión del 14 de octubre de 2026 está en la tabla, con su razón', () => {
+  // a quién se factura: se teclea al imprimir
+  for (const id of ['facturarNombre', 'facturarNit']) {
+    const c = campoPorId(id);
+    assert.equal(c.tecleado, true, id);
+    assert.match(c.de, /lo teclea en la pantalla de imprimir; no se guarda/, id);
+    assert.match(c.nota, /14 de octubre de 2026/);
+    assert.match(c.nota, /ADR-001/);
+  }
+  // el lugar de entrada y las dos tarifas: precargados y corregibles
+  assert.match(campoPorId('lugarEntrada').de, /`lugar`.*precargado/);
+  assert.match(campoPorId('horaTardia').de, /TARIFAS_DEL_PAPEL\.horaTardia` \(Q150/);
+  assert.match(campoPorId('combustiblePrecio').de, /TARIFAS_DEL_PAPEL\.galon` \(Q65/);
+  for (const id of ['lugarEntrada', 'horaTardia', 'combustiblePrecio']) assert.match(campoPorId(id).nota, /14 de octubre de 2026/, id);
+  // el código del cliente se queda vacío, y lo dice
+  const codigo = campoPorId('codigoCliente');
+  assert.equal(codigo.de, null);
+  assert.match(codigo.nota, /14 de octubre de 2026: se queda vacío/);
+  // y son los únicos sin fuente, salvo el segundo apellido y el segundo nombre: el sistema los guarda juntos con el primero
+  // (`apellidos`, `nombres`) y la ficha no los separa; el texto completo sale en la casilla del primero
+  assert.deepEqual(CAMPOS.filter((c) => c.de === null && c.tipo !== 'etiqueta').map((c) => c.id).sort(), ['apellido2', 'codigoCliente', 'nombre2']);
+  // tecleados: los dos de facturar y los dos CBC, y ningún otro
+  assert.deepEqual(CAMPOS.filter((c) => c.tecleado).map((c) => c.id).sort(), ['facturarNit', 'facturarNombre', 'tarjeta1Cbc', 'tarjeta2Cbc']);
+});
+
+test('TARIFAS_DEL_PAPEL: la hora tardía a Q150 y el galón a Q65, las del Excel, y nadie las puede cambiar en pleno vuelo', () => {
+  assert.deepEqual({ ...TARIFAS_DEL_PAPEL }, { horaTardia: 150, galon: 65 });
+  assert.ok(Object.isFrozen(TARIFAS_DEL_PAPEL));
+  assert.throws(() => { 'use strict'; TARIFAS_DEL_PAPEL.horaTardia = 1; }, TypeError);
 });
 
 test('CAMPOS: ids únicos, rangos válidos y dentro de la hoja', () => {
@@ -233,10 +303,7 @@ test('CAMPOS: cada uno trae lo que la hoja necesita para dibujarlo', () => {
     // un campo que el sistema no tiene dice por qué, y uno que no se imprime también
     if (c.de === null && c.tipo !== 'etiqueta') assert.ok(c.nota, `${c.id}: sin fuente y sin nota`);
     if (c.imprime === false) assert.ok(c.nota, `${c.id}: no se imprime y no dice por qué`);
-    if (c.tipo === 'etiqueta') {
-      assert.ok(c.texto, `${c.id}: texto fijo sin texto`);
-      assert.equal(c.imprime, false, `${c.id}: un texto fijo no se imprime hasta que él diga`);
-    }
+    if (c.tipo === 'etiqueta') assert.ok(c.texto, `${c.id}: texto fijo sin texto`);
   }
 });
 
@@ -248,11 +315,19 @@ test('campoPorId encuentra un campo y lanza con el id si no existe', () => {
   assert.throws(() => campoPorId('toString'), /No hay un campo/, 'un nombre del prototipo no es un campo');
 });
 
-test('camposQueSeImprimen deja fuera exactamente los que dicen imprime: false', () => {
-  const salen = camposQueSeImprimen();
-  assert.ok(salen.every((c) => c.imprime !== false));
-  assert.equal(salen.length, CAMPOS.filter((c) => c.imprime !== false).length);
-  assert.ok(salen.length > 0 && salen.length < CAMPOS.length);
+test('camposQueSeImprimen: hoy se imprimen todos, y uno con imprime: false se deja fuera', () => {
+  assert.equal(camposQueSeImprimen().length, CAMPOS.length, 'el dueño decidió imprimir todo lo que Excel imprime');
+  assert.ok(CAMPOS.every((c) => c.imprime !== false));
+  const campo = campoPorId('kmSalida');
+  try {
+    campo.imprime = false;
+    const salen = camposQueSeImprimen();
+    assert.equal(salen.length, CAMPOS.length - 1);
+    assert.ok(!salen.includes(campo));
+  } finally {
+    delete campo.imprime;
+  }
+  assert.equal(camposQueSeImprimen().length, CAMPOS.length);
 });
 
 // ---------------------------------------------------------------------------

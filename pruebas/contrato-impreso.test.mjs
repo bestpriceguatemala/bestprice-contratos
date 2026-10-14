@@ -214,29 +214,109 @@ test('el modelo trae una entrada por cada campo de la tabla, y todas son texto',
 
 test('cada campo que el sistema SÍ tiene sale con texto, y cada uno que NO tiene sale vacío aunque el contrato traiga cosas parecidas', () => {
   // Datos tentadores en los lugares donde alguien podría ir a buscar lo que el sistema no guarda.
-  const tentador = {
-    horaTardia: 150, nit: '23232323-3', empresa: 'BEST PRICE', facturarA: 'BEST PRICE', lugarEntrada: 'AEROPUERTO',
-    combustiblePrecio: 65, precioGalon: 65, codigoCliente: 2, apellido2: 'Gómez', nombre2: 'Carlos',
-  };
+  const tentador = { codigoCliente: 2, codigo: 2, numeroDeCliente: 2 };
   const v = valores({
     contrato: { ...contrato(), ...tentador },
-    cliente: cliente({ codigo: 2, codigoCliente: 2, nit: '1234567-8', apellido2: 'Gómez', nombre2: 'Carlos' }),
+    cliente: cliente({ codigo: 2, codigoCliente: 2, apellido2: 'Gómez', nombre2: 'Carlos' }),
   });
   for (const campo of CAMPOS) {
     if (campo.tipo === 'etiqueta') continue;
-    // el CBC solo existe mientras se teclea (ADR-001): sin lo tecleado sale en blanco
-    if (campo.tipo === 'cbc') { assert.equal(v[campo.id], '', `${campo.id}: nunca sale del contrato`); continue; }
+    // lo que viene del teclado al imprimir (el CBC, a quién se factura) está en blanco hasta que se teclea
+    if (campo.tecleado) { assert.equal(v[campo.id], '', `${campo.id}: nunca sale del contrato`); continue; }
     if (campo.de === null) assert.equal(v[campo.id], '', `${campo.id}: el sistema no tiene este dato y no se inventa`);
     else assert.notEqual(v[campo.id], '', `${campo.id}: tiene fuente (${campo.de}) y salió vacío`);
   }
+  assert.equal(v.codigoCliente, '', 'el código del cliente se queda vacío (decisión del 14 de octubre de 2026)');
+  assert.equal(v.apellido2, '');
+  assert.equal(v.nombre2, '');
 });
 
-test('los textos fijos de Excel salen en el modelo con su texto (aunque hoy no se imprimen)', () => {
+test('los textos fijos de Excel salen en el modelo con su texto, espacios incluidos', () => {
   const v = valores();
   assert.equal(v.etiquetaAcepto, 'ACEPTO LOS CARGOS A MI TARJETA NUMERO');
   assert.equal(v.etiquetaCodigo, 'CODIGO');
+  assert.equal(v.etiquetaTarjeta1, 'TARJETA 1  No:');
+  assert.equal(v.etiquetaExpira1, 'EXPIRA:');
+  assert.equal(v.etiquetaExpira2, 'EXPIRA:');
+  assert.equal(v.etiquetaCbc1, 'CODIGO CBC');
+  assert.equal(v.etiquetaCbc2, 'CODIGO CBC');
+  assert.equal(v.etiquetaBanco, 'BANCO EMISOR');
   assert.equal(v.departamento, 'GUATEMALA');
-  assert.equal(v.deducibleIva, '+ iva');
+  assert.equal(v.deducibleIva, ' + iva');
+});
+
+test('los textos fijos no cuentan como «se sale de su casilla»: Excel los deja salirse a propósito', () => {
+  const modelo = armarContratoImpreso(entrada());
+  assert.ok(!modelo.avisos.some((a) => /Texto fijo/.test(a)), modelo.avisos.join('\n'));
+  // «EXPIRA:» no cabe en su celda (una sola columna) y aun así es lo que Excel imprime
+  assert.equal(modelo.valores.etiquetaExpira1, 'EXPIRA:');
+});
+
+// ---------------------------------------------------------------------------
+// Lo que el papel lleva y el sistema no guarda (decisión del 14 de octubre de 2026)
+// ---------------------------------------------------------------------------
+
+const papel = (datosDelPapel) => valores({ datosDelPapel });
+
+test('a quién se factura sale de lo que se tecleó al imprimir, y en blanco si no se tecleó', () => {
+  assert.equal(valores().facturarNombre, '');
+  assert.equal(valores().facturarNit, '');
+  const v = papel({ facturarNombre: ' Transportes López, S.A. ', facturarNit: ' 1234567-8 ' });
+  assert.equal(v.facturarNombre, 'Transportes López, S.A.');
+  assert.equal(v.facturarNit, '1234567-8');
+  // lo del cliente o del contrato NO se usa para facturar: son datos que el sistema no tiene
+  const tentador = valores({ cliente: cliente({ nit: '9999999-9', facturarA: 'X' }), contrato: { ...contrato(), nit: '8888888-8', facturarA: 'Y' } });
+  assert.equal(tentador.facturarNit, '');
+  assert.equal(tentador.facturarNombre, '');
+});
+
+test('el lugar de entrada se precarga con el lugar de la salida y se puede corregir; borrarlo lo deja en blanco', () => {
+  assert.equal(valores().lugarEntrada, 'OFICINA', 'sin tocar: el de la salida');
+  assert.equal(papel({ lugarEntrada: 'AEROPUERTO' }).lugarEntrada, 'AEROPUERTO', 'corregido');
+  assert.equal(papel({ lugarEntrada: '' }).lugarEntrada, '', 'borrado a propósito: en blanco, no el de la salida');
+  assert.equal(papel({ lugarEntrada: null }).lugarEntrada, 'OFICINA');
+  assert.equal(papel({ lugarEntrada: undefined }).lugarEntrada, 'OFICINA');
+  // y si la salida no tenía lugar, queda en blanco
+  assert.equal(valores({ contrato: contrato({ lugar: '' }) }).lugarEntrada, '');
+});
+
+test('las dos tarifas del papel vienen del código (Q150 y Q65), se pueden corregir y pasan por q() y dinero()', () => {
+  const v = valores();
+  assert.equal(v.horaTardia, 'Q150.00');
+  assert.equal(v.combustiblePrecio, 'Q65.00');
+  assert.equal(papel({ horaTardia: '200', combustiblePrecio: '70.5' }).horaTardia, 'Q200.00');
+  assert.equal(papel({ horaTardia: '200', combustiblePrecio: '70.5' }).combustiblePrecio, 'Q70.50');
+  assert.equal(papel({ horaTardia: 1234.567 }).horaTardia, 'Q1,234.57', 'q() redondea los centavos');
+  // una tarifa borrada, en cero o que no es un número sale en blanco, nunca «Q0.00» ni «NaN»
+  for (const nada of ['', '0', 0, 'abc', '   ']) {
+    assert.equal(papel({ horaTardia: nada }).horaTardia, '', JSON.stringify(nada));
+    assert.equal(papel({ combustiblePrecio: nada }).combustiblePrecio, '', JSON.stringify(nada));
+  }
+  // tocar una no toca la otra
+  assert.equal(papel({ horaTardia: '' }).combustiblePrecio, 'Q65.00');
+  assert.equal(papel({ combustiblePrecio: '' }).horaTardia, 'Q150.00');
+  // y NO salen del contrato: el cobro de hora tardía que se anota al recibir es otra cosa
+  const conCobro = valores({ contrato: { ...contrato(), horaTardia: 999, cierre: { horaTardia: 888 } } });
+  assert.equal(conCobro.horaTardia, 'Q150.00');
+});
+
+test('datosDelPapel que no es un objeto no rompe nada: todo cae a los valores de siempre', () => {
+  for (const raro of [undefined, null, 'x', 5, [], true]) {
+    const v = valores({ datosDelPapel: raro });
+    assert.equal(v.lugarEntrada, 'OFICINA', JSON.stringify(raro));
+    assert.equal(v.horaTardia, 'Q150.00');
+    assert.equal(v.facturarNombre, '');
+  }
+});
+
+test('lo tecleado para este papel no toca el contrato, el cliente ni el carro', () => {
+  const c = congelar(contrato());
+  const k = congelar(cliente());
+  const antes = JSON.stringify([c, k]);
+  const modelo = armarContratoImpreso({ contrato: c, cliente: k, carro: CARRO, datosDelPapel: congelar({ facturarNombre: 'ZZZ', facturarNit: '777', lugarEntrada: 'QQQ', horaTardia: '999', combustiblePrecio: '888' }) });
+  assert.equal(JSON.stringify([c, k]), antes);
+  assert.equal(modelo.valores.facturarNit, '777');
+  assert.ok(!antes.includes('ZZZ') && !antes.includes('777') && !antes.includes('QQQ'));
 });
 
 test('un carro AJENO se lee de carroAjeno, nunca de la flota, aunque venga una ficha de flota con otros datos', () => {
@@ -530,31 +610,49 @@ test('cada campo cae en su caja de la tabla (más el origen de la hoja en la car
   }
 });
 
-test('la hoja trae solo lo que se imprime Y tiene dato: nada de letra blanca, de textos fijos ni de casillas vacías', () => {
-  const hoja = html();
-  for (const id of ['carroPlacas', 'nombre1', 'tarjeta1Numero', 'fechaNacimiento']) assert.ok(hoja.includes(`data-campo="${id}"`), id);
-  for (const campo of CAMPOS) {
-    if (campo.imprime === false) assert.ok(!hoja.includes(`data-campo="${campo.id}"`), `${campo.id} no se imprime y salió`);
+test('la hoja trae todo lo que Excel imprime Y tiene dato, rótulos y letra blanca incluidos, y nada de las casillas vacías', () => {
+  const hoja = html({ tarjetasEfimeras: [{ numero: NUMERO_COMPLETO, cbc: CBC }], datosDelPapel: { facturarNombre: 'Empresa', facturarNit: '1234567-8' } });
+  // los rótulos que el papel no trae
+  for (const id of ['etiquetaAcepto', 'etiquetaCodigo', 'etiquetaTarjeta1', 'etiquetaExpira1', 'etiquetaExpira2', 'etiquetaCbc1', 'etiquetaCbc2', 'etiquetaBanco', 'departamento', 'deducibleIva']) {
+    assert.ok(hoja.includes(`data-campo="${id}"`), `${id} no salió`);
   }
-  // sin dato no hay caja: el cliente de arriba trae todo, pero lo que el sistema no tiene (de: null) queda sin su div
-  for (const campo of CAMPOS.filter((c) => c.de === null)) assert.ok(!hoja.includes(`data-campo="${campo.id}"`), `${campo.id} no tiene fuente`);
-  // el CBC está en blanco hasta que se teclee: tampoco tiene caja
-  assert.ok(!hoja.includes('data-campo="tarjeta1Cbc"'));
-  assert.ok(html({ tarjetasEfimeras: [{ numero: NUMERO_COMPLETO, cbc: CBC }] }).includes('data-campo="tarjeta1Cbc"'));
+  // la letra blanca de Excel, que por decisión del dueño ahora se ve
+  for (const id of ['kmSalida', 'licenciaExpira', 'conductorNombre', 'deducibleBajo', 'seguroMenores', 'seguroPai', 'variosDescripcion', 'variosPrecio', 'tarjeta2Autorizacion']) {
+    assert.ok(hoja.includes(`data-campo="${id}"`), `${id} no salió`);
+  }
+  // lo tecleado y lo precargado
+  for (const id of ['tarjeta1Numero', 'tarjeta1Cbc', 'facturarNombre', 'facturarNit', 'lugarEntrada', 'horaTardia', 'combustiblePrecio', 'carroPlacas', 'nombre1']) {
+    assert.ok(hoja.includes(`data-campo="${id}"`), id);
+  }
+  // sin dato no hay caja: lo que el sistema no tiene (el código del cliente, el segundo apellido) queda sin su div
+  for (const id of ['codigoCliente', 'apellido2', 'nombre2']) assert.ok(!hoja.includes(`data-campo="${id}"`), `${id} no tiene dato`);
+  // el CBC y a quién se factura, sin teclear, tampoco tienen caja
+  const sinTeclear = html();
+  for (const id of ['tarjeta1Cbc', 'tarjeta2Cbc', 'facturarNombre', 'facturarNit']) assert.ok(!sinTeclear.includes(`data-campo="${id}"`), id);
 });
 
-test('un texto fijo de Excel se imprime en cuanto se le quita `imprime: false` (como dice la tabla)', () => {
-  const campo = campoPorId('etiquetaCodigo');
-  assert.equal(campo.imprime, false);
-  assert.ok(!html().includes('data-campo="etiquetaCodigo"'));
+test('un campo con `imprime: false` no sale en la hoja (la tabla conserva ese interruptor)', () => {
+  const campo = campoPorId('kmSalida');
+  assert.ok(html().includes('data-campo="kmSalida"'));
   try {
-    delete campo.imprime;
-    const hoja = html();
-    assert.ok(hoja.includes('data-campo="etiquetaCodigo"'), 'el texto fijo no se imprimió aunque ya no dice imprime: false');
-    assert.match(hoja, /data-campo="etiquetaCodigo"[^>]*><span class="hc-t">CODIGO<\/span>/);
-  } finally {
     campo.imprime = false;
+    assert.ok(!html().includes('data-campo="kmSalida"'));
+  } finally {
+    delete campo.imprime;
   }
+  assert.ok(html().includes('data-campo="kmSalida"'));
+});
+
+test('los textos fijos llevan sus espacios de Excel tal cual: dos en «TARJETA 1  No:» y uno delante de « + iva»', () => {
+  const hoja = html();
+  assert.ok(hoja.includes('<span class="hc-t">TARJETA 1  No:</span>'));
+  assert.ok(hoja.includes('<span class="hc-t"> + iva</span>'));
+  for (const id of ['etiquetaTarjeta1', 'deducibleIva', 'etiquetaAcepto']) assert.ok(estiloDe(hoja, id).clase.includes('hc-pre'), `${id}: el navegador no debe juntar sus espacios`);
+  // y en su caja de la tabla, con la letra de Excel por 0.89
+  const iva = estiloDe(hoja, 'deducibleIva');
+  const caja = cajaDeRango('Y36:Y37');
+  assert.ok(Math.abs(Number.parseFloat(iva.css.left) - (ORIGEN_MM.x + caja.x)) < 0.002);
+  assert.ok(Math.abs(Number.parseFloat(iva.css['font-size']) - 10 * ESCALA_EXCEL) < 0.002);
 });
 
 test('cada campo lleva las clases de su fuente, su alineación y su ajuste', () => {
@@ -666,8 +764,9 @@ function contenedorFalso() {
     set innerHTML(valor) { dibujado = valor; },
     querySelector: (selector) => nodo(selector),
     querySelectorAll(selector) {
-      if (selector !== '.hc-tarjeta input') return [];
-      return [...dibujado.matchAll(/<input[^>]*id="(hc-t\d+-(?:numero|cbc))"/g)].map((m) => nodo(`#${m[1]}`));
+      if (selector === '.hc-tarjeta input') return [...dibujado.matchAll(/<input[^>]*id="(hc-t\d+-(?:numero|cbc))"/g)].map((m) => nodo(`#${m[1]}`));
+      if (selector === '.hc-datos input') return [...dibujado.matchAll(/<input[^>]*id="(hc-(?:facturar|lugar|tarifa)-[a-z-]+)"/g)].map((m) => nodo(`#${m[1]}`));
+      return [];
     },
     vista: () => nodo('[data-pieza="vista"]').innerHTML,
     avisos: () => nodo('[data-pieza="avisos"]').innerHTML,
@@ -809,6 +908,91 @@ test('ADR-001, de punta a punta: el número y el CBC llegan a la hoja que se imp
   assert.ok(!todo.includes('4111'), `el número llegó a otro lugar: ${todo}`);
   assert.ok(!todo.includes(CBC), `el CBC llegó a otro lugar: ${todo}`);
   assert.ok(!todo.includes('1111 1111'));
+});
+
+test('las cajas de lo que el sistema no guarda traen el lugar de la salida y las dos tarifas ya puestos, y a quién se factura vacío', () => {
+  const c = contenedorFalso();
+  pintarContratoImpreso(c, entrada(), { almacen: almacenEspia() });
+  assert.equal(c.querySelectorAll('.hc-datos input').length, 5);
+  assert.equal(c.nodo('#hc-facturar-nombre').value, '');
+  assert.equal(c.nodo('#hc-facturar-nit').value, '');
+  assert.equal(c.nodo('#hc-lugar-entrada').value, 'OFICINA');
+  assert.equal(c.nodo('#hc-tarifa-hora-tardia').value, '150');
+  assert.equal(c.nodo('#hc-tarifa-galon').value, '65');
+  // la hoja ya los lleva
+  assert.ok(c.vista().includes('data-campo="lugarEntrada"') && c.vista().includes('Q150.00') && c.vista().includes('Q65.00'));
+  assert.ok(!c.vista().includes('data-campo="facturarNit"'));
+  // y la pantalla dice que no se guardan
+  assert.match(c.innerHTML, /NO se guardan en el sistema: se borran al terminar de imprimir/);
+  // también en una renta en efectivo, que no pide tarjeta
+  const efectivo = contenedorFalso();
+  pintarContratoImpreso(efectivo, entrada({ contrato: contrato({ tarjetas: [] }) }), { almacen: almacenEspia() });
+  assert.equal(efectivo.querySelectorAll('.hc-tarjeta input').length, 0);
+  assert.equal(efectivo.querySelectorAll('.hc-datos input').length, 5);
+});
+
+test('lo que se teclea en esas cajas sale en la hoja, y al terminar de imprimir todo vuelve a como estaba', () => {
+  const c = contenedorFalso();
+  let enElDialogo = null;
+  pintarContratoImpreso(c, entrada(), { almacen: almacenEspia(), imprimir: () => { enElDialogo = c.vista(); } });
+  const teclear = (id, valor) => { c.nodo(id).value = valor; c.nodo(id).oyentes.input(); };
+  teclear('#hc-facturar-nombre', 'Transportes López, S.A.');
+  teclear('#hc-facturar-nit', '1234567-8');
+  teclear('#hc-lugar-entrada', 'AEROPUERTO');
+  teclear('#hc-tarifa-hora-tardia', '200');
+  teclear('#hc-tarifa-galon', '70.5');
+  const hoja = c.vista();
+  assert.ok(hoja.includes('Transportes López, S.A.') && hoja.includes('1234567-8') && hoja.includes('AEROPUERTO') && hoja.includes('Q200.00') && hoja.includes('Q70.50'));
+  assert.ok(!hoja.includes('Q150.00') && !hoja.includes('Q65.00'), 'las tarifas corregidas reemplazan a las de siempre');
+
+  c.nodo('[data-accion="imprimir"]').oyentes.click();
+  assert.ok(enElDialogo.includes('1234567-8') && enElDialogo.includes('AEROPUERTO') && enElDialogo.includes('Q200.00'), 'lo que se imprimió es lo tecleado');
+
+  // terminó: a quién se factura se borra, y lo corregido para esta renta no se queda para la siguiente
+  assert.equal(c.nodo('#hc-facturar-nombre').value, '');
+  assert.equal(c.nodo('#hc-facturar-nit').value, '');
+  assert.equal(c.nodo('#hc-lugar-entrada').value, 'OFICINA');
+  assert.equal(c.nodo('#hc-tarifa-hora-tardia').value, '150');
+  assert.equal(c.nodo('#hc-tarifa-galon').value, '65');
+  assert.ok(!c.vista().includes('1234567-8') && !c.vista().includes('Transportes') && !c.vista().includes('AEROPUERTO'));
+  assert.ok(c.vista().includes('Q150.00') && c.vista().includes('Q65.00') && c.vista().includes('OFICINA'));
+});
+
+test('una tarifa borrada en la caja sale en blanco en la hoja (no vuelve a la de siempre)', () => {
+  const c = contenedorFalso();
+  pintarContratoImpreso(c, entrada(), { almacen: almacenEspia() });
+  c.nodo('#hc-tarifa-hora-tardia').value = '';
+  c.nodo('#hc-tarifa-hora-tardia').oyentes.input();
+  assert.ok(!c.vista().includes('data-campo="horaTardia"'));
+  assert.ok(c.vista().includes('data-campo="combustiblePrecio"'));
+  c.nodo('#hc-lugar-entrada').value = '';
+  c.nodo('#hc-lugar-entrada').oyentes.input();
+  assert.ok(!c.vista().includes('data-campo="lugarEntrada"'));
+});
+
+test('a quién se factura tampoco se guarda ni se manda a ningún lado, y se borra al salir de la pantalla', async () => {
+  const almacen = almacenEspia();
+  const oyentes = {};
+  const ventana = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  globalThis.window = { addEventListener: (evento, fn) => { oyentes[evento] = fn; } };
+  const c = contenedorFalso();
+  try {
+    const apuntes = await conEspias(() => {
+      pintarContratoImpreso(c, entrada(), { almacen });
+      c.nodo('#hc-facturar-nit').value = '7654321-0';
+      c.nodo('#hc-facturar-nombre').value = 'Empresa Secreta, S.A.';
+      c.nodo('#hc-facturar-nit').oyentes.input();
+      assert.ok(c.vista().includes('7654321-0'));
+      oyentes.hashchange();
+    });
+    assert.equal(c.nodo('#hc-facturar-nit').value, '', 'al salir se borra');
+    assert.ok(!c.vista().includes('7654321-0'));
+    assert.deepEqual(almacen.escrituras, []);
+    const todo = JSON.stringify(apuntes);
+    assert.ok(!todo.includes('7654321') && !todo.includes('Empresa Secreta'), todo);
+  } finally {
+    if (ventana) Object.defineProperty(globalThis, 'window', ventana); else delete globalThis.window;
+  }
 });
 
 test('lo que quedó en las cajas sin avisar (autocompletar, pegar) también va en la hoja al imprimir', () => {
