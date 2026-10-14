@@ -1101,12 +1101,35 @@ en el código.
    (`afterprint`, imprima o cancele) y al salir de la pantalla. Sin ellos, la hoja
    lleva `•••• 3343`. **No se debe guardar esa hoja como PDF**: quedaría un archivo con
    la tarjeta en la computadora; la pantalla lo dice.
+7. **La hora de entrada: «Igual que el Excel».** La casilla de la hora de entrada repite la
+   hora de salida (en Excel las dos leen la misma celda). Es decisión suya, no una copia
+   heredada sin preguntar; el contrato no guarda una hora de entrada prevista.
+8. **La «Q»: su papel no la trae.** Por eso los montos se imprimen con ella
+   (`QUETZAL_EN_EL_PAPEL`, una línea si algún día cambia de papelería).
+9. **El nivel del tanque no se imprime: «Yo lo escribo mejor».** `combustibleSalida` queda
+   fuera (`imprime: false` en la tabla): el sistema guarda «Lleno, 3/4…», el papel dice
+   «FULL», y traducir entre los dos vocabularios habría sido una tabla de conversión que se
+   desactualiza sola el día que él agregue una opción. La tarifa por galón (Q65) sí sale.
+10. **La autorización de la tarjeta 1 sí se imprime, y su casilla es la única DERIVADA, no
+    medida.** En Excel su celda (la combinada vacía `M29:P31`, pegada al monto autorizado)
+    nunca imprimió nada, así que no hay un texto medido: del rectángulo y de la alineación
+    se fió la tabla de la propia celda de Excel; la fuente y el tamaño (Arial 10) son los de
+    la autorización de la tarjeta 2, que sí está medida. La hoja de prueba la dibuja con
+    raya de trazos y la nombra como derivada, porque es la que hay que mirar con más
+    atención contra el papel.
+11. **El número de contrato no se imprime, y no es un olvido.** Dijo: «yo pongo el número de
+    contrato porque es el que está en las hojas membretadas». Viene preimpreso en su
+    papelería, por eso ni Excel ni el sistema lo imprimen y por eso el sistema le deja
+    teclearlo a él al sacar el carro. No hay un campo `numero` en la tabla a propósito.
 
-**Lo que sigue abierto.** El papel tiene una casilla por apellido y una por nombre y el
-sistema guarda cada uno en un solo texto: el texto completo sale en la primera casilla y
-la segunda queda en blanco. No se sabe si el papel ya trae la «Q» impresa junto a los
-montos (`QUETZAL_EN_EL_PAPEL`). Y falta la primera hoja de prueba impresa en su
-impresora: hasta entonces la escala 0.77 es una hipótesis.
+**Lo que hay que mirar con el papel enfrente el día de la calibración.** Ese día él tiene la
+hoja de prueba en una mano y su formulario en la otra, y puede contestar todo mirando:
+la calibración misma (la escala 0.77 es una hipótesis hasta entonces); si el papel tiene una
+casilla por apellido y por nombre (el sistema los guarda en un solo texto, así que hoy el
+texto completo sale en la primera casilla y la segunda queda en blanco); si hay casilla en
+el papel para las dos celdas blancas de Excel que no se agregaron (E27, la ciudad adicional,
+e I27, un `0` fijo); y la nacionalidad, que el papel pide y la ficha del cliente dejó de
+pedir el 3 de octubre.
 
 ## 9. Velocidad
 
