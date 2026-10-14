@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   armarContratoImpreso, htmlContratoImpreso, htmlHojaDePrueba, pintarContratoImpreso, pintarImpresionDeContrato,
-  pintarCalibracion, HITOS, PASOS_DE_CALIBRAR, MARCAS_DE_ESCALA,
+  pintarCalibracion, HITOS, PASOS_DE_CALIBRAR, MARCAS_DE_ESCALA, QUETZAL_EN_EL_PAPEL,
 } from '../js/pantallas/contratoImpreso.js';
 import {
   CAMPOS, ORIGEN_MM, PAPEL, ESCALA_EXCEL, cajaDeRango, campoPorId, leerCalibraciones, calibracionActiva, CALIBRACION_DE_FABRICA,
@@ -200,7 +200,7 @@ test('el contrato rico llena cada casilla con el dato que le toca', () => {
     cartaPoderDestino: 'EL SALVADOR', cartaPoderPrecio: 'Q350.00',
     // las tarjetas (enmascaradas: el número completo nunca se guardó)
     tarjeta1Numero: '•••• 3343', tarjeta1Vence: '04/30', tarjeta1Banco: 'BAC GUATEMALA', tarjeta1Monto: 'Q15,000.00',
-    tarjeta2Numero: '•••• 1111', tarjeta2Vence: '11/28', tarjeta2Monto: 'Q5,000.00', tarjeta2Autorizacion: '9876',
+    tarjeta1Autorizacion: '1234', tarjeta2Numero: '•••• 1111', tarjeta2Vence: '11/28', tarjeta2Monto: 'Q5,000.00', tarjeta2Autorizacion: '9876',
     rentadoPor: 'DENNIS',
   };
   for (const [id, texto] of Object.entries(esperado)) assert.equal(v[id], texto, id);
@@ -402,6 +402,16 @@ test('si los seguros igualan o pasan el precio por día, NO sale una cifra negat
   const sinPrecio = armarContratoImpreso(entrada({ contrato: contrato({ precioDia: 0, seguroDia: 0, seguroTercerosDia: 0 }) }));
   assert.equal(sinPrecio.valores.precioBase, '');
   assert.ok(!sinPrecio.avisos.some((a) => /seguro de terceros/.test(a)));
+});
+
+test('la Q se imprime: el dueño contestó el 14 de octubre de 2026 que su papel NO la trae', () => {
+  assert.equal(QUETZAL_EN_EL_PAPEL, true);
+  const v = valores();
+  for (const id of ['precioBase', 'seguro', 'seguroTerceros', 'deducible', 'tarjeta1Monto', 'horaTardia', 'combustiblePrecio', 'cartaPoderPrecio']) {
+    assert.match(v[id], /^Q[\d,]+\.\d\d$/, id);
+  }
+  // la copia del deducible de abajo va sin la Q, como la imprime Excel
+  assert.equal(v.deducibleCopia, '55,000.00');
 });
 
 test('el dinero sale con dinero(): la Q, los miles y dos decimales; y los centavos se redondean con q()', () => {
@@ -618,6 +628,12 @@ test('la hoja trae todo lo que Excel imprime Y tiene dato, rótulos y letra blan
   for (const id of ['etiquetaAcepto', 'etiquetaCodigo', 'etiquetaTarjeta1', 'etiquetaExpira1', 'etiquetaExpira2', 'etiquetaCbc1', 'etiquetaCbc2', 'etiquetaBanco', 'departamento', 'deducibleIva']) {
     assert.ok(hoja.includes(`data-campo="${id}"`), `${id} no salió`);
   }
+  // la autorización de la tarjeta 1, cuya posición se derivó
+  assert.ok(hoja.includes('data-campo="tarjeta1Autorizacion"'));
+  assert.match(hoja, /data-campo="tarjeta1Autorizacion"[^>]*><span class="hc-t">1234<\/span>/);
+  // el nivel del tanque lo escribe él a mano: no sale, aunque el contrato lo tenga
+  assert.ok(!hoja.includes('data-campo="combustibleSalida"'));
+  assert.equal(armarContratoImpreso(entrada()).valores.combustibleSalida, '3/4', 'el modelo lo sabe; la hoja no lo imprime');
   // la letra blanca de Excel, que por decisión del dueño ahora se ve
   for (const id of ['kmSalida', 'licenciaExpira', 'conductorNombre', 'deducibleBajo', 'seguroMenores', 'seguroPai', 'variosDescripcion', 'variosPrecio', 'tarjeta2Autorizacion']) {
     assert.ok(hoja.includes(`data-campo="${id}"`), `${id} no salió`);
@@ -761,6 +777,19 @@ test('el rótulo de la hoja de prueba dice la impresora (escapada) y la calibrac
   assert.match(prueba, /<strong>HOJA DE PRUEBA<\/strong> \(no es el contrato\)/);
   // y qué es cada cosa de la hoja
   assert.match(prueba, /Cada rectángulo marca dónde se escribirá un dato\. Los cuatro con número y borde grueso son con los que se compara\. Las reglas de los bordes están en milímetros\./);
+});
+
+test('la casilla derivada se dibuja con raya de trazos largos y se nombra como derivada, y la hoja dice por qué', () => {
+  const prueba = htmlHojaDePrueba();
+  assert.match(prueba, /<div class="hp-caja hp-derivada" data-campo="tarjeta1Autorizacion"/);
+  assert.equal((prueba.match(/hp-derivada/g) || []).length, 1, 'solo una');
+  assert.match(prueba, /data-campo="tarjeta1Autorizacion" style="[^"]*"><span>Tarjeta 1: autorización \(DERIVADA, no medida\)<\/span>/);
+  assert.match(prueba, /La casilla de raya de trazos largos \(«derivada»\) no se midió en Excel: mírala con más atención\./);
+  // y lo mismo en los pasos de la pantalla de calibrar
+  assert.ok(PASOS_DE_CALIBRAR[1].texto.includes('marcada «derivada, no medida»: es la autorización de la tarjeta 1'));
+  // el nivel del tanque, que no se imprime, va de puntos
+  assert.match(prueba, /<div class="hp-caja hp-no" data-campo="combustibleSalida"/);
+  assert.equal((prueba.match(/hp-no/g) || []).length, 1);
 });
 
 test('cuatro casillas con número, una en cada esquina, son con las que se compara', () => {
@@ -1591,6 +1620,7 @@ test('lo que tiene que verse en la hoja de prueba no depende de «Gráficos de f
   assert.match(bloqueDesde(css, css.indexOf('\n.hp-cruz::after { top')), /border-top:\s*0\.2mm solid #000;/);
   assert.match(bloqueDesde(css, css.indexOf('\n.hp-caja.hp-hito-caja {')), /border:\s*0\.5mm solid #000;/);
   assert.match(bloqueDesde(css, css.indexOf('\n.hp-hito {')), /border:\s*0\.4mm solid #000;/);
+  assert.match(bloqueDesde(css, css.indexOf('\n.hp-caja.hp-derivada {')), /border:\s*0\.4mm dashed #000;/);
   for (const regla of ['\n.hp-marca-x {', '\n.hp-marca-y {', '\n.hp-cruz {']) {
     assert.ok(!/background/.test(bloqueDesde(css, css.indexOf(regla))), `${regla.trim()} no debe llevar fondo`);
   }

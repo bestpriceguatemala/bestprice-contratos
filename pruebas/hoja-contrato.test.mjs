@@ -315,19 +315,77 @@ test('campoPorId encuentra un campo y lanza con el id si no existe', () => {
   assert.throws(() => campoPorId('toString'), /No hay un campo/, 'un nombre del prototipo no es un campo');
 });
 
-test('camposQueSeImprimen: hoy se imprimen todos, y uno con imprime: false se deja fuera', () => {
-  assert.equal(camposQueSeImprimen().length, CAMPOS.length, 'el dueño decidió imprimir todo lo que Excel imprime');
-  assert.ok(CAMPOS.every((c) => c.imprime !== false));
+test('camposQueSeImprimen: se imprime todo salvo el nivel del tanque, y uno con imprime: false se deja fuera', () => {
+  const apagados = CAMPOS.filter((c) => c.imprime === false).map((c) => c.id);
+  assert.deepEqual(apagados, ['combustibleSalida'], 'el dueño decidió imprimir todo lo que Excel imprime menos esto');
+  assert.equal(camposQueSeImprimen().length, CAMPOS.length - 1);
   const campo = campoPorId('kmSalida');
   try {
     campo.imprime = false;
     const salen = camposQueSeImprimen();
-    assert.equal(salen.length, CAMPOS.length - 1);
+    assert.equal(salen.length, CAMPOS.length - 2);
     assert.ok(!salen.includes(campo));
   } finally {
     delete campo.imprime;
   }
-  assert.equal(camposQueSeImprimen().length, CAMPOS.length);
+  assert.equal(camposQueSeImprimen().length, CAMPOS.length - 1);
+});
+
+test('el nivel del tanque NO se imprime: «Yo lo escribo mejor», 14 de octubre de 2026; la tarifa por galón sí', () => {
+  const nivel = campoPorId('combustibleSalida');
+  assert.equal(nivel.imprime, false);
+  assert.match(nivel.nota, /14 de octubre de 2026/);
+  assert.match(nivel.nota, /«Yo lo escribo mejor»/);
+  assert.match(nivel.nota, /tabla de conversión que se desactualiza sola/);
+  assert.notEqual(campoPorId('combustiblePrecio').imprime, false, 'no se confunde con el precio por galón');
+});
+
+test('la hora de entrada repite la de salida por decisión del dueño («Igual que el Excel»), no por una copia heredada', () => {
+  const c = campoPorId('horaEntrada');
+  assert.equal(c.de, '`horaSalida`');
+  assert.match(c.nota, /14 de octubre de 2026/);
+  assert.match(c.nota, /«Igual que el Excel»/);
+  assert.match(c.nota, /Es decisión suya, no una copia heredada sin preguntar/);
+});
+
+test('la autorización de la tarjeta 1 es la única casilla DERIVADA: su posición no sale de una medición, y la tabla lo dice', () => {
+  const aut = campoPorId('tarjeta1Autorizacion');
+  assert.equal(aut.derivada, true);
+  assert.match(aut.nota, /^DERIVADA, NO MEDIDA\./);
+  assert.match(aut.nota, /14 de octubre de 2026/);
+  assert.match(aut.nota, /único campo de la tabla que no sale de una medición/);
+  assert.equal(aut.de, '`tarjetas[0].autorizacion`');
+  assert.deepEqual(CAMPOS.filter((c) => c.derivada).map((c) => c.id), ['tarjeta1Autorizacion']);
+  // Excel nunca imprimió nada en esa celda: no hay texto medido. Es la única de las que llevan dato en la que pasa
+  // (los rótulos son texto fijo, no fórmulas, y tampoco están en el PDF de marcadores).
+  const sinTextoMedido = CAMPOS.filter((c) => !textoMedido[c.rango.split(':')[0]]).map((c) => c.id).sort();
+  const rotulos = CAMPOS.filter((c) => c.tipo === 'etiqueta').map((c) => c.id);
+  assert.deepEqual(sinTextoMedido, [...rotulos, 'tarjeta1Autorizacion'].sort());
+});
+
+test('la autorización de la tarjeta 1 va en la celda combinada vacía de Excel, pegada al monto autorizado y al ras de la de la tarjeta 2', () => {
+  const caja = cajaDeRango(campoPorId('tarjeta1Autorizacion').rango);
+  assert.equal(campoPorId('tarjeta1Autorizacion').rango, 'M29:P31');
+  assert.deepEqual(caja, { x: 121.19, y: 131.24, ancho: 21.04, alto: 12.56 });
+  const monto = cajaDeRango(campoPorId('tarjeta1Monto').rango);
+  cerca(caja.x + caja.ancho, monto.x, 0.02, 'termina donde empieza el monto autorizado');
+  cerca(caja.y, monto.y, 0.001, 'en el mismo renglón del monto');
+  cerca(caja.alto, monto.alto, 0.001);
+  const aut2 = cajaDeRango(campoPorId('tarjeta2Autorizacion').rango);
+  cerca(caja.x, aut2.x, 0.001, 'al ras de la autorización de la tarjeta 2, que sí está medida');
+  assert.ok(caja.y + caja.alto <= aut2.y + 0.001, 'arriba de la de la tarjeta 2');
+  // y la columna M está oculta y vale 0: por eso el rango no es «M29» a secas
+  assert.throws(() => cajaDeRango('M29'), /vacío/);
+  // tiene la letra y la alineación de la autorización de la tarjeta 2 (que es lo que se derivó)
+  for (const clave of ['fuente', 'pt', 'alinea', 'valinea']) assert.equal(campoPorId('tarjeta1Autorizacion')[clave], campoPorId('tarjeta2Autorizacion')[clave], clave);
+});
+
+test('el número de contrato no está en la tabla a propósito: viene preimpreso en la papelería del dueño', () => {
+  // «yo pongo el número de contrato porque es el que está en las hojas membretadas»: ni Excel ni el sistema lo imprimen
+  for (const c of CAMPOS) {
+    assert.ok(!/`numero`/.test(c.de ?? ''), `${c.id} imprimiría el número de contrato`);
+    assert.ok(!/n[úu]mero de contrato/i.test(`${c.etiqueta} ${c.texto ?? ''}`), c.id);
+  }
 });
 
 // ---------------------------------------------------------------------------

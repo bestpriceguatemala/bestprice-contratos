@@ -17,6 +17,11 @@
 // la celda D34 del Excel y que §7b dice que se guarda justo para desglosarla al imprimir (`seguroDia` y
 // `seguroTercerosDia` «se guardan para desglosarlos cuando se imprima el contrato»).
 //
+// ===== EL NÚMERO DE CONTRATO NO SE IMPRIME =====
+// Ni Excel ni este sistema lo imprimen, y no es un olvido: viene PREIMPRESO en la papelería (las hojas membretadas), y el dueño lo
+// pone al sacar el carro. Lo dijo así: «yo pongo el número de contrato porque es el que está en las hojas membretadas».
+// Por eso no hay un campo de `numero` en la tabla de nucleo/hojaContrato.js.
+//
 // ===== LA TARJETA Y EL CBC (ADR-001) =====
 // El número completo de la tarjeta y el CBC NUNCA se guardan: ni en Firestore, ni en la copia local, ni en
 // localStorage, ni en la dirección de la página. Este archivo es el único lugar del sistema que los lee, y solo así:
@@ -48,9 +53,9 @@ function esc(texto) {
 }
 
 /**
- * ¿El papel ya trae la «Q» impresa junto a las casillas de dinero? El Excel la imprime (`Q150.00`); el papel
- * podría traerla y entonces saldría doble. Es una de las preguntas abiertas para el dueño. Con `false` los montos
- * salen sin la Q.
+ * ¿El papel ya trae la «Q» impresa junto a las casillas de dinero? El Excel la imprime (`Q150.00`) y el dueño contestó el
+ * 14 de octubre de 2026 que su papel NO la trae: por eso se imprime, pegada al monto. Con `false` los montos saldrían sin
+ * la Q (si algún día cambia de papelería y la traen, sería esta línea).
  */
 export const QUETZAL_EN_EL_PAPEL = true;
 
@@ -88,6 +93,7 @@ const VALOR = {
   tarjeta2Cbc: ({ tarjetas }) => tarjetas[1]?.cbc ?? '',
   tarjeta1Monto: ({ contrato }) => monto(contrato.tarjetas?.[0]?.montoAutorizado),
   tarjeta2Monto: ({ contrato }) => monto(contrato.tarjetas?.[1]?.montoAutorizado),
+  tarjeta1Autorizacion: ({ contrato }) => limpio(contrato.tarjetas?.[0]?.autorizacion),
   tarjeta2Autorizacion: ({ contrato }) => limpio(contrato.tarjetas?.[1]?.autorizacion),
 
   carroTipo: ({ carro, ajeno, contrato }) => limpio(ajeno ? contrato.carroAjeno?.tipo : carro?.tipo),
@@ -381,7 +387,7 @@ export const PASOS_DE_CALIBRAR = [
   },
   {
     titulo: 'Ponla sobre tu formulario',
-    texto: `Pon la hoja impresa sobre tu formulario preimpreso, contra la luz. Fíjate en las cuatro casillas con número: ${LEYENDA_DE_HITOS}. ¿Cada una cae dentro de su casilla del formulario?`,
+    texto: `Pon la hoja impresa sobre tu formulario preimpreso, contra la luz. Fíjate en las cuatro casillas con número: ${LEYENDA_DE_HITOS}. ¿Cada una cae dentro de su casilla del formulario? Además hay una casilla de raya de trazos largos, marcada «derivada, no medida»: es la autorización de la tarjeta 1, que en Excel nunca se imprimió y cuya posición se dedujo; mírala con más atención.`,
     corto: `Pon la hoja contra la luz sobre tu formulario. Casillas con número: ${LEYENDA_DE_HITOS}.`,
   },
   {
@@ -406,7 +412,8 @@ export const PASOS_DE_CALIBRAR = [
  * le damos en el código. Un texto fijo de Excel se muestra con su propio texto.
  */
 function nombreEnLaPrueba(campo) {
-  return campo.tipo === 'etiqueta' ? campo.texto.trim() : campo.etiqueta;
+  const nombre = campo.tipo === 'etiqueta' ? campo.texto.trim() : campo.etiqueta;
+  return campo.derivada ? `${nombre} (DERIVADA, no medida)` : nombre;
 }
 
 /**
@@ -426,7 +433,7 @@ export function htmlHojaDePrueba(cal = CALIBRACION_DE_FABRICA, { impresora = nul
   const cajas = CAMPOS.map((c) => {
     const imprime = c.imprime !== false;
     const h = hito.get(c.id);
-    const clase = `hp-caja${imprime ? '' : ' hp-no'}${h ? ' hp-hito-caja' : ''}`;
+    const clase = `hp-caja${imprime ? '' : ' hp-no'}${h ? ' hp-hito-caja' : ''}${c.derivada ? ' hp-derivada' : ''}`;
     return `<div class="${clase}" data-campo="${esc(c.id)}" style="${estiloDeCaja(c).replace(/font-size:[^;]+;/, '')}"><span>${esc(nombreEnLaPrueba(c))}</span></div>`;
   }).join('\n    ');
   const insignias = HITOS.map((h) => {
@@ -435,7 +442,7 @@ export function htmlHojaDePrueba(cal = CALIBRACION_DE_FABRICA, { impresora = nul
   }).join('');
   const esquina = (x, y, clase) => `<i class="hp-cruz ${clase}" style="left:${mm(ORIGEN_MM.x + x)};top:${mm(ORIGEN_MM.y + y)}"></i>`;
   const marco = `<div class="hp-marco" style="left:${mm(ORIGEN_MM.x)};top:${mm(ORIGEN_MM.y)};width:${mm(HOJA_MM.ancho)};height:${mm(HOJA_MM.alto)}"></div>`;
-  const rotulo = `<strong>HOJA DE PRUEBA</strong> (no es el contrato)${impresora ? ` · impresora «${esc(impresora)}»` : ''} · ${esc(textoDeCalibracion(cal))}<br>Cada rectángulo marca dónde se escribirá un dato. Los cuatro con número y borde grueso son con los que se compara. Las reglas de los bordes están en milímetros.`;
+  const rotulo = `<strong>HOJA DE PRUEBA</strong> (no es el contrato)${impresora ? ` · impresora «${esc(impresora)}»` : ''} · ${esc(textoDeCalibracion(cal))}<br>Cada rectángulo marca dónde se escribirá un dato. Los cuatro con número y borde grueso son con los que se compara. Las reglas de los bordes están en milímetros. La casilla de raya de trazos largos («derivada») no se midió en Excel: mírala con más atención.`;
   const pasos = PASOS_DE_CALIBRAR.map((p, i) => `<li><b>${i + 1}.</b> ${esc(p.corto)}</li>`).join('');
   return `<article class="hoja-contrato hoja-de-prueba" aria-label="Hoja de prueba">
   <div class="hp-regla">${reglaHtml()}</div>
