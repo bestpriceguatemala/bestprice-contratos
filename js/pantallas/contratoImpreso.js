@@ -33,9 +33,9 @@ import { lineasSalida } from '../nucleo/contrato.js';
 import { nombresResueltos } from '../nucleo/cliente.js';
 import { q } from '../nucleo/dinero.js';
 import {
-  CAMPOS, ESCALA_EXCEL, ORIGEN_MM, PAPEL, HOJA_MM, cajaDeRango, fechaParaPapel, textoSeSale,
+  CAMPOS, ESCALA_EXCEL, ORIGEN_MM, PAPEL, HOJA_MM, cajaDeRango, campoPorId, fechaParaPapel, textoSeSale,
   transformacionCss, textoDeCalibracion, aplicarTecla, calibracionActiva, guardarCalibracion,
-  leerCalibraciones, CALIBRACION_DE_FABRICA, calibracionValida, camposQueSeImprimen, TARIFAS_DEL_PAPEL,
+  leerCalibraciones, CALIBRACION_DE_FABRICA, calibracionValida, camposQueSeImprimen, TARIFAS_DEL_PAPEL, PASOS,
 } from '../nucleo/hojaContrato.js';
 import { dinero } from '../ui.js';
 import { cargarContrato, cargarClientes, cargarFlota } from '../datos.js';
@@ -343,31 +343,97 @@ function reglaHtml() {
 }
 
 /**
+ * Las cuatro casillas con que se compara la hoja de prueba contra el formulario: una en cada esquina, para que la posición
+ * y el tamaño se vean a la vez. Salen de la tabla por su id (una prueba comprueba que existan): el dueño las conoce por su
+ * nombre en el formulario. La 1 manda sobre la posición (es la esquina que no se mueve al cambiar el tamaño) y la 4 sobre el
+ * tamaño.
+ */
+export const HITOS = [
+  { n: 1, id: 'tarjeta1Numero', que: 'número de tarjeta', donde: 'arriba a la izquierda' },
+  { n: 2, id: 'fechaSalida', que: 'fecha de salida', donde: 'arriba a la derecha' },
+  { n: 3, id: 'licencia', que: 'licencia', donde: 'abajo a la izquierda' },
+  { n: 4, id: 'rentadoPor', que: 'rentado por', donde: 'abajo a la derecha' },
+];
+
+/** Las marcas de la regla con que se mide la escala de la impresión: 100 mm entre ellas. */
+export const MARCAS_DE_ESCALA = { desde: 10, hasta: 110 };
+
+const aTexto = (n) => String(n);
+const LEYENDA_DE_HITOS = HITOS.map((h) => `${h.n} = ${h.que} (${h.donde})`).join(' · ');
+const TOQUE_MM = aTexto(PASOS.normal.mm);
+
+/**
+ * Lo que dice, en palabras, qué comparar y en qué orden. Se escribe UNA vez y sale en la pantalla de calibrar (completo) y
+ * en la hoja impresa (la versión corta de abajo): esta hoja es la única parte del sistema donde el dueño es el
+ * instrumento de medición, y una hoja que no se entiende convierte un minuto en una tarde. El orden importa: primero se
+ * comprueba que la impresora no encogió la hoja, después se mira la casilla 1 (posición) y al final la 4 (tamaño); como el
+ * tamaño se cambia desde la esquina de arriba a la izquierda, arreglar la 4 no desarregla la 1.
+ */
+export const PASOS_DE_CALIBRAR = [
+  {
+    titulo: 'Que la impresora no encoja la hoja',
+    texto: `Con una regla de verdad, mide la distancia entre la marca ${MARCAS_DE_ESCALA.desde} y la marca ${MARCAS_DE_ESCALA.hasta} de la regla del borde de arriba. Tiene que medir ${MARCAS_DE_ESCALA.hasta - MARCAS_DE_ESCALA.desde} mm. Si mide menos, la impresora achicó la hoja: en el diálogo de imprimir elige escala «100 %» (no «Ajustar a la página») y vuelve a imprimirla.`,
+    corto: `Mide con regla de la marca ${MARCAS_DE_ESCALA.desde} a la ${MARCAS_DE_ESCALA.hasta}: tienen que ser ${MARCAS_DE_ESCALA.hasta - MARCAS_DE_ESCALA.desde} mm. Si no, al imprimir elige escala «100 %».`,
+  },
+  {
+    titulo: 'Ponla sobre tu formulario',
+    texto: `Pon la hoja impresa sobre tu formulario preimpreso, contra la luz. Fíjate en las cuatro casillas con número: ${LEYENDA_DE_HITOS}. ¿Cada una cae dentro de su casilla del formulario?`,
+    corto: `Pon la hoja contra la luz sobre tu formulario. Casillas con número: ${LEYENDA_DE_HITOS}.`,
+  },
+  {
+    titulo: 'Primero la posición (casilla 1)',
+    texto: `Mira la casilla 1. Mide con la regla cuántos milímetros está corrida y hacia dónde, y en esta pantalla pulsa la flecha contraria: si cae demasiado a la derecha, pulsa ←; demasiado abajo, pulsa ↑. Cada toque mueve la hoja ${TOQUE_MM} mm (con Shift, ${aTexto(PASOS.fino.mm)} mm; con Ctrl o Cmd, ${aTexto(PASOS.grueso.mm)} mm).`,
+    corto: `POSICIÓN: mira la 1. Mide cuánto se corrió y pulsa en el sistema la flecha contraria. Cada toque = ${TOQUE_MM} mm (Shift = ${aTexto(PASOS.fino.mm)}; Ctrl/Cmd = ${aTexto(PASOS.grueso.mm)}).`,
+  },
+  {
+    titulo: 'Después el tamaño (casilla 4)',
+    texto: 'Ahora mira la casilla 4, la de abajo a la derecha. Si cae más lejos que su casilla del formulario, la hoja salió grande: pulsa −. Si cae antes, pulsa +. La casilla 1 no se mueve cuando cambias el tamaño. Cada toque corre esa esquina poco más de 1 mm.',
+    corto: 'TAMAÑO: mira la 4. Si cae más allá de su casilla, pulsa −; si cae antes, pulsa +. La 1 no se mueve.',
+  },
+  {
+    titulo: 'Comprueba y guarda',
+    texto: 'Imprime otra vez la hoja de prueba y comprueba las cuatro casillas. Cuando calcen, escribe el nombre de esta impresora y pulsa «Guardar ajuste». Desde entonces el contrato sale con ese ajuste.',
+    corto: 'Imprime otra vez. Cuando calcen las cuatro, escribe el nombre de la impresora y pulsa «Guardar ajuste».',
+  },
+];
+
+/**
  * La hoja de prueba: lo que se imprime en papel blanco y se pone contra la luz sobre el formulario preimpreso para
  * que calce.
  *   - Una regla en los bordes de la carta, en milímetros. No se corre con la calibración: dice dónde mete la
  *     impresora el papel, y si la escala de la impresión es de verdad 100 % (la marca de 100 mm tiene que caer a 100 mm
  *     de una regla de verdad).
+ *   - Los pasos, en palabras, abajo (ver PASOS_DE_CALIBRAR). Tampoco se corren.
  *   - El rectángulo de la hoja entera y una cruz en cada una de sus cuatro esquinas.
- *   - Una caja por cada campo, con su nombre, en el lugar donde se imprimiría (raya continua si se imprime, de
- *     puntos si no). Sirve para ver, campo por campo, qué cae dentro de su casilla del papel y qué no.
- * Todo lo que no es regla va dentro del mismo lienzo con el mismo `transform` que la hoja del contrato.
+ *   - Una caja por cada campo, con su nombre, en el lugar donde se imprimiría. Cuatro de ellas (los HITOS) van en
+ *     grueso y con su número: son con las que se compara.
+ * Todo lo que no es regla ni texto va dentro del mismo lienzo con el mismo `transform` que la hoja del contrato.
  */
 export function htmlHojaDePrueba(cal = CALIBRACION_DE_FABRICA, { impresora = null } = {}) {
+  const hito = new Map(HITOS.map((h) => [h.id, h]));
   const cajas = CAMPOS.map((c) => {
     const imprime = c.imprime !== false;
-    return `<div class="hp-caja${imprime ? '' : ' hp-no'}" data-campo="${esc(c.id)}" style="${estiloDeCaja(c).replace(/font-size:[^;]+;/, '')}"><span>${esc(c.id)}</span></div>`;
+    const h = hito.get(c.id);
+    const clase = `hp-caja${imprime ? '' : ' hp-no'}${h ? ' hp-hito-caja' : ''}`;
+    return `<div class="${clase}" data-campo="${esc(c.id)}" style="${estiloDeCaja(c).replace(/font-size:[^;]+;/, '')}"><span>${esc(c.id)}</span></div>`;
   }).join('\n    ');
+  const insignias = HITOS.map((h) => {
+    const caja = cajaDeRango(campoPorId(h.id).rango);
+    return `<b class="hp-hito" data-hito="${h.n}" style="left:${mm(ORIGEN_MM.x + caja.x)};top:${mm(ORIGEN_MM.y + caja.y)}">${h.n}</b>`;
+  }).join('');
   const esquina = (x, y, clase) => `<i class="hp-cruz ${clase}" style="left:${mm(ORIGEN_MM.x + x)};top:${mm(ORIGEN_MM.y + y)}"></i>`;
   const marco = `<div class="hp-marco" style="left:${mm(ORIGEN_MM.x)};top:${mm(ORIGEN_MM.y)};width:${mm(HOJA_MM.ancho)};height:${mm(HOJA_MM.alto)}"></div>`;
-  const rotulo = `Hoja de prueba${impresora ? ` · ${esc(impresora)}` : ''} · ${esc(textoDeCalibracion(cal))}`;
+  const rotulo = `<strong>HOJA DE PRUEBA</strong> (no es el contrato)${impresora ? ` · impresora «${esc(impresora)}»` : ''} · ${esc(textoDeCalibracion(cal))}`;
+  const pasos = PASOS_DE_CALIBRAR.map((p, i) => `<li><b>${i + 1}.</b> ${esc(p.corto)}</li>`).join('');
   return `<article class="hoja-contrato hoja-de-prueba" aria-label="Hoja de prueba">
   <div class="hp-regla">${reglaHtml()}</div>
   <p class="hp-rotulo">${rotulo}</p>
+  <ol class="hp-pasos">${pasos}</ol>
   <div class="hc-lienzo" style="transform-origin:${mm(ORIGEN_MM.x)} ${mm(ORIGEN_MM.y)};transform:${transformacionCss(cal)};">
     ${marco}
     ${esquina(0, 0, 'hp-nw')}${esquina(HOJA_MM.ancho, 0, 'hp-ne')}${esquina(0, HOJA_MM.alto, 'hp-sw')}${esquina(HOJA_MM.ancho, HOJA_MM.alto, 'hp-se')}
     ${cajas}
+    ${insignias}
   </div>
 </article>`;
 }
@@ -669,12 +735,16 @@ export function pintarCalibracion(contenedor, {
     <button type="button" class="btn" data-accion="fabrica">Volver al ajuste de fábrica</button>
   </div>
   <div class="hc-calibracion no-imprimir">
+    <h2>Calibrar la impresora (un minuto)</h2>
+    <ol class="hc-pasos">
+      ${PASOS_DE_CALIBRAR.map((p, i) => `<li><strong>${esc(p.titulo)}.</strong> ${esc(p.texto)}${i === 0 ? ` ${esc(AYUDA_DE_IMPRIMIR)}` : ''}</li>`).join('\n      ')}
+    </ol>
     <label>Nombre de la impresora
       <input type="text" id="hc-nombre" list="hc-nombres" value="${esc(nombre)}" placeholder="Oficina" autocomplete="off">
       <datalist id="hc-nombres">${Object.keys(guardadas.impresoras).map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
     </label>
-    <p class="comp-ayuda" data-pieza="lectura"></p>
-    <p class="comp-ayuda">1) Imprime la hoja de prueba en papel blanco. ${esc(AYUDA_DE_IMPRIMIR)} 2) Mide con una regla de verdad la marca de 100 mm de la hoja impresa: si no mide 100 mm, la escala de la impresión no es 100 %. 3) Ponla contra la luz sobre el formulario preimpreso y mira, en la pantalla, qué hay que mover: las flechas corren toda la hoja (Shift: más fino; Ctrl o Cmd: más grueso) y + / − la agrandan o la achican. 4) Vuelve a imprimir hasta que calce y guarda.</p>
+    <p class="hc-lectura" data-pieza="lectura"></p>
+    <p class="comp-ayuda"><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> mueven toda la hoja ${esc(TOQUE_MM)} mm · con <kbd>Shift</kbd> ${esc(aTexto(PASOS.fino.mm))} mm · con <kbd>Ctrl</kbd> o <kbd>Cmd</kbd> ${esc(aTexto(PASOS.grueso.mm))} mm · <kbd>+</kbd> y <kbd>−</kbd> la agrandan o la achican.</p>
   </div>
   <div class="hc-vista" data-pieza="vista"></div>
 </div>`;

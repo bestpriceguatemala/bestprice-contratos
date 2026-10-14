@@ -15,11 +15,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   armarContratoImpreso, htmlContratoImpreso, htmlHojaDePrueba, pintarContratoImpreso, pintarImpresionDeContrato,
-  pintarCalibracion,
+  pintarCalibracion, HITOS, PASOS_DE_CALIBRAR, MARCAS_DE_ESCALA,
 } from '../js/pantallas/contratoImpreso.js';
 import {
   CAMPOS, ORIGEN_MM, PAPEL, ESCALA_EXCEL, cajaDeRango, campoPorId, leerCalibraciones, calibracionActiva, CALIBRACION_DE_FABRICA,
-  CLAVE_DE_CALIBRACIONES, guardarCalibracion,
+  CLAVE_DE_CALIBRACIONES, guardarCalibracion, PASOS,
 } from '../js/nucleo/hojaContrato.js';
 import { construirContrato } from '../js/pantallas/sacarCarro.js';
 import { contratoParaGuardar } from '../js/datos.js';
@@ -689,6 +689,7 @@ test('la hoja de prueba trae una caja por cada campo de la tabla, de puntos las 
     const caja = new RegExp(`<div class="(hp-caja[^"]*)" data-campo="${campo.id}"`).exec(prueba);
     assert.ok(caja, campo.id);
     assert.equal(caja[1].includes('hp-no'), campo.imprime === false, `${campo.id}: raya de puntos solo si no se imprime`);
+    assert.equal(caja[1].includes('hp-hito-caja'), HITOS.some((h) => h.id === campo.id), `${campo.id}: grueso solo si es una de las cuatro`);
   }
   // sin letra: son cajas, no datos
   assert.ok(!/class="hp-caja[^"]*"[^>]*font-size/.test(prueba));
@@ -735,6 +736,75 @@ test('el rótulo de la hoja de prueba dice la impresora (escapada) y la calibrac
   assert.ok(prueba.includes('Oficina &lt;1&gt; &amp; &quot;2&quot;'));
   assert.ok(prueba.includes('1.5 mm a la derecha, 0.5 mm hacia arriba, 98.0 % del tamaño de Excel'));
   assert.ok(!htmlHojaDePrueba().includes(' · null'));
+  // y dice, antes que nada, que NO es el contrato
+  assert.match(prueba, /<strong>HOJA DE PRUEBA<\/strong> \(no es el contrato\)/);
+});
+
+test('cuatro casillas con número, una en cada esquina, son con las que se compara', () => {
+  assert.equal(HITOS.length, 4);
+  assert.deepEqual(HITOS.map((h) => h.n), [1, 2, 3, 4]);
+  const prueba = htmlHojaDePrueba();
+  const lienzo = prueba.indexOf('class="hc-lienzo"');
+  const cajas = campoPorId;
+  const posiciones = HITOS.map((h) => {
+    const campo = cajas(h.id); // lanza si la tabla ya no tiene ese campo
+    const caja = cajaDeRango(campo.rango);
+    // la caja va en grueso
+    assert.match(prueba, new RegExp(`<div class="hp-caja hp-hito-caja" data-campo="${h.id}"`), `${h.id}: caja gruesa`);
+    // y su número, dentro del lienzo, en la esquina de arriba a la izquierda de su casilla
+    const m = new RegExp(`<b class="hp-hito" data-hito="${h.n}" style="left:([\\d.]+)mm;top:([\\d.]+)mm">${h.n}</b>`).exec(prueba);
+    assert.ok(m, `${h.n}: falta su número`);
+    assert.ok(prueba.indexOf(m[0]) > lienzo, `${h.n}: el número debe ir dentro del lienzo, para que se corra con la hoja`);
+    assert.ok(Math.abs(Number(m[1]) - (ORIGEN_MM.x + caja.x)) < 0.002 && Math.abs(Number(m[2]) - (ORIGEN_MM.y + caja.y)) < 0.002, `${h.n}: posición`);
+    return { x: caja.x, y: caja.y, h };
+  });
+  // una en cada esquina: dos de cada lado, arriba y abajo, izquierda y derecha
+  const [uno, dos, tres, cuatro] = posiciones;
+  assert.ok(uno.x < dos.x && tres.x < cuatro.x, '1 y 3 a la izquierda; 2 y 4 a la derecha');
+  assert.ok(uno.y < tres.y && dos.y < cuatro.y, '1 y 2 arriba; 3 y 4 abajo');
+  assert.ok(cuatro.x > 150 && cuatro.y > 200, 'la 4 está lejos de la 1: de ella depende ver el tamaño');
+  // ninguna otra caja va en grueso
+  assert.equal((prueba.match(/hp-hito-caja/g) || []).length, 4);
+  assert.equal((prueba.match(/class="hp-hito"/g) || []).length, 4);
+});
+
+test('los pasos salen en la hoja impresa, abajo y FUERA del lienzo (no se corren con la calibración)', () => {
+  const prueba = htmlHojaDePrueba({ dx: 7, dy: -9, escala: 0.9 });
+  const pasos = prueba.indexOf('class="hp-pasos"');
+  const lienzo = prueba.indexOf('class="hc-lienzo"');
+  assert.ok(pasos > 0 && pasos < lienzo, 'los pasos van antes del lienzo, no dentro');
+  assert.equal((prueba.match(/<li><b>\d\.<\/b>/g) || []).length, PASOS_DE_CALIBRAR.length);
+  assert.equal(PASOS_DE_CALIBRAR.length, 5);
+  for (const paso of PASOS_DE_CALIBRAR) assert.ok(prueba.includes(paso.corto.replace(/&/g, '&amp;')), paso.corto);
+  assert.equal((prueba.match(/transform:/g) || []).length, 1, 'sigue habiendo un solo transform');
+});
+
+test('los pasos dicen qué comparar y en qué orden: escala, formulario, posición, tamaño, guardar', () => {
+  const [escala, formulario, posicion, tamano, guardar] = PASOS_DE_CALIBRAR;
+  // 1. que la impresora no encoja la hoja, medido con la regla de la hoja
+  assert.match(escala.texto, /marca 10 y la marca 110/);
+  assert.match(escala.texto, /100 mm/);
+  assert.match(escala.texto, /escala «100 %»/);
+  assert.equal(MARCAS_DE_ESCALA.hasta - MARCAS_DE_ESCALA.desde, 100);
+  // 2. ponerla sobre el formulario y mirar las cuatro casillas, que se nombran todas
+  for (const h of HITOS) assert.ok(formulario.texto.includes(`${h.n} = ${h.que} (${h.donde})`), `${h.n} sin nombrar`);
+  // 3. posición, con la casilla 1 y las flechas, dicha en cuánto mueve cada toque (de las constantes, no de memoria)
+  assert.match(posicion.texto, /casilla 1/);
+  assert.ok(posicion.texto.includes(`${PASOS.normal.mm} mm`) && posicion.texto.includes(`${PASOS.fino.mm} mm`) && posicion.texto.includes(`${PASOS.grueso.mm} mm`));
+  assert.match(posicion.texto, /flecha contraria/);
+  // 4. tamaño, con la casilla 4, y que la 1 no se mueve
+  assert.match(tamano.texto, /casilla 4/);
+  assert.match(tamano.texto, /La casilla 1 no se mueve/);
+  assert.match(tamano.texto, /pulsa −/);
+  assert.match(tamano.texto, /pulsa \+/);
+  // 5. comprobar y guardar con el nombre de la impresora
+  assert.match(guardar.texto, /nombre de esta impresora/);
+  assert.match(guardar.texto, /Guardar ajuste/);
+  // el orden: la posición se arregla antes que el tamaño
+  assert.ok(PASOS_DE_CALIBRAR.indexOf(posicion) < PASOS_DE_CALIBRAR.indexOf(tamano));
+  // y las dos versiones, la larga y la corta, dicen lo mismo de lo mismo
+  for (const paso of PASOS_DE_CALIBRAR) assert.ok(paso.titulo && paso.texto.length > paso.corto.length - 20 && paso.corto);
+  assert.match(posicion.corto, new RegExp(`${PASOS.normal.mm} mm`));
 });
 
 // ---------------------------------------------------------------------------
@@ -1268,6 +1338,22 @@ test('la pantalla de calibrar empieza en la calibración de fábrica y dibuja la
   for (const accion of ['imprimir-prueba', 'guardar', 'fabrica', 'volver']) assert.ok(c.innerHTML.includes(`data-accion="${accion}"`), accion);
 });
 
+test('la pantalla de calibrar trae los cinco pasos en palabras, el nombre de la impresora y qué hace cada tecla', () => {
+  const c = contenedorFalso();
+  pintarCalibracion(c, { almacen: almacenEspia() });
+  const pasos = c.innerHTML.match(/<ol class="hc-pasos">[^]*?<\/ol>/)[0];
+  assert.equal((pasos.match(/<li>/g) || []).length, 5);
+  PASOS_DE_CALIBRAR.forEach((paso, i) => {
+    assert.ok(pasos.includes(`<strong>${paso.titulo}.</strong>`), `paso ${i + 1}`);
+    assert.ok(pasos.includes(paso.texto.replace(/&/g, '&amp;')), `texto del paso ${i + 1}`);
+  });
+  // el primer paso trae además cómo se configura el diálogo de imprimir
+  assert.match(pasos, /márgenes «Ninguno»/);
+  assert.match(c.innerHTML, /<kbd>←<\/kbd> <kbd>→<\/kbd> <kbd>↑<\/kbd> <kbd>↓<\/kbd> mueven toda la hoja 0\.5 mm · con <kbd>Shift<\/kbd> 0\.1 mm · con <kbd>Ctrl<\/kbd> o <kbd>Cmd<\/kbd> 5 mm/);
+  assert.match(c.innerHTML, /<kbd>\+<\/kbd> y <kbd>−<\/kbd> la agrandan o la achican/);
+  assert.ok(c.innerHTML.includes('id="hc-nombre"'));
+});
+
 test('guardar sin nombre lo dice y no guarda; con nombre guarda, activa esa impresora y lo confirma', () => {
   const almacen = almacenEspia();
   const c = contenedorFalso();
@@ -1421,6 +1507,28 @@ test('la hoja de estilos: la página es la carta sin margen, la hoja ocupa la ca
   assert.match(impresion, /body:has\(\.hoja-contrato\) \*:not\(:has\(\.hoja-contrato\)\):not\(\.hoja-contrato\):not\(\.hoja-contrato \*\) \{\s*display:\s*none !important;/);
   assert.match(impresion, /\.hoja-contrato \{[^}]*transform:\s*none;/);
   assert.match(impresion, /html,\s*body \{[^}]*margin:\s*0 !important;/);
+});
+
+test('lo que tiene que verse en la hoja de prueba no depende de «Gráficos de fondo» (Chrome los trae apagados)', () => {
+  const css = readFileSync(new URL('../css/contrato-papel.css', import.meta.url), 'utf8');
+  // las marcas de la regla, la cruz y la caja gruesa son BORDES: siempre salen en el papel
+  assert.match(bloqueDesde(css, css.indexOf('\n.hp-marca-x {')), /border-left:\s*0\.15mm solid #000;/);
+  assert.match(bloqueDesde(css, css.indexOf('\n.hp-marca-y {')), /border-top:\s*0\.15mm solid #000;/);
+  assert.match(bloqueDesde(css, css.indexOf('\n.hp-cruz::before,')), /content:\s*'';/);
+  assert.match(bloqueDesde(css, css.indexOf('\n.hp-cruz::before { left')), /border-left:\s*0\.2mm solid #000;/);
+  assert.match(bloqueDesde(css, css.indexOf('\n.hp-cruz::after { top')), /border-top:\s*0\.2mm solid #000;/);
+  assert.match(bloqueDesde(css, css.indexOf('\n.hp-caja.hp-hito-caja {')), /border:\s*0\.5mm solid #000;/);
+  assert.match(bloqueDesde(css, css.indexOf('\n.hp-hito {')), /border:\s*0\.4mm solid #000;/);
+  for (const regla of ['\n.hp-marca-x {', '\n.hp-marca-y {', '\n.hp-cruz {']) {
+    assert.ok(!/background/.test(bloqueDesde(css, css.indexOf(regla))), `${regla.trim()} no debe llevar fondo`);
+  }
+  // y por si algún fondo se cuela, se pide imprimirlo igual
+  assert.match(bloqueDesde(css, css.indexOf('\n.hoja-de-prueba,')), /print-color-adjust:\s*exact;/);
+  // los pasos van fijos al papel, abajo, y no se corren con la calibración
+  const pasos = bloqueDesde(css, css.indexOf('\n.hp-pasos {'));
+  assert.match(pasos, /position:\s*absolute;/);
+  assert.match(pasos, /top:\s*250mm;/);
+  assert.ok(!/transform/.test(pasos));
 });
 
 test('index.html carga la hoja de estilos del contrato', () => {
