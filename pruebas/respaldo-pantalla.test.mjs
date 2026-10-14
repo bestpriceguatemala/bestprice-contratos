@@ -319,3 +319,32 @@ test('el respaldo no recalcula ningún total: ni q() ni sumas propias en el mapa
   assert.match(mapa, /horaTardiaDe\(c\)/);
   assert.doesNotMatch(mapa, /precioDia\s*\*|\*\s*c\.dias|dias\s*\*\s*precio/, 'la renta no se multiplica aquí');
 });
+
+// ---------------------------------------------------------------------------
+// El papel membretado: el único lugar donde un aviso de pantalla se vuelve tinta
+// ---------------------------------------------------------------------------
+
+test('el aviso de arriba lleva `no-imprimir`: si la hoja del contrato no se arma, el aviso no sale impreso sobre el papel que el cliente firma', async () => {
+  olvidarElDescarteDelRecordatorio();
+  const doc = documentoFalso();
+  await mostrarElRecordatorioDeRespaldo({ hoy: '2027-10-14', leer: registro({ 2026: '2026-10-14' }), documento: doc });
+  assert.match(doc.banners()[0].className, /(^|\s)no-imprimir(\s|$)/);
+});
+
+test('y la regla de impresión que esconde `.no-imprimir` existe CON sus declaraciones: display: none !important dentro de @media print', () => {
+  const css = leer('../css/estilos.css');
+  const impresion = css.slice(css.indexOf('@media print'));
+  // La regla que nombra `.no-imprimir` entre sus selectores, y lo que declara.
+  const regla = /([^{}]*\.no-imprimir[^{}]*)\{([^{}]*)\}/.exec(impresion);
+  assert.ok(regla, 'ninguna regla de @media print nombra .no-imprimir');
+  assert.match(regla[2], /display:\s*none\s*!important/);
+});
+
+test('nada más de lo que dibuja el respaldo encima de otra pantalla puede salir en el papel: el único elemento que inserta fuera de su pantalla es el aviso', () => {
+  const fuente = sinComentarios(leer('../js/pantallas/respaldo.js'));
+  // Todo lo que se inserta en el documento fuera de `#pantalla` pasa por insertBefore / appendChild: solo el aviso, el enlace de descarga (que se quita al instante).
+  const inserciones = [...fuente.matchAll(/\b(insertBefore|appendChild|prepend|append)\(/g)].map((m) => m[1]);
+  assert.deepEqual(inserciones.sort(), ['appendChild', 'insertBefore'], inserciones.join(', '));
+  assert.match(fuente, /app\.insertBefore\(aviso, pantalla\)/);
+  assert.match(fuente, /document\.body\.appendChild\(enlace\)/);
+});

@@ -240,7 +240,10 @@ export async function mostrarElRecordatorioDeRespaldo({
   if (!aviso) {
     aviso = documento.createElement('div');
     aviso.id = ID_DEL_RECORDATORIO;
-    aviso.className = 'rs-recordatorio';
+    // `no-imprimir`: la hoja de estilos de impresión lo esconde (estilos.css). Este aviso se dibuja ENCIMA de cualquier pantalla, y
+    // el contrato se imprime sobre papel membretado: si la hoja del contrato no logra armarse, lo único que tapa el aviso es
+    // nada, y saldría impreso sobre el papel que el cliente firma.
+    aviso.className = 'rs-recordatorio no-imprimir';
     aviso.setAttribute('role', 'status');
     app.insertBefore(aviso, pantalla);
   }
