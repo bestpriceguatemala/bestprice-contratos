@@ -100,9 +100,11 @@ test('SIN datos de nadie: ni hipervínculos, ni valores en caché de fórmulas, 
   assert.doesNotMatch(core, /Esteban|Urizar/i);
 });
 
-test('pide a Excel calcular todo al abrir y no trae cadena de cálculo vieja', async () => {
+test('NO pide a Excel un recálculo completo al abrir (con una renta llena tardaba 186 s o más en vez de 19) y no trae cadena de cálculo vieja', async () => {
   const libro = await abrirLibro(leerPlantilla());
-  assert.match(xmlDe(libro.partes, 'xl/workbook.xml'), /<calcPr[^>]*fullCalcOnLoad="1"/);
+  // Las fórmulas no traen valor guardado, y Excel calcula las que no lo traen; la bandera solo cambia el tiempo, no las cifras.
+  assert.doesNotMatch(xmlDe(libro.partes, 'xl/workbook.xml'), /fullCalcOnLoad/);
+  assert.match(xmlDe(libro.partes, 'xl/workbook.xml'), /<calcPr calcId="\d+"\/>/);
   assert.equal(libro.partes.has('xl/calcChain.xml'), false);
   assert.doesNotMatch(xmlDe(libro.partes, '[Content_Types].xml'), /calcChain/);
   assert.doesNotMatch(xmlDe(libro.partes, 'xl/_rels/workbook.xml.rels'), /calcChain/);

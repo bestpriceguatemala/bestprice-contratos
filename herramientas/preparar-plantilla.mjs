@@ -16,7 +16,7 @@
 //   1. comprueba que el diseño sea el que el respaldo conoce (los encabezados): si no, se niega;
 //   2. vacía las celdas de datos de CLIENTES, VEHICULOS, CONTRATOS y el formulario INGRESO DE DATOS de una renta;
 //   3. quita el hipervínculo de correo de CLIENTES;
-//   4. quita los valores en caché de TODAS las fórmulas y le pide a Excel recalcular todo al abrir;
+//   4. quita los valores en caché de TODAS las fórmulas (Excel calcula las que no traen valor al abrir);
 //   5. vacía los textos compartidos que ninguna celda usa;
 //   6. quita la cadena de cálculo (Excel la reconstruye) y los datos del autor.
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -114,9 +114,13 @@ export async function prepararPlantilla(bytes) {
   ponerXml(partes, 'xl/sharedStrings.xml', nuevaSst);
   const huerfanos = textos.length - usados.size;
 
-  // 6. Cálculo completo al abrir, sin cadena de cálculo, sin datos del autor
+  // 6. Sin cadena de cálculo y sin datos del autor.
+  //
+  // NO se pide `fullCalcOnLoad`: las fórmulas ya no traen valor guardado, y Excel calcula las que no lo traen al abrir. Pedirle
+  // además un recálculo completo no cambia ninguna cifra (se comprobó celda por celda en Excel de verdad) y sí el tiempo: con una
+  // renta llena (2,000 clientes, 150 carros, 990 contratos) abrir tardó 186 s (y 454 s otra vez, con la máquina ocupada) con la bandera y 19 s sin ella.
   ponerXml(partes, 'xl/workbook.xml', xmlDe(partes, 'xl/workbook.xml')
-    .replace(/<calcPr\b[^>]*\/>/, '<calcPr calcId="191029" fullCalcOnLoad="1"/>'));
+    .replace(/<calcPr\b[^>]*\/>/, '<calcPr calcId="191029"/>'));
   partes.delete('xl/calcChain.xml');
   ponerXml(partes, 'xl/_rels/workbook.xml.rels', xmlDe(partes, 'xl/_rels/workbook.xml.rels')
     .replace(/<Relationship\s[^>]*relationships\/calcChain"[^>]*\/>/g, ''));

@@ -4,7 +4,7 @@
 // de CLIENTES, VEHICULOS y CONTRATOS y se vuelve a cerrar. Los colores, las fórmulas, las validaciones, la protección,
 // las áreas de impresión y la imagen son los mismos bytes que tiene su archivo (ver hojas.js).
 //
-// Las fórmulas no traen valores guardados: Excel las calcula al abrir (la plantilla pide recálculo completo). Si el
+// Las fórmulas no traen valores guardados: Excel las calcula al abrir. Si el
 // archivo se abre en «Vista protegida» —Excel lo hace con todo lo que baja de internet— las fórmulas se ven en blanco
 // hasta apretar «Habilitar edición»; ver MENSAJE_VISTA_PROTEGIDA.
 import { leerZip, escribirZip } from './zip.js';

@@ -796,6 +796,48 @@ entrega, y a un empleado no se le imprime nada.
   ya suman otra cosa que su `monto`, la ficha lo dice con palabras
   (`pagosQueCambiaron`) y no cambia lo que se debe: no se paga ni se descuenta nada solo.
 
+**Del respaldo** (documento `ajustes/respaldo`; agregado el 14 de octubre):
+`porAnio`, un mapa de año a la fecha ISO en que se bajó el respaldo de ese año:
+`{ "2026": "2026-10-12" }`. Es la única llave. `anotarRespaldo` la escribe con
+`merge` y por año (bajar 2027 no pisa la fecha de 2026), después de entregar el archivo
+(§10). El último respaldo es la fecha más reciente (`ultimoRespaldo`) y un año está
+completo solo si se bajó después de que terminó (`estadoDeLosAnios`,
+`nucleo/respaldo.js`). Una fecha que no se entiende nunca silencia el aviso.
+
+**Del respaldo, de campo a columna** (`js/respaldo/mapa.js` es la lista viva, como
+`CAMPOS_CLIENTE` lo es del cliente; los encabezados de su Excel que se comprueban están
+en `js/respaldo/diseno.js`). Lo que no es obvio:
+- **Clientes.** Su hoja parte el nombre en cuatro columnas y el sistema guarda
+  `apellidos` y `nombres` enteros: no se adivina dónde cortar «María del Carmen López de
+  Pérez». Los apellidos enteros van en 1er APELLIDO y los nombres enteros en 1er NOMBRE;
+  las columnas del 2do quedan vacías (su hoja las junta igual). El CODIGO de su hoja es
+  la posición de la fila: los clientes van en orden alfabético y `clienteId` de cada
+  contrato se traduce a ese código. `nacionalidad` y `pais` (de antes de que la ficha los
+  quitara) se conservan; `licenciaEmision` (una fecha) no tiene columna: LUGAR EMISION es
+  `licenciaEmitidaEn`. `facturarA` no tiene celda en sus filas de datos.
+- **Carros.** El carro con `codigo` k va en la fila k+2, para que la columna CODIGO de su
+  hoja (que cuenta sola) diga lo mismo que la pantalla de Carros. `fueraDeServicio` y
+  `motivoFueraDeServicio` no tienen columna.
+- **Contratos.** `numero` va en A y las filas son contiguas desde la 6 (su hoja pega la
+  siguiente renta en `COUNT(A6:A1005)+6`: un hueco la pegaría encima de otra). `clienteId`
+  y `carroId` se traducen a los códigos de su hoja; un carro ajeno deja COD. CARRO vacío y
+  llena las columnas SUBARR. con `carroAjeno{placas, tipo, marca, color, modelo, dueno,
+  costoDia}`. `tarjetas[]` entran como `XXXX XXXX XXXX` y `ultimos4` (ADR-001); su hoja
+  tiene dos, de la tercera en adelante van a COMENTARIOS. Las fechas son fechas de Excel y
+  las horas fracciones del día. `pagos[]` se resume en FORMA DE PAGO (una forma, o MIXTO)
+  y en % TARJETA (solo si todo se pagó con tarjeta con un mismo porcentaje).
+  `duenoId`/`pagosDueno` dicen PAGADO AL DUEÑO (SI/NO) y su fecha.
+- **Sin campo en el sistema:** PERSONA O EMPRESA y NIT, T. CIRCULACION ORIGINAL y
+  AUTENTICA, SEMANA, MES y COMBUSTIBLE X GALON (en CONTRATOS) quedan vacías.
+- **Sin columna en su hoja:** `porcentajeComision`, `garantiaLiberada` y
+  `garantiaLiberadaEn` (si la garantía sigue sin soltar, COMENTARIOS lo dice),
+  `cierre.varios` y `cierre.variosDetalle`, `cierre.danosDetalle` (va a COMENTARIOS) y el
+  detalle de cada pago. Las colecciones `reservas`, `empleados`, `pagosComision`,
+  `pagosDueno` y `duenos` no se respaldan (§10).
+- **Una hora tardía de una sola forma.** `horaTardiaDe` (`nucleo/contrato.js`) es quien
+  la lee, igual que en el resto del sistema: lo escrito al salir y lo escrito al recibir
+  suman en la columna HORA TARDIA.
+
 **Los puentes de lectura que siguen en el código:**
 - `nucleo/comisiones.js:agruparPorEmpleado()` — junta las rentas por `empleadoId` y, si
   no lo traen (las de antes de la lista de empleados), por el texto de `rentadoPor`,
@@ -1165,6 +1207,77 @@ un aviso y el botón para bajarlo.
 
 Se le advierte al dueño que ese archivo lleva DPI, licencias y teléfonos de sus
 clientes, y merece el mismo cuidado que el Excel de hoy.
+
+**Cómo es hoy** (construido el 14 de octubre de 2026; la decisión y sus
+alternativas están en `docs/adr/ADR-004-el-respaldo-parcha-su-excel-sin-libreria.md`):
+
+- **Dónde está el botón.** En `#/dinero/respaldo`, **detrás de la segunda
+  contraseña**: el archivo lleva el costo por día de cada dueño de carro ajeno y
+  si cada renta ya se le pagó al dueño, y ADR-002 manda que toda pantalla que
+  necesite ese costo pida la credencial de dinero. Un respaldo sin esos números
+  parecería completo y diría una utilidad falsa (el costo en cero), que es peor
+  que no tenerlo. El aviso de arriba, al entrar, lleva a esa pantalla.
+- **Cómo se arma.** Sin librerías. Un `.xlsx` es un zip de XML y el navegador ya
+  trae la compresión (`CompressionStream`), así que se abre `plantilla/best-price.xlsx`
+  —su Excel, sin datos de nadie—, se escriben solo las celdas de datos y se vuelve a
+  cerrar (`js/respaldo/`). Lo que no se toca —estilos, fórmulas, validaciones,
+  protección, imagen, áreas de impresión— son los mismos bytes que tiene su archivo.
+  La plantilla vive en el repositorio, que es **público**, así que se prepara
+  quitándole todo dato personal (`herramientas/preparar-plantilla.mjs`: celdas, textos
+  compartidos y valores en caché). Antes de escribir una celda se comprueba que los
+  encabezados de la plantilla sean los que el mapa espera; si no, el respaldo se
+  niega: nunca pone el DPI donde antes iba la licencia.
+- **Qué lleva.** Todos los clientes y todos los carros (su hoja es la base para
+  rentar esa tarde), y los contratos de ese año por `fechaSalida`. Los datos salen
+  de la **nube**, nunca de la copia de la computadora; si cualquier lectura falla
+  (contratos, clientes, carros, pagos a dueños o el costo de un dueño) no se arma
+  nada. Lo que no cabe se dice: su hoja tiene 2,000 filas de clientes (si hay más
+  entran primero los de las rentas del año y se avisa cuántos no cupieron), 200 de
+  carros y 1,000 de contratos (con más contratos en el año **no se arma**, porque
+  un respaldo al que le faltan contratos y parece completo es peor que ninguno).
+- **De campo a columna.** Las columnas de su hoja y los campos de §7b (el
+  glosario de «Del respaldo», en §7b) se corresponden en `js/respaldo/mapa.js`. Lo
+  que su hoja no tiene dónde guardar **no se mete en la columna que más se le
+  parece**: queda vacío, o se escribe en COMENTARIOS con el monto y la razón, o se
+  lista en pantalla como «lo que este archivo NO lleva» (reservaciones, comisiones,
+  pagos a dueños uno por uno, fichas de dueños, si un carro está fuera de servicio).
+- **Los totales son los de su hoja, no los del sistema.** El respaldo no escribe
+  ningún total: SUBTOTAL, TOTAL COBRADO y UTILIDAD son sus fórmulas, que siguen en el
+  archivo y se calculan al abrirlo. Sus fórmulas suman todo lo que el sistema cobra
+  **salvo tres cosas**: la hora tardía, los «varios» de la devolución y el recargo de
+  tarjeta cuando se pagó con más de una forma (su hoja aplica un solo porcentaje a
+  todo el total). Una renta con alguna de esas tres sale en la hoja con un total
+  **menor** que el del sistema, y por eso su COMENTARIO **abre** con «OJO», la cifra
+  que falta y por qué («la hoja anota la hora tardía pero no la suma: faltan Q200»),
+  y al bajar el archivo la pantalla lista cada contrato así. El respaldo **no corrige
+  la fórmula de su hoja**: arreglarla es decisión suya sobre su propio archivo.
+- **La advertencia va donde se baja.** La pantalla dibuja, antes de cualquier botón de
+  descarga, que el archivo lleva DPI, licencia y teléfono de los clientes y lo que se
+  le paga a cada dueño, y la repite en el aviso de «Listo».
+- **Vista protegida.** Excel abre en «Vista protegida» lo que baja de internet, y ahí
+  no calcula fórmulas: se ven en blanco hasta apretar «Habilitar edición». La
+  pantalla lo dice junto al botón.
+
+**El hueco entre «un archivo por año» y «recuérdalo al año»** (hallado el 14 de octubre
+de 2026 al construirlo). Tal como estaba escrito, el archivo de 2026 bajado en octubre
+de 2026 no lleva noviembre ni diciembre, y el de 2027 empieza en enero: lo que pasara
+entre una cosa y otra no viviría en **ningún** archivo, y el aviso de «pasó un año»
+no lo atrapaba. Queda cerrado así: el sistema guarda **la fecha en que se bajó el
+respaldo de cada año** (`ajustes/respaldo`, ver §7b), un año solo cuenta como
+**completo** si se bajó cuando el año ya había terminado, y la pantalla ofrece el año
+en curso y —solo cuando hay algo que hacer con él— el anterior: bajado antes de
+terminar (se vuelve a ofrecer, «no lleva las rentas de después») o sin bajar en el
+primer trimestre. Cualquier otro año se baja con «Otro año». El aviso de arriba sigue
+siendo el de §10: **365 días** desde el último respaldo de cualquier año (o ninguno
+nunca bajado). La regla recibe `hoy` y no lee el reloj (`nucleo/respaldo.js`).
+
+La fecha se guarda en la nube y no en el navegador porque es un hecho del negocio:
+bajarlo en una computadora debe callar el aviso en todas, y vaciar el historial de
+una no debe hacerlo volver. Se anota **después** de entregar el archivo, nunca antes:
+si la anotación falla, lo peor es que el aviso vuelva a salir; anotar un respaldo que
+no salió lo callaría un año. Si no se puede LEER cuándo fue, el aviso no dice nada (no
+se sabe, y un aviso falso se aprende a ignorar). No hace falta ninguna regla nueva de
+Firestore: `ajustes` ya se lee y se escribe con la sesión normal.
 
 ## 11. Seguridad
 
