@@ -16,9 +16,12 @@ su impresora y calibrar.** Hasta entonces, la escala 0.77 es una hipótesis (muy
 | `424a5b6` | el texto de arriba y el del medio bajan medio milímetro (medido contra Excel) |
 | `7662971` | §8b del diseño, con lo que decidió el dueño y la fecha |
 | `6a3802b` | pantalla de imprimir: cajas con su nombre, la tarjeta enmascarada es una nota y no una alarma roja |
+| `7a8eb08` | la primera versión de este informe |
+| `e7ef495`, `2c6d6ba` | las respuestas del 14 de octubre sobre la hora de entrada, la Q, el combustible y la autorización de la tarjeta 1 (casilla derivada), y su marca en la hoja de prueba |
+| `f48ac20`, `85eaf3a` | §8b: esas respuestas, el número de contrato preimpreso y lo que se mira el día de la calibración |
 
-**Pruebas:** el árbol completo está verde, **1996 pruebas, 0 fallan** (el basal que se me dio era 1475; subió porque los otros dos agentes también agregaron). Las mías son
-**147**: `pruebas/hoja-contrato.test.mjs` (61) y `pruebas/contrato-impreso.test.mjs` (86). Se mutaron `hojaContrato.js` (≈70 mutaciones), `contratoImpreso.js`
+**Pruebas:** el árbol completo está verde, **2006 pruebas, 0 fallan** (el basal que se me dio era 1475; subió porque los otros dos agentes también agregaron). Las mías son
+**154**: `pruebas/hoja-contrato.test.mjs` (66) y `pruebas/contrato-impreso.test.mjs` (88). Se mutaron `hojaContrato.js` (≈70 mutaciones), `contratoImpreso.js`
 (≈115) y el CSS (13): sobreviven solo 5, todas equivalentes (un `>=` contra `>` sobre un flotante exacto, una copia defensiva de un objeto que ya sale nuevo de `JSON.parse`,
 un `>= 0` cuando `monto(0)` ya devuelve vacío, un título que se calcula antes de teclear, y un `null` contra `''` que `filter(Boolean)` borra).
 
@@ -60,9 +63,9 @@ tocó el proyecto real. Chrome headless propio, `Emulation.setEmulatedMedia('pri
    la encoge. 193 / 250.2 = 0.771: `ESCALA_QUE_CABE`. Es la hipótesis más probable, no una prueba; la calibración la confirma o la corrige.
 2. La hoja no tiene bordes ni líneas ni imágenes: solo texto, hecha para caer sobre un formulario preimpreso. Los textos fijos que trae (rótulos) el dueño dijo que **el papel no los trae**: los imprime el sistema.
 3. **Once celdas con letra blanca** (no catorce): nueve tienen fuente en el sistema y se imprimen ahora por decisión suya; **E27** (ciudad adicional: el 3 de octubre dijo que la segunda dirección no se imprime) e **I27** (un `0` fijo) no se agregaron.
-4. **Excel no imprime el número de contrato** en ningún lado (ninguna celda lee `INGRESO!F1`): el formulario debe traer el suyo preimpreso.
-5. La hora de entrada que imprime Excel es la hora de **salida** (las dos casillas leen la misma celda). Se replicó.
-6. Excel no imprime la autorización de la tarjeta 1 (su casilla, M29:P31, queda vacía) ni el banco de la tarjeta 2.
+4. **Excel no imprime el número de contrato** en ningún lado (ninguna celda lee `INGRESO!F1`): viene preimpreso en su papelería, como él lo dijo.
+5. La hora de entrada que imprime Excel es la hora de **salida** (las dos casillas leen la misma celda). Se replicó, y él dijo «Igual que el Excel».
+6. Excel no imprime la autorización de la tarjeta 1 (su casilla, M29:P31, queda vacía; ahora se imprime, derivada) ni el banco de la tarjeta 2.
 7. El archivo guarda anchos en «caracteres» y alturas en puntos y Excel los redondea al imprimir (cada fila imprime una unidad menos): por eso se **midió** con Excel y no se calculó desde el archivo.
 
 ## Cómo se manejó el CBC (ADR-001), exactamente
@@ -72,7 +75,9 @@ el cliente y el carro y arman la hoja: no lanza y no cambia), hasta el HTML de l
 módulo de `datos.js` se llama desde el flujo de imprimir. La pantalla dice en voz alta que **no se guarde esa hoja como PDF**, y el título del documento solo lleva «Contrato 77». Lo mismo se hizo con a quién se factura.
 **Lo que NO hice:** `sacarCarro.js` es de otro agente y sigue sin leer el CBC (lo teclea y lo descarta); por eso al imprimir se vuelve a teclear. Pasarlo desde «Sacar carro» pide una variable en memoria con el contrato y las dos cajas, y un cambio en ese archivo.
 
-## La tabla de campos (posiciones medidas, en mm desde la esquina de arriba a la izquierda de la hoja, a tamaño de Excel; la última columna de posición es en la carta con el ajuste de fábrica 0.77)
+## La tabla de campos (71; posiciones medidas, en mm desde la esquina de arriba a la izquierda de la hoja, a tamaño de Excel; la segunda columna de posición es en la carta con el ajuste de fábrica 0.77)
+
+**Hay un solo campo que NO sale de una medición: `Tarjeta 1: autorización` (M29:P31) es DERIVADO, no medido.** Excel nunca imprimió nada ahí. Su rectángulo es la celda combinada vacía de Excel (la posición sí está en la cuadrícula medida) y su alineación es la que el autor le dejó (centrada); la fuente y el tamaño (Arial 10) son los de la autorización de la tarjeta 2, que sí está medida. La hoja de prueba la dibuja con raya de trazos y la nombra «DERIVADA, no medida». (Se puso en la celda combinada de Excel y no en «el mismo ancho que la de la tarjeta 2» porque así queda pegada a su monto autorizado, como están las de la tarjeta 2; si él prefiere lo otro es cambiar el rango `M29:P31` por `M29:O31`.)
 
 | Campo | Celda(s) | x / y / ancho × alto (mm, tamaño Excel) | x / y en la carta (0.77) | De dónde sale (§7b) | Estado |
 |---|---|---|---|---|---|
@@ -98,13 +103,13 @@ módulo de `datos.js` se llama desde el flujo de imprimir. La pantalla dice en v
 | Color | N10:Q10 | 121.2 / 41.8 / 33.9 × 4.4 | 111.2 / 50.7 | flota: `color`; ajeno: `carroAjeno.color` |  |
 | Modelo | N11:Q12 | 121.2 / 46.1 / 33.9 × 5.7 | 111.2 / 54.1 | flota: `modelo`; ajeno: `carroAjeno.modelo` |  |
 | Kilometraje de salida | O14:Q15 | 127.8 / 55.9 / 27.3 × 14.8 | 116.3 / 61.6 | `kmSalida` | blanca en Excel, ahora se ve |
-| Combustible de salida | N23:O25 | 121.2 / 100.5 / 12.9 × 9.7 | 111.2 / 95.9 | `combustibleSalida` |  |
+| Combustible de salida | N23:O25 | 121.2 / 100.5 / 12.9 × 9.7 | 111.2 / 95.9 | `combustibleSalida` | **no se imprime**: lo escribe él |
 | Lugar de entrada | T7:W8 | 166.4 / 27.3 / 30.8 × 7.2 | 146.0 / 39.6 | `lugar` (el de la salida), precargado en la pantalla de imprimir y corregible ahí; no se guarda aparte | precargado, corregible |
 | Fecha de salida | X7:Y8 | 197.2 / 27.3 / 29.5 × 7.2 | 169.7 / 39.6 | `fechaSalida` |  |
 | Hora de salida | Z7:Z8 | 226.7 / 27.3 / 23.6 × 7.2 | 192.5 / 39.6 | `horaSalida` |  |
 | Lugar de salida | T9:V9 | 166.4 / 34.5 / 22.6 × 7.2 | 146.0 / 45.1 | `lugar` |  |
 | Fecha de entrada | W9:Y9 | 189.0 / 34.5 / 37.7 × 7.2 | 163.4 / 45.1 | `devolucionPrevista` |  |
-| Hora de entrada | Z9:Z10 | 226.7 / 34.5 / 23.6 × 11.6 | 192.5 / 45.1 | `horaSalida` |  |
+| Hora de entrada | Z9:Z10 | 226.7 / 34.5 / 23.6 × 11.6 | 192.5 / 45.1 | `horaSalida` | repite la salida (decisión suya) |
 | Hora tardía (precio) | V10:X12 | 182.7 / 41.8 / 26.4 × 10.1 | 158.6 / 50.7 | `TARIFAS_DEL_PAPEL.horaTardia` (Q150, del INGRESO DE DATOS de su Excel), precargada y corregible al imprimir | precargado, corregible |
 | NIT (persona o empresa) | A13:D14 | 0.0 / 51.8 / 34.9 × 12.9 | 17.9 / 58.4 | lo teclea en la pantalla de imprimir; no se guarda en ninguna parte | se teclea, no se guarda |
 | Persona o empresa | E13:L14 | 34.9 / 51.8 / 86.3 × 12.9 | 44.7 / 58.4 | lo teclea en la pantalla de imprimir; no se guarda en ninguna parte | se teclea, no se guarda |
@@ -142,6 +147,7 @@ módulo de `datos.js` se llama desde el flujo de imprimir. La pantalla dice en v
 | Seguro PAI (por día) | U30:X31 | 174.6 / 136.6 / 34.5 × 7.2 | 152.3 / 123.7 | `seguroPaiDia` | blanca en Excel, ahora se ve |
 | Varios: descripción | V32:X32 | 182.7 / 143.8 / 26.4 × 3.1 | 158.6 / 129.2 | `variosDescripcion` | blanca en Excel, ahora se ve |
 | Varios: precio | V33:X33 | 182.7 / 146.9 / 26.4 × 3.8 | 158.6 / 131.7 | `variosPrecio` | blanca en Excel, ahora se ve |
+| Tarjeta 1: autorización | M29:P31 | 121.2 / 131.2 / 21.0 × 12.6 | 111.2 / 119.6 | `tarjetas[0].autorizacion` | **DERIVADA, NO MEDIDA** |
 | Tarjeta 1: monto autorizado | Q29:T31 | 142.2 / 131.2 / 32.3 × 12.6 | 127.4 / 119.6 | `tarjetas[0].montoAutorizado` |  |
 | Tarjeta 2: monto autorizado | P32:R33 | 134.1 / 143.8 / 24.2 × 6.9 | 121.1 / 129.2 | `tarjetas[1].montoAutorizado` |  |
 | Tarjeta 2: autorización | M32:O33 | 121.2 / 143.8 / 12.9 × 6.9 | 111.2 / 129.2 | `tarjetas[1].autorizacion` | blanca en Excel, ahora se ve |
@@ -149,17 +155,23 @@ módulo de `datos.js` se llama desde el flujo de imprimir. La pantalla dice en v
 
 Todos con la fuente y el tamaño de Excel por 0.89 (Arial o Arial Narrow), la alineación de Excel y el origen de la hoja en la carta a 17.90 / 18.52 mm.
 
-## Las preguntas para el dueño (las que quedan)
+## Lo que hay que mirar con el papel enfrente el día de la calibración
 
-1. **La única prueba que falta: imprimir la hoja de prueba en su impresora**, con los márgenes en «Ninguno», escala 100 % y sin encabezados, ponerla contra la luz sobre su formulario y calibrar. Si con flechas y +/− no calza, necesito saber qué papel y qué escala usa hoy el diálogo de Excel.
-2. **Apellidos y nombres:** el papel tiene una casilla por apellido y una por nombre; el sistema guarda cada uno en un solo texto. Hoy sale completo en la primera casilla y la segunda queda en blanco. ¿Quiere una regla para partirlos?
-3. **La Q:** ¿el papel ya trae la «Q» junto a los montos? Si sí, se imprimen sin ella (`QUETZAL_EN_EL_PAPEL`, una línea).
-4. **El número de contrato** no sale en ningún lado (tampoco en Excel): ¿el formulario trae el suyo preimpreso?
-5. **Autorización de la tarjeta 1:** Excel deja su casilla vacía y el sistema sí la guarda. ¿Se imprime ahí? (La de la tarjeta 2 ya sale.)
-6. **E27 e I27**, las dos celdas blancas de Excel que no se agregaron: ¿hay casilla en el papel? (E27 sería la ciudad adicional.)
-7. **Combustible:** Excel imprime «FULL» y las fracciones; el sistema guarda «Lleno, 3/4, 1/2, 1/4, Vacío». ¿Cómo lo quiere el papel?
-8. **Nacionalidad:** el papel la pide (Excel la imprime) y la ficha del cliente ya no la tiene desde el 3 de octubre: los clientes nuevos salen sin ella.
-9. **La hora de entrada** repite la de salida (como Excel). ¿Es lo que quiere?
+Ese día él tiene la hoja de prueba en una mano y su formulario en la otra: puede contestar todo esto mirando.
+
+1. **La calibración misma.** Imprimir la hoja de prueba (escala 100 %, márgenes «Ninguno», sin encabezados) y seguir los pasos que trae. Hasta entonces la escala 0.77 es una hipótesis. Si con flechas y +/− no calza, hace falta saber qué papel y qué escala usa hoy el diálogo de Excel.
+2. **La casilla derivada** (autorización de la tarjeta 1, la de raya de trazos): ¿cae en su casilla del formulario? Es la única que no se midió.
+3. **Apellidos y nombres:** ¿el papel tiene una casilla por apellido y una por nombre? El sistema los guarda en un solo texto, así que hoy el texto completo sale en la primera casilla y la segunda queda en blanco.
+4. **E27 e I27**, las dos celdas de letra blanca de Excel que no se agregaron: ¿hay casilla para ellas en el papel? (E27 sería la ciudad adicional; I27 es un `0` fijo.)
+5. **Nacionalidad:** el papel la pide (Excel la imprime) y la ficha del cliente dejó de pedirla el 3 de octubre, así que los clientes nuevos salen sin ella.
+
+### Ya contestadas por él (no volver a preguntar)
+
+- **Cómo imprime hoy:** «Así como está en la hoja de Excel, así la imprimo y casi siempre sale bien.»
+- **Los rótulos:** el papel no los trae. **La letra blanca:** sí se imprime. **Lo que el sistema no guarda:** «lo que tú creas conveniente» (se resolvió: a quién se factura se teclea; lugar y tarifas precargados; código del cliente vacío).
+- **Hora de entrada:** «Igual que el Excel» (repite la de salida). **La «Q»:** su papel no la trae (se imprime). **Combustible de salida:** «Yo lo escribo mejor» (no se imprime).
+- **Autorización de la tarjeta 1:** sí, se imprime (casilla derivada).
+- **Número de contrato:** «yo pongo el número de contrato porque es el que está en las hojas membretadas»: viene preimpreso en su papelería, por eso no se imprime.
 
 ## Para el coordinador
 
