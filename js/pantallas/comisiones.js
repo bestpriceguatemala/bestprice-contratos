@@ -136,6 +136,7 @@ export function armarVistaDeComisiones(lectura) {
 
   const registros = Array.isArray(empleados?.datos) ? ordenarEmpleados(empleados.datos.filter((e) => e?.id)) : [];
   const registroDe = new Map(registros.map((e) => [e.id, e]));
+  const falloEmpleados = Boolean(empleados?.fallo) || !Array.isArray(empleados?.datos);
   const enlazados = new Set();
 
   const entradas = grupos.map((g) => {
@@ -147,8 +148,9 @@ export function armarVistaDeComisiones(lectura) {
       nombre: String(registro?.nombre ?? '').trim() || g.nombre,
       registro,
       sinEnlazar: g.sinEnlazar,
-      // Enlazado a un empleado que no está en la lista (o que no se pudo leer).
-      sinRegistro: Boolean(g.empleadoId && !registro),
+      // Enlazado a un empleado que no está en la lista. Solo se afirma si la lista se LEYÓ: con la lectura fallida no se sabe, y
+      // decir «no está en la lista» de alguien que sí está sería inventar un problema (la barra roja ya dice lo que pasó).
+      sinRegistro: Boolean(g.empleadoId && !registro && !falloEmpleados),
       cuenta: g.cuenta,
       contratos: rentasDeCuenta(g.cuenta),
     };
@@ -175,7 +177,7 @@ export function armarVistaDeComisiones(lectura) {
     ok: true,
     entradas,
     registros,
-    falloEmpleados: Boolean(empleados?.fallo) || !Array.isArray(empleados?.datos),
+    falloEmpleados,
     // Lo que se le debe a TODOS junto: la pregunta con la que se abre esta pantalla. La suma la hace el núcleo.
     total: totalGeneralDeComisiones(entradas.map((e) => e.cuenta)),
   };
@@ -594,6 +596,19 @@ function htmlPagosQueCambiaron(ctx) {
 }
 
 /**
+ * El mensaje del confirm() antes de enlazar: cuántas rentas, de qué nombre escrito a qué empleado, y —solo si lo pidió— cuántas
+ * de ellas cambian de porcentaje y a cuál. Lo ya pagado no entra a esa cuenta (`sinPagar`). Función pura.
+ */
+export function textoConfirmarEnlazar({ entrada, registro, sinPagar = [] }) {
+  const cuantos = entrada.contratos.length;
+  const n = sinPagar.length;
+  const delPorcentaje = n
+    ? ` Además, el porcentaje de ${n} ${n === 1 ? 'renta que aún no se ha pagado' : 'rentas que aún no se han pagado'} pasa a ${textoDeLaTasa(registro.porcentajeComision)}.`
+    : '';
+  return `¿Enlazar ${cuantos} ${palabraRentas(cuantos)} de «${entrada.nombre}» al empleado «${registro.nombre}»?${delPorcentaje} Esto no se puede deshacer desde el sistema.`;
+}
+
+/**
  * Lo que se ofrece para las rentas viejas con el nombre escrito a mano: se escoge a qué empleado de la lista corresponde ese
  * nombre. Opcionalmente, y solo si lo pide, las que aún no se han pagado toman el porcentaje de hoy de ese empleado — para las
  * rentas de antes cuyo porcentaje fue el 5 % que traía el formulario y no uno que alguien decidiera (el caso de Wilder, que no
@@ -831,12 +846,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     if (!registro) { ui.mensajeEnlace = 'Escoge a qué empleado de la lista corresponde.'; dibujar(); return; }
     // Solo las que no están pagadas pueden tomar otro porcentaje: lo ya pagado no se toca.
     const sinPagar = ui.enlazarPorcentaje ? rentasSinPagar(entrada.cuenta) : [];
-    const cuantos = entrada.contratos.length;
-    const delPorcentaje = sinPagar.length
-      ? ` Además, en ${sinPagar.length} ${palabraRentas(sinPagar.length)} que aún no se han pagado el porcentaje pasa a ${textoDeLaTasa(registro.porcentajeComision)}.`
-      : '';
-    const pregunta = `¿Enlazar ${cuantos} ${cuantos === 1 ? 'renta' : 'rentas'} de «${entrada.nombre}» al empleado «${registro.nombre}»?${delPorcentaje} Esto no se puede deshacer desde el sistema.`;
-    if (!window.confirm(pregunta)) return;
+    if (!window.confirm(textoConfirmarEnlazar({ entrada, registro, sinPagar }))) return;
     ui.ocupado = true;
     ui.mensajeEnlace = '';
     try {

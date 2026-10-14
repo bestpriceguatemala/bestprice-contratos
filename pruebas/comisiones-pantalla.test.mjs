@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import {
   armarVistaDeComisiones, resumenDeMarcadasDeComision, pagosDeLaCuentaDeComision, registrarElPagoDeComision, anularElPagoDeComision,
   textoConfirmarAnularPagoDeComision, htmlListaDeComisiones, htmlFichaDeComisiones, htmlFalloDeComisiones, mensajeSeguroDeComision,
-  rutaDeComisiones, textoDePagoQueCambio, porcentajesDeLasRentas, textoDeLaTasa,
+  rutaDeComisiones, textoDePagoQueCambio, porcentajesDeLasRentas, textoDeLaTasa, textoConfirmarEnlazar,
   MENSAJE_FALLO_RENTAS, MENSAJE_FALLO_PAGOS_DE_COMISION, MENSAJE_FALLO_EMPLEADOS, MENSAJE_COMISION_SIN_COMPROBAR,
   MENSAJE_COMISION_SIN_COMPROBAR_RENTAS, MENSAJE_ANULAR_COMISION_SIN_COMPROBAR, MENSAJE_COMISION_FALLO,
 } from '../js/pantallas/comisiones.js';
@@ -89,9 +89,17 @@ test('una lectura fallida de los EMPLEADOS no impide dibujar lo que se debe: sal
   assert.equal(vista.falloEmpleados, true);
   const ana1 = vista.entradas[0];
   assert.equal(ana1.nombre, 'Ana López', 'el nombre de respaldo es el que se escribió ese día');
-  assert.equal(ana1.sinRegistro, true);
+  assert.equal(ana1.sinRegistro, false, 'no se sabe si está en la lista: no se afirma que no');
+  assert.doesNotMatch(htmlListaDeComisiones(vista), /No está en la lista de empleados/);
   assert.equal(vista.total, 140);
   assert.match(texto(htmlListaDeComisiones(vista)), new RegExp(MENSAJE_FALLO_EMPLEADOS.slice(0, 40)));
+});
+
+test('con la lista de empleados LEÍDA, una renta enlazada a alguien que ya no está en ella sí dice «No está en la lista de empleados»', () => {
+  const vista = armarVistaDeComisiones(lecturaOk({ contratos: [firme('a1')], empleados: [wilder, luis] }));
+  const e = vista.entradas.find((x) => x.empleadoId === 'e1');
+  assert.equal(e.sinRegistro, true);
+  assert.match(htmlListaDeComisiones(vista), /No está en la lista de empleados/);
 });
 
 test('el nombre de un empleado enlazado es el de SU REGISTRO: si se corrige allá, aquí se ve ya', () => {
@@ -305,6 +313,20 @@ test('sin empleados en la lista, el enlace manda a darlos de alta en lugar de de
 
 test('una renta ya enlazada no ofrece enlazar', () => {
   assert.doesNotMatch(ficha('Ana López', { lectura: lecturaOk({ contratos: [firme('a1')] }) }), /cm-enlace/);
+});
+
+test('el mensaje de confirmar el enlace: cuántas rentas, de qué nombre a qué empleado, y solo si se pidió, cuántas cambian de porcentaje y a cuál', () => {
+  const lectura = lecturaOk({ contratos: [rentaDeAntes({ id: 'v1', rentadoPor: 'Wilder', recibidoEl: '2026-09-29' }), rentaDeAntes({ id: 'v2', numero: 2, rentadoPor: 'Wilder', recibidoEl: '2026-09-29' })] });
+  const entrada = entradaDe(armarVistaDeComisiones(lectura), 'Wilder');
+  const base = { entrada, registro: wilder };
+  assert.equal(
+    textoConfirmarEnlazar({ ...base, sinPagar: [] }),
+    '¿Enlazar 2 rentas de «Wilder» al empleado «Wilder»? Esto no se puede deshacer desde el sistema.',
+    'sin pedir el cambio de porcentaje no dice nada de porcentajes',
+  );
+  assert.match(textoConfirmarEnlazar({ ...base, sinPagar: [{}, {}] }), /el porcentaje de 2 rentas que aún no se han pagado pasa a 0 %\./);
+  assert.match(textoConfirmarEnlazar({ ...base, sinPagar: [{}] }), /el porcentaje de 1 renta que aún no se ha pagado pasa a 0 %\./);
+  assert.match(textoConfirmarEnlazar({ entrada: { ...entrada, contratos: [entrada.contratos[0]] }, registro: ana, sinPagar: [] }), /¿Enlazar 1 renta de «Wilder» al empleado «Ana López»\?/);
 });
 
 test('porcentajesDeLasRentas: los distintos, ordenados, sin los que no se leen', () => {
