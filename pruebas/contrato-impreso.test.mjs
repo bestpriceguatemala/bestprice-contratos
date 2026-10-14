@@ -1555,6 +1555,11 @@ test('la hoja de estilos: la página es la carta sin margen, la hoja ocupa la ca
   assert.match(campo, /position:\s*absolute;/);
   assert.ok(!/transform/.test(campo));
 
+  // el texto de arriba y el del medio bajan lo que mide la diferencia con el PDF de Excel (medida en Chrome, ver el informe)
+  assert.match(bloqueDesde(css, css.indexOf('\n.hc-arriba {')), /align-items:\s*flex-start;\s*padding-top:\s*0\.47mm;/);
+  assert.match(bloqueDesde(css, css.indexOf('\n.hc-medio {')), /align-items:\s*center;\s*padding-top:\s*0\.48mm;/);
+  assert.match(bloqueDesde(css, css.indexOf('\n.hc-abajo {')), /align-items:\s*flex-end;/);
+  assert.ok(!/padding-top/.test(bloqueDesde(css, css.indexOf('\n.hc-abajo {'))), 'las de abajo coincidían con Excel y no se tocan');
   // el texto no baja de renglón salvo que el campo lo pida, y las fechas con espacios no se juntan
   assert.match(bloqueDesde(css, css.indexOf('\n.hc-t {')), /white-space:\s*nowrap;/);
   assert.match(bloqueDesde(css, css.indexOf('\n.hc-ajusta .hc-t {')), /white-space:\s*normal;/);

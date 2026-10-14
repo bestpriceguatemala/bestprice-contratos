@@ -74,8 +74,11 @@
 .hc-izq { justify-content: flex-start; text-align: left; }
 .hc-centro { justify-content: center; text-align: center; }
 .hc-der { justify-content: flex-end; text-align: right; }
-.hc-arriba { align-items: flex-start; }
-.hc-medio { align-items: center; }
+/* El texto de arriba y el del medio bajan medio milímetro: medido contra el PDF de Excel (60 casillas), el texto de Chrome salía
+   0.47 mm más arriba en las de arriba y 0.24 mm en las del medio, y las de abajo coincidían. Con esto la línea base queda a
+   0.02 mm en promedio de la de Excel, y la peor a 0.42 mm. */
+.hc-arriba { align-items: flex-start; padding-top: 0.47mm; }
+.hc-medio { align-items: center; padding-top: 0.48mm; }
 .hc-abajo { align-items: flex-end; }
 
 /* Sin ajuste: el texto sigue derecho, aunque pase de su casilla (un dato cortado en un contrato es peor que uno largo). */
