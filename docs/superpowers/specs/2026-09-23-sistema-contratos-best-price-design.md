@@ -1037,6 +1037,77 @@ detalle del cobro, como la hoja IMP. CIERRE DE CONTRATO.
 En una reimpresión, el número de tarjeta sale enmascarado (`•••• 3343`), porque
 el completo nunca se guardó.
 
+### 8b. El contrato sobre el papel, tal como se construyó (14 de octubre de 2026)
+
+Dónde vive: `js/nucleo/hojaContrato.js` (la tabla `CAMPOS` y la calibración, sin DOM),
+`js/pantallas/contratoImpreso.js` (la hoja, la hoja de prueba y las dos pantallas) y
+`css/contrato-papel.css`. La ruta es `#/imprimir/:contratoId` (botón «Imprimir
+contrato» en la ficha del contrato) y `#/impresion/calibrar`. Cómo se midió la hoja de
+Excel, con qué, y los números crudos: `analisis/imp-contrato/`.
+
+**Lo que decidió el dueño el 14 de octubre de 2026, y de dónde sale cada decisión.**
+Cada una está también escrita, con su fecha, en la nota del campo de la tabla
+`CAMPOS`: dentro de seis meses «¿por qué sale el kilometraje aquí?» tiene respuesta
+en el código.
+
+1. **Cómo imprime hoy: «Así como está en la hoja de Excel, así la imprimo y casi
+   siempre sale bien.»** La geometría de la hoja IMP. CONTRATO **es** la verdad y el
+   sistema la reproduce. Se midió con el propio Excel (una copia del libro exportada a
+   PDF con borde en cada celda), porque el archivo guarda anchos en «caracteres» y
+   Excel los redondea al imprimir: 797 × 749 unidades de pantalla, a 0.89 de su
+   tamaño, son **250.2 × 235.2 mm**, y la carta solo deja 193 mm de ancho entre los
+   márgenes que él le puso a Excel (18 mm a la izquierda, 5 a la derecha). Con la
+   configuración guardada, Excel la parte en dos hojas (A–V y W–Z). Que a él «casi
+   siempre le salga bien» significa que su impresora, o el diálogo de imprimir, la
+   encoge. Por eso la escala por omisión es la que cabe (`ESCALA_QUE_CABE` = 0.77,
+   193 / 250.2), y la **calibración** es el instrumento para confirmar eso sin teoría.
+2. **La calibración es UN solo cambio para toda la hoja:** corrimiento (`dx`, `dy`, en
+   mm) y tamaño (`escala`), aplicados una sola vez sobre la esquina de la hoja
+   (`transform` del lienzo). Ningún campo tiene su propio ajuste: si uno no calza y
+   los demás sí, el problema es la tabla y se arregla en la tabla. Se guarda por
+   impresora, con el nombre que él le ponga, **en esa computadora** (`localStorage`: una
+   impresora está conectada a una computadora y el ajuste no es un dato del negocio).
+   La hoja de prueba lleva una regla en milímetros, cuatro casillas numeradas (una por
+   esquina) y los pasos en palabras: primero que la impresora no encoja (la marca 10 a
+   la 110 mide 100 mm), después la posición (casilla 1) y al final el tamaño (casilla
+   4). Si una calibración deja casillas fuera de la carta, la pantalla lo dice.
+3. **Los rótulos: «el papel NO los trae».** Los imprime el sistema: `ACEPTO LOS CARGOS
+   A MI TARJETA NUMERO`, `TARJETA 1  No:`, `EXPIRA:` (dos veces), `CODIGO CBC` (dos
+   veces), `BANCO EMISOR`, `CODIGO`, `GUATEMALA` y ` + iva`: diez campos, ocho textos,
+   con la fuente, el tamaño y el lugar de Excel y sus espacios tal cual.
+4. **La letra blanca, sí se imprime.** En Excel nueve datos con fuente en el sistema
+   están en letra blanca (kilometraje de salida, vencimiento de la licencia, nombre
+   del conductor adicional, seguro de menores, seguro PAI, deducible bajo, varios:
+   descripción y precio, y la autorización de la tarjeta 2): se imprimían pero no se
+   veían en el papel que firma el cliente. Desde esta fecha se ven, por decisión suya
+   con la lista delante. Hay dos celdas más en blanco en Excel que **no** se agregaron:
+   E27 (la ciudad adicional, que el 3 de octubre él dijo que no se imprime) e I27 (un
+   `0` fijo que no significa nada).
+5. **Lo que el papel lleva y el sistema no guarda: «lo que tú creas conveniente».**
+   - *A quién se factura* (`facturarNombre`, `facturarNit`) se teclea en la pantalla
+     de imprimir y no se guarda: varía de renta en renta y guardarlo obligaría a tocar
+     la ficha del cliente. Mismo camino que el CBC (ADR-001).
+   - *El lugar de entrada* se precarga con el `lugar` de la salida y se corrige ahí.
+   - *Las dos tarifas del papel* —hora tardía **Q150** y combustible **Q65** por
+     galón, las del `INGRESO DE DATOS` de su Excel— son constantes del código
+     (`TARIFAS_DEL_PAPEL`), precargadas y corregibles al imprimir. No hay colección ni
+     pantalla de ajustes: si algún día cambian, es una línea.
+   - *El código del cliente* se queda **vacío**: en Excel es el número de fila de su
+     hoja CLIENTES y no significa nada en este sistema.
+   - Todo esto se borra al terminar de imprimir y al salir de la pantalla.
+6. **El número completo de la tarjeta y el CBC** se teclean en esa misma pantalla, solo
+   para ese papel (ADR-001): no van al contrato, ni a la nube, ni a la copia local, ni
+   al almacén del navegador, y se borran cuando termina el diálogo de imprimir
+   (`afterprint`, imprima o cancele) y al salir de la pantalla. Sin ellos, la hoja
+   lleva `•••• 3343`. **No se debe guardar esa hoja como PDF**: quedaría un archivo con
+   la tarjeta en la computadora; la pantalla lo dice.
+
+**Lo que sigue abierto.** El papel tiene una casilla por apellido y una por nombre y el
+sistema guarda cada uno en un solo texto: el texto completo sale en la primera casilla y
+la segunda queda en blanco. No se sabe si el papel ya trae la «Q» impresa junto a los
+montos (`QUETZAL_EN_EL_PAPEL`). Y falta la primera hoja de prueba impresa en su
+impresora: hasta entonces la escala 0.77 es una hipótesis.
+
 ## 9. Velocidad
 
 Objetivos medibles, verificados antes de entregar:
