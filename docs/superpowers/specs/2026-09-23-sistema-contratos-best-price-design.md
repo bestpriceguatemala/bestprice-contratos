@@ -291,8 +291,17 @@ Colecciones en Firestore:
   este documento, no viven aquí: la comisión sigue en el contrato (ver el
   pendiente de `porcentajeComision` al final de §7b) y los pagos al dueño tienen
   su propia colección, `pagosDueno`.
-- `empleados` — nombre, porcentaje de comisión, activo.
-- `pagosComision` — fecha, empleado, contratos incluidos, total, forma de pago.
+- `empleados` — quien renta los carros y cobra comisión: código, nombre, porcentaje
+  de comisión y si trabaja aquí (los campos, en §7b). **Se lee con la sesión
+  normal** —el mostrador escoge de ahí quién rentó, y de ahí sale el porcentaje que
+  se sella en el contrato— y **se escribe solo con la credencial de dinero**
+  (`firestore.rules`): el porcentaje solo se cambia detrás de la contraseña (§12b).
+  Sin copia local: lo que se sella en un contrato tiene que ser el porcentaje de
+  ahora, no el de la última vez que esa computadora sincronizó.
+- `pagosComision` — lo que se le ha pagado a cada empleado de comisión: fecha,
+  forma, monto y las rentas que cubre (los campos, en §7b; el «total» que decía esta
+  lista es `monto`, el mismo nombre de todo otro pago). **Solo con la contraseña de
+  dinero**, para leer y para escribir, y sin copia local, igual que `pagosDueno`.
 - `duenos` — la ficha de cada dueño de un carro ajeno: nombre, teléfono, NIT y
   una nota (los campos, en §7b). Se lee y se escribe con la sesión normal,
   porque el alta rápida ocurre en el mostrador, con el carro afuera y el cliente
@@ -502,12 +511,39 @@ entran en la cuenta y cuáles solo se anotan:
 con el nombre: es el último bloque de la pantalla «Sacar carro» y **no tiene nada
 que ver con `cierre{}`**, que es lo que se anota al recibir el carro.
 - `rentadoPor` es el **empleado** que atendió la renta, no el cliente (el cliente
-  es `clienteId` y `clienteNombre`). Se escribe a mano en «¿Quién lo rentó?» y se
-  guarda como texto, no como una referencia: hoy no hay una lista de empleados de
-  donde escoger (§12b), así que «Juan» y «juan» son dos nombres distintos para el
-  sistema. Es la persona a quien le toca la comisión del contrato
-  (`porcentajeComision`), y la búsqueda de contratos también lo encuentra por
-  este nombre.
+  es `clienteId` y `clienteNombre`). Hasta el 13 de octubre se escribía a mano en
+  «¿Quién lo rentó?»; desde entonces **se escoge de la lista de empleados**, por
+  código o por nombre, y se guarda su nombre **tal como se vio ese día**: es un dato
+  de *ese* contrato y no solo un puntero, como `carroAjeno.dueno` — si después se
+  corrige el nombre en la ficha del empleado, el contrato sigue diciendo quién lo
+  rentó. **Los contratos de antes traen ahí el texto que se escribió a mano, y siguen
+  mostrándolo, buscándose por él y pagándose**: la cuenta de comisiones los junta por
+  ese texto (grupo «sin enlazar») hasta que él los enlaza a un empleado de la lista
+  (`empleadoId`, abajo). «Juan» y «juan» son dos grupos distintos hasta entonces: no
+  se adivina que son la misma persona. Es la persona a quien le toca la comisión del
+  contrato (`porcentajeComision`), y la búsqueda de contratos también lo encuentra
+  por este nombre.
+- `empleadoId` es el id del empleado escogido de la lista `empleados`, para que la
+  cuenta de comisiones junte en una sola todo lo de la misma persona. Es el mismo
+  patrón que `duenoId`: es `null`, no ausente, cuando no hay empleado, y los
+  contratos de antes de este campo **ni siquiera traen la llave** — nada que lo lea
+  puede exigirlo. «Sacar carro» no deja guardar sin escoger a un empleado (de él sale
+  el porcentaje), así que en un contrato nuevo no es `null`; lo es en el que
+  `construirContrato` arma sin empleado, que no se guarda. Enlazar los viejos es
+  escribirles solo este campo y el sello `actualizado` (`enlazarContratosAlEmpleado`,
+  `js/datos.js`), con `update` y no con el contrato entero y **con la credencial de
+  dinero** (es una decisión suya sobre dinero, y así el día que una regla distinga quién
+  toca `porcentajeComision` ya viene con la credencial correcta); `rentadoPor` no se toca.
+- `porcentajeComision` es el porcentaje de comisión **de ese contrato, sellado el día
+  que se rentó**: el que su empleado tenía guardado entonces (`datosDelContratoPara`,
+  `nucleo/empleado.js`). Por eso subirle el porcentaje a alguien no mueve lo que ya
+  ganó (§5), y por eso la cuenta de comisiones (`nucleo/comisiones.js`) lee **este** y
+  nunca el de la ficha del empleado. Es un número, y el **0 es un porcentaje**: Wilder,
+  el dueño, no gana comisión, y sus contratos llevan `0`. Un contrato que no trae un
+  número legible (`undefined`, `''`, un texto) no se lee como 0 % ni como 5 %: se
+  aparta como «sin porcentaje» y no se paga. Ya no hay un 5 % de respaldo en
+  `construirContrato` ni un porcentaje por defecto en `ajustes`: el 5 % solo es lo que
+  el formulario de un empleado nuevo propone.
 - `conductorAdicional{nombre, licencia, identificacion}` es el segundo conductor
   de la renta, cuando lo hay. Siempre es un objeto con esas tres llaves, vacías
   (`''`) si no hay conductor adicional: no es `null`. Ojo con `identificacion`,
@@ -671,7 +707,66 @@ dos de la anulación, `anulado` y `anuladoEn` (agregados el 11 de octubre), y
   venció, cae en el mismo documento y no crea un segundo comprobante por las
   mismas rentas.
 
+**Del empleado** (colección `empleados`; agregado el 13 de octubre):
+`codigo`, `nombre`, `porcentajeComision`, `activo`, `actualizado`.
+
+Los cuatro primeros son los de `CAMPOS_EMPLEADO` (`js/nucleo/empleado.js`), que es la
+lista viva: la ficha dibuja su formulario desde ahí.
+- `codigo` es el código del empleado, **texto** y no número (se compara sin espacios ni
+  mayúsculas): la hoja de Excel del dueño trabaja por código, y en el mostrador teclea
+  `6` o busca «Wilder», lo que sea más rápido (los dos). **No se repite entre empleados,
+  contando a los dados de baja**: teclear `6` tiene que dar a uno solo. Buscar `6` da
+  primero al empleado cuyo código es exactamente 6 (`buscarEmpleados`).
+- `nombre` es el nombre del empleado, el que se muestra. Obligatorio.
+- `porcentajeComision` es el porcentaje **de hoy**. Se llama igual que el del contrato
+  (arriba) a propósito, porque es el mismo dato: el del contrato es una copia que se
+  sella el día que se renta. Un número de 0 a 100 con centavos, **obligatorio y el 0
+  vale**: no se deja guardar un empleado sin él, ni se asume 5. Solo se escribe con la
+  credencial de dinero.
+- `activo` es si trabaja aquí. **Dar de baja no borra**: sus contratos viejos siguen
+  siendo suyos y siguen pagándose, y su código sigue siendo suyo. Un empleado sin la
+  llave `activo` trabaja aquí. Solo los activos salen al escoger quién rentó.
+- `actualizado` lo sella `empleadoParaGuardar` al guardar, y `id` se decide antes del
+  primer intento (`nuevoIdEmpleado`), como el de un dueño.
+
+**Del pago de comisión** (colección `pagosComision`; agregado el 13 de octubre):
+`empleadoId`, `fecha`, `forma`, `monto`, `contratos[]`, `actualizado`, y los dos de la
+anulación, `anulado` y `anuladoEn`.
+
+Es la gemela del pago a un dueño y se llama igual donde es el mismo dato. **No lleva
+`numero`**: el de un pago a un dueño es el correlativo del comprobante que se le
+entrega, y a un empleado no se le imprime nada.
+- `empleadoId` es `null` en un pago hecho a un grupo de rentas viejas con el nombre
+  escrito a mano; el pago sigue siendo de ese empleado si después se enlazan, porque
+  se reconoce por las rentas que cubre (`contratos[]`), no por este campo.
+- `monto` y `contratos[]` nacen juntos, de la misma lista y en un solo lugar,
+  `construirPagoComision`, que toma de `elegirParaPagoDeComision`
+  (`nucleo/comisiones.js`) lo que se paga. **Solo entra una renta firme**: aquella cuyo
+  carro ya regresó (`cierre.fechaReal`). Mientras el carro sigue afuera, un día de
+  atraso sube la comisión y un descuento la baja, así que la de una renta abierta es
+  un estimado y no se paga; es la misma lógica por la que a un dueño de carro solo se
+  le paga sobre un contrato cerrado. («Firme» aquí es solo que el carro volvió: no
+  espera a que el cliente liquide todo, como dice §5.) Una renta con comisión de
+  Q0.00 (el 0 % de Wilder, o una base que el descuento se comió) tampoco entra: un
+  pago en cero no prueba que se pagó nada, y `guardarPagoComision` se niega.
+- `forma` es efectivo, transferencia o cheque (`FORMAS_DE_PAGO`), el mismo conjunto que
+  el pago a un dueño. Sin `porcentajeTarjeta`.
+- `anulado` y `anuladoEn` se llaman **igual que en un pago del cliente y en uno a un
+  dueño**, y son la misma función (`anularPagoComision` delega en `anularPagoDueno`):
+  un segundo modo de anular sería un segundo lugar donde equivocarse. El pago conserva
+  su `monto` y sus `contratos[]` y sigue en «Ya pagado», marcado; sus rentas vuelven a
+  «por pagar» (`pagoAnulado`, `nucleo/liquidacion.js`, es el único lugar que lo decide).
+- Que una renta esté pagada lo dice **solo** que su id aparezca en el `contratos[]` de
+  un pago vigente. El contrato no lleva un campo «pagado», por lo mismo que no lo lleva
+  el pago a un dueño. Si después de pagar se corrige un cierre y las rentas de un pago
+  ya suman otra cosa que su `monto`, la ficha lo dice con palabras
+  (`pagosQueCambiaron`) y no cambia lo que se debe: no se paga ni se descuenta nada solo.
+
 **Los puentes de lectura que siguen en el código:**
+- `nucleo/comisiones.js:agruparPorEmpleado()` — junta las rentas por `empleadoId` y, si
+  no lo traen (las de antes de la lista de empleados), por el texto de `rentadoPor`,
+  sin recortar más que los espacios. Ninguna renta se queda fuera de la vista por no
+  estar enlazada.
 - `pantallas/contratos.js:formaDePago()` — lee `forma` o `formaPago`, por los pagos de la salida que
   salieron guardados con el segundo nombre.
 - `pantallas/recibirCarro.js:conKmSalidaNormalizado()` — el puente real entre `kmSalida` y
@@ -823,7 +918,9 @@ Hallados en las revisiones del plan de liquidación a dueños (5 de octubre) y
 **diferidos a propósito**, no olvidados.
 
 **`porcentajeComision` sigue en el documento del contrato**, legible con una
-sesión normal. §7 ya decía que el plan de dinero tenía que mover **los dos**
+sesión normal. *(13 de octubre: el plan de empleados y comisiones lo decidió y NO lo
+movió; la decisión y sus razones están abajo, tras este párrafo, que se deja como se
+escribió.)* §7 ya decía que el plan de dinero tenía que mover **los dos**
 campos —el costo del dueño del carro y el porcentaje de comisión— a
 `privado/dinero`; ADR-002 movió solo el costo, que era lo que la liquidación
 necesitaba. Mientras él sea el único que usa el sistema, nadie más lo ve y no
@@ -834,6 +931,43 @@ cada empleado, y §12b ya dice que ese porcentaje solo lo controla él. Necesita
 otro plan. Moverlo reusa la maquinaria que ya existe para el costo (la
 migración, el puente de lectura, la limpieza de la copia local), y hacerlo
 ahora, con pocos contratos guardados, es más barato que hacerlo después.
+
+**La decisión del 13 de octubre (plan de empleados y comisiones): no se mueve, y mover
+solo el campo del contrato no habría cerrado nada.** Tres razones, de la más a la menos
+importante:
+
+1. **El mostrador tiene que LEER el porcentaje del empleado para poder sellarlo.** El
+   contrato se queda con el porcentaje que el empleado tenga guardado ese día (§12b y
+   §5), y quien escribe el contrato es la sesión del mostrador. Ese número vive en
+   `empleados/{id}`, que la regla del dueño deja leer con cualquier sesión
+   (`allow read: if haySesion()`) justo para escoger quién rentó. Un empleado en el
+   mostrador que abre las herramientas del navegador lo lee de ahí, haya movido o no el
+   campo del contrato. Para que el mostrador no lo viera habría que sellarlo de otra
+   manera —que lo escriba alguien con la credencial de dinero, o guardar un historial
+   de porcentajes por fecha donde solo se lea con ella—, y las dos cosas piden una
+   regla nueva (`empleados/{id}/privado/…`) y rediseñar el sellado: no es el trabajo de
+   este plan, que además tenía el encargo de no tocar `firestore.rules`.
+2. **La lectura no es el hueco que pesa. La escritura sí.** §12b dice que el porcentaje
+   no se *cambia* en el mostrador, y eso hoy se cumple en `empleados` (escribe solo
+   dinero) pero **no en el contrato**: `contratos/{id}` lo escribe cualquier sesión, y
+   `privado/{doc}` también (`allow create, update: if haySesion()`), así que un
+   empleado con las herramientas del navegador podría subir el `porcentajeComision` de
+   sus propios contratos antes de que se pague, y la cuenta de comisiones, que lee el
+   del contrato, lo pagaría. Moverlo a `privado/dinero` no lo arregla (ahí también
+   escribe cualquier sesión). Lo que sí lo cerraría es una regla: que `porcentajeComision`
+   de un contrato no cambie al actualizarlo (salvo con la credencial de dinero, que es
+   con la que se enlazan las rentas viejas) y que al crearlo sea igual al del empleado
+   que dice `empleadoId`. Es una regla de pocas líneas, y es lo que hay que decidir
+   **antes de que un empleado use el mostrador**.
+3. **Mientras tanto, los contratos ya guardados no se pierden ni se mueven.** El campo se
+   queda donde estaba, `construirContrato` lo sigue sellando y la copia local de
+   contratos lo sigue llevando (a diferencia del costo del dueño, que sí se limpia de
+   ahí). Nada se migra, así que no hay un segundo botón de «mover» que correr.
+
+Hoy él es el único que usa el sistema, así que nada de esto corre prisa. Lo que queda
+anotado para el día que no sea así: (1) decidir si basta con que el mostrador vea los
+porcentajes (se leen, no se cambian) o no; (2) la regla de la escritura, aunque se decida
+lo primero. Ninguna de las dos se resuelve cambiando de lugar el campo.
 
 **Una renta cuyo costo de verdad no se puede leer no se puede pagar, y eso es
 correcto.** `construirPagoDueno` se niega, con una frase que dice cuáles rentas
@@ -1012,6 +1146,14 @@ formulario de salida**: en su lugar se elige al empleado de una lista, y el
 contrato se queda con el porcentaje que ese empleado tenga guardado, sin
 mostrarlo ni dejarlo cambiar desde el mostrador. El porcentaje solo se edita
 detrás de la contraseña.
+
+**Hecho el 13 de octubre de 2026** (plan de empleados y comisiones): el campo salió de
+«Sacar carro» —una prueba fija su ausencia, porque es lo que una comodidad posterior
+pondría de vuelta sin que nada falle—, «¿Quién lo rentó?» se escoge de la lista de
+empleados por código o por nombre, el contrato sella el porcentaje del empleado sin
+mostrarlo, y la lista de empleados con su porcentaje vive en Dinero → Empleados, detrás
+de la contraseña. Quien no tiene a quién escoger (la lista no se pudo leer, o todavía
+no hay empleados) no puede guardar la salida, y cada razón se dice con sus palabras.
 
 ### Orden de construcción
 

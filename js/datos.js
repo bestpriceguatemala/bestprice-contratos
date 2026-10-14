@@ -2192,6 +2192,9 @@ export async function guardarEmpleado(empleado, {
   );
 }
 
+/** Lo que lee el dueño si intenta enlazar rentas a un empleado sin haber entrado al área de dinero. */
+export const MENSAJE_ENLACE_SIN_DINERO = 'Primero entra al área de dinero: sin esa contraseña no se pueden enlazar las rentas a un empleado.';
+
 /** Lo que lee el dueño si intenta registrar un pago de comisión sin haber entrado al área de dinero. */
 export const MENSAJE_COMISION_SIN_DINERO = 'Primero entra al área de dinero: sin esa contraseña no se puede registrar el pago.';
 
@@ -2320,8 +2323,14 @@ export async function cargarPagosComision({ iniciar = iniciarFirebase, dbDinero 
  * ofrece solo las que no están pagadas: lo ya pagado no se toca).
  */
 export async function enlazarContratosAlEmpleado(ids, empleadoId, {
-  idsConPorcentaje = [], porcentajeComision, iniciar = iniciarFirebase, ahora = Date.now(),
+  idsConPorcentaje = [], porcentajeComision, iniciar = iniciarFirebase, dbDinero = dbDeDinero, ahora = Date.now(),
 } = {}) {
+  // Con la credencial de dinero y no con la del mostrador, aunque las reglas de hoy dejen escribir contratos a cualquier
+  // sesión: enlazar —y sobre todo cambiar el porcentaje de una renta— es una decisión del dueño sobre dinero, y el día que
+  // la regla distinga quién puede tocar `porcentajeComision` (ver «Pendientes conocidos del dinero», §7b) esta escritura ya
+  // viene con la credencial correcta. Sin sesión de dinero se niega antes de escribir nada.
+  const db = dbDinero();
+  if (!db) throw new Error(MENSAJE_ENLACE_SIN_DINERO);
   const lista = [...new Set((Array.isArray(ids) ? ids : []).filter(Boolean))];
   if (!empleadoId) throw new Error('Falta escoger a qué empleado de la lista se enlazan las rentas.');
   if (!lista.length) throw new Error('No hay rentas que enlazar.');
@@ -2330,7 +2339,8 @@ export async function enlazarContratosAlEmpleado(ids, empleadoId, {
   if (conPorcentaje.size && porcentaje === null) {
     throw new Error('Falta el porcentaje del empleado: sin él no se puede cambiar el de las rentas.');
   }
-  const { db, fsMod } = await iniciar();
+  // De `iniciar` solo se toma el módulo de Firebase, que es el mismo (ver `guardarPagoComision`).
+  const { fsMod } = await iniciar();
   for (let desde = 0; desde < lista.length; desde += CONTRATOS_POR_LOTE) {
     const lote = fsMod.writeBatch(db);
     for (const id of lista.slice(desde, desde + CONTRATOS_POR_LOTE)) {

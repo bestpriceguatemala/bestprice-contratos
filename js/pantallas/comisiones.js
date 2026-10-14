@@ -36,7 +36,7 @@ import { sesionDeDinero } from '../dinero-sesion.js';
 import {
   cargarContratosDeLaNube, cargarPagosComision, cargarEmpleados, nuevoIdPagoComision, construirPagoComision, guardarPagoComision,
   anularPagoComision, enlazarContratosAlEmpleado, MENSAJE_COMISION_SIN_DINERO, MENSAJE_COMISION_SIN_RENTAS,
-  MENSAJE_COMISION_SIN_MONTO, MENSAJE_COMISION_SIN_ID,
+  MENSAJE_COMISION_SIN_MONTO, MENSAJE_COMISION_SIN_ID, MENSAJE_ENLACE_SIN_DINERO,
 } from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
 import { mostrar } from '../router.js';
@@ -78,6 +78,7 @@ const FRASES_CONOCIDAS = new Set([
   MENSAJE_COMISION_SIN_DINERO, MENSAJE_COMISION_SIN_RENTAS, MENSAJE_COMISION_SIN_MONTO, MENSAJE_COMISION_SIN_ID,
   MENSAJE_COMISION_SIN_COMPROBAR, MENSAJE_COMISION_SIN_COMPROBAR_RENTAS, MENSAJE_ANULAR_COMISION_SIN_COMPROBAR,
   'La nube no respondió a tiempo.',
+  MENSAJE_ENLACE_SIN_DINERO,
   'Falta escoger a qué empleado de la lista se enlazan las rentas.',
   'No hay rentas que enlazar.',
 ]);
@@ -822,7 +823,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
 
   // ----- Enlazar las rentas viejas a un empleado de la lista -----
   async function enlazar() {
-    if (ui.ocupado || !entrada?.sinEnlazar) return;
+    if (ui.ocupado || !entrada?.sinEnlazar || !haySesion()) return;
     const empleadoId = raiz.querySelector('#cm-enlazar-empleado')?.value ?? '';
     ui.enlazarEmpleadoId = empleadoId;
     ui.enlazarPorcentaje = Boolean(raiz.querySelector('#cm-enlazar-porcentaje')?.checked);

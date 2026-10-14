@@ -682,6 +682,12 @@ test('ninguna regla de negocio se repite en la pantalla: no multiplica por el po
   assert.ok(!/estadoContrato|pendientesDe/.test(PANTALLA), 'no mira si el contrato está cerrado: solo se paga lo firme (que el carro regresó)');
 });
 
+test('enlazar y registrar y anular vuelven a mirar que siga habiendo sesión de dinero antes de escribir', () => {
+  assert.match(PANTALLA, /async function enlazar\(\) \{\s*if \(ui\.ocupado \|\| !entrada\?\.sinEnlazar \|\| !haySesion\(\)\) return;/);
+  assert.match(PANTALLA, /async function guardarPago\(\) \{\s*if \(ui\.ocupado \|\| !haySesion\(\)\) return;/);
+  assert.match(PANTALLA, /async function anularPago\(pagoId\) \{\s*if \(ui\.ocupado \|\| !haySesion\(\)\) return;/);
+});
+
 test('la pantalla de comisiones y la de empleados no llevan estilos en línea: cada ajuste es una clase del CSS', () => {
   for (const archivo of ['../js/pantallas/comisiones.js', '../js/pantallas/empleados.js']) {
     const codigo = sinComentarios(leer(archivo));

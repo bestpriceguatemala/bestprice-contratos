@@ -12,7 +12,7 @@ import {
   cargarEmpleados, guardarEmpleado, nuevoIdEmpleado, empleadoParaGuardar, MENSAJE_EMPLEADO_SIN_DINERO, MENSAJE_ALTA_SIN_ID,
   nuevoIdPagoComision, construirPagoComision, pagoComisionParaGuardar, guardarPagoComision, cargarPagosComision, anularPagoComision,
   enlazarContratosAlEmpleado, MENSAJE_COMISION_SIN_DINERO, MENSAJE_COMISION_SIN_RENTAS, MENSAJE_COMISION_SIN_MONTO,
-  MENSAJE_COMISION_SIN_ID,
+  MENSAJE_COMISION_SIN_ID, MENSAJE_ENLACE_SIN_DINERO,
 } from '../js/datos.js';
 import { cuentaDeEmpleado } from '../js/nucleo/comisiones.js';
 import { nubeEnMemoria } from './fixtures/nubeEnMemoria.mjs';
@@ -263,6 +263,9 @@ test('lo que se guarda y se lee de vuelta sirve para la cuenta: lo ya pagado no 
 // Enlazar las rentas de antes a un empleado
 // ---------------------------------------------------------------------------
 
+/** Enlazar va con la credencial de dinero: las dependencias de siempre, con la base de dinero puesta. */
+const enlazaCon = (nube, extra = {}) => ({ iniciar: nube.iniciar, dbDinero: () => nube.dbDinero, ...extra });
+
 const nubeConViejas = () => {
   const v1 = rentaDeAntes({ id: 'v1', recibidoEl: '2026-09-29' });
   const v2 = rentaDeAntes({ id: 'v2', recibidoEl: '2026-09-29' });
@@ -272,20 +275,20 @@ const nubeConViejas = () => {
 test('enlazarContratosAlEmpleado: escribe SOLO empleadoId y el sello, con update — nunca el contrato entero, y no toca rentadoPor ni el porcentaje', async () => {
   const nube = nubeConViejas();
   const antes = nube.leer('contratos/v1');
-  await enlazarContratosAlEmpleado(['v1', 'v2', 'v1'], 'e6', { iniciar: nube.iniciar, ahora: AHORA + 123 });
+  await enlazarContratosAlEmpleado(['v1', 'v2', 'v1'], 'e6', { ...enlazaCon(nube), ahora: AHORA + 123 });
   const despues = nube.leer('contratos/v1');
   assert.equal(despues.empleadoId, 'e6');
   assert.equal(despues.actualizado, AHORA + 123, 'el sello sube para que la copia de otras computadoras recoja el cambio');
   assert.equal(despues.rentadoPor, antes.rentadoPor, 'el nombre de ese día se conserva');
   assert.equal(despues.porcentajeComision, 5, 'sellado es sellado: enlazar no mueve el porcentaje');
   assert.deepEqual(despues.pagos, antes.pagos);
-  assert.deepEqual(nube.llamadas.filter(([op]) => op === 'commit'), [['commit', ['contratos/v1', 'contratos/v2'], 'mostrador']], 'un lote, sin repetidos');
+  assert.deepEqual(nube.llamadas.filter(([op]) => op === 'commit'), [['commit', ['contratos/v1', 'contratos/v2'], 'dinero']], 'un lote, sin repetidos, con la credencial de dinero');
 });
 
 test('enlazarContratosAlEmpleado: puede, SOLO si se pide, ponerle a algunas rentas el porcentaje de hoy del empleado (Wilder, 0 %)', async () => {
   const nube = nubeConViejas();
   await enlazarContratosAlEmpleado(['v1', 'v2'], 'e6', {
-    iniciar: nube.iniciar, ahora: AHORA, idsConPorcentaje: ['v1'], porcentajeComision: 0,
+    ...enlazaCon(nube), ahora: AHORA, idsConPorcentaje: ['v1'], porcentajeComision: 0,
   });
   assert.strictEqual(nube.leer('contratos/v1').porcentajeComision, 0, 'a la pedida, el 0 de Wilder como número');
   assert.equal(nube.leer('contratos/v2').porcentajeComision, 5, 'a la que no se pidió, no');
@@ -295,7 +298,7 @@ test('enlazarContratosAlEmpleado: puede, SOLO si se pide, ponerle a algunas rent
 test('enlazarContratosAlEmpleado: pedir cambiar el porcentaje sin decir cuál es no escribe nada', async () => {
   const nube = nubeConViejas();
   await assert.rejects(
-    enlazarContratosAlEmpleado(['v1'], 'e6', { iniciar: nube.iniciar, idsConPorcentaje: ['v1'], porcentajeComision: undefined }),
+    enlazarContratosAlEmpleado(['v1'], 'e6', { ...enlazaCon(nube), idsConPorcentaje: ['v1'], porcentajeComision: undefined }),
     /porcentaje del empleado/,
   );
   assert.equal(nube.escrituras().length, 0);
@@ -304,15 +307,22 @@ test('enlazarContratosAlEmpleado: pedir cambiar el porcentaje sin decir cuál es
 
 test('enlazarContratosAlEmpleado: sin empleado o sin rentas se niega; si un contrato ya no existe, ninguno se enlaza', async () => {
   const nube = nubeConViejas();
-  await assert.rejects(enlazarContratosAlEmpleado(['v1'], '', { iniciar: nube.iniciar }), /Falta escoger a qué empleado/);
-  await assert.rejects(enlazarContratosAlEmpleado([], 'e6', { iniciar: nube.iniciar }), /No hay rentas que enlazar/);
-  await assert.rejects(enlazarContratosAlEmpleado(['v1', 'borrado'], 'e6', { iniciar: nube.iniciar }), /no existe/);
+  await assert.rejects(enlazarContratosAlEmpleado(['v1'], '', enlazaCon(nube)), /Falta escoger a qué empleado/);
+  await assert.rejects(enlazarContratosAlEmpleado([], 'e6', enlazaCon(nube)), /No hay rentas que enlazar/);
+  await assert.rejects(enlazarContratosAlEmpleado(['v1', 'borrado'], 'e6', enlazaCon(nube)), /no existe/);
   assert.equal(nube.leer('contratos/v1').empleadoId ?? null, null, 'todo o nada');
 });
 
 test('enlazar y volver a enlazar no daña nada (repetirlo termina lo que faltó)', async () => {
   const nube = nubeConViejas();
-  await enlazarContratosAlEmpleado(['v1', 'v2'], 'e6', { iniciar: nube.iniciar, ahora: AHORA });
-  await enlazarContratosAlEmpleado(['v1', 'v2'], 'e6', { iniciar: nube.iniciar, ahora: AHORA + 1 });
+  await enlazarContratosAlEmpleado(['v1', 'v2'], 'e6', { ...enlazaCon(nube), ahora: AHORA });
+  await enlazarContratosAlEmpleado(['v1', 'v2'], 'e6', { ...enlazaCon(nube), ahora: AHORA + 1 });
   assert.equal(nube.leer('contratos/v2').empleadoId, 'e6');
+});
+
+test('enlazarContratosAlEmpleado: sin sesión de dinero se niega y no escribe nada — ni siquiera el enlace', async () => {
+  const nube = nubeConViejas();
+  await assert.rejects(enlazarContratosAlEmpleado(['v1'], 'e6', enlazaCon(nube, { dbDinero: () => null })), { message: MENSAJE_ENLACE_SIN_DINERO });
+  assert.equal(nube.escrituras().length, 0);
+  assert.equal(nube.llamadas.filter(([op]) => op === 'commit').length, 0);
 });
