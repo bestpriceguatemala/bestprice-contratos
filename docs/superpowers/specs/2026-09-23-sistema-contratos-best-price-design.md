@@ -1113,7 +1113,7 @@ en el código.
 10. **La autorización de la tarjeta 1 sí se imprime, y su casilla es la única DERIVADA, no
     medida.** En Excel su celda (la combinada vacía `M29:P31`, pegada al monto autorizado)
     nunca imprimió nada, así que no hay un texto medido: del rectángulo y de la alineación
-    se fió la tabla de la propia celda de Excel; la fuente y el tamaño (Arial 10) son los de
+    se tomaron de la propia celda de Excel; la fuente y el tamaño (Arial 10) son los de
     la autorización de la tarjeta 2, que sí está medida. La hoja de prueba la dibuja con
     raya de trazos y la nombra como derivada, porque es la que hay que mirar con más
     atención contra el papel.
