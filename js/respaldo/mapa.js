@@ -9,7 +9,9 @@
 // Lo que su hoja no tiene dónde guardar no se mete en la columna que más se le parece: se anota en COMENTARIOS (CA) con
 // el monto y la razón, o se lista en `NO_SE_RESPALDA`. Un dato en la columna equivocada es peor que un dato ausente que
 // se dice que está ausente.
-import { q, textoConQ } from '../nucleo/dinero.js';
+import {
+  q, suma, recargoTarjeta, textoConQ,
+} from '../nucleo/dinero.js';
 import { lineasSalida, horaTardiaDe, resumen } from '../nucleo/contrato.js';
 import { garantiaPorLiberar } from '../nucleo/estados.js';
 import { nombresResueltos } from '../nucleo/cliente.js';
@@ -223,9 +225,50 @@ function formaYPorcentaje(c) {
   return { forma, porcentaje, formas, porcentajes, pagos };
 }
 
-/** Lo que su hoja no puede mostrar de este contrato, en frases que se leen en COMENTARIOS. */
-function notasDelContrato(c, { formas, porcentajes, pagos }) {
+/**
+ * Lo que la hoja NO suma de este contrato aunque el sistema sí lo cobre: `{ faltante, razones, totalDelSistema }`.
+ *
+ * Su fórmula de SUBTOTAL suma renta, atraso, seguros, daños, carta poder, combustible y varios de la salida, y nada más.
+ * Entonces el TOTAL COBRADO de la hoja sale corto en tres casos, y los tres vienen de las funciones del núcleo, no de
+ * una cuenta propia:
+ *   - la hora tardía (`horaTardiaDe`): la hoja la anota en HORA TARDIA pero su SUBTOTAL no la suma;
+ *   - los «varios» de la devolución (`cierre.varios`): la hoja no tiene columna para ellos;
+ *   - el recargo de tarjeta de pagos que la hoja no puede representar (varias formas de pago, o varios porcentajes): su
+ *     fórmula aplica UN porcentaje a todo el total, y sin él no se aplica nada.
+ *
+ * `totalDelSistema` es el subtotal de `resumen()` más ese recargo: lo que el sistema dice que se cobró por esta renta.
+ * Con `faltante` en cero la hoja y el sistema dicen lo mismo.
+ */
+function loQueLaHojaNoSuma(c, pago) {
+  const cierre = c.cierre ?? {};
+  const horaTardia = horaTardiaDe(c);
+  const montoHoraTardia = suma(horaTardia.alSalir, horaTardia.alRecibir);
+  const varios = q(cierre.varios);
+  const recargo = pago.porcentaje === null
+    ? suma(...pago.pagos.map((p) => recargoTarjeta(p.monto, p.porcentajeTarjeta)))
+    : 0;
+  const razones = [];
+  if (montoHoraTardia) razones.push(`la hoja anota la hora tardía (${textoConQ(montoHoraTardia)}) pero no la suma`);
+  if (varios) razones.push(`los varios de la devolución (${textoConQ(varios)}${aTexto(cierre.variosDetalle) ? `, ${aTexto(cierre.variosDetalle)}` : ''}) no tienen dónde sumarse`);
+  if (recargo) razones.push(`el recargo de tarjeta que se cobró (${textoConQ(recargo)}) no cabe: la hoja aplica un solo porcentaje a todo el total`);
+  return {
+    faltante: suma(montoHoraTardia, varios, recargo),
+    razones,
+    totalDelSistema: suma(resumen(c).subtotal, recargo),
+  };
+}
+
+/** Lo que su hoja no puede mostrar de este contrato, en frases que se leen en COMENTARIOS. Lo que descuadra el total va PRIMERO. */
+function notasDelContrato(c, pago) {
+  const { formas, porcentajes, pagos } = pago;
   const notas = [];
+  const descuadre = loQueLaHojaNoSuma(c, pago);
+  if (descuadre.faltante) {
+    notas.push(`OJO: el total de esta hoja sale ${textoConQ(descuadre.faltante)} menos que el del sistema (${textoConQ(descuadre.totalDelSistema)}): ${descuadre.razones.join('; ')}`);
+  }
+  const horaTardia = horaTardiaDe(c);
+  if (horaTardia.sinMonto) notas.push('Hora tardía marcada al salir, sin monto');
+
   const tarjetas = Array.isArray(c.tarjetas) ? c.tarjetas : [];
   tarjetas.slice(2).forEach((t, i) => {
     notas.push(`Tarjeta ${i + 3}: ${textoDeTarjeta(t) ?? '(sin número)'}${t.vencimiento ? `, vence ${t.vencimiento}` : ''}${t.autorizacion ? `, autorización ${t.autorizacion}` : ''}${q(t.montoAutorizado) ? `, ${textoConQ(t.montoAutorizado)}` : ''}${t.banco ? `, ${t.banco}` : ''}`);
@@ -233,15 +276,6 @@ function notasDelContrato(c, { formas, porcentajes, pagos }) {
 
   const cierre = c.cierre ?? {};
   if (aTexto(cierre.danosDetalle)) notas.push(`Daños: ${aTexto(cierre.danosDetalle)}`);
-
-  // Su hoja guarda la hora tardía (HORA TARDIA) pero su SUBTOTAL no la suma, y los varios del cierre no tienen columna.
-  const horaTardia = horaTardiaDe(c);
-  const montoHoraTardia = q(horaTardia.alSalir + horaTardia.alRecibir);
-  if (montoHoraTardia) notas.push(`Hora tardía ${textoConQ(montoHoraTardia)}: la hoja la anota pero no la suma al total`);
-  if (horaTardia.sinMonto) notas.push('Hora tardía marcada al salir, sin monto');
-  if (q(cierre.varios)) {
-    notas.push(`Varios al recibir ${textoConQ(cierre.varios)}${aTexto(cierre.variosDetalle) ? ` (${aTexto(cierre.variosDetalle)})` : ''}: la hoja no tiene dónde sumarlo`);
-  }
 
   if (formas.length > 1 || porcentajes.length > 1) {
     notas.push(`Pagos: ${pagos.map((p) => `${p.forma || p.formaPago} ${textoConQ(p.monto)}${q(p.porcentajeTarjeta) ? ` (${q(p.porcentajeTarjeta)} % de tarjeta)` : ''}`).join('; ')}`);
@@ -252,6 +286,11 @@ function notasDelContrato(c, { formas, porcentajes, pagos }) {
   if (saldo < 0) notas.push(`A favor del cliente según el sistema: ${textoConQ(-saldo)}`);
   if (garantiaPorLiberar(c)) notas.push(`Garantía de tarjeta sin liberar: ${textoConQ(c.garantiaMonto)}`);
   return notas;
+}
+
+/** Cuántos quetzales le faltan al total de la hoja en este contrato (0 si cuadra). Para avisar en pantalla. */
+export function faltanteDelTotal(c) {
+  return loQueLaHojaNoSuma(c, formaYPorcentaje(c)).faltante;
 }
 
 /** Quién cubrió qué: id de contrato → fecha del pago al dueño. Solo cuentan los pagos que no se anularon. */
@@ -403,6 +442,14 @@ export function armarCeldas({
   const celdasDeContratos = numerados.flatMap((c, i) => armarContrato(c, CAPACIDAD.contratos.primera + i, {
     codigoDeCliente: hojaClientes.codigoDe, clientePorId: new Map(ordenados.map((cl) => [cl.id, cl])), codigoDeCarro: hojaVehiculos.codigoDe, pagados, avisos,
   }));
+
+  // Lo que la hoja no suma se dice AQUÍ, a la vista al bajar el archivo, además de en el COMENTARIO de cada renta: dentro de un
+  // año él va a mirar su Excel, ver un total y creerlo.
+  const descuadrados = numerados.map((c) => [c.numero, faltanteDelTotal(c)]).filter(([, falta]) => falta);
+  if (descuadrados.length) {
+    const lista = descuadrados.map(([numero, falta]) => `${numero} (faltan ${textoConQ(falta)})`).join(', ');
+    avisos.unshift(`En ${descuadrados.length} contrato${descuadrados.length === 1 ? '' : 's'} el total de la hoja sale MENOS que el del sistema, porque su hoja no suma la hora tardía ni los varios de la devolución ni el recargo de una tarjeta que no cubre todo el pago: ${lista}. El COMENTARIO de cada uno empieza con «OJO» y dice qué falta.`);
+  }
 
   return {
     celdas: { clientes: hojaClientes.celdas, vehiculos: hojaVehiculos.celdas, contratos: celdasDeContratos },

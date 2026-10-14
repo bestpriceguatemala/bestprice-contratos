@@ -296,22 +296,41 @@ test('un carro ajeno sin costo anotado se AVISA (su utilidad en el archivo saldr
 // Lo que su hoja no suma o no puede mostrar: va a COMENTARIOS, con el monto, y no a una columna que se le parezca
 // ---------------------------------------------------------------------------
 
-test('hora tardía y varios al recibir: la hoja anota la hora tardía en su columna pero no la suma, y lo dice; los varios no tienen columna', async () => {
+test('hora tardía y varios al recibir: la hora tardía se anota en su columna, los varios no tienen columna, y el COMENTARIO abre diciendo cuánto falta y por qué', async () => {
   const { libro } = await respaldo();
   const f = fila(106);
   assert.equal(libro.numero('CONTRATOS', `AH${f}`), 150);
   assert.equal(libro.texto('CONTRATOS', `AR${f}`), null, 'los varios del cierre NO se meten en VARIOS PRECIO: ese es el cargo de la salida');
   const notas = libro.texto('CONTRATOS', `CA${f}`);
-  assert.match(notas, /Hora tardía Q150\.00: la hoja la anota pero no la suma al total/);
-  assert.match(notas, /Varios al recibir Q50\.00 \(Llave perdida\): la hoja no tiene dónde sumarlo/);
+  assert.match(notas, /^Del sistema: OJO: el total de esta hoja sale Q200\.00 menos que el del sistema \(Q1,600\.00\): /, 'lo primero que se lee');
+  assert.match(notas, /la hoja anota la hora tardía \(Q150\.00\) pero no la suma/);
+  assert.match(notas, /los varios de la devolución \(Q50\.00, Llave perdida\) no tienen dónde sumarse/);
 });
 
-test('pagos mixtos: forma MIXTO, SIN porcentaje de tarjeta (aplicarlo a todo cobraría de más) y el detalle en COMENTARIOS', async () => {
+test('el aviso al bajar el archivo lista los contratos cuyo total no cuadra con el del sistema, con lo que falta de cada uno', async () => {
+  const r = await armar();
+  const aviso = r.avisos.find((a) => /el total de la hoja sale MENOS/.test(a));
+  assert.ok(aviso, r.avisos.join(' | '));
+  assert.match(aviso, /106 \(faltan Q200\.00\)/);
+  assert.match(aviso, /107 \(faltan Q20\.00\)/);
+  assert.equal(r.avisos.indexOf(aviso), 0, 'es lo primero que se lee entre los avisos');
+});
+
+test('un contrato que cuadra NO lleva el «OJO»: solo se avisa cuando el total de la hoja de verdad sale distinto', async () => {
+  const { libro } = await respaldo();
+  for (const n of [101, 102, 103, 104, 105, 108]) {
+    assert.doesNotMatch(libro.texto('CONTRATOS', `CA${fila(n)}`) ?? '', /OJO/, `contrato ${n}`);
+  }
+});
+
+test('pagos mixtos: forma MIXTO, SIN porcentaje de tarjeta (aplicarlo a todo cobraría de más), el detalle en COMENTARIOS y el recargo que la hoja no suma', async () => {
   const { libro } = await respaldo();
   const f = fila(107);
   assert.equal(libro.texto('CONTRATOS', `BZ${f}`), 'MIXTO');
   assert.equal(libro.texto('CONTRATOS', `BS${f}`), null);
-  assert.match(libro.texto('CONTRATOS', `CA${f}`), /Pagos: efectivo Q1,000\.00; tarjeta Q400\.00 \(5 % de tarjeta\)/);
+  const notas = libro.texto('CONTRATOS', `CA${f}`);
+  assert.match(notas, /Pagos: efectivo Q1,000\.00; tarjeta Q400\.00 \(5 % de tarjeta\)/);
+  assert.match(notas, /OJO: el total de esta hoja sale Q20\.00 menos que el del sistema \(Q1,420\.00\): el recargo de tarjeta que se cobró \(Q20\.00\) no cabe/);
 });
 
 test('un saldo por cobrar se anota en COMENTARIOS con la cifra del sistema', async () => {

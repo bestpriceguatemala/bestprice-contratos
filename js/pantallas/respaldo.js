@@ -180,6 +180,8 @@ export function htmlDeLaPantalla({
         <ul>${NO_SE_RESPALDA.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
         <p>Lo que tu hoja no puede mostrar de una renta queda escrito en su columna COMENTARIOS, en una frase que empieza con «Del sistema:».
           Los totales (subtotal, total cobrado, utilidad) los calcula tu hoja con sus fórmulas, no el sistema.</p>
+        <p><strong>Ojo con los totales:</strong> tu hoja no suma la hora tardía ni los «varios» de la devolución. Si una renta los tiene, su total en el Excel
+          sale menos que el del sistema, y su COMENTARIO empieza con «OJO» y dice cuánto falta y por qué.</p>
       </details>
     </section>`;
 }
