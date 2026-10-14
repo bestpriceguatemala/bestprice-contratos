@@ -18,6 +18,7 @@ import {
 import { pintarDuenos } from './pantallas/duenos.js';
 import { pintarEmpleados } from './pantallas/empleados.js';
 import { pintarComisiones, pintarComisionesDeEmpleado } from './pantallas/comisiones.js';
+import { pintarRespaldo, mostrarElRecordatorioDeRespaldo } from './pantallas/respaldo.js';
 import { vigilarVersion } from './version.js';
 import { limpiarCopiaLocalDelCosto } from './datos.js';
 
@@ -67,6 +68,9 @@ registrarPantalla('#/dinero/empleados', conPuertaDeDinero(pintarEmpleados));
 registrarPantalla('#/dinero/empleados/:empleadoId', conPuertaDeDinero(pintarEmpleados));
 registrarPantalla('#/dinero/comisiones', conPuertaDeDinero(pintarComisiones));
 registrarPantalla('#/dinero/comisiones/:clave', conPuertaDeDinero(pintarComisionesDeEmpleado));
+// El respaldo en Excel (§10) cuelga de #/dinero y pasa por la misma puerta: el archivo lleva el costo que se le paga a cada dueño de carro
+// (ADR-002: toda pantalla que lo necesite pide la contraseña de dinero).
+registrarPantalla('#/dinero/respaldo', conPuertaDeDinero(pintarRespaldo));
 
 const pantallaEntrada = document.getElementById('entrada');
 const pantallaApp = document.getElementById('app');
@@ -101,6 +105,9 @@ function verCascaron() {
   // por eso también se llama mostrar() aquí de una vez.
   location.hash = RUTA_INICIAL;
   mostrar(RUTA_INICIAL);
+  // §10: si pasó un año desde el último respaldo, un aviso arriba con el botón. Por detrás y sin esperar: nunca debe estorbar la
+  // entrada, y si no se pudo leer cuándo fue el último no dice nada (no se sabe).
+  mostrarElRecordatorioDeRespaldo().catch((error) => console.warn('No se pudo revisar el aviso del respaldo:', error));
 }
 
 forma.addEventListener('submit', async (ev) => {

@@ -1601,11 +1601,12 @@ test('app.js: NINGUNA llamada suelta a salirDeDinero (disparar y olvidar): el re
   assert.ok(usos.some((l) => /salir = salirDeDinero/.test(l)));
 });
 
-test('app.js: las ocho rutas del área de dinero (dueños, empleados y comisiones) pasan por la puerta de la contraseña', () => {
+test('app.js: las nueve rutas del área de dinero (dueños, empleados, comisiones y el respaldo) pasan por la puerta de la contraseña', () => {
   const rutas = [...sinComentarios(APP).matchAll(/registrarPantalla\('(#\/dinero[^']*)', ([^;]+)\);/g)];
   assert.deepEqual(rutas.map((r) => r[1]), [
     '#/dinero', '#/dinero/cuenta/:clave', '#/dinero/duenos', '#/dinero/duenos/:duenoId',
     '#/dinero/empleados', '#/dinero/empleados/:empleadoId', '#/dinero/comisiones', '#/dinero/comisiones/:clave',
+    '#/dinero/respaldo',
   ]);
   for (const [, ruta, funcion] of rutas) assert.match(funcion, /^conPuertaDeDinero\(\w+\)$/, `${ruta} sin puerta: ${funcion}`);
   assert.ok(sinComentarios(APP).includes("import { pintarDuenos } from './pantallas/duenos.js';"));

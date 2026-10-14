@@ -76,3 +76,12 @@ test('el rango de un año y el nombre del archivo', () => {
   assert.deepEqual(rangoDelAnio(2026), { desde: '2026-01-01', hasta: '2026-12-31' });
   assert.equal(nombreDelArchivo(2026), 'Best Price 2026.xlsx');
 });
+
+test('al año anterior solo se le da lugar cuando hay algo que hacer con él: incompleto, o el primer trimestre sin bajar', () => {
+  const ofrecidos = (porAnio, hoy) => estadoDeLosAnios(porAnio, hoy).filter((a) => a.ofrecer).map((a) => a.anio);
+  assert.deepEqual(ofrecidos({}, '2026-10-14'), [2026], 'en octubre de 2026 no hay un 2025 que ofrecer: el sistema ni existía');
+  assert.deepEqual(ofrecidos({ 2026: '2026-10-14' }, '2027-02-10'), [2027, 2026], 'bajado antes de terminar el año: se ofrece de nuevo');
+  assert.deepEqual(ofrecidos({}, '2027-02-10'), [2027, 2026], 'primer trimestre y nunca bajado: es cuando se cierra el año anterior');
+  assert.deepEqual(ofrecidos({}, '2027-04-01'), [2027], 'pasado el primer trimestre ya no se ofrece sin que él lo pida');
+  assert.deepEqual(ofrecidos({ 2026: '2027-01-05' }, '2027-02-10'), [2027], 'bajado ya terminado el año: completo, no se ofrece');
+});

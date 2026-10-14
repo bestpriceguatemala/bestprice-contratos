@@ -36,21 +36,26 @@ export function ultimoRespaldo(porAnio) {
 
 /**
  * Los años que se pueden bajar ahora —el de hoy y el anterior—, con lo que se sabe de cada uno:
- * `{ anio, bajadoEl, completo, esDelAnioEnCurso }`. El más nuevo primero.
+ * `{ anio, bajadoEl, completo, esDelAnioEnCurso, ofrecer }`. El más nuevo primero.
  *
  * `completo` es que el archivo de ese año se bajó cuando el año ya había terminado. El año en curso nunca lo está.
+ *
+ * `ofrecer` es si la pantalla debe ponerlo a la vista. El año en curso siempre. El anterior solo cuando hay algo que
+ * hacer con él: ya se bajó pero antes de que terminara (le faltan las rentas del final), o todavía no se baja y estamos
+ * en el primer trimestre, que es cuando se cierra el año anterior. En octubre de 2026 no se le ofrece un «2025»: el
+ * sistema ni existía. Cualquier otro año se baja con «Otro año».
  */
 export function estadoDeLosAnios(porAnio, hoy) {
   const anioDeHoy = Number(String(hoy).slice(0, 4));
+  const mesDeHoy = Number(String(hoy).slice(5, 7));
   return [anioDeHoy, anioDeHoy - 1].map((anio) => {
     const fecha = porAnio?.[anio] ?? porAnio?.[String(anio)];
     const bajadoEl = esFechaISO(fecha) ? fecha : null;
     const esDelAnioEnCurso = anio === anioDeHoy;
+    const completo = Boolean(bajadoEl) && !esDelAnioEnCurso && bajadoEl >= `${anio + 1}-01-01`;
+    const ofrecer = esDelAnioEnCurso || (bajadoEl ? !completo : mesDeHoy <= 3);
     return {
-      anio,
-      bajadoEl,
-      esDelAnioEnCurso,
-      completo: Boolean(bajadoEl) && !esDelAnioEnCurso && bajadoEl >= `${anio + 1}-01-01`,
+      anio, bajadoEl, esDelAnioEnCurso, completo, ofrecer,
     };
   });
 }

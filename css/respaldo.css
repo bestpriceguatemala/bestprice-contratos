@@ -1,0 +1,184 @@
+/* Respaldo en Excel (§10): la pantalla y el aviso de arriba. Las clases llevan el prefijo rs-. */
+
+.rs-pantalla {
+  max-width: 820px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.rs-pantalla h2 {
+  margin: 0;
+  color: var(--navy);
+  font-size: 22px;
+}
+
+.rs-intro {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--texto);
+}
+
+/* La advertencia de privacidad: va ANTES de los botones de descarga y no se puede pasar por alto. */
+.rs-cuidado {
+  background: #fff4e5;
+  border: 1px solid #f0b054;
+  border-left: 6px solid #e08a00;
+  border-radius: 8px;
+  padding: 14px 18px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.rs-cuidado strong {
+  display: block;
+  color: #8a4b00;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.rs-cuidado p {
+  margin: 0;
+}
+
+.rs-anios {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rs-anio {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+
+.rs-anio h3 {
+  margin: 0 0 4px;
+  color: var(--navy);
+  font-size: 18px;
+}
+
+.rs-anio p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--gris);
+  line-height: 1.4;
+}
+
+.rs-anio-completo {
+  border-left: 5px solid var(--verde);
+}
+
+.rs-cuando {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gris);
+  margin-left: 6px;
+}
+
+.rs-anio .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.rs-otro {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.rs-otro input {
+  width: 90px;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 7px 10px;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+}
+
+.rs-trabajando {
+  margin: 0;
+  padding: 12px 16px;
+  background: #eaf3fc;
+  border: 1px solid #b9d6f2;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.rs-listo {
+  padding: 14px 18px;
+  background: #eaf6ee;
+  border: 1px solid #a8d5b5;
+  border-left: 6px solid var(--verde);
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.rs-listo p {
+  margin: 0 0 6px;
+}
+
+.rs-listo p:last-child {
+  margin-bottom: 0;
+}
+
+.rs-sin-anotar {
+  color: var(--rojo);
+}
+
+.rs-avisos,
+.rs-error {
+  margin-top: 8px;
+}
+
+.rs-no-lleva {
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 12px 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.rs-no-lleva summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.rs-no-lleva ul {
+  margin: 6px 0 10px;
+  padding-left: 20px;
+}
+
+/* El aviso de arriba de todas las pantallas cuando pasó un año sin respaldo. */
+.rs-recordatorio {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  background: #fff8e1;
+  border-bottom: 2px solid var(--amarillo);
+  padding: 10px 24px;
+  font-size: 14px;
+}
+
+.rs-recordatorio-texto {
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+.rs-recordatorio .btn {
+  flex: 0 0 auto;
+  text-decoration: none;
+}
