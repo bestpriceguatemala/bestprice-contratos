@@ -56,12 +56,13 @@ test('la vista junta por empleado, de lo que más se le debe a lo que menos, y s
 });
 
 test('el total de todos se suma por q(): los centavos no se arrastran (0.10 + 0.20 es 0.30, no 0.30000000000000004)', () => {
-  const centavos = (id, precioDia) => renta({ id, dias: 1, precioDia, fechaSalida: '2026-10-01', recibidoEl: '2026-10-02' });
-  const vista = armarVistaDeComisiones(lecturaOk({ contratos: [centavos('c1', 2), renta({ id: 'c2', empleado: luis, dias: 1, precioDia: 2, recibidoEl: '2026-10-02' })] }));
-  assert.equal(comisionDe(centavos('c1', 2)).monto, 0.1);
-  assert.strictEqual(vista.total, 0.25, '0.10 de Ana + 0.15 de Luis (7.5 % de 2)');
-  const dos = armarVistaDeComisiones(lecturaOk({ contratos: [centavos('c1', 2), centavos('c2', 4)] }));
-  assert.strictEqual(dos.total, 0.3);
+  const beto = { id: 'e2', codigo: '2', nombre: 'Beto', porcentajeComision: 10, activo: true };
+  const delAna = renta({ id: 'c1', dias: 1, precioDia: 2, fechaSalida: '2026-10-01', recibidoEl: '2026-10-02' });
+  const delBeto = renta({ id: 'c2', empleado: beto, dias: 1, precioDia: 2, fechaSalida: '2026-10-01', recibidoEl: '2026-10-02' });
+  assert.deepEqual([comisionDe(delAna).monto, comisionDe(delBeto).monto], [0.1, 0.2]);
+  const vista = armarVistaDeComisiones(lecturaOk({ contratos: [delAna, delBeto], empleados: [ana, beto] }));
+  assert.equal(vista.entradas.length, 2);
+  assert.strictEqual(vista.total, 0.3);
 });
 
 test('una lectura fallida de las RENTAS o de los PAGOS no arma ninguna cuenta: jamás «no le debes nada a nadie»', () => {
