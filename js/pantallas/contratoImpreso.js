@@ -231,6 +231,14 @@ export function armarContratoImpreso({
     avisos.push('El precio por día no pasa de lo que suman el seguro y el seguro de terceros: el precio sin seguros sale en blanco.');
   }
   tarjetas.forEach((t, i) => {
+    const tecleado = String(efimeras[i]?.numero ?? '').replace(/\D/g, '');
+    const guardado = String(guardadas[i]?.ultimos4 ?? '').replace(/\D/g, '');
+    if (t.completa && guardado && tecleado.slice(-4) !== guardado.slice(-4)) {
+      avisos.push(
+        `Tarjeta ${i + 1}: el número que tecleaste no termina en los últimos 4 dígitos de la tarjeta de este contrato (${enmascarado(guardado)}). `
+        + 'Revisa que no sea otra tarjeta o un error de dedo antes de imprimir.',
+      );
+    }
     if (!t.completa) {
       avisos.push(
         `Tarjeta ${i + 1}: el papel llevará el número enmascarado (${t.numero || '••••'}) y el CBC en blanco, porque el sistema nunca guarda el número completo ni el CBC. `
@@ -239,7 +247,7 @@ export function armarContratoImpreso({
     }
   });
   for (const campo of camposQueSeImprimen()) {
-    if (campo.tipo !== 'etiqueta' && textoSeSale(campo, valores[campo.id])) {
+    if (textoSeSale(campo, valores[campo.id])) {
       avisos.push(`«${campo.etiqueta}» es más largo que su casilla del papel y se saldría de ella.`);
     }
   }
@@ -289,7 +297,7 @@ function campoHtml(campo, texto) {
  */
 export function htmlContratoImpreso(modelo, cal = CALIBRACION_DE_FABRICA) {
   const campos = camposQueSeImprimen()
-    .filter((c) => c.tipo !== 'etiqueta' && modelo.valores[c.id])
+    .filter((c) => modelo.valores[c.id])
     .map((c) => campoHtml(c, modelo.valores[c.id]))
     .join('\n    ');
   return `<article class="hoja-contrato" aria-label="Contrato N.° ${esc(modelo.numero ?? '')}">
@@ -380,7 +388,10 @@ function almacenDelNavegador() {
   } catch {
     // acceso bloqueado: se sigue sin almacén
   }
-  return { getItem: () => null, setItem: () => {} };
+  return {
+    getItem: () => null,
+    setItem: () => { throw new Error('El navegador no deja guardar datos en esta computadora.'); },
+  };
 }
 
 /** Pone, mientras esta pantalla esté abierta, la regla de página sin margen (la carta entera es del papel). */
@@ -526,7 +537,9 @@ function textoSinLeer(que) {
  * La ruta '#/imprimir/:contratoId': lee el contrato, el cliente y el carro y dibuja la hoja. Cada lectura
  * que falla se avisa como falla (no como «no existe»), y sin cliente no hay hoja.
  */
-export async function pintarImpresionDeContrato(contenedor, contratoId) {
+export async function pintarImpresionDeContrato(contenedor, contratoId, {
+  leer = { cargarContrato, cargarClientes, cargarFlota },
+} = {}) {
   contenedor.innerHTML = '<p class="pendiente">Cargando…</p>';
   const alVolver = () => { location.hash = contratoId ? `#/contratos/${contratoId}` : '#/contratos'; };
   const caer = (mensaje) => {
@@ -535,7 +548,7 @@ export async function pintarImpresionDeContrato(contenedor, contratoId) {
 
   let contrato = null;
   try {
-    contrato = await cargarContrato(contratoId);
+    contrato = await leer.cargarContrato(contratoId);
   } catch {
     caer(textoSinLeer('este contrato'));
     return;
@@ -545,7 +558,13 @@ export async function pintarImpresionDeContrato(contenedor, contratoId) {
     return;
   }
 
-  const clientes = await cargarClientes();
+  let clientes;
+  try {
+    clientes = await leer.cargarClientes();
+  } catch {
+    caer(textoSinLeer('la lista de clientes'));
+    return;
+  }
   if (clientes.fallo && !clientes.datos.length) {
     caer(textoSinLeer('la lista de clientes'));
     return;
@@ -554,7 +573,13 @@ export async function pintarImpresionDeContrato(contenedor, contratoId) {
 
   let carro = null;
   if (!contrato.ajeno) {
-    const flota = await cargarFlota();
+    let flota;
+    try {
+      flota = await leer.cargarFlota();
+    } catch {
+      caer(textoSinLeer('la flota'));
+      return;
+    }
     carro = flota.datos.find((c) => c.id === contrato.carroId) ?? null;
   }
 

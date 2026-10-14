@@ -398,7 +398,12 @@ export function guardarCalibracion(almacen, nombre, cal) {
   const actuales = leerCalibraciones(almacen);
   actuales.impresoras[limpio] = { dx: cal.dx, dy: cal.dy, escala: cal.escala };
   actuales.activa = limpio;
-  almacen.setItem(CLAVE_DE_CALIBRACIONES, JSON.stringify(actuales));
+  try {
+    almacen.setItem(CLAVE_DE_CALIBRACIONES, JSON.stringify(actuales));
+  } catch {
+    // Ventana privada o datos bloqueados: decir «guardado» sin haber guardado nada sería peor que avisar.
+    throw new Error('No se pudo guardar el ajuste en esta computadora: el navegador no deja guardar datos (¿ventana privada?).');
+  }
   return actuales;
 }
 
