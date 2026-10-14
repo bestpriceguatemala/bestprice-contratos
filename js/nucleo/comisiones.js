@@ -10,12 +10,17 @@
 // La comisión de CADA renta la calcula `comisionDe` (comision.js, §5 del diseño) y
 // aquí no se vuelve a escribir. Lo que este archivo decide es qué hacer con ella:
 //
-// - SOLO SE PAGA LO FIRME. Una comisión queda firme cuando el carro regresó
-//   (`cierre.fechaReal`): un día de atraso la sube y un descuento la baja, así que
-//   la de una renta que sigue afuera es un estimado, y pagarle a alguien un
-//   estimado es pagar sobre una cifra que se mueve. Es la misma lógica por la que a
-//   un dueño de carro solo se le paga sobre un contrato cerrado. (Aquí «firme» es
-//   que el carro volvió, no que el cliente haya pagado todo: así lo dice el diseño.)
+// - SOLO SE PAGA LO FIRME, Y «FIRME» ES UN CONTRATO CERRADO (decisión del dueño, 14 de
+//   octubre de 2026: «Lo miro cuando el contrato está cerrado y tengo que pagar
+//   quincena o final de mes. Yo decido cuándo lo pago.»). Es la MISMA pregunta con la
+//   que se le paga al dueño de un carro ajeno: `estadoContrato(c) === 'cerrado'`
+//   (estados.js), que ya exige que el carro haya vuelto, que no se deba saldo y que la
+//   garantía esté liberada. Aquí no se vuelve a escribir esa regla, se le pregunta.
+//   Ojo con dos preguntas que se parecen y no son la misma: `comisionDe(c).firme` dice si
+//   el MONTO ya se conoce (el carro volvió: un día de atraso la sube y un descuento la
+//   baja mientras siga afuera) y sirve para decir «estimada» o no; lo que decide si se
+//   PAGA es que el contrato cierre. Una renta cuyo carro volvió pero cuyo cliente aún
+//   debe tiene su monto, y todavía no se paga.
 // - EL PORCENTAJE ES EL DEL CONTRATO, no el que el empleado tiene hoy: se selló el
 //   día que se rentó, y subirle el porcentaje a alguien no mueve lo ya ganado.
 // - UN 0 % NO SE PAGA, y no es lo mismo que un porcentaje que falta. Wilder, el
@@ -26,6 +31,8 @@ import { q, suma } from './dinero.js';
 import { comisionDe } from './comision.js';
 import { porcentajeAnotado } from './empleado.js';
 import { sinIdsRepetidos, pagoAnulado } from './liquidacion.js';
+import { estadoContrato } from './estados.js';
+import { esFechaISO } from './fechas.js';
 
 // Lo que se lee cuando una renta no trae ningún nombre de empleado. Existe para
 // que esa renta tenga un grupo donde aparecer: dejarla fuera sería un monto fuera
@@ -41,18 +48,20 @@ const queLlego = (valor) => (valor === null ? 'null' : typeof valor);
 /**
  * En qué anda la comisión de UNA renta, sin mirar si ya se pagó (eso lo decide la cuenta):
  * - 'estimada': el carro no ha regresado; el monto puede cambiar y no se paga.
- * - 'sin-porcentaje': el contrato no trae un porcentaje legible; no se sabe cuánto es.
- * - 'sin-comision': firme, pero la comisión es Q0.00 (0 % o una base que el descuento se comió).
- * - 'por-pagar': firme y con un monto.
+ * - 'sin-cerrar': el carro volvió, así que el monto ya se conoce, pero el contrato todavía no cierra (el cliente
+ *   debe saldo, o falta liberar la garantía): no se paga todavía. Por qué no cierra lo dice `razonDeNoCierre`
+ *   (pantallas/dinero.js), con las mismas palabras de la ficha del dueño de un carro ajeno.
+ * - 'sin-porcentaje': el contrato cerró, pero no trae un porcentaje legible; no se sabe cuánto es.
+ * - 'sin-comision': cerrado, pero la comisión es Q0.00 (0 % o una base que el descuento se comió).
+ * - 'por-pagar': cerrado y con un monto.
  *
- * Le pregunta a `comisionDe` si está firme y cuánto es: no mira el campo `estado` guardado
- * (que un sello viejo podría tener atrasado) ni decide «firme» por su cuenta.
+ * Le pregunta a `estadoContrato` si cierra y a `comisionDe` cuánto es y si el monto ya se conoce: no mira el campo
+ * `estado` guardado (que un sello viejo podría tener atrasado) ni decide «cerrado» por su cuenta.
  */
 export function estadoDeComision(contrato) {
-  const { firme, monto } = comisionDe(contrato);
-  if (!firme) return 'estimada';
+  if (estadoContrato(contrato) !== 'cerrado') return comisionDe(contrato).firme ? 'sin-cerrar' : 'estimada';
   if (porcentajeAnotado(contrato?.porcentajeComision) === null) return 'sin-porcentaje';
-  return monto > 0 ? 'por-pagar' : 'sin-comision';
+  return comisionDe(contrato).monto > 0 ? 'por-pagar' : 'sin-comision';
 }
 
 /**
@@ -112,19 +121,20 @@ const porSalida = (a, b) => (
 /**
  * La cuenta con un empleado: las listas y el total, ya separadas para que la pantalla solo las dibuje.
  *
- * - `porPagar`: firmes, con una comisión mayor que cero y todavía sin pagar. Suman al total y se pueden marcar.
- *   Del que regresó primero al último.
- * - `noFirmes`: del empleado, sin pagar, pero el carro todavía no regresa. Se ven con su estimado, pero no se
- *   pueden marcar ni suman al total: todavía pueden cambiar.
+ * - `porPagar`: de contratos CERRADOS, con una comisión mayor que cero y todavía sin pagar. Suman al total y se
+ *   pueden marcar. Del que regresó primero al último.
+ * - `noFirmes`: del empleado, sin pagar, pero el contrato todavía no cierra: el carro sigue afuera (el monto es un
+ *   estimado), o ya volvió y el cliente debe saldo o falta liberar la garantía. Se ven, pero no se pueden marcar ni
+ *   suman al total. `estadoDeComision` dice cuál de las dos es.
  * - `pagados`: cubiertos por un pago vigente (`pagos[].contratos` guarda sus ids). Se revisan primero: una renta
  *   ya pagada sigue pagada aunque después cambie, y nunca debe volver a pagarse completa. Un pago ANULADO no
  *   cubre nada: sus rentas vuelven a `porPagar`, y el pago sigue existiendo con su número y su monto.
- * - `sinComision`: firmes y sin pagar, pero la comisión es Q0.00 (el 0 % de Wilder, o un descuento que se comió
+ * - `sinComision`: cerradas y sin pagar, pero la comisión es Q0.00 (el 0 % de Wilder, o un descuento que se comió
  *   la base). No hay nada que pagarles ni marcar; se cuentan para que no desaparezcan de la vista.
- * - `sinPorcentaje`: firmes y sin pagar, pero el contrato no trae un porcentaje legible. No se pagan: no se sabe
+ * - `sinPorcentaje`: cerradas y sin pagar, pero el contrato no trae un porcentaje legible. No se pagan: no se sabe
  *   cuánto es. (Un contrato guardado por «Sacar carro» siempre lo trae; esto es por un documento dañado.)
  * - `totalPorPagar`: lo que suman las `porPagar`, con `comisionDe` y `suma` (que redondea con `q()`).
- * - `totalEstimado`: lo que sumarían las `noFirmes` si no cambiaran. Es aparte a propósito: no es deuda.
+ * - `totalEstimado`: lo que sumarían las `noFirmes` si cerraran como están. Es aparte a propósito: no es deuda.
  * - `pagosQueCambiaron`: pagos vigentes cuyas rentas hoy suman otra cosa que lo que se pagó (se corrigió un
  *   cierre después de pagar). `{ pago, pagado, ahora, diferencia }`. No afirma nada si el pago cubre una renta
  *   que ya no está en esta cuenta, o si alguna de las que cubre dejó de ser firme: ahí la comparación no es de
@@ -147,7 +157,7 @@ export function cuentaDeEmpleado({ contratos, pagos } = {}) {
   for (const c of todos) {
     if (cubiertos.has(c?.id)) { pagados.push(c); continue; }
     const estado = estadoDeComision(c);
-    if (estado === 'estimada') noFirmes.push(c);
+    if (estado === 'estimada' || estado === 'sin-cerrar') noFirmes.push(c);
     else if (estado === 'sin-porcentaje') sinPorcentaje.push(c);
     else if (estado === 'sin-comision') sinComision.push(c);
     else porPagar.push(c);
@@ -201,6 +211,66 @@ export function elegirParaPagoDeComision(cuenta, idsMarcados) {
     contratos: [...new Set(rentas.map((c) => c.id))],
     monto: suma(...rentas.map((c) => comisionDe(c).monto)),
   };
+}
+
+/**
+ * Lo que de la cuenta queda SIN MARCAR: las rentas por pagar que no están entre las marcadas, con los ids y lo que suman.
+ * Es el complemento de `elegirParaPagoDeComision` (la misma lista, la otra mitad), para que quien marcó un período vea
+ * lo que dejó fuera y su total: él tiene que poder ver que escogió una parte, no creer que escogió todo.
+ */
+export function sinMarcarDeComision(cuenta, idsMarcados) {
+  const marcados = new Set(idsMarcados ?? []);
+  const rentas = (cuenta?.porPagar ?? []).filter((c) => c?.id && !marcados.has(c.id));
+  return {
+    rentas,
+    contratos: [...new Set(rentas.map((c) => c.id))],
+    monto: suma(...rentas.map((c) => comisionDe(c).monto)),
+  };
+}
+
+/**
+ * La quincena a la que cuenta una fecha: la primera es del 1 al 15 y la segunda del 16 al fin de mes. `null` si no es una
+ * fecha de calendario de verdad. Es la regla de «quincena» del dueño y vive solo aquí.
+ */
+export function quincenaDe(fechaISO) {
+  if (!esFechaISO(fechaISO)) return null;
+  return { mes: fechaISO.slice(0, 7), quincena: Number(fechaISO.slice(8, 10)) <= 15 ? 1 : 2 };
+}
+
+/**
+ * Los períodos en que se puede marcar de un clic lo que se le debe a un empleado: por cada mes con algo por pagar, el mes
+ * completo y cada una de sus quincenas que tenga algo. El dueño paga por quincena o a fin de mes (14 de octubre de 2026,
+ * §5 del diseño) y decide él cuándo: esto no pone plazos ni dice qué lleva sin pagar, solo agrupa lo que hay.
+ *
+ * Una renta cuenta en el período de la fecha en que regresó el carro (`cierre.fechaReal`, §5: «se cuenta en el mes de esa
+ * fecha de devolución»), no en el de la fecha en que cerró el contrato —esa no se guarda—. Así una renta que regresó el 10 y
+ * cerró el 18, cuando el cliente pagó, reaparece en la primera quincena aunque ya se haya pagado esa quincena. Solo entran
+ * las `porPagar` de la cuenta: nada que no se pueda pagar. Una renta cuya fecha no se lee no cae en ningún período (se sigue
+ * pudiendo marcar a mano).
+ *
+ * Cada período es `{ mes, cuantas, total, contratos, quincenas }`, del mes más viejo al más nuevo; `quincenas` son
+ * `{ quincena, cuantas, total, contratos }` (1 o 2). `contratos` son ids, y `total` pasa por `suma`.
+ */
+export function periodosDePago(cuenta) {
+  const porMes = new Map();
+  for (const c of cuenta?.porPagar ?? []) {
+    const q1 = quincenaDe(c?.cierre?.fechaReal);
+    if (!q1 || !c?.id) continue;
+    if (!porMes.has(q1.mes)) porMes.set(q1.mes, { 1: [], 2: [] });
+    porMes.get(q1.mes)[q1.quincena].push(c);
+  }
+  const armar = (rentas) => ({
+    cuantas: rentas.length,
+    total: suma(...rentas.map((c) => comisionDe(c).monto)),
+    contratos: rentas.map((c) => c.id),
+  });
+  return [...porMes.entries()]
+    .sort(([a], [b]) => porCodigo(a, b))
+    .map(([mes, quincenas]) => ({
+      mes,
+      ...armar([...quincenas[1], ...quincenas[2]]),
+      quincenas: [1, 2].filter((n) => quincenas[n].length).map((n) => ({ quincena: n, ...armar(quincenas[n]) })),
+    }));
 }
 
 /**

@@ -3,14 +3,19 @@
 // `construirContrato` («Sacar carro»), `construirCierre` («Recibir carro») y `contratoParaGuardar` (datos.js)—,
 // no objetos escritos a mano con las llaves que la prueba necesita (§7b del diseño).
 //
-//   renta({ id, empleado, recibidoEl })     -> una renta de ese empleado; sin `recibidoEl` el carro sigue afuera
+//   renta({ id, empleado, recibidoEl })     -> una renta de ese empleado; sin `recibidoEl` el carro sigue afuera. Con él, el
+//                                              contrato queda CERRADO (el saldo que apareció al recibir se cobra y no hay garantía
+//                                              que soltar): es la comisión pagable. `cerrada: false` lo deja devuelto con su saldo
+//                                              sin cobrar, y `garantiaSinLiberar: true` con la tarjeta de la garantía todavía retenida:
+//                                              el carro volvió pero el contrato NO cierra, y por eso su comisión no se paga todavía.
 //   rentaDeAntes({ id, rentadoPor })        -> la de antes de la lista de empleados: un nombre escrito a mano,
 //                                              el 5 % de entonces y NI SIQUIERA la llave `empleadoId`
 //
 // 4 días a Q700 dan una base de Q2,800: al 5 % son Q140.00 de comisión; al 0 % de Wilder, Q0.00.
 import { construirContrato } from '../../js/pantallas/sacarCarro.js';
 import { construirCierre } from '../../js/nucleo/cierre.js';
-import { contratoParaGuardar } from '../../js/datos.js';
+import { resumen } from '../../js/nucleo/contrato.js';
+import { agregarPago, contratoParaGuardar } from '../../js/datos.js';
 import { datosDelContratoPara } from '../../js/nucleo/empleado.js';
 
 const AHORA = 1790000000000;
@@ -22,7 +27,7 @@ export const EMPLEADOS = {
 };
 
 function armar({
-  id, numero, datosDelEmpleado, fechaSalida, dias, precioDia, recibidoEl, descuento, ajeno, danos,
+  id, numero, datosDelEmpleado, fechaSalida, dias, precioDia, recibidoEl, descuento, ajeno, danos, cerrada, garantiaSinLiberar,
 }) {
   const salida = construirContrato({
     id,
@@ -37,27 +42,32 @@ function armar({
     fechaSalida,
     dias,
     precioDia,
-    tarjetas: [],
+    tarjetas: garantiaSinLiberar ? [{ ultimos4: '3343', vencimiento: '08/28', banco: 'BAC', autorizacion: 'A1', montoAutorizado: 5000 }] : [],
     forma: 'efectivo',
     porcentajeTarjeta: 0,
     montoPago: dias * precioDia,
     ...datosDelEmpleado,
   });
-  const final = recibidoEl
-    ? construirCierre(salida, {
+  let final = salida;
+  if (recibidoEl) {
+    final = construirCierre(salida, {
       fechaReal: recibidoEl, horaReal: '10:00', lugarEntrada: 'Oficina', kmEntrada: 0, combustible: 0, danos, varios: 0, descuento,
-    })
-    : salida;
+    });
+    // Lo que apareció al recibir (días de atraso, daños) se cobra, salvo que se pida el contrato devuelto con su saldo.
+    const saldo = resumen(final).saldo;
+    if (cerrada && saldo > 0) final = agregarPago(final, { monto: saldo, forma: 'efectivo', porcentajeTarjeta: 0, fecha: recibidoEl });
+  }
   return contratoParaGuardar(final, { id, numero, ahora: AHORA });
 }
 
 /** Una renta de un empleado de la lista: lleva su `empleadoId`, su nombre de ese día y su porcentaje de ese día. */
 export function renta({
   id, numero = 1, empleado = EMPLEADOS.ana, fechaSalida = '2026-10-01', dias = 4, precioDia = 700,
-  recibidoEl = null, descuento = 0, ajeno = false, danos = 0,
+  recibidoEl = null, descuento = 0, ajeno = false, danos = 0, cerrada = true, garantiaSinLiberar = false,
 }) {
   return armar({
     id, numero, datosDelEmpleado: datosDelContratoPara(empleado), fechaSalida, dias, precioDia, recibidoEl, descuento, ajeno, danos,
+    cerrada, garantiaSinLiberar,
   });
 }
 
@@ -67,10 +77,11 @@ export function renta({
  */
 export function rentaDeAntes({
   id, numero = 1, rentadoPor = 'Wilder', porcentajeComision = 5, fechaSalida = '2026-09-25', dias = 4, precioDia = 700,
-  recibidoEl = null, descuento = 0, ajeno = false, danos = 0,
+  recibidoEl = null, descuento = 0, ajeno = false, danos = 0, cerrada = true, garantiaSinLiberar = false,
 }) {
   const guardado = armar({
     id, numero, datosDelEmpleado: { rentadoPor, porcentajeComision }, fechaSalida, dias, precioDia, recibidoEl, descuento, ajeno, danos,
+    cerrada, garantiaSinLiberar,
   });
   const { empleadoId: _no, ...sinLlave } = guardado;
   return sinLlave;

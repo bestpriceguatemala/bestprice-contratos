@@ -7,8 +7,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   cuentaDeEmpleado, agruparPorEmpleado, elegirParaPagoDeComision, totalGeneralDeComisiones, estadoDeComision, rentasSinPagar,
+  sinMarcarDeComision, periodosDePago, quincenaDe,
 } from '../js/nucleo/comisiones.js';
 import { comisionDe } from '../js/nucleo/comision.js';
+import { estadoContrato } from '../js/nucleo/estados.js';
+import { esPagableAlDueno } from '../js/nucleo/liquidacion.js';
 import { q } from '../js/nucleo/dinero.js';
 import { renta, rentaDeAntes, pagoDeComision, EMPLEADOS } from './fixtures/rentasConComision.mjs';
 
@@ -24,10 +27,10 @@ test('la renta de ejemplo: Q2,800 de base al 5 % dan Q140.00 de comisión, firme
 });
 
 // ---------------------------------------------------------------------------
-// Solo se paga lo firme
+// Solo se paga lo firme, y firme es un contrato CERRADO (el dueño, 14 de octubre de 2026)
 // ---------------------------------------------------------------------------
 
-test('una renta con el carro de vuelta es pagable; una que sigue afuera NO: su comisión es un estimado', () => {
+test('una renta de contrato cerrado es pagable; una que sigue afuera NO: su comisión es un estimado', () => {
   const cuenta = cuentaDeEmpleado({ contratos: [firme('c1'), abierta('c2')], pagos: [] });
   assert.deepEqual(cuenta.porPagar.map((c) => c.id), ['c1']);
   assert.deepEqual(cuenta.noFirmes.map((c) => c.id), ['c2']);
@@ -35,7 +38,53 @@ test('una renta con el carro de vuelta es pagable; una que sigue afuera NO: su c
   assert.equal(cuenta.totalEstimado, 140, 'pero se ve cuánto sería, aparte');
 });
 
+test('el carro volvió pero el cliente todavía DEBE: no es pagable, está en «no firmes», y su monto ya se conoce', () => {
+  const conSaldo = renta({ id: 'c1', recibidoEl: '2026-10-05', danos: 200, cerrada: false });
+  assert.equal(estadoContrato(conSaldo), 'devuelto', 'el escenario: devuelto, con Q200 de daños sin cobrar');
+  assert.equal(comisionDe(conSaldo).firme, true, 'el monto sí se conoce: el carro volvió');
+  assert.equal(estadoDeComision(conSaldo), 'sin-cerrar');
+  const cuenta = cuentaDeEmpleado({ contratos: [conSaldo, firme('c2')], pagos: [] });
+  assert.deepEqual(cuenta.porPagar.map((c) => c.id), ['c2']);
+  assert.deepEqual(cuenta.noFirmes.map((c) => c.id), ['c1']);
+  assert.equal(cuenta.totalPorPagar, 140, 'la del cliente que debe no suma');
+  assert.equal(cuenta.totalEstimado, 140);
+  assert.deepEqual(elegirParaPagoDeComision(cuenta, ['c1']), { rentas: [], contratos: [], monto: 0 }, 'ni marcándola a la fuerza');
+});
+
+test('el carro volvió y no se debe nada, pero la GARANTÍA sigue sin liberar: tampoco es pagable', () => {
+  const conGarantia = renta({ id: 'c1', recibidoEl: '2026-10-05', garantiaSinLiberar: true });
+  assert.equal(estadoContrato(conGarantia), 'devuelto');
+  assert.equal(estadoDeComision(conGarantia), 'sin-cerrar');
+  assert.deepEqual(cuentaDeEmpleado({ contratos: [conGarantia], pagos: [] }).noFirmes.map((c) => c.id), ['c1']);
+});
+
+test('cuando el contrato cierra (el cliente paga), la comisión pasa a «por pagar» sin que nada más cambie', () => {
+  const debiendo = renta({ id: 'c1', recibidoEl: '2026-10-05', danos: 200, cerrada: false });
+  const pagado = renta({ id: 'c1', recibidoEl: '2026-10-05', danos: 200 });
+  assert.equal(estadoDeComision(debiendo), 'sin-cerrar');
+  assert.equal(estadoDeComision(pagado), 'por-pagar');
+  assert.equal(comisionDe(debiendo).monto, comisionDe(pagado).monto, 'los daños no entran a la base: el monto es el mismo');
+});
+
+test('UNA SOLA REGLA para los dos pagos: una comisión se paga exactamente cuando se le podría pagar a un dueño de carro ajeno', () => {
+  const casos = [
+    { recibidoEl: null },
+    { recibidoEl: '2026-10-05', danos: 200, cerrada: false },
+    { recibidoEl: '2026-10-05', garantiaSinLiberar: true },
+    { recibidoEl: '2026-10-05' },
+    { recibidoEl: '2026-10-06' },
+    { recibidoEl: '2026-10-05', descuento: 300 },
+  ];
+  for (const [i, caso] of casos.entries()) {
+    const ajena = renta({ id: `a${i}`, ajeno: true, ...caso });
+    const deComision = estadoDeComision(ajena) === 'por-pagar';
+    assert.equal(deComision, esPagableAlDueno(ajena), `${JSON.stringify(caso)}: la comisión y el pago al dueño preguntan lo mismo`);
+    assert.equal(deComision, estadoContrato(ajena) === 'cerrado');
+  }
+});
+
 test('un día de atraso sube la comisión y un descuento la baja: por eso la que sigue afuera es solo un estimado', () => {
+  // (Con atraso el cliente debe esa renta de más: la comisión se paga cuando ya la pagó y el contrato cierra.)
   const alDia = renta({ id: 'c1', recibidoEl: '2026-10-05' }); // prevista 5 oct: a tiempo
   const tarde = renta({ id: 'c2', recibidoEl: '2026-10-06' }); // un día tarde
   const conDescuento = renta({ id: 'c3', recibidoEl: '2026-10-05', descuento: 300 });
@@ -54,20 +103,14 @@ test('marcar una renta que no es firme no la mete al pago: ni su dinero ni su id
   assert.deepEqual(elegirParaPagoDeComision(cuenta, ['c2']), { rentas: [], contratos: [], monto: 0 });
 });
 
-test('«firme» es solo que el carro volvió: aunque el cliente aún deba daños, la comisión ya se conoce', () => {
-  // Con daños el contrato queda abierto (devuelto), pero los daños no entran a la base de la comisión (§5).
-  const devuelto = renta({ id: 'c1', recibidoEl: '2026-10-05', danos: 200 });
-  assert.equal(comisionDe(devuelto).firme, true);
-  const cuenta = cuentaDeEmpleado({ contratos: [devuelto], pagos: [] });
-  assert.deepEqual(cuenta.porPagar.map((c) => c.id), ['c1']);
-});
-
-test('el estado de una comisión lo dice una sola función, y se pregunta por `comisionDe`, no por el campo `estado` guardado', () => {
+test('el estado de una comisión lo dice una sola función, y se pregunta por `estadoContrato`, no por el campo `estado` guardado', () => {
   assert.equal(estadoDeComision(firme('c1')), 'por-pagar');
   assert.equal(estadoDeComision(abierta('c2')), 'estimada');
-  // Un sello `estado` viejo o equivocado no cambia nada: lo que manda es que el carro haya vuelto.
+  // Un sello `estado` viejo o equivocado no cambia nada: lo que manda es lo que dice el contrato (cierre, saldo, garantía).
   assert.equal(estadoDeComision({ ...abierta('c3'), estado: 'cerrado' }), 'estimada');
   assert.equal(estadoDeComision({ ...firme('c4'), estado: 'rentado' }), 'por-pagar');
+  const debiendo = renta({ id: 'c5', recibidoEl: '2026-10-05', danos: 200, cerrada: false });
+  assert.equal(estadoDeComision({ ...debiendo, estado: 'cerrado' }), 'sin-cerrar', 'un sello «cerrado» viejo no la vuelve pagable');
 });
 
 // ---------------------------------------------------------------------------
@@ -166,7 +209,7 @@ test('un pago que sigue cuadrando no avisa nada, ni uno anulado, ni uno que cubr
     'no se afirma nada sobre una comparación que no es de lo mismo contra lo mismo');
 });
 
-test('un pago que cubre una renta que todavía no es firme no afirma nada sobre cuánto suman: ese monto aún se mueve', () => {
+test('un pago que cubre una renta cuyo carro todavía no regresa no afirma nada sobre cuánto suman: ese monto aún se mueve', () => {
   const pagos = [pagoDeComision({ id: 'p1', monto: 999, contratos: ['c1'] })];
   assert.deepEqual(cuentaDeEmpleado({ contratos: [abierta('c1')], pagos }).pagosQueCambiaron, []);
 });
@@ -357,4 +400,96 @@ test('rentasSinPagar: todo lo que no está pagado, de cualquier tipo — y nunca
   const cuenta = cuentaDeEmpleado({ contratos, pagos: [pagoDeComision({ id: 'p1', monto: 140, contratos: ['pagada'] })] });
   assert.deepEqual(rentasSinPagar(cuenta).map((c) => c.id).sort(), ['afuera', 'cero', 'porpagar', 'sinpct']);
   assert.deepEqual(rentasSinPagar(undefined), []);
+});
+
+// ---------------------------------------------------------------------------
+// El dueño paga por quincena y por fin de mes: marcar un período es un clic
+// ---------------------------------------------------------------------------
+
+test('quincenaDe: la primera es del 1 al 15 y la segunda del 16 al fin de mes, en cualquier mes', () => {
+  assert.deepEqual(quincenaDe('2026-10-01'), { mes: '2026-10', quincena: 1 });
+  assert.deepEqual(quincenaDe('2026-10-15'), { mes: '2026-10', quincena: 1 }, 'el 15 todavía es de la primera');
+  assert.deepEqual(quincenaDe('2026-10-16'), { mes: '2026-10', quincena: 2 });
+  assert.deepEqual(quincenaDe('2026-10-31'), { mes: '2026-10', quincena: 2 });
+  assert.deepEqual(quincenaDe('2026-02-28'), { mes: '2026-02', quincena: 2 }, 'un mes de 28 días');
+  assert.deepEqual(quincenaDe('2028-02-29'), { mes: '2028-02', quincena: 2 }, 'y uno bisiesto');
+  assert.deepEqual(quincenaDe('2026-12-16'), { mes: '2026-12', quincena: 2 });
+});
+
+test('quincenaDe: lo que no es una fecha de calendario no es de ninguna quincena', () => {
+  for (const mala of ['', undefined, null, '2026-02-30', '20261-10-05', 'hoy', 20261005]) {
+    assert.strictEqual(quincenaDe(mala), null, JSON.stringify(mala));
+  }
+});
+
+/** Una renta de 2 días que regresa en `regreso` (salió 2 días antes: a tiempo, comisión de Q70). */
+const regresa = (id, regreso, extra = {}) => {
+  const salida = new Date(`${regreso}T12:00:00Z`);
+  salida.setUTCDate(salida.getUTCDate() - 2);
+  return renta({ id, fechaSalida: salida.toISOString().slice(0, 10), dias: 2, recibidoEl: regreso, ...extra });
+};
+
+test('los períodos: por mes, el mes completo y cada quincena que tenga algo, con cuántas rentas y cuánto suman', () => {
+  const contratos = [
+    regresa('a1', '2026-10-03'), regresa('a2', '2026-10-15'), regresa('a3', '2026-10-16'),
+    regresa('a4', '2026-10-31'), regresa('a5', '2026-10-31'),
+  ];
+  const [oct, ...otros] = periodosDePago(cuentaDeEmpleado({ contratos, pagos: [] }));
+  assert.deepEqual(otros, []);
+  assert.equal(oct.mes, '2026-10');
+  assert.deepEqual([oct.cuantas, oct.total], [5, 350]);
+  assert.deepEqual(oct.contratos.sort(), ['a1', 'a2', 'a3', 'a4', 'a5']);
+  assert.deepEqual(oct.quincenas.map((x) => [x.quincena, x.cuantas, x.total]), [[1, 2, 140], [2, 3, 210]]);
+  assert.deepEqual(oct.quincenas[0].contratos.sort(), ['a1', 'a2']);
+  assert.deepEqual(oct.quincenas[1].contratos.sort(), ['a3', 'a4', 'a5']);
+});
+
+test('los períodos: una quincena vacía no se ofrece, y los meses salen del más viejo al más nuevo', () => {
+  const contratos = [regresa('n1', '2026-11-20'), regresa('s1', '2026-09-02'), regresa('o1', '2026-10-17')];
+  const meses = periodosDePago(cuentaDeEmpleado({ contratos, pagos: [] }));
+  assert.deepEqual(meses.map((m) => m.mes), ['2026-09', '2026-10', '2026-11']);
+  assert.deepEqual(meses.map((m) => m.quincenas.map((x) => x.quincena)), [[1], [2], [2]], 'solo las quincenas con algo');
+});
+
+test('los períodos solo cuentan lo PAGABLE: ni lo que no cierra, ni lo ya pagado, ni lo que no genera comisión', () => {
+  const contratos = [
+    regresa('p1', '2026-10-03'),
+    regresa('debe', '2026-10-04', { danos: 200, cerrada: false }),
+    regresa('afuera', '2026-10-05', { recibidoEl: null }),
+    regresa('pagada', '2026-10-06'),
+    regresa('w1', '2026-10-07', { empleado: wilder }),
+  ];
+  const cuenta = cuentaDeEmpleado({ contratos, pagos: [pagoDeComision({ id: 'x', monto: 70, contratos: ['pagada'] })] });
+  const [oct] = periodosDePago(cuenta);
+  assert.deepEqual(oct.contratos, ['p1']);
+  assert.equal(oct.total, 70);
+  assert.deepEqual(periodosDePago(cuentaDeEmpleado({ contratos: [regresa('afuera', '2026-10-05', { recibidoEl: null })], pagos: [] })), []);
+  assert.deepEqual(periodosDePago(undefined), []);
+});
+
+test('una renta cuenta en el período de la fecha en que REGRESÓ el carro, aunque el contrato haya cerrado después', () => {
+  // Regresó el 10 de octubre y el cliente pagó el 18: sigue siendo de la primera quincena.
+  const tarde = regresa('t1', '2026-10-10');
+  const cuenta = cuentaDeEmpleado({ contratos: [tarde, regresa('t2', '2026-10-20')], pagos: [pagoDeComision({ id: 'p', monto: 70, contratos: ['t2'] })] });
+  const [oct] = periodosDePago(cuenta);
+  assert.deepEqual(oct.quincenas.map((x) => [x.quincena, x.contratos]), [[1, ['t1']]]);
+});
+
+test('una renta cuya fecha de regreso no se lee no cae en ningún período, pero sigue siendo pagable a mano', () => {
+  const rara = { ...regresa('r1', '2026-10-03'), cierre: { ...regresa('r1', '2026-10-03').cierre, fechaReal: '2026-10-3x' } };
+  const cuenta = { porPagar: [rara, regresa('b1', '2026-10-04')] };
+  assert.deepEqual(periodosDePago(cuenta).map((m) => m.contratos), [['b1']]);
+});
+
+test('lo que queda SIN MARCAR es el complemento exacto de lo marcado, con su total', () => {
+  const cuenta = cuentaDeEmpleado({ contratos: [regresa('a1', '2026-10-03'), regresa('a2', '2026-10-04'), regresa('a3', '2026-10-20')], pagos: [] });
+  const marcado = elegirParaPagoDeComision(cuenta, ['a1', 'a2']);
+  const resto = sinMarcarDeComision(cuenta, ['a1', 'a2']);
+  assert.deepEqual(resto.contratos, ['a3']);
+  assert.equal(resto.monto, 70);
+  assert.equal(marcado.monto + resto.monto, cuenta.totalPorPagar, 'lo marcado y lo no marcado suman todo lo que se debe');
+  assert.deepEqual(sinMarcarDeComision(cuenta, []).contratos.sort(), ['a1', 'a2', 'a3']);
+  assert.deepEqual(sinMarcarDeComision(cuenta, ['a1', 'a2', 'a3']), { rentas: [], contratos: [], monto: 0 });
+  assert.deepEqual(sinMarcarDeComision(cuenta, ['no-existe']).contratos.length, 3, 'una casilla que no corresponde a nada no quita nada');
+  assert.deepEqual(sinMarcarDeComision(undefined, undefined), { rentas: [], contratos: [], monto: 0 });
 });
