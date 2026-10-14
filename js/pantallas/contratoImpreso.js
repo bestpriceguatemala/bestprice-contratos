@@ -218,7 +218,10 @@ export function armarContratoImpreso({
     contrato, cliente, carro, tarjetas, ajeno, papel,
   };
   const valores = {};
+  // `avisos` son cosas que pueden salir mal en el papel (una fecha inválida, un texto que se sale, una tarjeta que no coincide);
+  // `notas` son lo normal que conviene saber (la tarjeta de una reimpresión sale enmascarada). Las primeras van en rojo.
   const avisos = [];
+  const notas = [];
 
   for (const campo of CAMPOS) {
     if (campo.tipo === 'etiqueta') {
@@ -254,7 +257,7 @@ export function armarContratoImpreso({
       );
     }
     if (!t.completa) {
-      avisos.push(
+      notas.push(
         `Tarjeta ${i + 1}: el papel llevará el número enmascarado (${t.numero || '••••'}) y el CBC en blanco, porque el sistema nunca guarda el número completo ni el CBC. `
         + 'Para imprimirlos, tecléalos abajo: solo se usan para este papel.',
       );
@@ -273,6 +276,7 @@ export function armarContratoImpreso({
     valores,
     tarjetas: tarjetas.map((t) => ({ completa: t.completa })),
     avisos,
+    notas,
   };
 }
 
@@ -372,7 +376,7 @@ const TOQUE_MM = aTexto(PASOS.normal.mm);
 export const PASOS_DE_CALIBRAR = [
   {
     titulo: 'Que la impresora no encoja la hoja',
-    texto: `Con una regla de verdad, mide la distancia entre la marca ${MARCAS_DE_ESCALA.desde} y la marca ${MARCAS_DE_ESCALA.hasta} de la regla del borde de arriba. Tiene que medir ${MARCAS_DE_ESCALA.hasta - MARCAS_DE_ESCALA.desde} mm. Si mide menos, la impresora achicó la hoja: en el diálogo de imprimir elige escala «100 %» (no «Ajustar a la página») y vuelve a imprimirla.`,
+    texto: `Con una regla de verdad, mide la distancia entre la marca ${MARCAS_DE_ESCALA.desde} y la marca ${MARCAS_DE_ESCALA.hasta} de la regla del borde de arriba. Tiene que medir ${MARCAS_DE_ESCALA.hasta - MARCAS_DE_ESCALA.desde} mm. Si mide menos, la impresora achicó la hoja: revisa que la escala del diálogo de imprimir sea «100 %» y vuelve a imprimirla.`,
     corto: `Mide con regla de la marca ${MARCAS_DE_ESCALA.desde} a la ${MARCAS_DE_ESCALA.hasta}: tienen que ser ${MARCAS_DE_ESCALA.hasta - MARCAS_DE_ESCALA.desde} mm. Si no, al imprimir elige escala «100 %».`,
   },
   {
@@ -501,7 +505,7 @@ function quitarPaginaSinMargen() {
 
 const textoDeImpresora = ({ nombre, cal, calibrada }) => (calibrada
   ? `Impresora «${esc(nombre)}»: ${esc(textoDeCalibracion(cal))}.`
-  : `Esta computadora todavía no tiene una impresora calibrada: el primer papel sale corrido. ${esc(textoDeCalibracion(cal))}.`);
+  : `Esta computadora todavía no tiene una impresora calibrada: el primer papel sale corrido (ajuste de fábrica: ${esc(textoDeCalibracion(cal))}).`);
 
 /** Lo que se dice cuando una calibración dejaría casillas fuera de la carta. */
 function textoDeCortadas(ids) {
@@ -515,7 +519,7 @@ function lecturaDe(cal, prefijo = '') {
   return `${prefijo}Ajuste: ${textoDeCalibracion(cal)}.${cortadas.length ? ` ${textoDeCortadas(cortadas)}` : ''}`;
 }
 
-const AYUDA_DE_IMPRIMIR = 'En el diálogo de imprimir: tamaño Carta, escala 100 % (no «Ajustar a la página»), márgenes «Ninguno» y sin encabezados ni pies de página.';
+const AYUDA_DE_IMPRIMIR = 'En el diálogo de imprimir pon siempre: tamaño Carta, escala 100 % (no «Ajustar a la página»), márgenes «Ninguno» y sin encabezados ni pies de página.';
 const AVISO_DE_TARJETA = 'Este papel lleva el número completo de la tarjeta y el CBC: imprímelo directo a la impresora. NO lo guardes como PDF: quedaría un archivo con la tarjeta en la computadora (ADR-001).';
 
 function cajasDeTarjetas(contrato) {
@@ -607,6 +611,7 @@ export function pintarContratoImpreso(contenedor, entrada, {
   <p class="comp-ayuda no-imprimir">${esc(AYUDA_DE_IMPRIMIR)}</p>
   ${cajasDeTarjetas(entrada.contrato)}
   ${cajasDelPapel(entrada.contrato)}
+  <div data-pieza="notas"></div>
   <div data-pieza="avisos"></div>
   <div class="hc-vista" data-pieza="vista"></div>
 </div>`;
@@ -614,6 +619,7 @@ export function pintarContratoImpreso(contenedor, entrada, {
   const el = (id) => contenedor.querySelector(id);
 
   function pintarAvisos() {
+    el('[data-pieza="notas"]').innerHTML = modelo.notas.map((n) => `<p class="comp-ayuda no-imprimir">${esc(n)}</p>`).join('');
     const caja = el('[data-pieza="avisos"]');
     // Con la calibración de esta impresora, ¿alguna casilla que lleva dato se saldría de la carta? Se cortaría en el papel.
     const cortadas = camposFueraDeLaCarta(impresora.cal).filter((id) => modelo.valores[id]);

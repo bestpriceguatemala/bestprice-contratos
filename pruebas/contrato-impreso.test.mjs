@@ -482,7 +482,9 @@ test('ADR-001: sin lo tecleado, la tarjeta sale enmascarada con los últimos 4 y
   assert.equal(modelo.valores.tarjeta2Numero, '•••• 1111');
   assert.equal(modelo.valores.tarjeta2Cbc, '');
   assert.deepEqual(modelo.tarjetas, [{ completa: false }, { completa: false }]);
-  assert.equal(modelo.avisos.filter((a) => /enmascarado/.test(a)).length, 2);
+  // enmascarada es lo normal de una reimpresión: es una NOTA, no un aviso en rojo
+  assert.equal(modelo.notas.filter((a) => /enmascarado/.test(a)).length, 2);
+  assert.deepEqual(modelo.avisos, [], 'sin nada que pueda salir mal, ningún aviso');
   // sin número tecleado no hay nada que comparar con los últimos 4: ningún aviso de «no termina como la tarjeta»
   assert.ok(!modelo.avisos.some((a) => /no termina/.test(a)));
 });
@@ -805,7 +807,7 @@ test('los pasos dicen qué comparar y en qué orden: escala, formulario, posici�
   // 1. que la impresora no encoja la hoja, medido con la regla de la hoja
   assert.match(escala.texto, /marca 10 y la marca 110/);
   assert.match(escala.texto, /100 mm/);
-  assert.match(escala.texto, /escala «100 %»/);
+  assert.match(escala.texto, /escala del diálogo de imprimir sea «100 %»/);
   assert.equal(MARCAS_DE_ESCALA.hasta - MARCAS_DE_ESCALA.desde, 100);
   // 2. ponerla sobre el formulario y mirar las cuatro casillas, que se nombran todas
   for (const h of HITOS) assert.ok(formulario.texto.includes(`${h.n} = ${h.que} (${h.donde})`), `${h.n} sin nombrar`);
@@ -861,6 +863,7 @@ function contenedorFalso() {
     },
     vista: () => nodo('[data-pieza="vista"]').innerHTML,
     avisos: () => nodo('[data-pieza="avisos"]').innerHTML,
+    notas: () => nodo('[data-pieza="notas"]').innerHTML,
   };
 }
 
@@ -992,8 +995,9 @@ test('ADR-001, de punta a punta: el número y el CBC llegan a la hoja que se imp
     // ya se ve en la hoja, y los avisos de «va enmascarado» de esa tarjeta se apagaron
     assert.ok(c.vista().includes(NUMERO_COMPLETO));
     assert.ok(c.vista().includes(`<span class="hc-t">${CBC}</span>`));
-    assert.ok(!/Tarjeta 1: el papel llevará/.test(c.avisos()));
-    assert.ok(/Tarjeta 2: el papel llevará/.test(c.avisos()), 'la segunda sigue enmascarada y lo dice');
+    assert.ok(!/Tarjeta 1: el papel llevará/.test(c.notas()));
+    assert.ok(/Tarjeta 2: el papel llevará/.test(c.notas()), 'la segunda sigue enmascarada y lo dice');
+    assert.ok(!/Tarjeta 2: el papel llevará/.test(c.avisos()), 'y no en rojo: es lo normal');
     // se imprime
     c.nodo('[data-accion="imprimir"]').oyentes.click();
   });
@@ -1009,6 +1013,7 @@ test('ADR-001, de punta a punta: el número y el CBC llegan a la hoja que se imp
   assert.ok(c.vista().includes('•••• 3343'));
   assert.ok(!c.innerHTML.includes('4111') && !c.innerHTML.includes(CBC));
   assert.ok(!c.avisos().includes('4111') && !c.avisos().includes(CBC));
+  assert.ok(!c.notas().includes('4111') && !c.notas().includes(CBC));
 
   // 3. Nada se guardó ni se mandó: ni el almacén de la calibración, ni localStorage, sessionStorage, IndexedDB, red o consola
   assert.deepEqual(almacen.escrituras, [], 'la pantalla de imprimir no guarda nada en el almacén');
@@ -1555,6 +1560,10 @@ test('la hoja de estilos: la página es la carta sin margen, la hoja ocupa la ca
   assert.match(campo, /position:\s*absolute;/);
   assert.ok(!/transform/.test(campo));
 
+  // las cajas de lo que el sistema no guarda van con su nombre encima, en fila que baja de renglón
+  const datos = bloqueDesde(css, css.indexOf('\n.hc-datos {\n  display: flex;'));
+  assert.match(datos, /flex-wrap:\s*wrap;/);
+  assert.match(bloqueDesde(css, css.indexOf('\n.hc-datos label {')), /display:\s*grid;/);
   // el texto de arriba y el del medio bajan lo que mide la diferencia con el PDF de Excel (medida en Chrome, ver el informe)
   assert.match(bloqueDesde(css, css.indexOf('\n.hc-arriba {')), /align-items:\s*flex-start;\s*padding-top:\s*0\.47mm;/);
   assert.match(bloqueDesde(css, css.indexOf('\n.hc-medio {')), /align-items:\s*center;\s*padding-top:\s*0\.48mm;/);

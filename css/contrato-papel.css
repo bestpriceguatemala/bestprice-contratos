@@ -19,8 +19,27 @@
 }
 
 .hc-tarjetas,
-.hc-calibracion {
+.hc-calibracion,
+.hc-datos {
   margin: 12px 0;
+}
+
+/* Lo que el papel lleva y el sistema no guarda: cada caja con su nombre encima, como las de la tarjeta. */
+.hc-datos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: end;
+}
+
+.hc-datos .comp-ayuda {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.hc-datos label {
+  display: grid;
+  gap: 4px;
 }
 
 .hc-tarjeta {
