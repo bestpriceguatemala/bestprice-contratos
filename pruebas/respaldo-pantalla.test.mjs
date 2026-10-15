@@ -374,3 +374,18 @@ test('lo inesperado también dice que NO se bajó nada y cómo reintentar', () =
   assert.match(MENSAJE_GENERICO, /^No se bajó nada/);
   assert.match(MENSAJE_GENERICO, /vuelve a apretar el botón/);
 });
+
+// ---------------------------------------------------------------------------
+// El dibujo: lo que se vio con los ojos en el navegador y ninguna prueba de texto ve
+// ---------------------------------------------------------------------------
+
+test('respaldo.css: los botones de la pantalla y del aviso son del tamaño de su texto — el `.btn` global es de ancho completo y aplastaba el texto del año a 50 px', () => {
+  const css = leer('../css/respaldo.css');
+  const regla = /([^{}]*\.rs-anio \.btn[^{}]*)\{([^{}]*)\}/.exec(css);
+  assert.ok(regla, 'falta la regla de los botones');
+  for (const selector of ['.rs-anio .btn', '.rs-otro .btn', '.rs-recordatorio .btn']) assert.ok(regla[1].includes(selector), selector);
+  assert.match(regla[2], /width:\s*auto/);
+  assert.match(regla[2], /margin:\s*0/);
+  const texto = /\.rs-anio > div\s*\{([^{}]*)\}/.exec(css);
+  assert.ok(texto && /flex:\s*1 1 auto/.test(texto[1]) && /min-width:\s*0/.test(texto[1]), 'el texto del año ocupa lo que sobra');
+});

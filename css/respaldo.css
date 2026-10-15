@@ -84,9 +84,20 @@
   margin-left: 6px;
 }
 
-.rs-anio .btn {
+/* El `.btn` de estilos.css es de ancho completo y trae margen de arriba (sirve en las tarjetas de carro); aquí el botón es del
+   tamaño de su texto y no empuja a su vecino. Sin esto, el texto del año se aplastaba a una columna de 50 px. */
+.rs-anio .btn,
+.rs-otro .btn,
+.rs-recordatorio .btn {
   flex: 0 0 auto;
+  width: auto;
+  margin: 0;
   white-space: nowrap;
+}
+
+.rs-anio > div {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .rs-otro {
@@ -179,6 +190,5 @@
 }
 
 .rs-recordatorio .btn {
-  flex: 0 0 auto;
   text-decoration: none;
 }
