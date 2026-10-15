@@ -88,8 +88,10 @@ export async function leerDatosDelRespaldo(anio, {
 
   if (fallaron.length) {
     const unicas = [...new Set(fallaron)];
+    // «no se pudo leer el costo…» (una sola cosa, en singular) / «no se pudieron leer los clientes y los carros…» (todo lo demás).
+    const verbo = unicas.length === 1 && unicas[0].startsWith('el costo') ? 'no se pudo leer' : 'no se pudieron leer';
     throw new ErrorDeRespaldo(
-      `No se bajó nada: no se pudo leer ${enLista(unicas)} de la nube, y sin eso el archivo quedaría incompleto aunque pareciera completo. ${COMO_REINTENTAR}`,
+      `No se bajó nada: ${verbo} ${enLista(unicas)} de la nube, y sin eso el archivo quedaría incompleto aunque pareciera completo. ${COMO_REINTENTAR}`,
     );
   }
   return { clientes, vehiculos, contratos: contratos.datos, pagosDueno: pagos.datos };

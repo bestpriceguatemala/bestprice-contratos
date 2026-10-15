@@ -70,7 +70,7 @@ async function seNiega(deps, quien) {
     () => leerDatosDelRespaldo(2026, deps),
     (e) => {
       assert.ok(e instanceof ErrorDeRespaldo, `ErrorDeRespaldo, no ${e?.constructor?.name}`);
-      assert.match(e.message, /^No se bajó nada: no se pudo leer /);
+      assert.match(e.message, /^No se bajó nada: no se pudieron leer /);
       assert.ok(e.message.includes(FRASES[quien]), `dice cuál falló: ${e.message}`);
       for (const [otra, frase] of Object.entries(FRASES)) if (otra !== quien) assert.ok(!e.message.includes(frase), `no acusa a ${frase}: ${e.message}`);
       assert.match(e.message, REINTENTAR);
@@ -108,12 +108,12 @@ test('si fallan varias a la vez, el mensaje las dice TODAS, no solo la primera',
   const nube = nubeConDatos({ fallan: [{ op: 'getDocs', ruta: 'clientes' }, { op: 'getDocs', ruta: 'vehiculos' }] });
   await assert.rejects(
     () => leerDatosDelRespaldo(2026, conDinero(nube)),
-    (e) => /no se pudo leer los clientes y los carros de la flota de la nube/.test(e.message) && REINTENTAR.test(e.message),
+    (e) => /no se pudieron leer los clientes y los carros de la flota de la nube/.test(e.message) && REINTENTAR.test(e.message),
   );
   const todas = nubeConDatos({ fallan: [{ op: 'getDocs', ruta: 'clientes' }] });
   await assert.rejects(
     () => leerDatosDelRespaldo(2026, { ...conDinero(todas), cargarContratos: async () => { throw new Error('x'); }, cargarPagos: async () => ({ datos: null, fallo: true }) }),
-    (e) => /los contratos, los pagos a los dueños de carros y los clientes de la nube/.test(e.message),
+    (e) => /no se pudieron leer los contratos, los pagos a los dueños de carros y los clientes de la nube/.test(e.message),
   );
 });
 
