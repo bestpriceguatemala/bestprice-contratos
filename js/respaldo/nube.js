@@ -37,39 +37,60 @@ async function leerColeccion(nombre, iniciar) {
   return instantanea.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
+/** Lo que se le dice para volver a intentar: el botón sigue ahí, y recargar es lo último. */
+const COMO_REINTENTAR = 'Revisa tu internet y vuelve a apretar el botón; si sigue igual, recarga la página.';
+
+/** «los clientes», «los clientes y los carros», «los clientes, los carros y los pagos a dueños». */
+function enLista(partes) {
+  if (partes.length <= 1) return partes.join('');
+  return `${partes.slice(0, -1).join(', ')} y ${partes.at(-1)}`;
+}
+
 /**
  * Todo lo que el respaldo de ese año necesita, leído de la nube: `{ clientes, vehiculos, contratos, pagosDueno }`.
  * Los contratos son los de ese año (por `fechaSalida`) y traen el costo del dueño ya puesto en `subarriendo.costoDia`.
  *
- * LANZA `ErrorDeRespaldo` con una frase para el dueño si falta la sesión de dinero o si CUALQUIER lectura falló.
+ * LANZA `ErrorDeRespaldo` con una frase para el dueño si falta la sesión de dinero o si CUALQUIER lectura falló, y la
+ * frase dice CUÁL (o cuáles) y cómo volver a intentar. Un respaldo que se baja con una lectura caída es la peor falla
+ * posible de esta pantalla: el archivo abre, las fórmulas calculan, todo se ve bien, y le faltan los clientes — y nadie
+ * audita un archivo que abre. Por eso no se entrega NADA: ni un archivo parcial, ni uno con una hoja vacía, ni uno con una
+ * nota adentro. Se esperan todas las lecturas (no solo la primera que falle) para decir todas las que fallaron.
  */
 export async function leerDatosDelRespaldo(anio, {
   iniciar = iniciarFirebase, dbDinero = dbDeDinero, cargarContratos = cargarContratosParaDinero, cargarPagos = cargarPagosDueno,
 } = {}) {
   if (!dbDinero()) throw new ErrorDeRespaldo(MENSAJE_SIN_DINERO);
 
-  let contratos; let pagos; let clientes; let vehiculos;
-  try {
-    [contratos, pagos, clientes, vehiculos] = await Promise.all([
-      cargarContratos(rangoDelAnio(anio), undefined, { iniciar, dbDinero }),
-      cargarPagos({ iniciar, dbDinero }),
-      leerColeccion('clientes', iniciar),
-      leerColeccion('vehiculos', iniciar),
-    ]);
-  } catch (error) {
-    console.error('El respaldo no pudo leer de la nube:', error);
-    throw new ErrorDeRespaldo('No se pudo leer todo de la nube. Revisa tu internet e intenta de nuevo: no se arma un respaldo con datos a medias.');
-  }
+  const lecturas = [
+    ['los contratos', () => cargarContratos(rangoDelAnio(anio), undefined, { iniciar, dbDinero })],
+    ['los pagos a los dueños de carros', () => cargarPagos({ iniciar, dbDinero })],
+    ['los clientes', () => leerColeccion('clientes', iniciar)],
+    ['los carros de la flota', () => leerColeccion('vehiculos', iniciar)],
+  ];
+  const resultados = await Promise.allSettled(lecturas.map(([, leer]) => leer()));
+  const [contratos, pagos, clientes, vehiculos] = resultados.map((r) => (r.status === 'fulfilled' ? r.value : null));
 
-  if (contratos.fallo || !Array.isArray(contratos.datos)) {
-    throw new ErrorDeRespaldo('No se pudieron leer los contratos de la nube. No se arma el respaldo con la copia de esta computadora: podría estar atrasada. Revisa tu internet e intenta de nuevo.');
-  }
-  if (contratos.costoSinLeer?.length) {
-    const n = contratos.costoSinLeer.length;
-    throw new ErrorDeRespaldo(`No se pudo leer el costo del dueño de ${n} renta${n === 1 ? '' : 's'}. Sin eso el archivo diría una utilidad que no es. Revisa tu internet e intenta de nuevo.`);
-  }
-  if (pagos.fallo || !Array.isArray(pagos.datos)) {
-    throw new ErrorDeRespaldo('No se pudieron leer los pagos a los dueños de carros. Sin ellos el archivo no sabría qué rentas ya se pagaron. Revisa tu internet e intenta de nuevo.');
+  // Una lectura puede fallar de dos maneras: lanzando, o devolviendo `fallo: true` (las pantallas sirven la copia de esta
+  // computadora en ese caso, y para un respaldo esa copia podría estar atrasada). Las dos son lo mismo aquí.
+  const cayeron = new Set();
+  resultados.forEach((r, i) => {
+    if (r.status === 'rejected') {
+      console.error(`El respaldo no pudo leer ${lecturas[i][0]} de la nube:`, r.reason);
+      cayeron.add(i);
+    }
+  });
+  if (contratos && (contratos.fallo || !Array.isArray(contratos.datos))) cayeron.add(0);
+  if (pagos && (pagos.fallo || !Array.isArray(pagos.datos))) cayeron.add(1);
+  // En el orden en que se leen, no en el orden en que se descubrió el fallo: el mensaje sale igual cada vez.
+  const fallaron = lecturas.filter((_, i) => cayeron.has(i)).map(([que]) => que);
+  const sinCosto = contratos && !cayeron.has(0) ? (contratos.costoSinLeer?.length ?? 0) : 0;
+  if (sinCosto) fallaron.push(`el costo del dueño de ${sinCosto} renta${sinCosto === 1 ? '' : 's'}`);
+
+  if (fallaron.length) {
+    const unicas = [...new Set(fallaron)];
+    throw new ErrorDeRespaldo(
+      `No se bajó nada: no se pudo leer ${enLista(unicas)} de la nube, y sin eso el archivo quedaría incompleto aunque pareciera completo. ${COMO_REINTENTAR}`,
+    );
   }
   return { clientes, vehiculos, contratos: contratos.datos, pagosDueno: pagos.datos };
 }

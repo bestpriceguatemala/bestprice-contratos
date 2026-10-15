@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   htmlDeLaPantalla, htmlDelRecordatorio, textoDelEstadoDelAnio, crearElRespaldo, mostrarElRecordatorioDeRespaldo,
-  olvidarElDescarteDelRecordatorio, AVISO_DE_PRIVACIDAD, RUTA_DEL_RESPALDO,
+  olvidarElDescarteDelRecordatorio, AVISO_DE_PRIVACIDAD, RUTA_DEL_RESPALDO, bajarLaPlantilla, MENSAJE_SIN_PLANTILLA, MENSAJE_GENERICO,
 } from '../js/pantallas/respaldo.js';
 import { estadoDeLosAnios } from '../js/nucleo/respaldo.js';
 import { NO_SE_RESPALDA, ErrorDeRespaldo } from '../js/respaldo/mapa.js';
@@ -347,4 +347,30 @@ test('nada más de lo que dibuja el respaldo encima de otra pantalla puede salir
   assert.deepEqual(inserciones.sort(), ['appendChild', 'insertBefore'], inserciones.join(', '));
   assert.match(fuente, /app\.insertBefore\(aviso, pantalla\)/);
   assert.match(fuente, /document\.body\.appendChild\(enlace\)/);
+});
+
+// ---------------------------------------------------------------------------
+// La plantilla y el mensaje de lo inesperado: NO se baja nada y se dice por qué
+// ---------------------------------------------------------------------------
+
+test('la plantilla que no se puede bajar (sin red, 404, o llega a medias) se niega diciendo cuál es el problema y cómo reintentar', async () => {
+  const quien = (pedir) => assert.rejects(() => bajarLaPlantilla(pedir), (e) => e instanceof ErrorDeRespaldo && e.message === MENSAJE_SIN_PLANTILLA);
+  await quien(async () => { throw new TypeError('Failed to fetch'); });
+  await quien(async () => ({ ok: false, status: 404 }));
+  await quien(async () => ({ ok: true, arrayBuffer: async () => { throw new Error('conexión cortada'); } }));
+  assert.match(MENSAJE_SIN_PLANTILLA, /^No se bajó nada: no se pudo bajar la plantilla/);
+  assert.match(MENSAJE_SIN_PLANTILLA, /vuelve a apretar el botón; si sigue igual, recarga la página/);
+  const bien = await bajarLaPlantilla(async () => ({ ok: true, arrayBuffer: async () => Uint8Array.from([1, 2, 3]).buffer }));
+  assert.deepEqual([...bien], [1, 2, 3]);
+});
+
+test('si la plantilla no baja, NO se entrega nada y NO se anota nada', async () => {
+  const { orden, deps } = llamadas({ cargarPlantilla: async () => { throw new ErrorDeRespaldo(MENSAJE_SIN_PLANTILLA); } });
+  await assert.rejects(() => crearElRespaldo(deps), /No se bajó nada/);
+  assert.deepEqual(orden, ['leer 2026']);
+});
+
+test('lo inesperado también dice que NO se bajó nada y cómo reintentar', () => {
+  assert.match(MENSAJE_GENERICO, /^No se bajó nada/);
+  assert.match(MENSAJE_GENERICO, /vuelve a apretar el botón/);
 });

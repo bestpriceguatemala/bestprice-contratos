@@ -54,34 +54,81 @@ test('sin sesión de dinero NO se arma: se pide la segunda contraseña, y no se 
   assert.equal(nube.llamadas.length, 0);
 });
 
-test('si la lectura de los contratos falla NO se arma con la copia de esta computadora, aunque la copia traiga datos', async () => {
-  const nube = nubeConDatos();
-  const copiaLocal = { datos: [F.rentadoAlDia()], fallo: true, costoSinLeer: [] };
+// Cada lectura que el archivo necesita, rota a propósito. Lo que se exige de TODAS es lo mismo: no se arma nada, el mensaje dice
+// CUÁL falló (y solo esa) y dice cómo volver a intentar. Un respaldo que se baja con una lectura caída abre, calcula y se ve
+// bien, y le faltan los clientes: nadie audita un archivo que abre.
+const REINTENTAR = /vuelve a apretar el botón; si sigue igual, recarga la página/;
+const FRASES = {
+  contratos: 'los contratos',
+  pagos: 'los pagos a los dueños de carros',
+  clientes: 'los clientes',
+  carros: 'los carros de la flota',
+};
+
+async function seNiega(deps, quien) {
   await assert.rejects(
-    () => leerDatosDelRespaldo(2026, { ...conDinero(nube), cargarContratos: async () => copiaLocal }),
-    (e) => e instanceof ErrorDeRespaldo && /contratos/.test(e.message) && /copia de esta computadora/.test(e.message),
+    () => leerDatosDelRespaldo(2026, deps),
+    (e) => {
+      assert.ok(e instanceof ErrorDeRespaldo, `ErrorDeRespaldo, no ${e?.constructor?.name}`);
+      assert.match(e.message, /^No se bajó nada: no se pudo leer /);
+      assert.ok(e.message.includes(FRASES[quien]), `dice cuál falló: ${e.message}`);
+      for (const [otra, frase] of Object.entries(FRASES)) if (otra !== quien) assert.ok(!e.message.includes(frase), `no acusa a ${frase}: ${e.message}`);
+      assert.match(e.message, REINTENTAR);
+      return true;
+    },
+    quien,
   );
+}
+
+test('si falla la lectura de los CLIENTES: no se arma, dice «los clientes» y cómo reintentar', async () => {
+  const nube = nubeConDatos({ fallan: [{ op: 'getDocs', ruta: 'clientes' }] });
+  await seNiega(conDinero(nube), 'clientes');
+});
+
+test('si falla la lectura de los CARROS: no se arma, dice «los carros de la flota» y cómo reintentar', async () => {
+  const nube = nubeConDatos({ fallan: [{ op: 'getDocs', ruta: 'vehiculos' }] });
+  await seNiega(conDinero(nube), 'carros');
+});
+
+test('si falla la lectura de los PAGOS A DUEÑOS (lanzando o con `fallo`): no se arma y lo dice', async () => {
+  const nube = nubeConDatos();
+  await seNiega({ ...conDinero(nube), cargarPagos: async () => ({ datos: null, fallo: true }) }, 'pagos');
+  await seNiega({ ...conDinero(nube), cargarPagos: async () => { throw new Error('sin internet'); } }, 'pagos');
+});
+
+test('si falla la lectura de los CONTRATOS (lanzando, o con `fallo` y la copia de esta computadora de relleno): no se arma y lo dice', async () => {
+  const nube = nubeConDatos();
+  // Con `fallo: true` las pantallas sirven la copia local: un respaldo armado con ella parecería completo y podría estar atrasado.
+  const copiaLocal = { datos: [F.rentadoAlDia()], fallo: true, costoSinLeer: [] };
+  await seNiega({ ...conDinero(nube), cargarContratos: async () => copiaLocal }, 'contratos');
+  await seNiega({ ...conDinero(nube), cargarContratos: async () => { throw new Error('sin internet'); } }, 'contratos');
+});
+
+test('si fallan varias a la vez, el mensaje las dice TODAS, no solo la primera', async () => {
+  const nube = nubeConDatos({ fallan: [{ op: 'getDocs', ruta: 'clientes' }, { op: 'getDocs', ruta: 'vehiculos' }] });
+  await assert.rejects(
+    () => leerDatosDelRespaldo(2026, conDinero(nube)),
+    (e) => /no se pudo leer los clientes y los carros de la flota de la nube/.test(e.message) && REINTENTAR.test(e.message),
+  );
+  const todas = nubeConDatos({ fallan: [{ op: 'getDocs', ruta: 'clientes' }] });
+  await assert.rejects(
+    () => leerDatosDelRespaldo(2026, { ...conDinero(todas), cargarContratos: async () => { throw new Error('x'); }, cargarPagos: async () => ({ datos: null, fallo: true }) }),
+    (e) => /los contratos, los pagos a los dueños de carros y los clientes de la nube/.test(e.message),
+  );
+});
+
+test('una lectura caída no deja NADA en la mano: la función lanza, no devuelve un archivo a medias ni una lista vacía', async () => {
+  const nube = nubeConDatos({ fallan: [{ op: 'getDocs', ruta: 'clientes' }] });
+  let devolvio = 'nada';
+  try { devolvio = await leerDatosDelRespaldo(2026, conDinero(nube)); } catch { /* lo esperado */ }
+  assert.equal(devolvio, 'nada');
 });
 
 test('si no se pudo leer el costo del dueño de alguna renta NO se arma: el archivo diría una utilidad falsa', async () => {
   const nube = nubeConDatos({ fallan: [{ op: 'getDoc', ruta: 'contratos/c-ajeno-debe/privado/dinero' }] });
   await assert.rejects(
     () => leerDatosDelRespaldo(2026, conDinero(nube)),
-    (e) => e instanceof ErrorDeRespaldo && /costo del dueño de 1 renta/.test(e.message),
-  );
-});
-
-test('si falla la lectura de los clientes, de los carros o de los pagos a dueños, NO se arma, y cada una dice cuál', async () => {
-  for (const [coleccion, patron] of [['clientes', /no se arma un respaldo con datos a medias/], ['vehiculos', /no se arma un respaldo con datos a medias/]]) {
-    const nube = nubeConDatos({ fallan: [{ op: 'getDocs', ruta: coleccion }] });
-    // La falla del fake se declara por colección en `ruta`; getDocs la compara con el nombre de la colección.
-    nube.fallan.splice(0, nube.fallan.length, { op: 'getDocs', ruta: coleccion });
-    await assert.rejects(() => leerDatosDelRespaldo(2026, conDinero(nube)), (e) => e instanceof ErrorDeRespaldo && patron.test(e.message), coleccion);
-  }
-  const sinPagos = nubeConDatos();
-  await assert.rejects(
-    () => leerDatosDelRespaldo(2026, { ...conDinero(sinPagos), cargarPagos: async () => ({ datos: null, fallo: true }) }),
-    (e) => e instanceof ErrorDeRespaldo && /pagos a los dueños/.test(e.message),
+    (e) => e instanceof ErrorDeRespaldo && /No se bajó nada: no se pudo leer el costo del dueño de 1 renta de la nube/.test(e.message) && REINTENTAR.test(e.message),
   );
 });
 

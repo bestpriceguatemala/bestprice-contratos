@@ -27,7 +27,8 @@ export const RUTA_DEL_RESPALDO = '#/dinero/respaldo';
 const TIPO_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const ANIO_MAS_VIEJO = 2000;
 
-export const MENSAJE_GENERICO = 'No se pudo armar el respaldo. Revisa tu internet e intenta de nuevo; si sigue igual, recarga la página o avisa a quien lleva el sistema.';
+export const MENSAJE_GENERICO = 'No se bajó nada: no se pudo armar el respaldo. Revisa tu internet y vuelve a apretar el botón; si sigue igual, recarga la página o avisa a quien lleva el sistema.';
+export const MENSAJE_SIN_PLANTILLA = 'No se bajó nada: no se pudo bajar la plantilla del archivo (la hoja de tu Excel que viaja con el sistema). Revisa tu internet y vuelve a apretar el botón; si sigue igual, recarga la página.';
 
 /** La advertencia de §10. Lleva las tres cosas que el archivo trae de los clientes, por su nombre. */
 export const AVISO_DE_PRIVACIDAD = {
@@ -42,9 +43,19 @@ export const AVISO_DE_PRIVACIDAD = {
 
 /** La plantilla que viaja con el sistema (su Excel, sin datos de nadie). `no-cache`: si se actualiza, se baja la nueva. */
 export async function bajarLaPlantilla(pedir = fetch) {
-  const respuesta = await pedir(new URL('../../plantilla/best-price.xlsx', import.meta.url), { cache: 'no-cache' });
-  if (!respuesta.ok) throw new ErrorDeRespaldo('No se pudo bajar la plantilla del archivo de Excel. Revisa tu internet e intenta de nuevo.');
-  return new Uint8Array(await respuesta.arrayBuffer());
+  let respuesta = null;
+  try {
+    respuesta = await pedir(new URL('../../plantilla/best-price.xlsx', import.meta.url), { cache: 'no-cache' });
+  } catch (error) {
+    console.error('No se pudo bajar la plantilla del respaldo:', error);
+  }
+  if (!respuesta?.ok) throw new ErrorDeRespaldo(MENSAJE_SIN_PLANTILLA);
+  try {
+    return new Uint8Array(await respuesta.arrayBuffer());
+  } catch (error) {
+    console.error('La plantilla del respaldo llegó a medias:', error);
+    throw new ErrorDeRespaldo(MENSAJE_SIN_PLANTILLA);
+  }
 }
 
 /** Le entrega el archivo al navegador, que lo guarda en descargas. Solo en el navegador. */
