@@ -122,7 +122,7 @@ export function construirContrato(datos) {
     seguroDia, seguroTercerosDia, seguroMenoresDia, seguroPaiDia, deducible, deducibleBajo,
     cartaPoderDestino, cartaPoderPrecio, variosDescripcion, variosPrecio,
     tarjetas = [], forma, porcentajeTarjeta, montoPago,
-    rentadoPor, empleadoId, porcentajeComision,
+    rentadoPor, empleadoId, empleadoCodigo, porcentajeComision,
     conductorAdicional, observaciones,
   } = datos;
 
@@ -223,6 +223,10 @@ export function construirContrato(datos) {
     // porcentaje que tenía ese día. Es null (y no ausente) cuando no hay empleado, y los contratos de antes de
     // este campo ni siquiera traen la llave: nada de lo que lo lea puede exigirlo.
     empleadoId: empleadoId || null,
+    // El código del empleado ese día: lo que pide la casilla «PREPARADO POR (CODIGO)» del papel, y lo que una reimpresión tiene que
+    // volver a decir aunque después le cambien el código. Texto, o null si no hay (nunca un '' que parezca un código). Los contratos
+    // de antes de este campo ni siquiera traen la llave, y no se les inventa uno.
+    empleadoCodigo: String(empleadoCodigo ?? '').trim() || null,
     porcentajeComision: porcentajeComisionNum,
     conductorAdicional: { ...conductorAdicional },
     observaciones: observaciones || '',
@@ -457,7 +461,9 @@ export function leerFormularioDe({ texto, num, marcado }, estado, numero) {
   const ajeno = marcado('sc-ajeno');
   // Del empleado escogido salen el id, el nombre de ese día y el porcentaje de ese día; no se lee ningún campo: el
   // mostrador no escribe ni ve el porcentaje (§12b). Sin empleado (o sin porcentaje) quedan vacíos y no se guarda.
-  const delEmpleado = datosDelContratoPara(empleadoEscogido) ?? { empleadoId: null, rentadoPor: '', porcentajeComision: null };
+  const delEmpleado = datosDelContratoPara(empleadoEscogido) ?? {
+    empleadoId: null, empleadoCodigo: null, rentadoPor: '', porcentajeComision: null,
+  };
   const dueno = duenoDelContrato({
     escogido: duenoEscogido, buscado: texto('sc-dueno-buscar'), nuevo: texto('sc-nd-nombre'),
   });
@@ -503,6 +509,7 @@ export function leerFormularioDe({ texto, num, marcado }, estado, numero) {
     montoPago: num('sc-pago-monto'),
     rentadoPor: delEmpleado.rentadoPor,
     empleadoId: delEmpleado.empleadoId,
+    empleadoCodigo: delEmpleado.empleadoCodigo,
     porcentajeComision: delEmpleado.porcentajeComision,
     conductorAdicional: {
       nombre: texto('sc-conductor-nombre'),

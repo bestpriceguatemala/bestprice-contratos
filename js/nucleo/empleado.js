@@ -141,8 +141,16 @@ export function ordenarEmpleados(lista) {
 /**
  * Lo que el contrato guarda del empleado que lo rentó: su `id` (para juntar todo lo suyo
  * en una cuenta), su nombre de ESE día (un dato de ese contrato, como `carroAjeno.dueno`: si
- * después se corrige el nombre en la ficha, el contrato sigue diciendo quién lo rentó) y su
- * porcentaje de ESE día (sellado: subirlo después no mueve lo ya ganado).
+ * después se corrige el nombre en la ficha, el contrato sigue diciendo quién lo rentó), su
+ * porcentaje de ESE día (sellado: subirlo después no mueve lo ya ganado) y su CÓDIGO de ESE día
+ * (`empleadoCodigo`).
+ *
+ * El código se sella por la misma razón que el porcentaje, y más fuerte: la casilla del papel
+ * preimpreso donde cae «quién lo rentó» se llama «PREPARADO POR (CODIGO)» y pide el código, no el
+ * nombre. El papel impreso ese día llevó ese código, y una reimpresión tiene que decir lo mismo que
+ * el original aunque después le cambien el código al empleado (el mismo principio del comprobante
+ * del dueño de un carro ajeno). Es `null`, no `''`, si el empleado no tiene un código escrito: un
+ * vacío no se parece a un código. Los contratos de antes no traen este campo y no se les inventa.
  *
  * `null` si no hay empleado o no tiene un porcentaje legible: ningún contrato se sella con un
  * porcentaje inventado. El 0 de Wilder se conserva como 0.
@@ -153,6 +161,7 @@ export function datosDelContratoPara(empleado) {
   return {
     empleadoId: empleado.id,
     rentadoPor: String(empleado.nombre ?? '').trim(),
+    empleadoCodigo: String(empleado.codigo ?? '').trim() || null,
     porcentajeComision: porcentaje,
   };
 }

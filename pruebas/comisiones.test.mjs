@@ -265,6 +265,7 @@ test('las rentas con `empleadoId` se juntan por empleado aunque el nombre de ese
 test('las rentas de antes (solo el nombre escrito a mano) siguen apareciendo y pagándose, agrupadas por ese texto y sin enlazar', () => {
   const vieja = rentaDeAntes({ id: 'v1', rentadoPor: 'Pedro', recibidoEl: '2026-09-29' });
   assert.equal('empleadoId' in vieja, false, 'el contrato de antes ni siquiera trae la llave');
+  assert.equal('empleadoCodigo' in vieja, false, 'ni la del código del empleado');
   const [g] = agruparPorEmpleado([vieja], []);
   assert.equal(g.empleadoId, null);
   assert.equal(g.sinEnlazar, true);

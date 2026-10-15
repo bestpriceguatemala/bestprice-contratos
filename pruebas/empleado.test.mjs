@@ -144,9 +144,24 @@ test('ordenar: por código como número (2 antes que 10), y por nombre a igual c
 });
 
 // Lo que el contrato guarda del empleado escogido: el id, su nombre de ESE día y su porcentaje de ESE día.
-test('datosDelContratoPara: id, nombre y porcentaje, y el cero de Wilder se conserva como cero', () => {
-  assert.deepEqual(datosDelContratoPara(wilder()), { empleadoId: 'e6', rentadoPor: 'Wilder', porcentajeComision: 0 });
-  assert.deepEqual(datosDelContratoPara(ana()), { empleadoId: 'e1', rentadoPor: 'Ana López', porcentajeComision: 5 });
+test('datosDelContratoPara: id, nombre, código y porcentaje, y el cero de Wilder se conserva como cero', () => {
+  assert.deepEqual(datosDelContratoPara(wilder()), { empleadoId: 'e6', rentadoPor: 'Wilder', empleadoCodigo: '6', porcentajeComision: 0 });
+  assert.deepEqual(datosDelContratoPara(ana()), { empleadoId: 'e1', rentadoPor: 'Ana López', empleadoCodigo: '1', porcentajeComision: 5 });
+});
+
+// La casilla del papel se llama «PREPARADO POR (CODIGO)»: pide el código, no el nombre. `rentadoPor` se queda con el nombre.
+test('datosDelContratoPara: el código sale tal como está en la ficha (sin espacios), y es un texto aunque se haya guardado como número', () => {
+  assert.strictEqual(datosDelContratoPara({ ...wilder(), codigo: ' 6 ' }).empleadoCodigo, '6');
+  assert.strictEqual(datosDelContratoPara({ ...wilder(), codigo: 6 }).empleadoCodigo, '6');
+  assert.strictEqual(datosDelContratoPara({ ...wilder(), codigo: 'A-12' }).empleadoCodigo, 'A-12');
+  assert.strictEqual(datosDelContratoPara({ ...wilder(), codigo: '0' }).empleadoCodigo, '0', 'el código «0» es un código');
+  assert.equal(datosDelContratoPara(wilder()).rentadoPor, 'Wilder', 'el nombre sigue siendo el nombre');
+});
+
+test('datosDelContratoPara: un empleado sin código escrito sella null, no un vacío que se parezca a un código', () => {
+  for (const sin of [undefined, null, '', '   ']) {
+    assert.strictEqual(datosDelContratoPara({ ...wilder(), codigo: sin }).empleadoCodigo, null, JSON.stringify(sin));
+  }
 });
 
 test('datosDelContratoPara: un empleado sin porcentaje legible NO se convierte en 5 ni en 0, devuelve null', () => {

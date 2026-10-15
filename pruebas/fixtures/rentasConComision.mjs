@@ -83,7 +83,7 @@ export function rentaDeAntes({
     id, numero, datosDelEmpleado: { rentadoPor, porcentajeComision }, fechaSalida, dias, precioDia, recibidoEl, descuento, ajeno, danos,
     cerrada, garantiaSinLiberar,
   });
-  const { empleadoId: _no, ...sinLlave } = guardado;
+  const { empleadoId: _no, empleadoCodigo: _tampoco, ...sinLlave } = guardado;
   return sinLlave;
 }
 

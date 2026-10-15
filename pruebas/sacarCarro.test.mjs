@@ -1434,11 +1434,52 @@ test('el porcentaje sellado es el de HOY del empleado: subirlo después no cambi
   assert.equal(despues.porcentajeComision, 10);
 });
 
-test('sin empleado el formulario no inventa nada: id null, nombre vacío y porcentaje null', () => {
+test('sin empleado el formulario no inventa nada: id null, nombre vacío, código null y porcentaje null', () => {
   const { datos } = contratoDeLosCampos(formularioDeCarroAjeno(), { empleadoEscogido: null });
   assert.equal(datos.empleadoId, null);
   assert.equal(datos.rentadoPor, '');
+  assert.strictEqual(datos.empleadoCodigo, null);
   assert.equal(datos.porcentajeComision, null);
+});
+
+// ---------------------------------------------------------------------------
+// El CÓDIGO del empleado se sella en el contrato (la casilla del papel es «PREPARADO POR (CODIGO)»)
+// ---------------------------------------------------------------------------
+
+test('escoger a Wilder: el contrato guarda su código 6 en `empleadoCodigo`, y `rentadoPor` se queda con el nombre', () => {
+  const { guardado } = contratoDeLosCampos(formularioDeCarroAjeno(), { empleadoEscogido: EMPLEADOS.wilder });
+  assert.strictEqual(guardado.empleadoCodigo, '6');
+  assert.equal(guardado.rentadoPor, 'Wilder', 'el nombre es lo que se lee en pantalla');
+  assert.equal(guardado.empleadoId, 'e6');
+});
+
+test('construirContrato guarda el código tal como llega, recortado, y null si no llega ninguno', () => {
+  assert.strictEqual(construirContrato({ ...datosBase(), empleadoCodigo: ' 6 ' }).empleadoCodigo, '6');
+  for (const sin of ['', '  ', undefined, null]) {
+    const c = construirContrato({ ...datosBase(), empleadoCodigo: sin });
+    assert.strictEqual(c.empleadoCodigo, null, JSON.stringify(sin));
+    assert.equal('empleadoCodigo' in c, true, 'null y no ausente, como empleadoId');
+  }
+});
+
+test('EL CÓDIGO QUE SE SELLÓ SE QUEDA: si después le cambian el código al empleado, el contrato viejo conserva el que tenía', () => {
+  const antes = { ...EMPLEADOS.wilder, codigo: '6' };
+  const viejo = contratoDeLosCampos(formularioDeCarroAjeno(), { empleadoEscogido: antes }).guardado;
+  // El dueño le cambia el código a Wilder de 6 a 9 en su ficha.
+  const despues = { ...antes, codigo: '9' };
+  const nuevo = contratoDeLosCampos(formularioDeCarroAjeno(), { empleadoEscogido: despues }).guardado;
+  assert.strictEqual(nuevo.empleadoCodigo, '9', 'el contrato de hoy lleva el código de hoy');
+  assert.strictEqual(viejo.empleadoCodigo, '6', 'el de antes conserva el suyo: la reimpresión dice lo mismo que el papel original');
+  // Y lo que se vuelve a guardar de ese contrato (cobrar, recibir, anular un pago) no lo toca.
+  const reguardado = contratoParaGuardar({ ...viejo, pagos: [...viejo.pagos] }, { id: viejo.id, numero: viejo.numero, ahora: 1790000000900 });
+  assert.strictEqual(reguardado.empleadoCodigo, '6');
+});
+
+test('un contrato de ANTES (sin la llave) no se lee como uno con código: no se le inventa ninguno, ni vacío ni buscado en la lista de hoy', () => {
+  const viejo = contratoGuardadoConHoraTardiaAlSalir();
+  assert.equal('empleadoCodigo' in viejo, false);
+  const reguardado = contratoParaGuardar(viejo, { id: 'c-viejo', numero: 1, ahora: 1790000000900 });
+  assert.equal('empleadoCodigo' in reguardado, false, 'guardarlo otra vez no le escribe un código');
 });
 
 // ---------- No se guarda sin empleado, y cada razón dice lo suyo ----------

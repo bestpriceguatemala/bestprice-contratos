@@ -567,6 +567,25 @@ que ver con `cierre{}`**, que es lo que se anota al recibir el carro.
   `js/datos.js`), con `update` y no con el contrato entero y **con la credencial de
   dinero** (es una decisión suya sobre dinero, y así el día que una regla distinga quién
   toca `porcentajeComision` ya viene con la credencial correcta); `rentadoPor` no se toca.
+- `empleadoCodigo` es el **código del empleado ese día** (15 de octubre de 2026), texto
+  (`'6'`), sellado junto al nombre y al porcentaje. Existe porque la casilla del papel
+  preimpreso donde cae «quién lo rentó» se llama **«PREPARADO POR (CODIGO)»**, con la palabra
+  CÓDIGO impresa y 16 mm de ancho: el papel pide el código, no el nombre (y por eso el Excel
+  del dueño trabaja por código, y él dijo desde el principio «normalmente usa el código 6»).
+  Se sella, y no se lee de la lista de hoy, por la razón del porcentaje y más fuerte: **el
+  papel impreso ese día llevó ese código, y una reimpresión tiene que decir lo mismo que el
+  original**, aunque después le cambien el código al empleado en su ficha (es el mismo principio
+  que rige el comprobante del dueño de un carro ajeno: lo que ya se entregó no cambia por lo
+  que cambie la ficha). Es `null`, no `''`, cuando el empleado no tiene un código escrito: un
+  vacío no se parece a un código. **`rentadoPor` se queda como está**: el nombre es lo que se
+  lee en pantalla, y los contratos de antes solo tienen eso. **Los contratos de antes de este
+  campo ni siquiera traen la llave y no se les inventa uno**: ni buscándolo en la lista de hoy
+  (el código de hoy no es necesariamente el que escribió el papel de aquel día) ni dejando un
+  vacío que parezca un código. Un contrato viejo se imprime sin código y el dueño lo escribe a
+  mano, como hace hoy con todo el papel. Por lo mismo **enlazar** las rentas viejas a un empleado
+  (`enlazarContratosAlEmpleado`) no lo escribe: el enlace afirma quién fue, no qué código llevaba
+  el papel. Quien imprime lo lee de aquí (`js/nucleo/empleado.js:datosDelContratoPara` lo sella;
+  `construirContrato` lo guarda); ausente, `null` y vacío significan «sin código».
 - `porcentajeComision` es el porcentaje de comisión **de ese contrato, sellado el día
   que se rentó**: el que su empleado tenía guardado entonces (`datosDelContratoPara`,
   `nucleo/empleado.js`). Por eso subirle el porcentaje a alguien no mueve lo que ya

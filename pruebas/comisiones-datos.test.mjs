@@ -285,6 +285,15 @@ test('enlazarContratosAlEmpleado: escribe SOLO empleadoId y el sello, con update
   assert.deepEqual(nube.llamadas.filter(([op]) => op === 'commit'), [['commit', ['contratos/v1', 'contratos/v2'], 'dinero']], 'un lote, sin repetidos, con la credencial de dinero');
 });
 
+test('enlazarContratosAlEmpleado NO pone el código: lo que el papel dijo ese día no se adivina con la lista de hoy', async () => {
+  const nube = nubeConViejas();
+  await enlazarContratosAlEmpleado(['v1', 'v2'], 'e6', { ...enlazaCon(nube), ahora: AHORA, idsConPorcentaje: ['v1'], porcentajeComision: 0 });
+  for (const id of ['v1', 'v2']) {
+    assert.equal('empleadoCodigo' in nube.leer(`contratos/${id}`), false, `${id}: sigue sin código`);
+  }
+  assert.equal(nube.leer('contratos/v1').rentadoPor, 'Wilder', 'y el nombre escrito ese día se conserva');
+});
+
 test('enlazarContratosAlEmpleado: puede, SOLO si se pide, ponerle a algunas rentas el porcentaje de hoy del empleado (Wilder, 0 %)', async () => {
   const nube = nubeConViejas();
   await enlazarContratosAlEmpleado(['v1', 'v2'], 'e6', {
