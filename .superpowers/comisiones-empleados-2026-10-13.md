@@ -229,3 +229,21 @@ copia de la nube y no la de la pantalla, y que el total de todos pase por `q()` 
    contraste; es el mismo de la lista de dueños y no lo toqué.
 7. Cuando corrí la suite completa hubo un rojo de `pruebas/respaldo-excel.test.mjs` que era trabajo a medias del agente del respaldo
    (archivos `js/respaldo/*` sin commitear); a la última corrida está en verde.
+
+## Tercera tanda (15 de octubre): el CÓDIGO del empleado se sella en el contrato
+
+El dueño mandó la foto de su hoja membretada: la casilla donde cae «quién lo rentó» se llama **«PREPARADO POR (CODIGO)»** y mide 16 mm.
+El papel pide el código, no el nombre.
+
+- **Campo nuevo: `empleadoCodigo`** (texto, `'6'`; `null` si el empleado no tiene un código escrito). Lo sella `datosDelContratoPara`
+  (`js/nucleo/empleado.js`) junto al id, el nombre y el porcentaje; `construirContrato` y `leerFormularioDe` lo llevan al contrato. Commit
+  `1db042f`. §7b lo documenta con su por qué (el papel de ese día llevó ese código y una reimpresión dice lo mismo que el original, el
+  mismo principio del comprobante del dueño de un carro ajeno).
+- `rentadoPor` no cambió: sigue siendo el nombre.
+- **Los contratos de antes no traen la llave y no se les inventa**: ni vacío, ni buscándolo en la lista de hoy. Decisión mía: **enlazar rentas
+  viejas a un empleado tampoco lo escribe** (hay prueba). El enlace afirma quién fue, no qué código llevaba el papel de aquel día; el código
+  de hoy no es necesariamente el que se escribió entonces. Un contrato viejo se imprime sin código y el dueño lo escribe a mano. Si algún día
+  quiere llenarlos, sería una casilla aparte al enlazar, como la del porcentaje.
+- **Prueba del caso pedido**: a Wilder le cambian el código de 6 a 9; el contrato nuevo lleva 9, el viejo conserva 6, y volver a guardar el viejo
+  (cobrar, recibir, anular un pago) no se lo toca. 9 mutaciones al código nuevo, todas atrapadas.
+- Quien imprime debe tratar ausente, `null` y `''` como «sin código».
