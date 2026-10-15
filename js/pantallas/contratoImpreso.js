@@ -55,19 +55,23 @@ function esc(texto) {
 /**
  * ¿El papel ya trae la «Q» impresa junto a las casillas de dinero? El Excel la imprime (`Q150.00`) y el dueño contestó el
  * 14 de octubre de 2026 que su papel NO la trae: por eso se imprime, pegada al monto. Con `false` los montos saldrían sin
- * la Q (si algún día cambia de papelería y la traen, sería esta línea).
+ * la Q (si algún día cambia de papelería y la traen, sería esta línea). La excepción son las casillas que dicen `sinQ` en la tabla
+ * (hoy «LDW Q.» y «PAI Q.», que sí la traen impresa: foto de su hoja en blanco, 15 de octubre de 2026).
  */
 export const QUETZAL_EN_EL_PAPEL = true;
 
 const limpio = (x) => String(x ?? '').trim();
 
 /** Un monto para el papel: con dinero() (la Q y los miles), y en blanco si es cero (una casilla sin dato, no «Q0.00»). */
-function monto(n, { plano = false } = {}) {
+function monto(n) {
   const x = q(n);
   if (x === 0) return '';
   const texto = dinero(x);
-  return plano || !QUETZAL_EN_EL_PAPEL ? texto.replace(/^(-?)Q/, '$1') : texto;
+  return QUETZAL_EN_EL_PAPEL ? texto : sinLaQ(texto);
 }
+
+/** El monto sin su Q: '-Q50.00' queda '-50.00'. */
+const sinLaQ = (texto) => texto.replace(/^(-?)Q/, '$1');
 
 /** `•••• 3343`, igual que en el detalle del contrato (ADR-001): la reimpresión nunca lleva más que los últimos 4. */
 function enmascarado(ultimos4) {
@@ -147,7 +151,7 @@ const VALOR = {
   seguro: ({ contrato }) => monto(contrato.seguroDia),
   seguroCopia: ({ contrato }) => monto(contrato.seguroDia),
   deducible: ({ contrato }) => monto(contrato.deducible),
-  deducibleCopia: ({ contrato }) => monto(contrato.deducible, { plano: true }),
+  deducibleCopia: ({ contrato }) => monto(contrato.deducible),
   deducibleBajo: ({ contrato }) => monto(contrato.deducibleBajo),
   seguroMenores: ({ contrato }) => monto(contrato.seguroMenoresDia),
   seguroPai: ({ contrato }) => monto(contrato.seguroPaiDia),
@@ -157,7 +161,10 @@ const VALOR = {
   // línea «Carta poder» de lineasSalida: lo mismo que ve el mostrador al salir el carro.
   cartaPoderDestino: ({ contrato }) => limpio(contrato.cartaPoderDestino),
   cartaPoderPrecio: ({ contrato }) => monto(lineasSalida(contrato).find((l) => l.concepto === 'Carta poder')?.monto),
-  rentadoPor: ({ contrato }) => limpio(contrato.rentadoPor),
+  // El CÓDIGO del empleado que sellaba ese día el contrato, nunca su nombre: la casilla del papel dice «PREPARADO POR (CODIGO)» y mide
+  // 16 mm. Ausente, `null` y `''` salen en blanco (él lo escribe a mano). No se busca en la lista de empleados de hoy: el papel de aquel
+  // día llevaba el código de aquel día.
+  empleadoCodigo: ({ contrato }) => limpio(contrato.empleadoCodigo),
 };
 
 /** Los textos fijos del Excel, por si algún día se imprimen (`imprime: false` hoy). */
@@ -233,7 +240,9 @@ export function armarContratoImpreso({
     if (campo.tipo === 'etiqueta') {
       valores[campo.id] = TEXTO_FIJO(campo);
     } else if (VALOR[campo.id]) {
-      valores[campo.id] = VALOR[campo.id](contexto);
+      // Si su casilla del papel ya trae la Q (o Excel no la imprime ahí), el monto sale sin ella: lo dice la tabla (`sinQ`), no este archivo.
+      const texto = VALOR[campo.id](contexto);
+      valores[campo.id] = campo.sinQ ? sinLaQ(texto) : texto;
     } else {
       // Sin fuente en el sistema (`de: null`): en blanco, y la hoja de prueba lo dice.
       valores[campo.id] = '';
@@ -362,7 +371,7 @@ export const HITOS = [
   { n: 1, id: 'tarjeta1Numero', que: 'número de tarjeta', donde: 'arriba a la izquierda' },
   { n: 2, id: 'fechaSalida', que: 'fecha de salida', donde: 'arriba a la derecha' },
   { n: 3, id: 'licencia', que: 'licencia', donde: 'abajo a la izquierda' },
-  { n: 4, id: 'rentadoPor', que: 'rentado por', donde: 'abajo a la derecha' },
+  { n: 4, id: 'empleadoCodigo', que: 'preparado por (código)', donde: 'abajo a la derecha' },
 ];
 
 /** Las marcas de la regla con que se mide la escala de la impresión: 100 mm entre ellas. */

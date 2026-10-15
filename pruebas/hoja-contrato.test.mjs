@@ -250,6 +250,35 @@ test('lo que el sistema no guarda: cada decisión del 14 de octubre de 2026 est�
   assert.deepEqual(CAMPOS.filter((c) => c.tecleado).map((c) => c.id).sort(), ['facturarNit', 'facturarNombre', 'tarjeta1Cbc', 'tarjeta2Cbc']);
 });
 
+test('«PREPARADO POR (CODIGO)»: la casilla pide el código del empleado, y la tabla lo dice con su razón y su fecha', () => {
+  const c = campoPorId('empleadoCodigo');
+  assert.equal(c.de, '`empleadoCodigo`');
+  assert.equal(c.etiqueta, 'Preparado por (código)');
+  assert.equal(c.rango, 'T58:U59');
+  assert.match(c.nota, /15 de octubre de 2026/);
+  assert.match(c.nota, /«PREPARADO POR \(CODIGO\)»/);
+  assert.match(c.nota, /mide 16 mm/);
+  assert.match(c.nota, /Nunca el nombre/);
+  assert.match(c.nota, /COMPUTADO POR \(CODIGO\)/, 'la casilla de al lado, que nadie llena, queda anotada');
+  assert.ok(!CAMPOS.some((x) => x.id === 'rentadoPor'), 'el nombre del empleado ya no es un campo del papel');
+});
+
+test('sinQ: solo «LDW Q.» y «PAI Q.» (el papel la trae) y el deducible de abajo (Excel no la imprime); cada uno con su razón', () => {
+  assert.deepEqual(CAMPOS.filter((c) => c.sinQ).map((c) => c.id).sort(), ['deducibleCopia', 'seguro', 'seguroPai']);
+  for (const [id, rotulo] of [['seguro', 'LDW'], ['seguroPai', 'PAI']]) {
+    const c = campoPorId(id);
+    assert.match(c.nota, /15 de octubre de 2026/, id);
+    assert.match(c.nota, /foto de su hoja en blanco/, id);
+    assert.match(c.nota, new RegExp(`«${rotulo} Q\\.»`), id);
+    assert.match(c.nota, /Q\. Q150\.00/, `${id}: dice qué se evita`);
+  }
+  assert.match(campoPorId('deducibleCopia').nota, /SIN la Q/);
+  // todos son de dinero
+  for (const c of CAMPOS.filter((x) => x.sinQ)) assert.equal(c.tipo, 'dinero', c.id);
+  // y nadie más lo lleva: el resto de los montos, con Q (su papel no la trae)
+  assert.ok(CAMPOS.filter((c) => c.tipo === 'dinero' && !c.sinQ).length >= 10);
+});
+
 test('TARIFAS_DEL_PAPEL: la hora tardía a Q150 y el galón a Q65, las del Excel, y nadie las puede cambiar en pleno vuelo', () => {
   assert.deepEqual({ ...TARIFAS_DEL_PAPEL }, { horaTardia: 150, galon: 65 });
   assert.ok(Object.isFrozen(TARIFAS_DEL_PAPEL));
@@ -291,7 +320,7 @@ test('CAMPOS: cada uno trae lo que la hoja necesita para dibujarlo', () => {
   const FUENTES = ['arial', 'narrow'];
   const ALINEA = ['left', 'center', 'right', 'general'];
   const VALINEA = ['top', 'center', 'bottom'];
-  const TIPOS = ['texto', 'dinero', 'dineroPlano', 'entero', 'fechaCorta', 'fechaLarga', 'fechaDoc', 'tarjeta', 'cbc', 'etiqueta'];
+  const TIPOS = ['texto', 'dinero', 'entero', 'fechaCorta', 'fechaLarga', 'fechaDoc', 'tarjeta', 'cbc', 'etiqueta'];
   for (const c of CAMPOS) {
     assert.ok(typeof c.etiqueta === 'string' && c.etiqueta, `${c.id}: sin etiqueta`);
     assert.ok(FUENTES.includes(c.fuente), `${c.id}: fuente ${c.fuente}`);
@@ -616,7 +645,7 @@ test('camposFueraDeLaCarta: un corrimiento también puede sacar casillas por cua
   assert.ok(camposFueraDeLaCarta({ dx: 8, dy: 0, escala: fabrica }).includes('horaSalida'), 'a la derecha');
   assert.ok(camposFueraDeLaCarta({ dx: -20, dy: 0, escala: fabrica }).includes('etiquetaAcepto'), 'a la izquierda: la primera columna empieza en 17.9 mm');
   assert.ok(camposFueraDeLaCarta({ dx: 0, dy: -35, escala: fabrica }).includes('etiquetaAcepto'), 'arriba: la hoja empieza en 18.5 mm y su primera casilla en 29');
-  assert.ok(camposFueraDeLaCarta({ dx: 0, dy: 90, escala: fabrica }).includes('rentadoPor'), 'abajo');
+  assert.ok(camposFueraDeLaCarta({ dx: 0, dy: 90, escala: fabrica }).includes('empleadoCodigo'), 'abajo');
   // y un corrimiento chico hacia adentro no saca nada
   assert.deepEqual(camposFueraDeLaCarta({ dx: -1, dy: 1, escala: fabrica }), []);
 });

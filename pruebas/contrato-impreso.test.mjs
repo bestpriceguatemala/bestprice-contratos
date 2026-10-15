@@ -97,6 +97,7 @@ function contrato(extra = {}) {
     porcentajeTarjeta: 0,
     montoPago: 3500,
     rentadoPor: 'DENNIS',
+    empleadoCodigo: '6',
     porcentajeComision: 5,
     conductorAdicional: { nombre: 'ESTEBAN URIZAR', licencia: '2380 10120 0101', identificacion: '' },
     observaciones: 'una nota',
@@ -194,14 +195,14 @@ test('el contrato rico llena cada casilla con el dato que le toca', () => {
     licencia: '1234 56789 0101', licenciaEmitidaEn: 'Guatemala', licenciaExpira: '30  06    29',
     conductorNombre: 'ESTEBAN URIZAR', conductorLicencia: '2380 10120 0101',
     // el dinero
-    precioBase: 'Q508.00', seguroTerceros: 'Q120.00', seguro: 'Q72.00', seguroCopia: 'Q72.00',
+    precioBase: 'Q508.00', seguroTerceros: 'Q120.00', seguro: '72.00', seguroCopia: 'Q72.00',
     deducible: 'Q55,000.00', deducibleCopia: '55,000.00', deducibleBajo: 'Q250.00',
-    seguroMenores: 'Q10.00', seguroPai: 'Q5.00', variosDescripcion: 'Lavado', variosPrecio: 'Q80.00',
+    seguroMenores: 'Q10.00', seguroPai: '5.00', variosDescripcion: 'Lavado', variosPrecio: 'Q80.00',
     cartaPoderDestino: 'EL SALVADOR', cartaPoderPrecio: 'Q350.00',
     // las tarjetas (enmascaradas: el número completo nunca se guardó)
     tarjeta1Numero: '•••• 3343', tarjeta1Vence: '04/30', tarjeta1Banco: 'BAC GUATEMALA', tarjeta1Monto: 'Q15,000.00',
     tarjeta1Autorizacion: '1234', tarjeta2Numero: '•••• 1111', tarjeta2Vence: '11/28', tarjeta2Monto: 'Q5,000.00', tarjeta2Autorizacion: '9876',
-    rentadoPor: 'DENNIS',
+    empleadoCodigo: '6',
   };
   for (const [id, texto] of Object.entries(esperado)) assert.equal(v[id], texto, id);
 });
@@ -384,7 +385,7 @@ test('el precio por día sale SIN los seguros, que van aparte: 700 − 72 − 12
   const v = valores();
   assert.equal(v.precioBase, 'Q508.00');
   assert.equal(v.seguroTerceros, 'Q120.00');
-  assert.equal(v.seguro, 'Q72.00');
+  assert.equal(v.seguro, '72.00', 'LDW: el papel ya trae la Q');
   // sin seguros, el precio entero
   const sinSeguros = valores({ contrato: contrato({ seguroDia: 0, seguroTercerosDia: 0 }) });
   assert.equal(sinSeguros.precioBase, 'Q700.00');
@@ -404,10 +405,82 @@ test('si los seguros igualan o pasan el precio por día, NO sale una cifra negat
   assert.ok(!sinPrecio.avisos.some((a) => /seguro de terceros/.test(a)));
 });
 
+test('«PREPARADO POR (CODIGO)» sale con el CÓDIGO que el contrato selló ese día, y nunca con el nombre', () => {
+  const c = contrato();
+  assert.equal(c.empleadoCodigo, '6', 'el contrato real (construirContrato) lo sella');
+  assert.equal(c.rentadoPor, 'DENNIS');
+  const modelo = armarContratoImpreso(entrada());
+  assert.equal(modelo.valores.empleadoCodigo, '6');
+  assert.ok(!Object.values(modelo.valores).some((t) => /DENNIS/.test(t)), 'el nombre del empleado no sale en ninguna casilla');
+  // la casilla del papel mide 16 mm: un código cabe, y un nombre completo no cabría
+  const ancho = cajaDeRango(campoPorId('empleadoCodigo').rango).ancho;
+  assert.ok(ancho > 16 && ancho < 16.5, `mide ${ancho} mm`);
+  assert.match(html(), /data-campo="empleadoCodigo"[^>]*><span class="hc-t">6<\/span>/);
+  assert.ok(!html().includes('DENNIS'));
+});
+
+test('sin código (ausente, null o vacío) la casilla sale en BLANCO, aunque el contrato traiga el nombre', () => {
+  const formas = {
+    null: { ...contrato(), empleadoCodigo: null },
+    vacio: { ...contrato(), empleadoCodigo: '' },
+    soloEspacios: { ...contrato(), empleadoCodigo: '   ' },
+    indefinido: { ...contrato(), empleadoCodigo: undefined },
+  };
+  for (const [forma, c] of Object.entries(formas)) {
+    assert.equal(c.rentadoPor, 'DENNIS', forma);
+    const modelo = armarContratoImpreso(entrada({ contrato: c }));
+    assert.equal(modelo.valores.empleadoCodigo, '', `${forma}: en blanco`);
+    assert.ok(!html({ contrato: c }).includes('data-campo="empleadoCodigo"'), `${forma}: sin caja`);
+    assert.ok(!html({ contrato: c }).includes('DENNIS'), `${forma}: nunca el nombre`);
+  }
+  // un contrato VIEJO no trae ni la llave
+  const viejo = contrato();
+  delete viejo.empleadoCodigo;
+  assert.ok(!('empleadoCodigo' in viejo));
+  assert.equal(armarContratoImpreso(entrada({ contrato: viejo })).valores.empleadoCodigo, '');
+  assert.ok(!html({ contrato: viejo }).includes('data-campo="empleadoCodigo"'));
+});
+
+test('el código es el de aquel día: no se busca en una lista de empleados de hoy', () => {
+  const viejo = contrato();
+  delete viejo.empleadoCodigo;
+  // aunque se le pase una lista con un empleado que se llama igual y tiene código, un contrato sin código sigue sin código
+  const modelo = armarContratoImpreso({ ...entrada({ contrato: viejo }), empleados: [{ id: 'e1', nombre: 'DENNIS', codigo: '9' }] });
+  assert.equal(modelo.valores.empleadoCodigo, '');
+  // y uno con código imprime el sellado, no el de la lista
+  const conCodigo = armarContratoImpreso({ ...entrada({ contrato: contrato({ empleadoCodigo: '6' }) }), empleados: [{ id: 'e1', nombre: 'DENNIS', codigo: '9' }] });
+  assert.equal(conCodigo.valores.empleadoCodigo, '6');
+});
+
+test('el código se recorta y un número se escribe como texto; uno largo se avisa porque se saldría de los 16 mm', () => {
+  assert.equal(valores({ contrato: { ...contrato(), empleadoCodigo: '  7 ' } }).empleadoCodigo, '7');
+  assert.equal(valores({ contrato: { ...contrato(), empleadoCodigo: 12 } }).empleadoCodigo, '12');
+  const largo = armarContratoImpreso(entrada({ contrato: { ...contrato(), empleadoCodigo: 'ANA-LOPEZ-2026' } }));
+  assert.ok(largo.avisos.some((a) => /«Preparado por \(código\)» es más largo que su casilla/.test(a)));
+  assert.ok(!armarContratoImpreso(entrada()).avisos.some((a) => /Preparado por/.test(a)));
+});
+
+test('«LDW Q.» y «PAI Q.»: el papel ya trae la Q, así que esos dos montos salen SIN ella y los demás con ella', () => {
+  const v = valores();
+  assert.equal(v.seguro, '72.00');
+  assert.equal(v.seguroPai, '5.00');
+  for (const id of ['precioBase', 'seguroTerceros', 'deducible', 'deducibleBajo', 'seguroMenores', 'variosPrecio', 'tarjeta1Monto', 'tarjeta2Monto', 'horaTardia', 'combustiblePrecio', 'cartaPoderPrecio', 'seguroCopia']) {
+    assert.match(v[id], /^Q[\d,]+\.\d\d$/, `${id}: con la Q`);
+  }
+  // lo decide la tabla, no un if suelto: se ve en la hoja y en cualquier monto que pase por esos dos campos
+  assert.match(html(), /data-campo="seguro"[^>]*><span class="hc-t">72\.00<\/span>/);
+  assert.match(html(), /data-campo="seguroPai"[^>]*><span class="hc-t">5\.00<\/span>/);
+  assert.equal(valores({ contrato: contrato({ seguroDia: 1234.5 }) }).seguro, '1,234.50');
+  // una casilla sin monto sigue en blanco
+  assert.equal(valores({ contrato: contrato({ seguroDia: 0, seguroPaiDia: 0 }) }).seguro, '');
+  // un monto negativo conserva su signo y pierde solo la Q: '-5.00', no '5.00' ni '-Q5.00'
+  assert.equal(valores({ contrato: contrato({ seguroPaiDia: -5 }) }).seguroPai, '-5.00');
+});
+
 test('la Q se imprime: el dueño contestó el 14 de octubre de 2026 que su papel NO la trae', () => {
   assert.equal(QUETZAL_EN_EL_PAPEL, true);
   const v = valores();
-  for (const id of ['precioBase', 'seguro', 'seguroTerceros', 'deducible', 'tarjeta1Monto', 'horaTardia', 'combustiblePrecio', 'cartaPoderPrecio']) {
+  for (const id of ['precioBase', 'seguroTerceros', 'seguroCopia', 'deducible', 'tarjeta1Monto', 'horaTardia', 'combustiblePrecio', 'cartaPoderPrecio']) {
     assert.match(v[id], /^Q[\d,]+\.\d\d$/, id);
   }
   // la copia del deducible de abajo va sin la Q, como la imprime Excel
@@ -418,7 +491,7 @@ test('el dinero sale con dinero(): la Q, los miles y dos decimales; y los centav
   const v = valores({ contrato: contrato({ deducible: 1234.5, seguroDia: 72.005, tarjetas: [{ ...TARJETAS[0], montoAutorizado: 1234567.891 }] }) });
   assert.equal(v.deducible, 'Q1,234.50');
   assert.equal(v.deducibleCopia, '1,234.50', 'la copia de abajo va sin la Q (así la imprime Excel)');
-  assert.equal(v.seguro, 'Q72.01');
+  assert.equal(v.seguro, '72.01');
   assert.equal(v.tarjeta1Monto, 'Q1,234,567.89');
 });
 
@@ -607,7 +680,7 @@ test('la calibración recibida es la que se escribe en el transform', () => {
 
 test('cada campo cae en su caja de la tabla (más el origen de la hoja en la carta), con la letra de Excel por 0.89', () => {
   const hoja = html();
-  for (const id of ['carroPlacas', 'fechaSalida', 'nombre1', 'tarjeta1Banco', 'rentadoPor', 'seguroTerceros', 'documentoExpira']) {
+  for (const id of ['carroPlacas', 'fechaSalida', 'nombre1', 'tarjeta1Banco', 'empleadoCodigo', 'seguroTerceros', 'documentoExpira']) {
     const campo = campoPorId(id);
     const caja = cajaDeRango(campo.rango);
     const { css } = estiloDe(hoja, id);
@@ -718,7 +791,7 @@ test('cada caja de la hoja de prueba se llama con las palabras del dueño, no co
   const nombreDe = (id) => new RegExp(`data-campo="${id}" style="[^"]*"><span>([^<]*)</span>`).exec(prueba)[1];
   assert.equal(nombreDe('carroPlacas'), 'Placas');
   assert.equal(nombreDe('fechaSalida'), 'Fecha de salida');
-  assert.equal(nombreDe('rentadoPor'), 'Rentado por');
+  assert.equal(nombreDe('empleadoCodigo'), 'Preparado por (código)');
   // un texto fijo se muestra con su propio texto, sin el «Texto fijo:» ni los espacios de Excel
   assert.equal(nombreDe('etiquetaTarjeta1'), 'TARJETA 1  No:');
   assert.equal(nombreDe('deducibleIva'), '+ iva');
@@ -737,7 +810,7 @@ test('las cajas de la prueba están exactamente donde se imprimiría el dato', (
   const hoja = html();
   const estiloDeCaja = (texto, id, clase) => new RegExp(`<div class="${clase}[^"]*" data-campo="${id}" style="([^"]*)"`).exec(texto)[1];
   const sinLetra = (estilo) => estilo.replace(/font-size:[^;]+;/, '');
-  for (const id of ['carroPlacas', 'nombre1', 'fechaSalida', 'rentadoPor']) {
+  for (const id of ['carroPlacas', 'nombre1', 'fechaSalida', 'empleadoCodigo']) {
     assert.equal(estiloDeCaja(prueba, id, 'hp-caja'), sinLetra(estiloDeCaja(hoja, id, 'hc-campo')), id);
   }
 });
@@ -794,6 +867,8 @@ test('la casilla derivada se dibuja con raya de trazos largos y se nombra como d
 
 test('cuatro casillas con número, una en cada esquina, son con las que se compara', () => {
   assert.equal(HITOS.length, 4);
+  // el dueño conoce la casilla 4 por lo que dice su papel: «PREPARADO POR (CODIGO)»
+  assert.deepEqual(HITOS[3], { n: 4, id: 'empleadoCodigo', que: 'preparado por (código)', donde: 'abajo a la derecha' });
   assert.deepEqual(HITOS.map((h) => h.n), [1, 2, 3, 4]);
   const prueba = htmlHojaDePrueba();
   const lienzo = prueba.indexOf('class="hc-lienzo"');
