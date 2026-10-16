@@ -15,7 +15,7 @@ import {
   PAPEL, ESCALA_EXCEL, MM_POR_UNIDAD, ORIGEN_MM, ANCHOS, ALTOS, HOJA_UNIDADES, HOJA_MM, CAMPOS,
   cajaDeRango, campoPorId, camposQueSeImprimen, fechaParaPapel, textoSeSale,
   ESCALA_QUE_CABE, CALIBRACION_DE_FABRICA, LIMITES, PASOS, calibracionValida, limitar, aplicarTecla,
-  cajaEnPapel, transformacionCss, textoDeCalibracion, TARIFAS_DEL_PAPEL, camposFueraDeLaCarta,
+  cajaEnPapel, transformacionCss, textoDeCalibracion, TARIFAS_DEL_PAPEL, camposFueraDelPapel, PAPELES, PAPEL_POR_OMISION, papelDe,
   CLAVE_DE_CALIBRACIONES, leerCalibraciones, guardarCalibracion, calibracionActiva,
 } from '../js/nucleo/hojaContrato.js';
 
@@ -627,36 +627,103 @@ test('cajaEnPapel: la hoja se achica hacia su esquina y el corrimiento se suma d
   assert.deepEqual(lejos, { x: ORIGEN_MM.x + 2 + 50, y: ORIGEN_MM.y - 3 + 25, ancho: 15, alto: 5 });
 });
 
-test('camposFueraDeLaCarta: con la calibración de fábrica todo cabe; más grande de lo que cabe, se cortan las columnas de la derecha', () => {
-  assert.deepEqual(camposFueraDeLaCarta({ ...CALIBRACION_DE_FABRICA }), []);
+test('camposFueraDelPapel: con la calibración de fábrica todo cabe; más grande de lo que cabe, se cortan las columnas de la derecha', () => {
+  assert.deepEqual(camposFueraDelPapel({ ...CALIBRACION_DE_FABRICA }), []);
   // a tamaño de Excel la hoja mide 250 mm y la carta 216: se salen las horas y los precios de la derecha
-  const alTamanoDeExcel = camposFueraDeLaCarta({ dx: 0, dy: 0, escala: 1 });
+  const alTamanoDeExcel = camposFueraDelPapel({ dx: 0, dy: 0, escala: 1 });
   for (const id of ['horaSalida', 'horaEntrada', 'precioBase', 'seguro', 'deducible']) assert.ok(alTamanoDeExcel.includes(id), id);
   assert.ok(!alTamanoDeExcel.includes('carroPlacas'), 'lo de la izquierda sigue dentro');
   // ESCALA_QUE_CABE deja los 5 mm de margen derecho que él le puso a Excel; las cajas todavía caben hasta 0.79 (216 mm menos
   // 17.9 de margen izquierdo, entre 250 de hoja) y a 0.80 ya se corta la columna de las horas
-  assert.deepEqual(camposFueraDeLaCarta({ dx: 0, dy: 0, escala: ESCALA_QUE_CABE }), []);
-  assert.deepEqual(camposFueraDeLaCarta({ dx: 0, dy: 0, escala: 0.79 }), []);
-  assert.deepEqual(camposFueraDeLaCarta({ dx: 0, dy: 0, escala: 0.8 }), ['horaSalida', 'horaEntrada']);
+  assert.deepEqual(camposFueraDelPapel({ dx: 0, dy: 0, escala: ESCALA_QUE_CABE }), []);
+  assert.deepEqual(camposFueraDelPapel({ dx: 0, dy: 0, escala: 0.79 }), []);
+  assert.deepEqual(camposFueraDelPapel({ dx: 0, dy: 0, escala: 0.8 }), ['horaSalida', 'horaEntrada']);
 });
 
-test('camposFueraDeLaCarta: un corrimiento también puede sacar casillas por cualquier lado', () => {
+test('camposFueraDelPapel: un corrimiento también puede sacar casillas por cualquier lado', () => {
   const fabrica = CALIBRACION_DE_FABRICA.escala;
-  assert.ok(camposFueraDeLaCarta({ dx: 8, dy: 0, escala: fabrica }).includes('horaSalida'), 'a la derecha');
-  assert.ok(camposFueraDeLaCarta({ dx: -20, dy: 0, escala: fabrica }).includes('etiquetaAcepto'), 'a la izquierda: la primera columna empieza en 17.9 mm');
-  assert.ok(camposFueraDeLaCarta({ dx: 0, dy: -35, escala: fabrica }).includes('etiquetaAcepto'), 'arriba: la hoja empieza en 18.5 mm y su primera casilla en 29');
-  assert.ok(camposFueraDeLaCarta({ dx: 0, dy: 90, escala: fabrica }).includes('empleadoCodigo'), 'abajo');
+  assert.ok(camposFueraDelPapel({ dx: 8, dy: 0, escala: fabrica }).includes('horaSalida'), 'a la derecha');
+  assert.ok(camposFueraDelPapel({ dx: -20, dy: 0, escala: fabrica }).includes('etiquetaAcepto'), 'a la izquierda: la primera columna empieza en 17.9 mm');
+  assert.ok(camposFueraDelPapel({ dx: 0, dy: -35, escala: fabrica }).includes('etiquetaAcepto'), 'arriba: la hoja empieza en 18.5 mm y su primera casilla en 29');
+  assert.ok(camposFueraDelPapel({ dx: 0, dy: 90, escala: fabrica }).includes('empleadoCodigo'), 'abajo');
   // y un corrimiento chico hacia adentro no saca nada
-  assert.deepEqual(camposFueraDeLaCarta({ dx: -1, dy: 1, escala: fabrica }), []);
+  assert.deepEqual(camposFueraDelPapel({ dx: -1, dy: 1, escala: fabrica }), []);
 });
 
-test('camposFueraDeLaCarta: solo cuenta los campos que se imprimen', () => {
+test('los dos papeles: carta de 8.5 × 11 y oficio de 8.5 × 13 pulgadas, del mismo ancho, y el oficio NO es el «Legal» de 14', () => {
+  assert.deepEqual(Object.keys(PAPELES), ['carta', 'oficio']);
+  cerca(PAPELES.carta.altoMm, 11 * 25.4, 0.001);
+  cerca(PAPELES.oficio.altoMm, 13 * 25.4, 0.001);
+  assert.ok(Math.abs(PAPELES.oficio.altoMm - 14 * 25.4) > 20, 'no es el Legal');
+  assert.equal(PAPELES.oficio.anchoMm, PAPELES.carta.anchoMm);
+  assert.equal(PAPELES.carta.de, 'de la carta');
+  assert.equal(PAPELES.oficio.de, 'del oficio');
+  assert.ok(Object.isFrozen(PAPELES) && Object.isFrozen(PAPELES.oficio));
+});
+
+test('calibracionValida: el papel es opcional (sin él, el de por omisión) y, si viene, uno que se conozca', () => {
+  assert.equal(calibracionValida({ dx: 0, dy: 0, escala: 1 }), true, 'lo guardado antes de poder escoger papel sigue valiendo');
+  assert.equal(calibracionValida({ dx: 0, dy: 0, escala: 1, papel: 'carta' }), true);
+  assert.equal(calibracionValida({ dx: 0, dy: 0, escala: 1, papel: 'oficio' }), true);
+  for (const malo of ['tabloide', '', null, 7, 'toString', 'constructor', {}, ['oficio']]) {
+    assert.equal(calibracionValida({ dx: 0, dy: 0, escala: 1, papel: malo }), false, JSON.stringify(malo));
+  }
+  assert.equal(calibracionValida({ dx: 0, dy: 0, escala: 1, papel: undefined }), true);
+});
+
+test('el papel viaja con la calibración: limitar y las teclas lo conservan, y sin papel no se inventa uno', () => {
+  assert.deepEqual(limitar({ dx: 99, dy: 0, escala: 1, papel: 'oficio' }), { dx: 40, dy: 0, escala: 1, papel: 'oficio' });
+  assert.deepEqual(limitar({ dx: 1, dy: 2, escala: 1 }), { dx: 1, dy: 2, escala: 1 });
+  assert.ok(!('papel' in limitar({ dx: 1, dy: 2, escala: 1 })));
+  assert.deepEqual(aplicarTecla({ dx: 0, dy: 0, escala: 1, papel: 'oficio' }, { key: 'ArrowRight' }), { dx: 0.5, dy: 0, escala: 1, papel: 'oficio' });
+  assert.deepEqual(aplicarTecla({ dx: 0, dy: 0, escala: 1, papel: 'oficio' }, { key: '+', shiftKey: true }), { dx: 0, dy: 0, escala: 1.001, papel: 'oficio' });
+  assert.ok(!('papel' in aplicarTecla(BASE, { key: 'ArrowRight' })));
+});
+
+test('el papel se guarda y se lee con cada impresora, y las que se guardaron sin papel siguen leyéndose', () => {
+  const almacen = almacenEnMemoria();
+  guardarCalibracion(almacen, 'Larga', { dx: 1, dy: 2, escala: 0.8, papel: 'oficio' });
+  guardarCalibracion(almacen, 'Corta', { dx: 0, dy: 0, escala: 0.77 });
+  const leidas = leerCalibraciones(almacen);
+  assert.deepEqual(leidas.impresoras.Larga, { dx: 1, dy: 2, escala: 0.8, papel: 'oficio' });
+  assert.deepEqual(leidas.impresoras.Corta, { dx: 0, dy: 0, escala: 0.77 });
+  assert.equal(papelDe(leidas.impresoras.Larga).clave, 'oficio');
+  assert.equal(papelDe(leidas.impresoras.Corta).clave, PAPEL_POR_OMISION);
+  // una impresora guardada con un papel que ya no existe se descarta como cualquier calibración imposible
+  const rota = JSON.stringify({ activa: 'X', impresoras: { X: { dx: 0, dy: 0, escala: 1, papel: 'tabloide' }, Y: { dx: 0, dy: 0, escala: 1 } } });
+  assert.deepEqual(Object.keys(leerCalibraciones(almacenConBasura(rota)).impresoras), ['Y']);
+  assert.equal(leerCalibraciones(almacenConBasura(rota)).activa, null);
+  // guardar con un papel imposible lanza
+  assert.throws(() => guardarCalibracion(almacenEnMemoria(), 'Z', { dx: 0, dy: 0, escala: 1, papel: 'tabloide' }), /no son posibles/);
+  // y solo se guardan las llaves de la calibración, aunque le pasen más
+  guardarCalibracion(almacen, 'Larga', { dx: 1, dy: 2, escala: 0.8, papel: 'oficio', secreto: 'x' });
+  assert.deepEqual(Object.keys(leerCalibraciones(almacen).impresoras.Larga).sort(), ['dx', 'dy', 'escala', 'papel']);
+  assert.deepEqual(calibracionActiva(almacen).cal, { dx: 1, dy: 2, escala: 0.8, papel: 'oficio' });
+});
+
+test('camposFueraDelPapel: el oficio da 51 mm más abajo y el mismo ancho; la escala que cabe es la misma', () => {
+  const fabrica = CALIBRACION_DE_FABRICA.escala;
+  // 90 mm hacia abajo saca «rentadoPor» de la carta, y el oficio todavía lo sostiene
+  assert.ok(camposFueraDelPapel({ dx: 0, dy: 90, escala: fabrica }).includes('empleadoCodigo'));
+  assert.ok(camposFueraDelPapel({ dx: 0, dy: 90, escala: fabrica, papel: 'carta' }).includes('empleadoCodigo'));
+  assert.ok(!camposFueraDelPapel({ dx: 0, dy: 90, escala: fabrica, papel: 'oficio' }).includes('empleadoCodigo'));
+  // pero lo de la derecha se corta igual en los dos: el ancho no cambia
+  for (const papel of ['carta', 'oficio']) {
+    assert.deepEqual(camposFueraDelPapel({ dx: 0, dy: 0, escala: fabrica, papel }), [], papel);
+    assert.deepEqual(camposFueraDelPapel({ dx: 0, dy: 0, escala: 0.79, papel }), [], papel);
+    assert.deepEqual(camposFueraDelPapel({ dx: 0, dy: 0, escala: 0.8, papel }), ['horaSalida', 'horaEntrada'], papel);
+  }
+  // un papel que no se conoce se trata como el de por omisión
+  assert.deepEqual(camposFueraDelPapel({ dx: 0, dy: 90, escala: fabrica, papel: 'tabloide' }), camposFueraDelPapel({ dx: 0, dy: 90, escala: fabrica }));
+});
+
+test('camposFueraDelPapel: solo cuenta los campos que se imprimen', () => {
   const campo = campoPorId('horaSalida');
   const alTamanoDeExcel = { dx: 0, dy: 0, escala: 1 };
-  assert.ok(camposFueraDeLaCarta(alTamanoDeExcel).includes('horaSalida'));
+  assert.ok(camposFueraDelPapel(alTamanoDeExcel).includes('horaSalida'));
   try {
     campo.imprime = false;
-    assert.ok(!camposFueraDeLaCarta(alTamanoDeExcel).includes('horaSalida'));
+    assert.ok(!camposFueraDelPapel(alTamanoDeExcel).includes('horaSalida'));
   } finally {
     delete campo.imprime;
   }

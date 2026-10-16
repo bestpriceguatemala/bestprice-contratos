@@ -19,7 +19,7 @@ import {
 } from '../js/pantallas/contratoImpreso.js';
 import {
   CAMPOS, ORIGEN_MM, PAPEL, ESCALA_EXCEL, cajaDeRango, campoPorId, leerCalibraciones, calibracionActiva, CALIBRACION_DE_FABRICA,
-  CLAVE_DE_CALIBRACIONES, guardarCalibracion, PASOS,
+  CLAVE_DE_CALIBRACIONES, guardarCalibracion, PASOS, PAPELES, PAPEL_POR_OMISION, papelDe,
 } from '../js/nucleo/hojaContrato.js';
 import { construirContrato } from '../js/pantallas/sacarCarro.js';
 import { contratoParaGuardar } from '../js/datos.js';
@@ -1049,6 +1049,183 @@ test('una calibración que dejaría casillas fuera de la carta se avisa en la pa
   assert.ok(!/Hora de salida/.test(sinHoras.avisos()));
 });
 
+// ---------------------------------------------------------------------------
+// El papel: carta y oficio, escogido al calibrar y guardado por impresora
+// ---------------------------------------------------------------------------
+
+const OFICIO = { dx: 0, dy: 0, escala: 0.77, papel: 'oficio' };
+
+test('hay dos papeles, del mismo ancho: la carta de 8.5 × 11 y el oficio de 8.5 × 13 pulgadas; y la carta es el de por omisión', () => {
+  assert.deepEqual(Object.keys(PAPELES), ['carta', 'oficio']);
+  assert.equal(PAPELES.carta.altoMm, 279.4);
+  assert.ok(Math.abs(PAPELES.oficio.altoMm - 13 * 25.4) < 0.001, 'el oficio mide 13 pulgadas: 330.2 mm (21.6 × 33 cm), no 14 como el «Legal»');
+  assert.equal(PAPELES.oficio.anchoMm, PAPELES.carta.anchoMm, 'el ancho no cambia, así que la escala horizontal tampoco');
+  assert.equal(PAPEL_POR_OMISION, 'carta', 'hasta que él conteste, la carta (una línea en hojaContrato.js)');
+  assert.equal(papelDe(undefined).clave, 'carta');
+  assert.equal(papelDe({}).clave, 'carta');
+  assert.equal(papelDe({ papel: 'oficio' }).clave, 'oficio');
+  assert.equal(papelDe({ papel: 'tabloide' }).clave, 'carta', 'un papel que no se conoce vuelve al de por omisión');
+  assert.equal(papelDe({ papel: 'toString' }).clave, 'carta');
+});
+
+test('la hoja del contrato trae el tamaño del papel de la calibración en su atributo style', () => {
+  assert.match(html(), /<article class="hoja-contrato"[^>]*style="width:215\.9mm;height:279\.4mm">/);
+  assert.match(html({}, OFICIO), /<article class="hoja-contrato"[^>]*style="width:215\.9mm;height:330\.2mm">/);
+  // el transform no cambia por el papel: sigue siendo uno solo
+  assert.equal((html({}, OFICIO).match(/transform:/g) || []).length, 1);
+});
+
+test('la hoja de prueba en oficio: regla hasta 330 mm, tamaño del papel en la hoja y el nombre del papel en el rótulo', () => {
+  const carta = htmlHojaDePrueba();
+  const oficio = htmlHojaDePrueba(OFICIO);
+  assert.match(oficio, /<article class="hoja-contrato hoja-de-prueba"[^>]*style="width:215\.9mm;height:330\.2mm">/);
+  assert.match(carta, /style="width:215\.9mm;height:279\.4mm"/);
+  assert.equal((carta.match(/hp-marca-y/g) || []).length, 56, 'carta: de 0 a 275 mm, cada 5');
+  assert.equal((oficio.match(/hp-marca-y/g) || []).length, 67, 'oficio: de 0 a 330 mm, cada 5');
+  assert.equal((oficio.match(/class="hp-num hp-num-y"/g) || []).length, 33, 'números 10 a 330');
+  assert.ok(oficio.includes('<b class="hp-num hp-num-y" style="top:320mm">320</b>'));
+  assert.ok(oficio.includes('<b class="hp-num hp-num-y" style="top:330mm">330</b>'));
+  assert.ok(!carta.includes('style="top:280mm"'), 'la carta termina en 279.4 mm');
+  assert.equal((oficio.match(/hp-marca-x/g) || []).length, 44, 'el ancho es el mismo');
+  assert.match(carta, /papel Carta · /);
+  assert.match(oficio, /papel Oficio · /);
+});
+
+test('la página de impresión sigue el papel de la impresora: en oficio, la suelta y la de nombre dicen 330.2 mm', () => {
+  const nav = navegadorFalso();
+  try {
+    const almacen = almacenEspia();
+    guardarCalibracion(almacen, 'Larga', OFICIO);
+    pintarContratoImpreso(contenedorFalso(), entrada(), { almacen });
+    assert.equal(nav.estilos.length, 1);
+    assert.equal(nav.estilos[0].textContent, '@page { size: 215.9mm 330.2mm; margin: 0; } @page contrato-papel { size: 215.9mm 330.2mm; margin: 0; }');
+    nav.disparar('hashchange');
+    assert.equal(nav.estilos.length, 0);
+  } finally {
+    nav.restaurar();
+  }
+});
+
+test('la pantalla de imprimir con una impresora de oficio: la hoja del tamaño del oficio, la ayuda dice 8.5 × 13 y no «Legal», y la vista reserva su alto', () => {
+  const almacen = almacenEspia();
+  guardarCalibracion(almacen, 'Larga', OFICIO);
+  const c = contenedorFalso();
+  pintarContratoImpreso(c, entrada(), { almacen });
+  assert.match(c.vista(), /style="width:215\.9mm;height:330\.2mm"/);
+  assert.match(c.innerHTML, /tamaño Oficio de 8\.5 × 13 pulgadas \(21\.6 × 33 cm; en el diálogo puede llamarse «Oficio» o «Folio», no «Legal», que mide 14 pulgadas\)/);
+  assert.match(c.innerHTML, /Impresora «Larga», papel Oficio: /);
+  assert.match(c.innerHTML, /<div class="hc-vista hc-vista-oficio" data-pieza="vista">/);
+  // con una de carta, nada de eso
+  const carta = contenedorFalso();
+  pintarContratoImpreso(carta, entrada(), { almacen: almacenEspia() });
+  assert.match(carta.innerHTML, /tamaño Carta, escala 100 %/);
+  assert.ok(!/hc-vista-oficio/.test(carta.innerHTML));
+});
+
+test('en oficio sobra espacio abajo pero el ancho es el mismo: el aviso de «se salen» habla del oficio y solo por la derecha', () => {
+  const almacen = almacenEspia();
+  guardarCalibracion(almacen, 'Larga', { dx: 0, dy: 40, escala: 0.8, papel: 'oficio' });
+  const c = contenedorFalso();
+  pintarContratoImpreso(c, entrada(), { almacen });
+  assert.match(c.avisos(), /casillas se salen del oficio y se cortarían en el papel: .*Hora de salida/);
+  assert.ok(!/de la carta/.test(c.avisos()));
+  // la misma calibración corrida 40 mm hacia abajo en carta sacaría también lo de abajo; en oficio, no
+  const enCarta = contenedorFalso();
+  const aCarta = almacenEspia();
+  guardarCalibracion(aCarta, 'Corta', { dx: 0, dy: 40, escala: 0.77, papel: 'carta' });
+  pintarContratoImpreso(enCarta, entrada(), { almacen: aCarta });
+  assert.ok(!/Preparado por/.test(c.avisos()));
+});
+
+test('el selector de papel de la pantalla de calibrar: carta y oficio, se escoge, se repinta la hoja de prueba y se guarda con la impresora', () => {
+  const nav = navegadorFalso();
+  try {
+    const almacen = almacenEspia();
+    const c = contenedorFalso();
+    const pantalla = pintarCalibracion(c, { almacen });
+    assert.match(c.innerHTML, /<select id="hc-papel"><option value="carta" selected>Carta \(215\.9 × 279\.4 mm\)<\/option><option value="oficio">Oficio \(215\.9 × 330\.2 mm\)<\/option><\/select>/);
+    assert.equal(papelDe(pantalla.cal()).clave, 'carta');
+    // escoger oficio: la hoja de prueba pasa al alto del oficio, la vista reserva su alto y la página de impresión cambia
+    c.nodo('#hc-papel').oyentes.change({ target: { value: 'oficio' } });
+    assert.equal(pantalla.cal().papel, 'oficio');
+    assert.match(c.vista(), /hoja-de-prueba[^>]*style="width:215\.9mm;height:330\.2mm"/);
+    assert.equal(c.nodo('[data-pieza="vista"]').className, 'hc-vista hc-vista-oficio');
+    assert.equal(c.nodo('#hc-papel').value, 'oficio');
+    assert.match(nav.estilos[0].textContent, /size: 215\.9mm 330\.2mm/);
+    assert.equal(nav.estilos.length, 1, 'una sola regla de página, no se acumulan');
+    // guardar: el papel viaja con el corrimiento y la escala
+    c.nodo('#hc-nombre').oyentes.input({ target: { value: 'Larga' } });
+    c.nodo('[data-accion="guardar"]').oyentes.click();
+    assert.deepEqual(leerCalibraciones(almacen).impresoras.Larga, { dx: 0, dy: 0, escala: 0.77, papel: 'oficio' });
+    assert.equal(calibracionActiva(almacen).cal.papel, 'oficio');
+    // las flechas no pierden el papel
+    nav.doc.keydown({ key: 'ArrowRight', target: { matches: () => false }, preventDefault() {} });
+    assert.equal(pantalla.cal().papel, 'oficio');
+    assert.equal(pantalla.cal().dx, 0.5);
+    // y volver a la carta
+    c.nodo('#hc-papel').oyentes.change({ target: { value: 'carta' } });
+    assert.equal(pantalla.cal().papel, 'carta');
+    assert.equal(c.nodo('[data-pieza="vista"]').className, 'hc-vista');
+    assert.match(nav.estilos[0].textContent, /size: 215\.9mm 279\.4mm/);
+  } finally {
+    nav.restaurar();
+  }
+});
+
+test('en la pantalla de calibrar, el aviso de casillas fuera del papel habla del papel escogido', () => {
+  const nav = navegadorFalso();
+  try {
+    const c = contenedorFalso();
+    const pantalla = pintarCalibracion(c, { almacen: almacenEspia() });
+    c.nodo('#hc-papel').oyentes.change({ target: { value: 'oficio' } });
+    const tecla = (key, extra = {}) => nav.doc.keydown({ key, target: { matches: () => false }, preventDefault() {}, ...extra });
+    tecla('+', { ctrlKey: true });
+    tecla('+', { ctrlKey: true });
+    assert.equal(pantalla.cal().papel, 'oficio');
+    assert.match(c.nodo('[data-pieza="lectura"]').textContent, /casillas se salen del oficio y se cortarían en el papel/);
+    c.nodo('#hc-papel').oyentes.change({ target: { value: 'carta' } });
+    assert.match(c.nodo('[data-pieza="lectura"]').textContent, /casillas se salen de la carta y se cortarían en el papel/);
+  } finally {
+    nav.restaurar();
+  }
+});
+
+test('al escribir el nombre de una impresora de oficio ya guardada, el selector y la hoja de prueba pasan a oficio', () => {
+  const nav = navegadorFalso();
+  try {
+    const almacen = almacenEspia();
+    guardarCalibracion(almacen, 'Larga', { dx: 1, dy: 0, escala: 0.77, papel: 'oficio' });
+    guardarCalibracion(almacen, 'Corta', { dx: 0, dy: 0, escala: 0.77 });
+    const c = contenedorFalso();
+    const pantalla = pintarCalibracion(c, { almacen });
+    assert.equal(pantalla.cal().papel, undefined, 'la activa (la última) es la corta, sin papel escogido: carta');
+    c.nodo('#hc-nombre').oyentes.input({ target: { value: 'Larga' } });
+    assert.equal(pantalla.cal().papel, 'oficio');
+    assert.equal(c.nodo('#hc-papel').value, 'oficio');
+    assert.match(c.vista(), /height:330\.2mm/);
+    c.nodo('#hc-nombre').oyentes.input({ target: { value: 'Corta' } });
+    assert.equal(c.nodo('#hc-papel').value, 'carta');
+    assert.match(c.vista(), /height:279\.4mm/);
+  } finally {
+    nav.restaurar();
+  }
+});
+
+test('«Volver al ajuste de fábrica» vuelve también al papel de por omisión', () => {
+  const nav = navegadorFalso();
+  try {
+    const c = contenedorFalso();
+    const pantalla = pintarCalibracion(c, { almacen: almacenEspia() });
+    c.nodo('#hc-papel').oyentes.change({ target: { value: 'oficio' } });
+    assert.equal(pantalla.cal().papel, 'oficio');
+    c.nodo('[data-accion="fabrica"]').oyentes.click();
+    assert.equal(papelDe(pantalla.cal()).clave, PAPEL_POR_OMISION);
+    assert.equal(c.nodo('#hc-papel').value, PAPEL_POR_OMISION);
+  } finally {
+    nav.restaurar();
+  }
+});
+
 test('un contrato en efectivo no pide número de tarjeta ni CBC', () => {
   const c = contenedorFalso();
   pintarContratoImpreso(c, entrada({ contrato: contrato({ tarjetas: [] }) }), { almacen: almacenEspia() });
@@ -1071,7 +1248,7 @@ test('sin cliente no se dibuja una hoja: se dibuja una barra roja que dice por q
 test('una calibración guardada se usa en la hoja, y sin ninguna la pantalla avisa que el primer papel sale corrido', () => {
   const sin = contenedorFalso();
   pintarContratoImpreso(sin, entrada(), { almacen: almacenEspia() });
-  assert.match(sin.innerHTML, /todavía no tiene una impresora calibrada: el primer papel sale corrido/);
+  assert.match(sin.innerHTML, /todavía no tiene una impresora calibrada: el primer papel sale corrido \(ajuste de fábrica, papel Carta: /);
   assert.ok(sin.vista().includes(`scale(${CALIBRACION_DE_FABRICA.escala})`));
 
   const almacen = almacenEspia();
@@ -1079,7 +1256,7 @@ test('una calibración guardada se usa en la hoja, y sin ninguna la pantalla avi
   const con = contenedorFalso();
   pintarContratoImpreso(con, entrada(), { almacen });
   assert.ok(con.vista().includes('translate(1.5mm, -0.5mm) scale(0.98)'));
-  assert.match(con.innerHTML, /Impresora «Oficina &lt;1&gt;»: 1\.5 mm a la derecha, 0\.5 mm hacia arriba, 98\.0 % del tamaño de Excel/);
+  assert.match(con.innerHTML, /Impresora «Oficina &lt;1&gt;», papel Carta: 1\.5 mm a la derecha, 0\.5 mm hacia arriba, 98\.0 % del tamaño de Excel/);
   assert.ok(!con.innerHTML.includes('no tiene una impresora calibrada'));
 });
 
@@ -1324,13 +1501,13 @@ function navegadorFalso() {
   };
 }
 
-test('mientras la pantalla de imprimir está abierta la página de impresión es la carta SIN margen, y al salir se quita', () => {
+test('mientras la pantalla de imprimir está abierta la página de impresión es la carta SIN margen (la suelta y la de nombre), y al salir se quita', () => {
   const nav = navegadorFalso();
   try {
     pintarContratoImpreso(contenedorFalso(), entrada(), { almacen: almacenEspia() });
     assert.equal(nav.estilos.length, 1);
     assert.equal(nav.estilos[0].id, 'hc-estilo-de-pagina');
-    assert.equal(nav.estilos[0].textContent, '@page { size: 215.9mm 279.4mm; margin: 0; }');
+    assert.equal(nav.estilos[0].textContent, '@page { size: 215.9mm 279.4mm; margin: 0; } @page contrato-papel { size: 215.9mm 279.4mm; margin: 0; }');
     // pintar otra vez no deja dos
     pintarContratoImpreso(contenedorFalso(), entrada(), { almacen: almacenEspia() });
     assert.equal(nav.estilos.length, 1);
@@ -1660,6 +1837,8 @@ test('la hoja de estilos: la página es la carta sin margen, la hoja ocupa la ca
   const lienzo = bloqueDesde(css, css.indexOf('\n.hc-lienzo {'));
   assert.ok(!/transform/.test(lienzo), 'el CSS del lienzo no puede traer su propio transform');
   assert.match(lienzo, /position:\s*absolute;/);
+  // el lienzo es del tamaño de la hoja, sea carta u oficio (el tamaño va en el style de la hoja)
+  assert.match(lienzo, /width:\s*100%;\s*height:\s*100%;/);
   const campo = bloqueDesde(css, css.indexOf('\n.hc-campo {'));
   assert.match(campo, /position:\s*absolute;/);
   assert.ok(!/transform/.test(campo));
@@ -1696,6 +1875,7 @@ test('lo que tiene que verse en la hoja de prueba no depende de «Gráficos de f
   assert.match(bloqueDesde(css, css.indexOf('\n.hp-caja.hp-hito-caja {')), /border:\s*0\.5mm solid #000;/);
   assert.match(bloqueDesde(css, css.indexOf('\n.hp-hito {')), /border:\s*0\.4mm solid #000;/);
   assert.match(bloqueDesde(css, css.indexOf('\n.hp-caja.hp-derivada {')), /border:\s*0\.4mm dashed #000;/);
+  assert.match(bloqueDesde(css, css.indexOf('.hc-vista.hc-vista-oficio {')), /height:\s*calc\(330\.2mm \* 0\.62 \+ 24px\);/);
   assert.match(bloqueDesde(css, css.indexOf('\n.hp-caja.hp-derivada span {')), /white-space:\s*normal;\s*overflow:\s*visible;/);
   for (const regla of ['\n.hp-marca-x {', '\n.hp-marca-y {', '\n.hp-cruz {']) {
     assert.ok(!/background/.test(bloqueDesde(css, css.indexOf(regla))), `${regla.trim()} no debe llevar fondo`);

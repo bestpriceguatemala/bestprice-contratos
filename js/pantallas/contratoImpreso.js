@@ -40,7 +40,7 @@ import { q } from '../nucleo/dinero.js';
 import {
   CAMPOS, ESCALA_EXCEL, ORIGEN_MM, PAPEL, HOJA_MM, cajaDeRango, campoPorId, fechaParaPapel, textoSeSale,
   transformacionCss, textoDeCalibracion, aplicarTecla, calibracionActiva, guardarCalibracion,
-  leerCalibraciones, CALIBRACION_DE_FABRICA, calibracionValida, camposQueSeImprimen, TARIFAS_DEL_PAPEL, PASOS, camposFueraDeLaCarta,
+  leerCalibraciones, CALIBRACION_DE_FABRICA, calibracionValida, camposQueSeImprimen, TARIFAS_DEL_PAPEL, PASOS, camposFueraDelPapel, papelDe, PAPELES,
 } from '../nucleo/hojaContrato.js';
 import { dinero } from '../ui.js';
 import { cargarContrato, cargarClientes, cargarFlota } from '../datos.js';
@@ -334,7 +334,8 @@ export function htmlContratoImpreso(modelo, cal = CALIBRACION_DE_FABRICA) {
     .filter((c) => modelo.valores[c.id])
     .map((c) => campoHtml(c, modelo.valores[c.id]))
     .join('\n    ');
-  return `<article class="hoja-contrato" aria-label="Contrato N.° ${esc(modelo.numero ?? '')}">
+  const papel = papelDe(cal);
+  return `<article class="hoja-contrato" aria-label="Contrato N.° ${esc(modelo.numero ?? '')}" style="width:${papel.anchoMm}mm;height:${papel.altoMm}mm">
   <div class="hc-lienzo" style="transform-origin:${mm(ORIGEN_MM.x)} ${mm(ORIGEN_MM.y)};transform:${transformacionCss(cal)};">
     ${campos}
   </div>
@@ -345,18 +346,18 @@ export function htmlContratoImpreso(modelo, cal = CALIBRACION_DE_FABRICA) {
 
 const NUMERAR_CADA_MM = 10;
 
-/** Una regla en los dos bordes de la carta: marcas cada 5 mm, número cada 10 mm. NO se corre con la calibración. */
-function reglaHtml() {
+/** Una regla en los dos bordes del papel (carta u oficio): marcas cada 5 mm, número cada 10 mm. NO se corre con la calibración. */
+function reglaHtml(papel) {
   const marcas = [];
-  for (let x = 0; x <= PAPEL.anchoMm; x += 5) {
+  for (let x = 0; x <= papel.anchoMm; x += 5) {
     const larga = x % NUMERAR_CADA_MM === 0;
     marcas.push(`<i class="hp-marca hp-marca-x${larga ? ' hp-larga' : ''}" style="left:${x}mm"></i>`);
-    if (larga && x > 0 && x < PAPEL.anchoMm) marcas.push(`<b class="hp-num hp-num-x" style="left:${x}mm">${x}</b>`);
+    if (larga && x > 0 && x < papel.anchoMm) marcas.push(`<b class="hp-num hp-num-x" style="left:${x}mm">${x}</b>`);
   }
-  for (let y = 0; y <= PAPEL.altoMm; y += 5) {
+  for (let y = 0; y <= papel.altoMm; y += 5) {
     const larga = y % NUMERAR_CADA_MM === 0;
     marcas.push(`<i class="hp-marca hp-marca-y${larga ? ' hp-larga' : ''}" style="top:${y}mm"></i>`);
-    if (larga && y > 0 && y < PAPEL.altoMm) marcas.push(`<b class="hp-num hp-num-y" style="top:${y}mm">${y}</b>`);
+    if (larga && y > 0 && y < papel.altoMm) marcas.push(`<b class="hp-num hp-num-y" style="top:${y}mm">${y}</b>`);
   }
   return marcas.join('');
 }
@@ -438,6 +439,7 @@ function nombreEnLaPrueba(campo) {
  * Todo lo que no es regla ni texto va dentro del mismo lienzo con el mismo `transform` que la hoja del contrato.
  */
 export function htmlHojaDePrueba(cal = CALIBRACION_DE_FABRICA, { impresora = null } = {}) {
+  const papel = papelDe(cal);
   const hito = new Map(HITOS.map((h) => [h.id, h]));
   const cajas = CAMPOS.map((c) => {
     const imprime = c.imprime !== false;
@@ -451,10 +453,10 @@ export function htmlHojaDePrueba(cal = CALIBRACION_DE_FABRICA, { impresora = nul
   }).join('');
   const esquina = (x, y, clase) => `<i class="hp-cruz ${clase}" style="left:${mm(ORIGEN_MM.x + x)};top:${mm(ORIGEN_MM.y + y)}"></i>`;
   const marco = `<div class="hp-marco" style="left:${mm(ORIGEN_MM.x)};top:${mm(ORIGEN_MM.y)};width:${mm(HOJA_MM.ancho)};height:${mm(HOJA_MM.alto)}"></div>`;
-  const rotulo = `<strong>HOJA DE PRUEBA</strong> (no es el contrato)${impresora ? ` · impresora «${esc(impresora)}»` : ''} · ${esc(textoDeCalibracion(cal))}<br>Cada rectángulo marca dónde se escribirá un dato. Los cuatro con número y borde grueso son con los que se compara. Las reglas de los bordes están en milímetros. La casilla de raya de trazos largos («derivada») no se midió en Excel: mírala con más atención.`;
+  const rotulo = `<strong>HOJA DE PRUEBA</strong> (no es el contrato)${impresora ? ` · impresora «${esc(impresora)}»` : ''} · papel ${esc(papel.nombre)} · ${esc(textoDeCalibracion(cal))}<br>Cada rectángulo marca dónde se escribirá un dato. Los cuatro con número y borde grueso son con los que se compara. Las reglas de los bordes están en milímetros. La casilla de raya de trazos largos («derivada») no se midió en Excel: mírala con más atención.`;
   const pasos = PASOS_DE_CALIBRAR.map((p, i) => `<li><b>${i + 1}.</b> ${esc(p.corto)}</li>`).join('');
-  return `<article class="hoja-contrato hoja-de-prueba" aria-label="Hoja de prueba">
-  <div class="hp-regla">${reglaHtml()}</div>
+  return `<article class="hoja-contrato hoja-de-prueba" aria-label="Hoja de prueba" style="width:${papel.anchoMm}mm;height:${papel.altoMm}mm">
+  <div class="hp-regla">${reglaHtml(papel)}</div>
   <p class="hp-rotulo">${rotulo}</p>
   <ol class="hp-pasos">${pasos}</ol>
   <div class="hc-lienzo" style="transform-origin:${mm(ORIGEN_MM.x)} ${mm(ORIGEN_MM.y)};transform:${transformacionCss(cal)};">
@@ -503,16 +505,26 @@ function almacenDelNavegador() {
   };
 }
 
-/** Pone, mientras esta pantalla esté abierta, la regla de página sin margen (la carta entera es del papel). */
+/**
+ * Pone, mientras esta pantalla esté abierta, la regla de página sin margen y del tamaño del papel (carta u oficio). Van DOS reglas:
+ * la suelta (Safari y los demás) y la de la página CON NOMBRE de css/contrato-papel.css, que en Chrome manda sobre la suelta y que
+ * en el CSS dice carta: sin pisarla, un oficio saldría en una página de carta.
+ */
 const ID_ESTILO_DE_PAGINA = 'hc-estilo-de-pagina';
-function ponerPaginaSinMargen() {
+let ventanaQueEscucha = null;
+function ponerPaginaSinMargen(papel = PAPELES.carta) {
   if (typeof document === 'undefined') return;
   quitarPaginaSinMargen();
   const estilo = document.createElement('style');
   estilo.id = ID_ESTILO_DE_PAGINA;
-  estilo.textContent = `@page { size: ${PAPEL.anchoMm}mm ${PAPEL.altoMm}mm; margin: 0; }`;
+  const pagina = `size: ${papel.anchoMm}mm ${papel.altoMm}mm; margin: 0;`;
+  estilo.textContent = `@page { ${pagina} } @page contrato-papel { ${pagina} }`;
   document.head.appendChild(estilo);
-  window.addEventListener('hashchange', quitarPaginaSinMargen, { once: true });
+  // Una sola escucha del cambio de pantalla aunque se vuelva a poner la regla (al cambiar de papel en calibrar): se pide una vez por ventana.
+  if (ventanaQueEscucha !== window) {
+    ventanaQueEscucha = window;
+    window.addEventListener('hashchange', () => { ventanaQueEscucha = null; quitarPaginaSinMargen(); }, { once: true });
+  }
 }
 function quitarPaginaSinMargen() {
   if (typeof document === 'undefined') return;
@@ -520,22 +532,28 @@ function quitarPaginaSinMargen() {
 }
 
 const textoDeImpresora = ({ nombre, cal, calibrada }) => (calibrada
-  ? `Impresora «${esc(nombre)}»: ${esc(textoDeCalibracion(cal))}.`
-  : `Esta computadora todavía no tiene una impresora calibrada: el primer papel sale corrido (ajuste de fábrica: ${esc(textoDeCalibracion(cal))}).`);
+  ? `Impresora «${esc(nombre)}», papel ${esc(papelDe(cal).nombre)}: ${esc(textoDeCalibracion(cal))}.`
+  : `Esta computadora todavía no tiene una impresora calibrada: el primer papel sale corrido (ajuste de fábrica, papel ${esc(papelDe(cal).nombre)}: ${esc(textoDeCalibracion(cal))}).`);
 
-/** Lo que se dice cuando una calibración dejaría casillas fuera de la carta. */
-function textoDeCortadas(ids) {
+/** Lo que se dice cuando una calibración dejaría casillas fuera del papel (de la carta o del oficio). */
+function textoDeCortadas(ids, papel = PAPELES.carta) {
   const nombres = ids.map((id) => campoPorId(id).etiqueta).join(', ');
-  return `Con la calibración de esta impresora ${ids.length === 1 ? 'una casilla se sale' : `${ids.length} casillas se salen`} de la carta y se cortarían en el papel: ${nombres}. Achica la hoja en «Calibrar impresora» (tecla −).`;
+  return `Con la calibración de esta impresora ${ids.length === 1 ? 'una casilla se sale' : `${ids.length} casillas se salen`} ${papel.de} y se cortarían en el papel: ${nombres}. Achica la hoja en «Calibrar impresora» (tecla −).`;
 }
 
-/** El renglón de «Ajuste: …» de la pantalla de calibrar, con el aviso si el ajuste deja casillas fuera de la carta. */
+/** El renglón de «Ajuste: …» de la pantalla de calibrar, con el aviso si el ajuste deja casillas fuera del papel. */
 function lecturaDe(cal, prefijo = '') {
-  const cortadas = camposFueraDeLaCarta(cal);
-  return `${prefijo}Ajuste: ${textoDeCalibracion(cal)}.${cortadas.length ? ` ${textoDeCortadas(cortadas)}` : ''}`;
+  const cortadas = camposFueraDelPapel(cal);
+  return `${prefijo}Ajuste: ${textoDeCalibracion(cal)}.${cortadas.length ? ` ${textoDeCortadas(cortadas, papelDe(cal))}` : ''}`;
 }
 
-const AYUDA_DE_IMPRIMIR = 'En el diálogo de imprimir pon siempre: tamaño Carta, escala 100 % (no «Ajustar a la página»), márgenes «Ninguno» y sin encabezados ni pies de página.';
+/** Cómo se configura el diálogo de imprimir para cada papel. El oficio mide 8.5 × 13 pulgadas, y NO es «Legal» (que mide 14). */
+function ayudaDeImprimir(papel = PAPELES.carta) {
+  const tamano = papel.clave === 'oficio'
+    ? 'tamaño Oficio de 8.5 × 13 pulgadas (21.6 × 33 cm; en el diálogo puede llamarse «Oficio» o «Folio», no «Legal», que mide 14 pulgadas)'
+    : 'tamaño Carta';
+  return `En el diálogo de imprimir pon siempre: ${tamano}, escala 100 % (no «Ajustar a la página»), márgenes «Ninguno» y sin encabezados ni pies de página.`;
+}
 const AVISO_DE_TARJETA = 'Este papel lleva el número completo de la tarjeta y el CBC: imprímelo directo a la impresora. NO lo guardes como PDF: quedaría un archivo con la tarjeta en la computadora (ADR-001).';
 
 function cajasDeTarjetas(contrato) {
@@ -624,12 +642,12 @@ export function pintarContratoImpreso(contenedor, entrada, {
     <a class="btn" href="#/impresion/calibrar" data-accion="calibrar">Calibrar impresora</a>
   </div>
   <p class="comp-ayuda no-imprimir" data-pieza="impresora">${textoDeImpresora(impresora)}</p>
-  <p class="comp-ayuda no-imprimir">${esc(AYUDA_DE_IMPRIMIR)}</p>
+  <p class="comp-ayuda no-imprimir">${esc(ayudaDeImprimir(papelDe(impresora.cal)))}</p>
   ${cajasDeTarjetas(entrada.contrato)}
   ${cajasDelPapel(entrada.contrato)}
   <div data-pieza="notas"></div>
   <div data-pieza="avisos"></div>
-  <div class="hc-vista" data-pieza="vista"></div>
+  <div class="${papelDe(impresora.cal).clave === 'oficio' ? 'hc-vista hc-vista-oficio' : 'hc-vista'}" data-pieza="vista"></div>
 </div>`;
 
   const el = (id) => contenedor.querySelector(id);
@@ -638,8 +656,8 @@ export function pintarContratoImpreso(contenedor, entrada, {
     el('[data-pieza="notas"]').innerHTML = modelo.notas.map((n) => `<p class="comp-ayuda no-imprimir">${esc(n)}</p>`).join('');
     const caja = el('[data-pieza="avisos"]');
     // Con la calibración de esta impresora, ¿alguna casilla que lleva dato se saldría de la carta? Se cortaría en el papel.
-    const cortadas = camposFueraDeLaCarta(impresora.cal).filter((id) => modelo.valores[id]);
-    const avisos = cortadas.length ? [...modelo.avisos, textoDeCortadas(cortadas)] : modelo.avisos;
+    const cortadas = camposFueraDelPapel(impresora.cal).filter((id) => modelo.valores[id]);
+    const avisos = cortadas.length ? [...modelo.avisos, textoDeCortadas(cortadas, papelDe(impresora.cal))] : modelo.avisos;
     caja.innerHTML = avisos.length
       ? `<div class="barra-lectura-fallida no-imprimir" role="alert">${avisos.map((a) => `<p>${esc(a)}</p>`).join('')}</div>`
       : '';
@@ -687,7 +705,7 @@ export function pintarContratoImpreso(contenedor, entrada, {
   contenedor.querySelectorAll('.hc-datos input').forEach((caja) => caja.addEventListener('input', redibujar));
   restablecerDatosDelPapel();
   redibujar();
-  ponerPaginaSinMargen();
+  ponerPaginaSinMargen(papelDe(impresora.cal));
   // Al salir de la pantalla se vacía lo tecleado (la hoja ya no está a la vista, pero el DOM podría seguir en memoria).
   if (typeof window !== 'undefined') window.addEventListener('hashchange', vaciar, { once: true });
 
@@ -782,8 +800,11 @@ export function pintarCalibracion(contenedor, {
   <div class="hc-calibracion no-imprimir">
     <h2>Calibrar la impresora (un minuto)</h2>
     <ol class="hc-pasos">
-      ${PASOS_DE_CALIBRAR.map((p, i) => `<li><strong>${esc(p.titulo)}.</strong> ${esc(p.texto)}${i === 0 ? ` ${esc(AYUDA_DE_IMPRIMIR)}` : ''}</li>`).join('\n      ')}
+      ${PASOS_DE_CALIBRAR.map((p, i) => `<li><strong>${esc(p.titulo)}.</strong> ${esc(p.texto)}${i === 0 ? ` ${esc(ayudaDeImprimir(papelDe(cal)))}` : ''}</li>`).join('\n      ')}
     </ol>
+    <label>Tamaño del papel
+      <select id="hc-papel">${Object.values(PAPELES).map((p) => `<option value="${p.clave}"${p.clave === papelDe(cal).clave ? ' selected' : ''}>${esc(p.nombre)} (${p.anchoMm} × ${p.altoMm} mm)</option>`).join('')}</select>
+    </label>
     <label>Nombre de la impresora
       <input type="text" id="hc-nombre" list="hc-nombres" value="${esc(nombre)}" placeholder="Oficina" autocomplete="off">
       <datalist id="hc-nombres">${Object.keys(guardadas.impresoras).map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
@@ -797,10 +818,14 @@ export function pintarCalibracion(contenedor, {
   const el = (id) => contenedor.querySelector(id);
   function pintar() {
     el('[data-pieza="lectura"]').textContent = lecturaDe(cal);
-    el('[data-pieza="vista"]').innerHTML = htmlHojaDePrueba(cal, { impresora: nombre || null });
+    const vista = el('[data-pieza="vista"]');
+    vista.innerHTML = htmlHojaDePrueba(cal, { impresora: nombre || null });
+    vista.className = papelDe(cal).clave === 'oficio' ? 'hc-vista hc-vista-oficio' : 'hc-vista';
+    const selector = el('#hc-papel');
+    if (selector) selector.value = papelDe(cal).clave;
+    ponerPaginaSinMargen(papelDe(cal));
   }
   pintar();
-  ponerPaginaSinMargen();
 
   const alTeclear = (ev) => {
     // Teclear el nombre de la impresora no debe mover la hoja.
@@ -818,6 +843,12 @@ export function pintarCalibracion(contenedor, {
       quitarPaginaSinMargen();
     }, { once: true });
   }
+
+  // El papel (carta u oficio) se escoge aquí y se guarda con la impresora, junto al corrimiento y la escala.
+  el('#hc-papel')?.addEventListener('change', (ev) => {
+    cal = { ...cal, papel: ev.target.value };
+    pintar();
+  });
 
   el('#hc-nombre')?.addEventListener('input', (ev) => {
     nombre = ev.target.value;

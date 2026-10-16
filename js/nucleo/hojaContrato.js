@@ -16,8 +16,27 @@
 //      vez. Ningún campo tiene su propio ajuste: si un campo no calza y los demás sí, el problema es la tabla, no
 //      la impresora, y se arregla en la tabla.
 
-/** Carta, en milímetros. */
-export const PAPEL = { anchoMm: 215.9, altoMm: 279.4 };
+/**
+ * Los dos papeles en que puede armarse la hoja, en milímetros. El ancho es el mismo (8.5 pulgadas): lo que cambia es el alto de
+ * la página, y con él lo que se sale de ella. **Oficio** es 8.5 × 13 pulgadas (21.6 × 33 cm); en el diálogo de imprimir puede
+ * llamarse «Oficio» o «Folio», y NO es «Legal», que mide 14 pulgadas. Cuál usa él se escoge al calibrar y se guarda por impresora
+ * junto al corrimiento y la escala; mientras no se escoja, la carta.
+ */
+export const PAPELES = Object.freeze({
+  carta: Object.freeze({ clave: 'carta', nombre: 'Carta', de: 'de la carta', anchoMm: 215.9, altoMm: 279.4 }),
+  oficio: Object.freeze({ clave: 'oficio', nombre: 'Oficio', de: 'del oficio', anchoMm: 215.9, altoMm: 330.2 }),
+});
+
+/** El papel de una impresora que nadie ha calibrado, o cuya calibración no dice cuál. Se cambia aquí cuando él conteste. */
+export const PAPEL_POR_OMISION = 'carta';
+
+/** La carta: lo que usan los cálculos de ancho (que no cambian entre los dos papeles). */
+export const PAPEL = PAPELES.carta;
+
+/** El papel de una calibración (`cal.papel`), o el de por omisión si no trae uno que se conozca. */
+export const papelDe = (cal) => (cal && typeof cal.papel === 'string' && Object.hasOwn(PAPELES, cal.papel)
+  ? PAPELES[cal.papel]
+  : PAPELES[PAPEL_POR_OMISION]);
 
 /**
  * Excel imprime esta hoja al 89 % («Ajustar a: 89 %» en su configuración de página), y una unidad de pantalla
@@ -311,18 +330,28 @@ export const PASOS = Object.freeze({
 
 const dentro = (valor, [min, max]) => Number.isFinite(valor) && valor >= min && valor <= max;
 
-/** ¿Es una calibración posible? (tres números dentro de lo razonable). */
+/**
+ * ¿Es una calibración posible? Tres números dentro de lo razonable y, si trae `papel`, uno que se conozca (sin `papel` es el de
+ * por omisión: así sigue valiendo lo que se guardó antes de que se pudiera escoger).
+ */
 export function calibracionValida(c) {
   return Boolean(c) && typeof c === 'object'
-    && dentro(c.dx, LIMITES.dx) && dentro(c.dy, LIMITES.dy) && dentro(c.escala, LIMITES.escala);
+    && dentro(c.dx, LIMITES.dx) && dentro(c.dy, LIMITES.dy) && dentro(c.escala, LIMITES.escala)
+    && (c.papel === undefined || (typeof c.papel === 'string' && Object.hasOwn(PAPELES, c.papel)));
 }
+
+/** Copia solo lo que es de una calibración: los tres números y, si lo trae, el papel. */
+const soloLoSuyo = (c) => (c.papel === undefined
+  ? { dx: c.dx, dy: c.dy, escala: c.escala }
+  : { dx: c.dx, dy: c.dy, escala: c.escala, papel: c.papel });
 
 const aMilesimas = (n) => Math.round(n * 1000) / 1000;
 
 /** Recorta cada valor a lo posible y lo deja en milésimas (0.1 + 0.2 no debe dar 0.30000000000000004 en un texto). */
 export function limitar(c) {
   const tope = (v, [min, max]) => aMilesimas(Math.min(max, Math.max(min, v)));
-  return { dx: tope(c.dx, LIMITES.dx), dy: tope(c.dy, LIMITES.dy), escala: tope(c.escala, LIMITES.escala) };
+  const recortada = { dx: tope(c.dx, LIMITES.dx), dy: tope(c.dy, LIMITES.dy), escala: tope(c.escala, LIMITES.escala) };
+  return c.papel === undefined ? recortada : { ...recortada, papel: c.papel };
 }
 
 /**
@@ -347,6 +376,7 @@ export function aplicarTecla(cal, { key, shiftKey = false, ctrlKey = false, meta
     dx: cal.dx + (cambios.dx ?? 0),
     dy: cal.dy + (cambios.dy ?? 0),
     escala: cal.escala + (cambios.escala ?? 0),
+    papel: cal.papel,
   });
 }
 
@@ -365,17 +395,18 @@ export function cajaEnPapel(caja, cal) {
 }
 
 /**
- * Los campos que, con una calibración, se saldrían de la carta (por cualquier lado) y se cortarían en el papel. A tamaño de
- * Excel la hoja mide 250 mm y la carta 216: con una escala mayor que `ESCALA_QUE_CABE` las últimas columnas (las horas y los
- * precios de la derecha) caen fuera del papel, y una calibración que lo permitiera sacaría un contrato sin esas casillas sin
- * avisar. Sirve para decírselo a quien calibra y a quien imprime. Cuenta las cajas (no el texto): lo que se sale de su casilla
- * ya lo avisa `textoSeSale`.
+ * Los campos que, con una calibración, se saldrían del papel de esa calibración (por cualquier lado) y se cortarían. A tamaño de
+ * Excel la hoja mide 250 mm y el papel 216 de ancho: con una escala mayor que `ESCALA_QUE_CABE` las últimas columnas (las horas y
+ * los precios de la derecha) caen fuera, y una calibración que lo permitiera sacaría un contrato sin esas casillas sin avisar.
+ * El ancho es el mismo en carta y en oficio, así que ese límite no cambia; el alto sí (oficio da 51 mm más de espacio abajo).
+ * Cuenta las cajas (no el texto): lo que se sale de su casilla ya lo avisa `textoSeSale`.
  */
-export function camposFueraDeLaCarta(cal) {
+export function camposFueraDelPapel(cal) {
+  const papel = papelDe(cal);
   return camposQueSeImprimen().filter((campo) => {
     const caja = cajaEnPapel(cajaDeRango(campo.rango), cal);
     const margen = 1e-6;
-    return caja.x < -margen || caja.y < -margen || caja.x + caja.ancho > PAPEL.anchoMm + margen || caja.y + caja.alto > PAPEL.altoMm + margen;
+    return caja.x < -margen || caja.y < -margen || caja.x + caja.ancho > papel.anchoMm + margen || caja.y + caja.alto > papel.altoMm + margen;
   }).map((campo) => campo.id);
 }
 
@@ -402,7 +433,7 @@ export function textoDeCalibracion(cal) {
 
 export const CLAVE_DE_CALIBRACIONES = 'bestprice.impresion.calibraciones';
 
-/** `{ activa, impresoras: { nombre: { dx, dy, escala } } }`. Lo ilegible o imposible se descarta, no se arregla. */
+/** `{ activa, impresoras: { nombre: { dx, dy, escala, papel? } } }`. Lo ilegible o imposible se descarta, no se arregla. */
 export function leerCalibraciones(almacen) {
   const vacio = { activa: null, impresoras: {} };
   let crudo;
@@ -414,7 +445,7 @@ export function leerCalibraciones(almacen) {
   if (!crudo || typeof crudo !== 'object' || !crudo.impresoras || typeof crudo.impresoras !== 'object') return vacio;
   const impresoras = {};
   for (const [nombre, c] of Object.entries(crudo.impresoras)) {
-    if (calibracionValida(c)) impresoras[nombre] = { dx: c.dx, dy: c.dy, escala: c.escala };
+    if (calibracionValida(c)) impresoras[nombre] = soloLoSuyo(c);
   }
   const activa = typeof crudo.activa === 'string' && impresoras[crudo.activa] ? crudo.activa : null;
   return { activa, impresoras };
@@ -426,7 +457,7 @@ export function guardarCalibracion(almacen, nombre, cal) {
   if (!limpio) throw new Error('Ponle un nombre a la impresora para guardar su ajuste.');
   if (!calibracionValida(cal)) throw new Error('Esos números de calibración no son posibles.');
   const actuales = leerCalibraciones(almacen);
-  actuales.impresoras[limpio] = { dx: cal.dx, dy: cal.dy, escala: cal.escala };
+  actuales.impresoras[limpio] = soloLoSuyo(cal);
   actuales.activa = limpio;
   try {
     almacen.setItem(CLAVE_DE_CALIBRACIONES, JSON.stringify(actuales));
