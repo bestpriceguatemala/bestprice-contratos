@@ -468,13 +468,52 @@ test('«LDW Q.» y «PAI Q.»: el papel ya trae la Q, así que esos dos montos s
     assert.match(v[id], /^Q[\d,]+\.\d\d$/, `${id}: con la Q`);
   }
   // lo decide la tabla, no un if suelto: se ve en la hoja y en cualquier monto que pase por esos dos campos
-  assert.match(html(), /data-campo="seguro"[^>]*><span class="hc-t">72\.00<\/span>/);
-  assert.match(html(), /data-campo="seguroPai"[^>]*><span class="hc-t">5\.00<\/span>/);
+  assert.equal(textoVisible(html(), 'seguro'), '72.00');
+  assert.equal(textoVisible(html(), 'seguroPai'), '5.00');
+  assert.equal(textoVisible(html(), 'seguroTerceros'), 'Q120.00', 'el de terceros, con su Q');
   assert.equal(valores({ contrato: contrato({ seguroDia: 1234.5 }) }).seguro, '1,234.50');
   // una casilla sin monto sigue en blanco
   assert.equal(valores({ contrato: contrato({ seguroDia: 0, seguroPaiDia: 0 }) }).seguro, '');
   // un monto negativo conserva su signo y pierde solo la Q: '-5.00', no '5.00' ni '-Q5.00'
   assert.equal(valores({ contrato: contrato({ seguroPaiDia: -5 }) }).seguroPai, '-5.00');
+});
+
+test('los montos de formato CONTABLE de Excel se dibujan con la «Q» a un extremo y el número al otro; los demás, con la «Q» pegada', () => {
+  const hoja = html();
+  // contables: horaTardia, seguroTerceros, combustiblePrecio (con Q) y seguro (sin Q, que el papel ya la trae)
+  assert.ok(hoja.includes('data-campo="horaTardia"') && /data-campo="horaTardia"[^>]*><span class="hc-t hc-contable"><i class="hc-q">Q<\/i><b class="hc-n">150\.00<\/b><\/span>/.test(hoja));
+  assert.match(hoja, /data-campo="seguroTerceros"[^>]*><span class="hc-t hc-contable"><i class="hc-q">Q<\/i><b class="hc-n">120\.00<\/b><\/span>/);
+  assert.match(hoja, /data-campo="combustiblePrecio"[^>]*><span class="hc-t hc-contable"><i class="hc-q">Q<\/i><b class="hc-n">65\.00<\/b><\/span>/);
+  assert.match(hoja, /data-campo="seguro"[^>]*><span class="hc-t hc-contable"><b class="hc-n">72\.00<\/b><\/span>/, 'sin Q: solo el número, al borde derecho');
+  // las que no son contables, un solo texto con la Q pegada
+  assert.match(hoja, /data-campo="precioBase"[^>]*><span class="hc-t">Q508\.00<\/span>/);
+  assert.match(hoja, /data-campo="deducible"[^>]*><span class="hc-t">Q55,000\.00<\/span>/);
+  assert.match(hoja, /data-campo="tarjeta1Monto"[^>]*><span class="hc-t">Q15,000\.00<\/span>/);
+  assert.match(hoja, /data-campo="cartaPoderPrecio"[^>]*><span class="hc-t">Q350\.00<\/span>/);
+  assert.match(hoja, /data-campo="seguroPai"[^>]*><span class="hc-t">5\.00<\/span>/, 'PAI: pegado en Excel, y sin Q porque el papel la trae');
+  assert.match(hoja, /data-campo="seguroCopia"[^>]*><span class="hc-t">Q72\.00<\/span>/);
+  assert.match(hoja, /data-campo="deducibleCopia"[^>]*><span class="hc-t">55,000\.00<\/span>/);
+  // y lo que se LEE no cambia con la separación
+  assert.equal(textoVisible(hoja, 'seguroTerceros'), 'Q120.00');
+  assert.equal(textoVisible(hoja, 'precioBase'), 'Q508.00');
+  // el modelo sigue guardando un solo texto: la separación es del dibujo
+  assert.equal(armarContratoImpreso(entrada()).valores.seguroTerceros, 'Q120.00');
+});
+
+test('un monto contable sin dato no dibuja nada, y uno que no empieza con Q se dibuja solo como número', () => {
+  const sin = html({ contrato: contrato({ seguroTercerosDia: 0, seguroDia: 0, seguroMenoresDia: 0, variosPrecio: 0 }) });
+  for (const id of ['seguroTerceros', 'seguro', 'seguroMenores', 'variosPrecio']) assert.ok(!sin.includes(`data-campo="${id}"`), id);
+  const cargado = html({ contrato: contrato({ seguroMenoresDia: 10, variosPrecio: 80 }) });
+  assert.match(cargado, /data-campo="seguroMenores"[^>]*><span class="hc-t hc-contable"><i class="hc-q">Q<\/i><b class="hc-n">10\.00<\/b>/);
+  assert.match(cargado, /data-campo="variosPrecio"[^>]*><span class="hc-t hc-contable"><i class="hc-q">Q<\/i><b class="hc-n">80\.00<\/b>/);
+  // un valor sin Q (como el de LDW) y uno negativo
+  const sinQ = htmlContratoImpreso({ numero: 1, valores: { seguroTerceros: '120.00', seguro: '-5.00' } });
+  assert.match(sinQ, /data-campo="seguroTerceros"[^>]*><span class="hc-t hc-contable"><b class="hc-n">120\.00<\/b>/);
+  assert.match(sinQ, /data-campo="seguro"[^>]*><span class="hc-t hc-contable"><b class="hc-n">-5\.00<\/b>/);
+  const negativo = htmlContratoImpreso({ numero: 1, valores: { seguroTerceros: '-Q5.00' } });
+  assert.match(negativo, /<i class="hc-q">Q<\/i><b class="hc-n">-5\.00<\/b>/);
+  // y el texto de un contable se escapa como todo
+  assert.ok(!htmlContratoImpreso({ numero: 1, valores: { seguroTerceros: 'Q<b>1</b>' } }).includes('<b>1</b>'));
 });
 
 test('la Q se imprime: el dueño contestó el 14 de octubre de 2026 que su papel NO la trae', () => {
@@ -634,6 +673,12 @@ test('ADR-001: un número que no termina como la tarjeta del contrato se avisa, 
 // ---------------------------------------------------------------------------
 
 const html = (extra, cal) => htmlContratoImpreso(armarContratoImpreso(entrada(extra)), cal);
+
+/** Lo que se LEE en una casilla de la hoja (sin las marcas que separan la «Q» del número en las contables): '' si la hoja no la trae. */
+function textoVisible(hoja, id) {
+  const m = new RegExp(`<div class="[^"]*" data-campo="${id}" style="[^"]*">(.*?)</div>`, 's').exec(hoja);
+  return m ? m[1].replace(/<[^>]*>/g, '') : '';
+}
 
 /** El estilo en línea de un campo de la hoja, partido en sus declaraciones. */
 function estiloDe(texto, id) {
@@ -1314,7 +1359,9 @@ test('las cajas de lo que el sistema no guarda traen el lugar de la salida y las
   assert.equal(c.nodo('#hc-tarifa-hora-tardia').value, '150');
   assert.equal(c.nodo('#hc-tarifa-galon').value, '65');
   // la hoja ya los lleva
-  assert.ok(c.vista().includes('data-campo="lugarEntrada"') && c.vista().includes('Q150.00') && c.vista().includes('Q65.00'));
+  assert.ok(c.vista().includes('data-campo="lugarEntrada"'));
+  assert.equal(textoVisible(c.vista(), 'horaTardia'), 'Q150.00');
+  assert.equal(textoVisible(c.vista(), 'combustiblePrecio'), 'Q65.00');
   assert.ok(!c.vista().includes('data-campo="facturarNit"'));
   // y la pantalla dice que no se guardan
   assert.match(c.innerHTML, /NO se guardan en el sistema: se borran al terminar de imprimir/);
@@ -1336,11 +1383,14 @@ test('lo que se teclea en esas cajas sale en la hoja, y al terminar de imprimir 
   teclear('#hc-tarifa-hora-tardia', '200');
   teclear('#hc-tarifa-galon', '70.5');
   const hoja = c.vista();
-  assert.ok(hoja.includes('Transportes López, S.A.') && hoja.includes('1234567-8') && hoja.includes('AEROPUERTO') && hoja.includes('Q200.00') && hoja.includes('Q70.50'));
-  assert.ok(!hoja.includes('Q150.00') && !hoja.includes('Q65.00'), 'las tarifas corregidas reemplazan a las de siempre');
+  assert.ok(hoja.includes('Transportes López, S.A.') && hoja.includes('1234567-8') && hoja.includes('AEROPUERTO'));
+  assert.equal(textoVisible(hoja, 'horaTardia'), 'Q200.00');
+  assert.equal(textoVisible(hoja, 'combustiblePrecio'), 'Q70.50');
+  assert.ok(!hoja.includes('150.00') && !hoja.includes('65.00'), 'las tarifas corregidas reemplazan a las de siempre');
 
   c.nodo('[data-accion="imprimir"]').oyentes.click();
-  assert.ok(enElDialogo.includes('1234567-8') && enElDialogo.includes('AEROPUERTO') && enElDialogo.includes('Q200.00'), 'lo que se imprimió es lo tecleado');
+  assert.ok(enElDialogo.includes('1234567-8') && enElDialogo.includes('AEROPUERTO') && enElDialogo.includes('200.00'), 'lo que se imprimió es lo tecleado');
+  assert.equal(textoVisible(enElDialogo, 'horaTardia'), 'Q200.00');
 
   // terminó: a quién se factura se borra, y lo corregido para esta renta no se queda para la siguiente
   assert.equal(c.nodo('#hc-facturar-nombre').value, '');
@@ -1349,7 +1399,9 @@ test('lo que se teclea en esas cajas sale en la hoja, y al terminar de imprimir 
   assert.equal(c.nodo('#hc-tarifa-hora-tardia').value, '150');
   assert.equal(c.nodo('#hc-tarifa-galon').value, '65');
   assert.ok(!c.vista().includes('1234567-8') && !c.vista().includes('Transportes') && !c.vista().includes('AEROPUERTO'));
-  assert.ok(c.vista().includes('Q150.00') && c.vista().includes('Q65.00') && c.vista().includes('OFICINA'));
+  assert.equal(textoVisible(c.vista(), 'horaTardia'), 'Q150.00');
+  assert.equal(textoVisible(c.vista(), 'combustiblePrecio'), 'Q65.00');
+  assert.ok(c.vista().includes('OFICINA'));
 });
 
 test('una tarifa borrada en la caja sale en blanco en la hoja (no vuelve a la de siempre)', () => {
@@ -1856,6 +1908,8 @@ test('la hoja de estilos: la página es la carta sin margen, la hoja ocupa la ca
   assert.match(bloqueDesde(css, css.indexOf('\n.hc-t {')), /white-space:\s*nowrap;/);
   assert.match(bloqueDesde(css, css.indexOf('\n.hc-ajusta .hc-t {')), /white-space:\s*normal;/);
   assert.match(bloqueDesde(css, css.indexOf('\n.hc-pre .hc-t {')), /white-space:\s*pre;/);
+  assert.match(bloqueDesde(css, css.indexOf('\n.hc-t.hc-contable {')), /display:\s*flex;\s*justify-content:\s*space-between;\s*width:\s*100%;\s*box-sizing:\s*border-box;\s*padding:\s*0 1\.26mm 0 1\.55mm;/);
+  assert.match(bloqueDesde(css, css.indexOf('\n.hc-contable .hc-n {')), /margin-left:\s*auto;/);
 
   // al imprimir
   const impresion = bloqueDesde(css, css.indexOf('@media print'));

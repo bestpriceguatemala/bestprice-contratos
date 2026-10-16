@@ -321,8 +321,21 @@ function claseDeCampo(campo) {
   ].filter(Boolean).join(' ');
 }
 
+/**
+ * Lo de dentro de la casilla. Un monto de formato CONTABLE (`contable` en la tabla) va como lo pone Excel: la «Q» en el borde izquierdo y el
+ * número en el derecho, con un hueco en medio; sin la «Q» (casillas que dicen `sinQ`), solo el número, en el borde derecho, donde Excel lo
+ * pone. Todo lo demás va en un solo texto, en la alineación de su celda.
+ */
+function contenidoDeCampo(campo, texto) {
+  if (!campo.contable) return `<span class="hc-t">${esc(texto)}</span>`;
+  const m = /^(-?)Q(.*)$/s.exec(texto);
+  const q = m ? '<i class="hc-q">Q</i>' : '';
+  const numero = m ? `${m[1]}${m[2]}` : texto;
+  return `<span class="hc-t hc-contable">${q}<b class="hc-n">${esc(numero)}</b></span>`;
+}
+
 function campoHtml(campo, texto) {
-  return `<div class="${claseDeCampo(campo)}" data-campo="${esc(campo.id)}" style="${estiloDeCaja(campo)}"><span class="hc-t">${esc(texto)}</span></div>`;
+  return `<div class="${claseDeCampo(campo)}" data-campo="${esc(campo.id)}" style="${estiloDeCaja(campo)}">${contenidoDeCampo(campo, texto)}</div>`;
 }
 
 /**

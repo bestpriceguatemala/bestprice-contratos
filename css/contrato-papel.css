@@ -104,6 +104,13 @@
 /* Sin ajuste: el texto sigue derecho, aunque pase de su casilla (un dato cortado en un contrato es peor que uno largo). */
 .hc-t { display: block; white-space: nowrap; }
 .hc-ajusta .hc-t { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+/* Los montos de formato CONTABLE de Excel: la «Q» en el borde izquierdo y el número en el derecho, con un hueco en medio. Los espacios de
+   afuera son los que Excel deja (medido en su PDF: la «Q» a 2.49 mm del borde izquierdo de la casilla y el número terminando a 2.20 mm del
+   derecho; la casilla ya trae 0.94 mm de relleno de cada lado, de ahí los 1.55 y 1.26). */
+.hc-t.hc-contable { display: flex; justify-content: space-between; width: 100%; box-sizing: border-box; padding: 0 1.26mm 0 1.55mm; }
+.hc-contable .hc-q { font-style: normal; }
+.hc-contable .hc-n { margin-left: auto; font-weight: inherit; }
+
 /* Las fechas con espacios entre sus partes: esos espacios caen en las casillas DD / MM / AAAA del papel. */
 .hc-pre .hc-t { white-space: pre; }
 

@@ -22,6 +22,8 @@ import {
 const leerJson = (ruta) => JSON.parse(readFileSync(new URL(ruta, import.meta.url), 'utf8'));
 const cuadricula = leerJson('../analisis/imp-contrato/cuadricula.json');
 const textoMedido = leerJson('../analisis/imp-contrato/texto-medido.json');
+const camposDeExcel = leerJson('../analisis/imp-contrato/campos-excel.json');
+const montoContable = leerJson('../analisis/imp-contrato/monto-contable-medido.json');
 
 const cerca = (real, esperado, tolerancia, mensaje) => assert.ok(
   Math.abs(real - esperado) <= tolerancia,
@@ -277,6 +279,66 @@ test('sinQ: solo «LDW Q.» y «PAI Q.» (el papel la trae) y el deducible de ab
   for (const c of CAMPOS.filter((x) => x.sinQ)) assert.equal(c.tipo, 'dinero', c.id);
   // y nadie más lo lleva: el resto de los montos, con Q (su papel no la trae)
   assert.ok(CAMPOS.filter((c) => c.tipo === 'dinero' && !c.sinQ).length >= 10);
+});
+
+test('contable: los seis montos cuya celda de Excel tiene el formato contable, y ninguno más; cada uno lo dice con su razón', () => {
+  const contables = CAMPOS.filter((c) => c.contable).map((c) => c.id).sort();
+  assert.deepEqual(contables, ['combustiblePrecio', 'horaTardia', 'seguro', 'seguroMenores', 'seguroTerceros', 'variosPrecio']);
+  for (const id of contables) {
+    const c = campoPorId(id);
+    assert.equal(c.tipo, 'dinero', id);
+    assert.match(c.nota, /FORMATO CONTABLE: su celda en Excel tiene el formato de número `_\("Q"\* #,##0\.00_\)`/, id);
+    assert.match(c.nota, /la «Q» pegada al borde izquierdo de la casilla y el número pegado al derecho/, id);
+  }
+  // LDW: el papel ya trae «Q.» y Excel imprime la suya: queda dicho que se mire con el papel enfrente
+  assert.match(campoPorId('seguro').nota, /OJO con «LDW Q\.»: Excel SÍ imprime su propia «Q»/);
+  assert.match(campoPorId('seguro').nota, /el día de la calibración/);
+  assert.equal(campoPorId('seguro').sinQ, true);
+  // los PAI y los demás, no: pegados
+  for (const id of ['seguroPai', 'precioBase', 'deducible', 'seguroCopia', 'cartaPoderPrecio', 'deducibleBajo', 'tarjeta1Monto', 'tarjeta2Monto', 'deducibleCopia']) assert.ok(!campoPorId(id).contable, id);
+});
+
+test('contable: coincide, campo por campo, con el formato de número que trae el archivo de Excel', () => {
+  let comparados = 0;
+  for (const c of CAMPOS.filter((x) => x.tipo === 'dinero')) {
+    const celda = camposDeExcel.find((e) => e.celda === c.rango.split(':')[0]);
+    assert.ok(celda, `${c.id}: no está en campos-excel.json`);
+    const contableEnExcel = celda.formato.startsWith('_("Q"*');
+    assert.equal(Boolean(c.contable), contableEnExcel, `${c.id}: Excel dice «${celda.formato}»`);
+    // los que no son contables, o llevan la Q pegada en su formato o no la llevan (la copia del deducible)
+    if (!contableEnExcel) assert.match(celda.formato, /^("Q"#,##0\.00(;\[Red\]"Q"#,##0\.00)?|\[\$Q-100A\]#,##0\.00|0\.00)$/, c.id);
+    comparados += 1;
+  }
+  assert.ok(comparados >= 14, `solo ${comparados}`);
+});
+
+test('contable: los huecos de la Q y del número son los que Excel deja en su PDF (medidos con los datos de ejemplo)', () => {
+  const css = readFileSync(new URL('../css/contrato-papel.css', import.meta.url), 'utf8');
+  const regla = /\.hc-t\.hc-contable \{[^}]*padding:\s*0 ([\d.]+)mm 0 ([\d.]+)mm;/.exec(css);
+  assert.ok(regla, 'la regla de .hc-contable con su relleno');
+  const relleno = { derecha: Number(regla[1]), izquierda: Number(regla[2]) };
+  const RELLENO_DE_LA_CASILLA = 3 * MM_POR_UNIDAD; // lo que `.hc-campo` ya trae de cada lado
+  const ANCHO_DIGITO = 1139 / 2048;
+  const ANCHO_PUNTO = 569 / 2048;
+  const medidas = Object.entries(montoContable);
+  assert.equal(medidas.length, 4);
+  let sumaIzq = 0;
+  let sumaDer = 0;
+  for (const [celda, m] of medidas) {
+    assert.equal(campoPorId(m.campo).rango.split(':')[0], celda, `${m.campo} es la celda ${celda}`);
+    assert.ok(campoPorId(m.campo).contable);
+    const caja = cajaDeRango(campoPorId(m.campo).rango);
+    const izquierda = m.qX - caja.x;
+    const anchoDelNumero = ([...m.numero].filter((ch) => ch !== '.').length * ANCHO_DIGITO + ANCHO_PUNTO) * m.pt * (25.4 / 72);
+    const derecha = (caja.x + caja.ancho) - (m.numeroX + anchoDelNumero);
+    cerca(izquierda, 2.49, 0.06, `${celda}: la «Q» a 2.49 mm del borde izquierdo`);
+    cerca(derecha, 2.2, 0.55, `${celda}: el número termina a ~2.2 mm del derecho`);
+    sumaIzq += izquierda;
+    sumaDer += derecha;
+  }
+  // el CSS reproduce esos huecos: relleno de la casilla (0.94 mm) más el de la regla
+  cerca(RELLENO_DE_LA_CASILLA + relleno.izquierda, sumaIzq / 4, 0.05, 'relleno izquierdo');
+  cerca(RELLENO_DE_LA_CASILLA + relleno.derecha, sumaDer / 4, 0.2, 'relleno derecho');
 });
 
 test('TARIFAS_DEL_PAPEL: la hora tardía a Q150 y el galón a Q65, las del Excel, y nadie las puede cambiar en pleno vuelo', () => {
