@@ -19,6 +19,9 @@ import {
   cuentaDeDueno, elegirParaPago, descuentoMaximo, totalPagadoDeMas,
 } from './nucleo/liquidacion.js';
 import { estadoReserva } from './nucleo/reserva.js';
+import {
+  construirServicio, carroConServicio, carroConServicioAnulado, carroConIntervalo,
+} from './nucleo/mantenimiento.js';
 import { resumen } from './nucleo/contrato.js';
 import { q, textoDosDecimales } from './nucleo/dinero.js';
 import { hoyISO } from './nucleo/fechas.js';
@@ -292,6 +295,17 @@ export async function cargarContratosAbiertos(alLlegar, deps) {
     deps,
   );
   return { datos: soloAbiertos(r.datos), fallo: r.fallo };
+}
+
+/**
+ * TODOS los contratos, cerrados incluidos, como `{ datos, fallo }`. Es lo que lee la ficha de un carro para el
+ * mantenimiento: el kilometraje de un carro sale de sus contratos (`kilometrajeDelCarro`, nucleo/mantenimiento.js) y el
+ * mayor casi nunca está en un contrato abierto — `cargarContratosAbiertos` solo trae los que todavía piden algo, y un
+ * carro cuyas rentas ya se cerraron todas pasaba por «sin kilometraje». No cuesta una lectura más: `cargarContratosAbiertos`
+ * ya lee la colección entera y filtra después; esto es la misma lectura sin el filtro.
+ */
+export async function cargarTodosLosContratos(alLlegar, deps) {
+  return cargarConSincronia('contratos', alLlegar, deps);
 }
 
 /** ¿Cae este contrato en el rango de `fechaSalida` pedido? Sin `desde` o sin `hasta`, ese lado queda abierto. */
@@ -1176,6 +1190,92 @@ export async function guardarVehiculo(vehiculo, deps = {}) {
   exigirId(vehiculo);
   const codigo = vehiculo?.codigo || (await siguienteCodigoCarro({ iniciar: deps.iniciar }));
   return guardarEnNubeYLocal('vehiculos', vehiculo, (id) => ({ ...vehiculo, id, codigo, actualizado: Date.now() }), deps);
+}
+
+// ---------- Cambiar un documento sobre lo que la nube tiene AHORA (mantenimiento, §12b) ----------
+//
+// Los servicios de un carro y sus intervalos viven DENTRO del documento del carro (`vehiculos/{id}`: `servicios[]` e
+// `intervalos{}`, §7b). Un arreglo dentro de un documento se pisa si dos pestañas lo reescriben a ciegas: la ficha que se
+// abrió esta mañana trae la lista de servicios de esta mañana, y guardarla entera borraría el cambio de aceite que otra
+// computadora anotó al mediodía — en silencio, y un servicio perdido deja un plazo mal calculado y un aviso que no sale.
+//
+// Por eso estos cambios NO escriben la copia que la pantalla tenía en memoria: leen el documento DENTRO de la transacción
+// que lo escribe y aplican el cambio sobre eso. Firestore descarta y repite la transacción si alguien lo tocó mientras
+// tanto (dos servicios anotados a la vez quedan los dos), y el cambio es una función pura del núcleo
+// (`carroConServicio`, `carroConServicioAnulado`, `carroConIntervalo`): esta función no sabe qué es un servicio.
+//
+// No se llama `guardar*` a propósito: el guardado de siempre (`guardarEnNubeYLocal`) escribe lo que le dan, y esto escribe
+// lo que LEE más un cambio. Comparte con él la regla que más importa: si la escritura en la nube salió bien, el cambio salió
+// bien, pase lo que pase con la copia local.
+
+/** El código del rechazo cuando el documento que se iba a cambiar ya no está en la nube. */
+export const CODIGO_DOCUMENTO_NO_ESTA = 'documento-no-esta';
+export const MENSAJE_CARRO_NO_ESTA = 'Este carro ya no está en la flota, así que no se guardó nada. Recarga la página.';
+
+/**
+ * Cambia el documento `coleccion/id` leyéndolo dentro de la transacción que lo escribe: `cambiar(documento)` recibe lo que
+ * la nube tiene ahora (con su `id`) y devuelve el documento nuevo, entero. Se escribe entero y sin `merge`: un cambio que
+ * QUITA una llave (volver un intervalo a los de siempre) tiene que quitarla de verdad, y `merge` solo suma. El sello
+ * `actualizado` nunca baja del que ya tenía, aunque el reloj de esta computadora vaya atrasado: `mezclar` (cache.js) deja
+ * ganar al más nuevo, y un cambio con un sello menor perdería contra la copia vieja.
+ *
+ * Lanza si el documento no existe (no se crea uno a medias) o si la nube no contesta; entonces la copia local ni se toca.
+ * Devuelve el documento como quedó.
+ */
+export async function cambiarEnNubeYLocal(coleccion, id, cambiar, {
+  iniciar = iniciarFirebase, guardarCopia = guardarLocal, avisar = avisarCopiaLocal,
+} = {}) {
+  const { db, fsMod } = await iniciar();
+  const ref = fsMod.doc(db, coleccion, id);
+  const cambiado = await conLimiteDeTiempo(fsMod.runTransaction(db, async (tx) => {
+    const actual = await tx.get(ref);
+    if (!actual.exists()) throw rechazo(MENSAJE_CARRO_NO_ESTA, CODIGO_DOCUMENTO_NO_ESTA, null);
+    const previo = { id: ref.id, ...actual.data() };
+    const nuevo = {
+      ...cambiar(previo),
+      id: ref.id,
+      actualizado: Math.max(Date.now(), Number(previo.actualizado || 0) + 1),
+    };
+    tx.set(ref, nuevo);
+    return nuevo;
+  }));
+  try {
+    await guardarCopia(coleccion, [cambiado]);
+  } catch (error) {
+    avisar(coleccion, error);
+  }
+  return cambiado;
+}
+
+/**
+ * Un id para un servicio nuevo, que se decide UNA vez por intención (`altaConIdFijo(nuevoIdServicio)`): si el primer
+ * intento vence pero sí llegó, el reintento trae el mismo id y `carroConServicio` no lo agrega otra vez. Sin red: no es un
+ * documento, es una llave dentro del arreglo del carro.
+ */
+export function nuevoIdServicio() {
+  const aleatorio = globalThis.crypto?.randomUUID?.();
+  return `s-${aleatorio ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`}`;
+}
+
+/**
+ * Anota un servicio hecho (`{ id, tipo, fecha, km }`) en el carro. Vuelve a pasar por `construirServicio`, la misma
+ * revisión del formulario: un servicio mal formado no se guarda aunque una pantalla se lo mande. Un servicio con un `id`
+ * que el carro ya tiene no se agrega otra vez (un reintento de un guardado que sí llegó).
+ */
+export async function registrarServicioDelCarro(carroId, servicio, { hoy = hoyISO(), ...deps } = {}) {
+  const { servicio: revisado, problemas } = construirServicio(servicio, hoy);
+  if (!revisado) throw new Error(problemas.join(' '));
+  return cambiarEnNubeYLocal('vehiculos', carroId, (carro) => carroConServicio(carro, { ...revisado, id: servicio.id }), deps);
+}
+
+/** Anula un servicio del carro (se marca y se queda en el historial; ver `conServicioAnulado`). */
+export async function anularServicioDelCarro(carroId, servicioId, { fecha = hoyISO(), ...deps } = {}) {
+  return cambiarEnNubeYLocal('vehiculos', carroId, (carro) => carroConServicioAnulado(carro, servicioId, fecha), deps);
+}
+
+/** Cambia los intervalos de un servicio en este carro, o los devuelve a los de siempre con `intervalo` en `null`. */
+export async function cambiarIntervaloDelCarro(carroId, tipo, intervalo, deps) {
+  return cambiarEnNubeYLocal('vehiculos', carroId, (carro) => carroConIntervalo(carro, tipo, intervalo), deps);
 }
 
 /**
