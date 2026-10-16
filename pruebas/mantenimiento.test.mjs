@@ -696,7 +696,7 @@ test('aviso: lo que ya toca por kilómetros, con el número que se escribió', (
   const r = avisosDeMantenimiento({ carro, kilometraje: { km: 20320 }, hoy: HOY });
   assert.deepEqual(r, [{
     nivel: 'medio',
-    mensaje: 'A este carro le toca servicio: aceite y filtro (le tocaba a los 20,000 km y el carro anda en 20,320).',
+    mensaje: 'A este carro le toca servicio: aceite y filtro (tocaba a los 20,000 km y el carro anda en 20,320).',
   }]);
 });
 
@@ -704,14 +704,14 @@ test('aviso: lo que ya toca por fecha, aunque no se sepa el kilometraje (el tiem
   const carro = carroConServicios(carroPropio(), [{ tipo: 'aceite', fecha: '2026-07-03', km: 15000 }], HOY);
   for (const km of [null, undefined, { km: 0 }]) {
     const r = avisosDeMantenimiento({ carro, kilometraje: km, hoy: HOY });
-    assert.deepEqual(r, [{ nivel: 'medio', mensaje: 'A este carro le toca servicio: aceite y filtro (le tocaba el 3 oct 2026).' }], JSON.stringify(km));
+    assert.deepEqual(r, [{ nivel: 'medio', mensaje: 'A este carro le toca servicio: aceite y filtro (tocaba el 3 oct 2026).' }], JSON.stringify(km));
   }
 });
 
 test('aviso: cuando toca por los dos lados lo dice con los dos', () => {
   const carro = carroConServicios(carroPropio(), [{ tipo: 'aceite', fecha: '2026-07-03', km: 15000 }], HOY);
   const r = avisosDeMantenimiento({ carro, kilometraje: { km: 21000 }, hoy: HOY });
-  assert.equal(r[0].mensaje, 'A este carro le toca servicio: aceite y filtro (le tocaba a los 20,000 km y el carro anda en 21,000 y el 3 oct 2026).');
+  assert.equal(r[0].mensaje, 'A este carro le toca servicio: aceite y filtro (tocaba a los 20,000 km y el carro anda en 21,000; por fecha, el 3 oct 2026).');
 });
 
 test('aviso: lo que está por tocar, con cuánto falta de cada lado', () => {
@@ -724,6 +724,14 @@ test('aviso: lo que está por tocar, con cuánto falta de cada lado', () => {
     nivel: 'medio',
     mensaje: 'A este carro le toca servicio pronto: aceite y filtro (faltan 300 km, a los 20,000) y alineación y balanceo (faltan 9 días, el 25 oct 2026).',
   }]);
+});
+
+test('aviso: cuando está por tocar por los dos lados, los dos van separados con «;» (no dos «y» seguidas)', () => {
+  const carro = carroConServicios(carroPropio(), [{ tipo: 'aceite', fecha: '2026-07-25', km: 15000 }], HOY);
+  const r = avisosDeMantenimiento({ carro, kilometraje: { km: 19700 }, hoy: HOY });
+  assert.deepEqual(r.map((a) => a.mensaje), [
+    'A este carro le toca servicio pronto: aceite y filtro (faltan 300 km, a los 20,000; faltan 9 días, el 25 oct 2026).',
+  ]);
 });
 
 test('aviso: lo vencido y lo próximo van en avisos separados, todos de nivel medio (advertencia, no candado)', () => {
@@ -742,7 +750,7 @@ test('aviso: con muchos servicios no se arma una pared: se nombran tres y se cue
   const todos = carroConServicios(carroPropio(), SERVICIOS.map((s) => ({ tipo: s.tipo, fecha: '2020-01-01', km: 1000 })), HOY);
   const r = avisosDeMantenimiento({ carro: todos, kilometraje: null, hoy: HOY });
   assert.equal(r.length, 1);
-  assert.match(r[0].mensaje, /aceite y filtro \(le tocaba el 1 abr 2020\), pastillas de freno \(le tocaba el 1 ene 2021\), llantas \(le tocaba el 1 ene 2024\) y 3 más\./);
+  assert.match(r[0].mensaje, /aceite y filtro \(tocaba el 1 abr 2020\), pastillas de freno \(tocaba el 1 ene 2021\), llantas \(tocaba el 1 ene 2024\) y 3 más\./);
 });
 
 test('aviso: los kilómetros del aviso son enteros con su separador de miles, nunca con decimales', () => {

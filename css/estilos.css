@@ -1898,11 +1898,6 @@ body {
   margin-bottom: 16px;
 }
 
-.mant-bloque > *:first-child h3,
-.mant-bloque h3:first-child {
-  margin-top: 0;
-}
-
 .mant-km {
   margin: 0 0 16px;
   font-size: 14px;
@@ -1935,6 +1930,11 @@ body {
   padding: 10px 8px;
   vertical-align: top;
   border-top: 1px solid var(--borde);
+}
+
+/* El nombre y su «cada 30,000 km o 12 meses» no se parten en tres renglones. */
+.mant-tabla td:first-child {
+  min-width: 190px;
 }
 
 .mant-intervalo {

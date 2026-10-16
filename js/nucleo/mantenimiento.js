@@ -557,12 +557,15 @@ function enLista(partes) {
   return `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`;
 }
 
-/** Por qué toca un servicio, corto: los lados que ya llegaron. */
+/**
+ * Por qué toca un servicio, corto: los lados que ya llegaron. Con los dos lados, el de fecha va aparte con «;»: con dos «y»
+ * seguidas no se sabía cuál cosa era de cuál («a los 17,000 km y el carro anda en 17,500 y el 16 oct» se lee mal).
+ */
 function porQueToca(s, kilometraje) {
   const razones = [];
-  if (s.km.estado === 'toca') razones.push(`a los ${textoEntero(s.km.proximo)} km y el carro anda en ${textoEntero(kilometraje.km)}`);
-  if (s.tiempo.estado === 'toca') razones.push(`el ${textoFecha(s.tiempo.proxima)}`);
-  return `${enMinuscula(s.nombre)} (le tocaba ${razones.join(' y ')})`;
+  if (s.km.estado === 'toca') razones.push(`tocaba a los ${textoEntero(s.km.proximo)} km y el carro anda en ${textoEntero(kilometraje.km)}`);
+  if (s.tiempo.estado === 'toca') razones.push(razones.length ? `por fecha, el ${textoFecha(s.tiempo.proxima)}` : `tocaba el ${textoFecha(s.tiempo.proxima)}`);
+  return `${enMinuscula(s.nombre)} (${razones.join('; ')})`;
 }
 
 /** Cuánto falta para un servicio que está por tocar, corto: los lados que ya están dentro de la antelación. */
@@ -570,7 +573,7 @@ function porQueFalta(s) {
   const razones = [];
   if (s.km.estado === 'pronto') razones.push(`faltan ${textoEntero(s.km.faltan)} km, a los ${textoEntero(s.km.proximo)}`);
   if (s.tiempo.estado === 'pronto') razones.push(`faltan ${dias(s.tiempo.faltan)}, el ${textoFecha(s.tiempo.proxima)}`);
-  return `${enMinuscula(s.nombre)} (${razones.join(' y ')})`;
+  return `${enMinuscula(s.nombre)} (${razones.join('; ')})`;
 }
 
 function nombrados(lista, aTexto) {

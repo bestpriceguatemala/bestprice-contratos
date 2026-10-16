@@ -492,7 +492,7 @@ test('mantenimiento: al escribir el kilometraje de salida, si al carro ya le toc
   const r = avisosDeLaSalida(ACEITE_A_LOS_15000(), 20320);
   assert.deepEqual(r, [{
     nivel: 'medio',
-    mensaje: 'A este carro le toca servicio: aceite y filtro (le tocaba a los 20,000 km y el carro anda en 20,320).',
+    mensaje: 'A este carro le toca servicio: aceite y filtro (tocaba a los 20,000 km y el carro anda en 20,320).',
   }]);
 });
 
@@ -506,7 +506,7 @@ test('mantenimiento: a 500 km avisa «pronto»; a 501, no', () => {
 test('mantenimiento: con el kilometraje de salida sin escribir (0) no inventa nada, pero el tiempo sí avisa', () => {
   assert.deepEqual(avisosDeLaSalida(ACEITE_A_LOS_15000(), 0), [], 'sin kilometraje y con el plazo lejos: callado, no «faltan 20,000 km»');
   const r = avisosDeLaSalida(ACEITE_DE_JULIO(), 0);
-  assert.deepEqual(r.map((a) => a.mensaje), ['A este carro le toca servicio: aceite y filtro (le tocaba el 3 oct 2026).']);
+  assert.deepEqual(r.map((a) => a.mensaje), ['A este carro le toca servicio: aceite y filtro (tocaba el 3 oct 2026).']);
   assert.ok(!/km/.test(r[0].mensaje), 'no menciona kilómetros que nadie leyó');
 });
 
