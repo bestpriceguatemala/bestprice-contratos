@@ -1161,7 +1161,8 @@ en el código.
    al almacén del navegador, y se borran cuando termina el diálogo de imprimir
    (`afterprint`, imprima o cancele) y al salir de la pantalla. Sin ellos, la hoja
    lleva `•••• 3343`. **No se debe guardar esa hoja como PDF**: quedaría un archivo con
-   la tarjeta en la computadora; la pantalla lo dice.
+   la tarjeta en la computadora; la pantalla lo dice. (Desde el 16 de octubre, si se llega a
+   esa pantalla directo desde guardar la salida en «Sacar carro», ya vienen puestos: punto 16.)
 7. **La hora de entrada: «Igual que el Excel».** La casilla de la hora de entrada repite la
    hora de salida (en Excel las dos leen la misma celda). Es decisión suya, no una copia
    heredada sin preguntar; el contrato no guarda una hora de entrada prevista.
@@ -1217,6 +1218,17 @@ derecha.)
     «LDW Q.»: o la de Excel se encima justo sobre la impresa, o su papel de hoy sale con dos Q sin
     que nadie lo note. No se sabe sin el papel enfrente. El sistema imprime solo el número, donde
     Excel pone el suyo.
+16. **El número y el CBC pasan de «Sacar carro» a imprimir sin guardarse (16 de octubre de 2026).**
+    Aprobado por el dueño: con el cliente enfrente, no se teclean dos veces. Es una aclaración del
+    ADR-001, que la lleva escrita. Al guardar la salida **con número o CBC tecleados**, la pantalla va
+    directo a imprimir ESE contrato y las dos tarjetas ya vienen puestas; sin ellos (una renta en
+    efectivo) todo sigue igual y se va a la flota. Los datos viven en una variable de memoria
+    (`js/pantallas/traspasoDeTarjetas.js`) y en ningún almacén. Se cierra por cuatro lados: atados al
+    id del contrato (la hoja de otro contrato no los ve), entregados una sola vez, borrados al cambiar
+    de pantalla a cualquier lado que no sea imprimir ese contrato, y vencidos al minuto. Guardar otra
+    renta los reemplaza, y una sin tarjeta también los borra. La pantalla de imprimir los pone solo si
+    el número termina en los últimos 4 dígitos que el contrato guardó. Si no llegó nada (dirección
+    escrita a mano, recargar, volver otro día) las cajas están vacías y se teclean como siempre.
 
 **Lo que el papel permitiría y hoy no se hace (no es para ahora; decisión suya).** El papel tiene
 toda una columna de liquidación (DAÑOS, COMBUSTIBLE, VARIOS, DEDUCIBLE, TOTAL CARGOS, MENOS
