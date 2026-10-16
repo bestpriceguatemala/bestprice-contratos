@@ -23,7 +23,9 @@
 // para que un cierre ya hecho no se pueda reabrir ni reeditar por accidente
 // desde aquí.
 import { construirCierre, problemasDelCierre } from '../nucleo/cierre.js';
-import { lineasDevolucion, lineasSalida, resumen, horaTardiaDe } from '../nucleo/contrato.js';
+import {
+  lineasDevolucion, lineasSalida, resumen, horaTardiaDe, conKmSalidaNormalizado,
+} from '../nucleo/contrato.js';
 import { q, textoEntero } from '../nucleo/dinero.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
@@ -52,23 +54,11 @@ function esc(texto) {
   ));
 }
 
-/**
- * "Sacar carro" ya guarda el kilometraje de salida como `kmSalida` (ronda de
- * corrección 1 de esta tarea: antes lo guardaba como `kilometrajeSalida`,
- * un nombre distinto al que valida `problemasDelCierre` en nucleo/cierre.js,
- * y ningún contrato real disparaba el aviso de "el kilometraje retrocede").
- *
- * Este puente NO es el camino normal — es compatibilidad hacia atrás, solo
- * para los contratos que ya quedaron guardados con el nombre viejo antes de
- * ese cambio. Un contrato nuevo, guardado por la versión actual de "Sacar
- * carro", ya trae `kmSalida` puesto y esta función lo devuelve tal cual. No
- * se pisa un `kmSalida` que ya viniera puesto.
- */
-export function conKmSalidaNormalizado(contrato) {
-  if (!contrato) return contrato;
-  if (contrato.kmSalida) return contrato;
-  return { ...contrato, kmSalida: q(contrato.kilometrajeSalida) };
-}
+// El puente `kilometrajeSalida` -> `kmSalida` vive en el núcleo (nucleo/contrato.js) desde que el mantenimiento también
+// lo necesita para saber en cuántos kilómetros anda un carro: una pantalla no es lugar para una regla que el núcleo usa, y
+// dos copias del puente son la manera de arreglar un contrato viejo en un lado y dejarlo mal en el otro. Se vuelve a
+// exportar desde aquí porque Contratos y las pruebas lo importan de esta pantalla.
+export { conKmSalidaNormalizado };
 
 /**
  * Con qué valores arranca el bloque "Al recibir el carro": vacíos y la fecha

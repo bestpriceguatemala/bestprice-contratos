@@ -16,7 +16,9 @@ import {
 } from '../js/pantallas/recibirCarro.js';
 import { construirContrato } from '../js/pantallas/sacarCarro.js';
 import { dinero } from '../js/ui.js';
-import { resumen, lineasDevolucion, lineasSalida, saldoConTarjeta } from '../js/nucleo/contrato.js';
+import {
+  resumen, lineasDevolucion, lineasSalida, saldoConTarjeta, conKmSalidaNormalizado as conKmSalidaDelNucleo,
+} from '../js/nucleo/contrato.js';
 import { construirCierre } from '../js/nucleo/cierre.js';
 import { agregarPago, CODIGO_GARANTIA_LIBERADA_CON_SALDO } from '../js/datos.js';
 import { contratoGuardadoConHoraTardiaSiNo } from './fixtures/contratoGuardadoConHoraTardiaSiNo.mjs';
@@ -41,6 +43,13 @@ test('conKmSalidaNormalizado: sin ninguno de los dos campos, da 0 (no undefined)
 
 test('conKmSalidaNormalizado: con contrato nulo, no revienta', () => {
   assert.equal(conKmSalidaNormalizado(null), null);
+});
+
+// El mantenimiento (nucleo/mantenimiento.js) necesita el mismo puente para saber en cuántos kilómetros anda un carro, y un
+// núcleo no puede importar de una pantalla. Vive UNA vez, en el núcleo; la pantalla solo lo vuelve a exportar. Dos copias
+// serían la manera de arreglar un contrato viejo en un lado y dejarlo mal en el otro.
+test('conKmSalidaNormalizado vive una sola vez, en el núcleo: la pantalla exporta esa misma función', () => {
+  assert.equal(conKmSalidaNormalizado, conKmSalidaDelNucleo);
 });
 
 // Tarea "cobro-claro": "Recibir sin cobrar" era justo la frase que confundió

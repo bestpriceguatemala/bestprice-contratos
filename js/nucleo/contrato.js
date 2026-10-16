@@ -193,3 +193,21 @@ export function saldoConTarjeta(c, porcentaje) {
   const { saldo } = resumen(c);
   return { saldo, recargo: recargoTarjeta(saldo, porcentaje), total: conTarjeta(saldo, porcentaje) };
 }
+
+/**
+ * "Sacar carro" ya guarda el kilometraje de salida como `kmSalida` (ronda de
+ * corrección 1 de esta tarea: antes lo guardaba como `kilometrajeSalida`,
+ * un nombre distinto al que valida `problemasDelCierre` en nucleo/cierre.js,
+ * y ningún contrato real disparaba el aviso de "el kilometraje retrocede").
+ *
+ * Este puente NO es el camino normal — es compatibilidad hacia atrás, solo
+ * para los contratos que ya quedaron guardados con el nombre viejo antes de
+ * ese cambio. Un contrato nuevo, guardado por la versión actual de "Sacar
+ * carro", ya trae `kmSalida` puesto y esta función lo devuelve tal cual. No
+ * se pisa un `kmSalida` que ya viniera puesto.
+ */
+export function conKmSalidaNormalizado(contrato) {
+  if (!contrato) return contrato;
+  if (contrato.kmSalida) return contrato;
+  return { ...contrato, kmSalida: q(contrato.kilometrajeSalida) };
+}
