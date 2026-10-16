@@ -24,8 +24,13 @@
 //
 // ===== LA TARJETA Y EL CBC (ADR-001) =====
 // El número completo de la tarjeta y el CBC NUNCA se guardan: ni en Firestore, ni en la copia local, ni en
-// localStorage, ni en la dirección de la página. Este archivo es el único lugar del sistema que los lee, y solo así:
-//   - Los teclea quien atiende, aquí, en dos cajas que solo existen mientras la pantalla está abierta.
+// localStorage, ni en la dirección de la página. Este archivo es, con «Sacar carro» (que los lee para llevarlos hasta aquí), el
+// único lugar del sistema que los toca, y solo así:
+//   - Los teclea quien atiende, aquí, en dos cajas que solo existen mientras la pantalla está abierta. O ya vienen puestos: si se
+//     llegó aquí directo desde guardar la salida en «Sacar carro», el número y el CBC que se tecleron allá se entregan una sola vez
+//     (traspasoDeTarjetas.js: en memoria, atados al id de este contrato, borrados al cambiar de pantalla y al minuto) y se ponen en
+//     las mismas cajas, después de comprobar que terminan en los últimos 4 dígitos que el contrato guardó. Desde ahí es lo mismo.
+//     Si no llegó nada (dirección escrita a mano, recargar, volver otro día), las cajas están vacías, como siempre.
 //   - Viajan por parámetros de funciones (`tarjetasEfimeras`, nunca un campo del contrato) hasta el HTML de la
 //     hoja, y de ahí a la impresora. `armarContratoImpreso` no los copia al contrato ni los devuelve en nada que se
 //     parezca a un contrato.
@@ -44,6 +49,7 @@ import {
 } from '../nucleo/hojaContrato.js';
 import { dinero } from '../ui.js';
 import { cargarContrato, cargarClientes, cargarFlota } from '../datos.js';
+import { tomarTraspaso } from './traspasoDeTarjetas.js';
 
 // El texto libre (nombre, dirección, observaciones) nunca entra al HTML sin pasar por aquí: mismo escape que el resto.
 function esc(texto) {
@@ -569,6 +575,41 @@ function ayudaDeImprimir(papel = PAPELES.carta) {
 }
 const AVISO_DE_TARJETA = 'Este papel lleva el número completo de la tarjeta y el CBC: imprímelo directo a la impresora. NO lo guardes como PDF: quedaría un archivo con la tarjeta en la computadora (ADR-001).';
 
+/**
+ * De lo que llegó de «Sacar carro» (`llegadas`, `[{ numero, cbc }]`, una por tarjeta del contrato y en su orden), lo que de verdad
+ * se pone en las cajas de ESTA hoja: `{ puestas: [{ i, numero, cbc }], descartadas: [i] }`. Una tarjeta llegada solo se pone si existe en
+ * el contrato en esa misma posición y su número termina en los últimos 4 dígitos que el contrato guardó (si no trae número, el
+ * contrato tampoco tenía): es la última defensa contra la peor equivocación posible, la tarjeta de un cliente en el papel de
+ * otro, por si el traspaso (que ya va atado al id del contrato y se borra al cambiar de pantalla) fallara por una razón que
+ * hoy no se ve. Lo que no coincide NO se pone, y se dice. Función pura.
+ */
+export function tarjetasDelTraspasoParaElPapel(guardadas, llegadas) {
+  const delContrato = Array.isArray(guardadas) ? guardadas : [];
+  const lista = Array.isArray(llegadas) ? llegadas : [];
+  const terminaEn = (x) => String(x ?? '').replace(/\D/g, '').slice(-4);
+  const puestas = [];
+  const descartadas = [];
+  lista.forEach((t, i) => {
+    const numero = limpio(t?.numero);
+    const cbc = limpio(t?.cbc);
+    if (!numero && !cbc) return;
+    const guardada = delContrato[i];
+    if (!guardada || terminaEn(numero) !== terminaEn(guardada.ultimos4)) {
+      descartadas.push(i);
+      return;
+    }
+    puestas.push({ i, numero, cbc });
+  });
+  return { puestas, descartadas };
+}
+
+/** Lo que dice la pantalla sobre lo que llegó de «Sacar carro». Nunca lleva el número ni el CBC, solo el lugar de la tarjeta. */
+function notasDelTraspaso({ puestas, descartadas }) {
+  const puesta = puestas.map(({ i }) => `<p class="comp-ayuda no-imprimir">Tarjeta ${i + 1}: el número y el CBC ya están puestos, vienen de «Sacar carro». Solo viven en esta pantalla: se borran al terminar de imprimir y al salir.</p>`);
+  const dudosa = descartadas.map((i) => `<div class="barra-lectura-fallida no-imprimir" role="alert"><p>Tarjeta ${i + 1}: lo que llegó de «Sacar carro» no coincide con la tarjeta de este contrato y NO se puso. Tecléalo abajo.</p></div>`);
+  return [...puesta, ...dudosa].join('');
+}
+
 function cajasDeTarjetas(contrato) {
   const guardadas = Array.isArray(contrato?.tarjetas) ? contrato.tarjetas : [];
   if (!guardadas.length) return '';
@@ -622,7 +663,7 @@ function cajasDelPapel(contrato) {
  * `entrada` es `{ contrato, cliente, carro }`; `imprimir`, `almacen` y `alVolver` se pueden inyectar para probar.
  */
 export function pintarContratoImpreso(contenedor, entrada, {
-  imprimir = () => window.print(), almacen = almacenDelNavegador(), alVolver,
+  imprimir = () => window.print(), almacen = almacenDelNavegador(), alVolver, tarjetasDelTraspaso = [],
 } = {}) {
   const volver = alVolver ? '<button type="button" class="btn" data-accion="volver">← Volver</button>' : '';
   const alertaDeFallo = (mensaje) => {
@@ -657,6 +698,7 @@ export function pintarContratoImpreso(contenedor, entrada, {
   <p class="comp-ayuda no-imprimir" data-pieza="impresora">${textoDeImpresora(impresora)}</p>
   <p class="comp-ayuda no-imprimir">${esc(ayudaDeImprimir(papelDe(impresora.cal)))}</p>
   ${cajasDeTarjetas(entrada.contrato)}
+  <div data-pieza="traspaso"></div>
   ${cajasDelPapel(entrada.contrato)}
   <div data-pieza="notas"></div>
   <div data-pieza="avisos"></div>
@@ -710,13 +752,30 @@ export function pintarContratoImpreso(contenedor, entrada, {
   function vaciar() {
     tarjetasEfimeras = [];
     contenedor.querySelectorAll('.hc-tarjeta input').forEach((caja) => { caja.value = ''; });
+    el('[data-pieza="traspaso"]').innerHTML = '';
     restablecerDatosDelPapel();
     redibujar();
+  }
+
+  /**
+   * Pone en las cajas lo que vino de «Sacar carro» (ver traspasoDeTarjetas.js), si es de ESTAS tarjetas. Es lo mismo que si el
+   * mostrador lo hubiera tecleado aquí: de las cajas va a la hoja, y se vacían al terminar de imprimir y al salir (`vaciar`).
+   */
+  function precargarDelTraspaso(llegadas) {
+    const lugar = tarjetasDelTraspasoParaElPapel(entrada.contrato.tarjetas, llegadas);
+    for (const { i, numero, cbc } of lugar.puestas) {
+      const caja = el(`#hc-t${i}-numero`);
+      const cajaCbc = el(`#hc-t${i}-cbc`);
+      if (caja) caja.value = numero;
+      if (cajaCbc) cajaCbc.value = cbc;
+    }
+    el('[data-pieza="traspaso"]').innerHTML = notasDelTraspaso(lugar);
   }
 
   contenedor.querySelectorAll('.hc-tarjeta input').forEach((caja) => caja.addEventListener('input', redibujar));
   contenedor.querySelectorAll('.hc-datos input').forEach((caja) => caja.addEventListener('input', redibujar));
   restablecerDatosDelPapel();
+  precargarDelTraspaso(tarjetasDelTraspaso);
   redibujar();
   ponerPaginaSinMargen(papelDe(impresora.cal));
   // Al salir de la pantalla se vacía lo tecleado (la hoja ya no está a la vista, pero el DOM podría seguir en memoria).
@@ -741,8 +800,11 @@ function textoSinLeer(que) {
  * que falla se avisa como falla (no como «no existe»), y sin cliente no hay hoja.
  */
 export async function pintarImpresionDeContrato(contenedor, contratoId, {
-  leer = { cargarContrato, cargarClientes, cargarFlota },
+  leer = { cargarContrato, cargarClientes, cargarFlota }, tomar = tomarTraspaso,
 } = {}) {
+  // Lo primero, antes de esperar nada: entrar aquí cierra el salto de «Sacar carro» (ver traspasoDeTarjetas.js). Lo que haya de ESTE
+  // contrato se recoge ya y se borra del módulo; si la lectura del contrato falla, se pierde con esta función y se teclea como siempre.
+  const delTraspaso = tomar(contratoId);
   contenedor.innerHTML = '<p class="pendiente">Cargando…</p>';
   const alVolver = () => { location.hash = contratoId ? `#/contratos/${contratoId}` : '#/contratos'; };
   const caer = (mensaje) => {
@@ -786,7 +848,7 @@ export async function pintarImpresionDeContrato(contenedor, contratoId, {
     carro = flota.datos.find((c) => c.id === contrato.carroId) ?? null;
   }
 
-  pintarContratoImpreso(contenedor, { contrato, cliente, carro }, { alVolver });
+  pintarContratoImpreso(contenedor, { contrato, cliente, carro }, { alVolver, tarjetasDelTraspaso: delTraspaso });
 }
 
 /**

@@ -15,13 +15,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   armarContratoImpreso, htmlContratoImpreso, htmlHojaDePrueba, pintarContratoImpreso, pintarImpresionDeContrato,
-  pintarCalibracion, HITOS, PASOS_DE_CALIBRAR, MARCAS_DE_ESCALA, QUETZAL_EN_EL_PAPEL,
+  pintarCalibracion, HITOS, PASOS_DE_CALIBRAR, MARCAS_DE_ESCALA, QUETZAL_EN_EL_PAPEL, tarjetasDelTraspasoParaElPapel,
 } from '../js/pantallas/contratoImpreso.js';
+import { dejarTraspaso, tomarTraspaso, olvidarTraspaso } from '../js/pantallas/traspasoDeTarjetas.js';
 import {
   CAMPOS, ORIGEN_MM, PAPEL, ESCALA_EXCEL, cajaDeRango, campoPorId, leerCalibraciones, calibracionActiva, CALIBRACION_DE_FABRICA,
   CLAVE_DE_CALIBRACIONES, guardarCalibracion, PASOS, PAPELES, PAPEL_POR_OMISION, papelDe,
 } from '../js/nucleo/hojaContrato.js';
-import { construirContrato } from '../js/pantallas/sacarCarro.js';
+import { construirContrato, irDespuesDeGuardar } from '../js/pantallas/sacarCarro.js';
 import { contratoParaGuardar } from '../js/datos.js';
 import { construirCliente } from '../js/nucleo/cliente.js';
 import { lineasSalida } from '../js/nucleo/contrato.js';
@@ -1924,4 +1925,175 @@ test('la hoja de estilos no toca el @page de los demás papeles', () => {
   assert.equal(sueltas, null, 'un @page sin nombre en esta hoja cambiaría el margen del comprobante');
   assert.equal((css.match(/@page contrato-papel/g) || []).length, 1);
   assert.equal(PAPEL.anchoMm, 215.9);
+});
+
+// ---------------------------------------------------------------------------
+// El traspaso desde «Sacar carro» (ADR-001, aclaración del 16 de octubre de 2026): el número y el CBC ya vienen puestos
+// ---------------------------------------------------------------------------
+
+const NUMERO_2 = '5500 0000 0000 1111';
+const CBC_2 = '4402';
+const DEL_TRASPASO = [{ numero: NUMERO_COMPLETO, cbc: CBC }, { numero: NUMERO_2, cbc: CBC_2 }];
+
+test('tarjetasDelTraspasoParaElPapel: se pone lo que es de ESTA tarjeta (misma posición, mismos últimos 4) y lo demás se descarta', () => {
+  assert.deepEqual(tarjetasDelTraspasoParaElPapel(TARJETAS, DEL_TRASPASO), {
+    puestas: [{ i: 0, numero: NUMERO_COMPLETO, cbc: CBC }, { i: 1, numero: NUMERO_2, cbc: CBC_2 }], descartadas: [],
+  });
+  // la tarjeta 1 llegó con el número de OTRA tarjeta: no se pone, y la 2 sí
+  assert.deepEqual(tarjetasDelTraspasoParaElPapel(TARJETAS, [{ numero: '4000 0000 0000 9999', cbc: '111' }, DEL_TRASPASO[1]]), {
+    puestas: [{ i: 1, numero: NUMERO_2, cbc: CBC_2 }], descartadas: [0],
+  });
+  // llegaron más tarjetas de las que tiene el contrato: la que sobra no tiene a dónde ir
+  assert.deepEqual(tarjetasDelTraspasoParaElPapel([TARJETAS[0]], DEL_TRASPASO).descartadas, [1]);
+  // una en blanco no es nada que poner ni nada que descartar
+  assert.deepEqual(tarjetasDelTraspasoParaElPapel(TARJETAS, [{ numero: '', cbc: '' }, { numero: '  ', cbc: undefined }]), { puestas: [], descartadas: [] });
+  // solo el CBC: vale si la tarjeta del contrato tampoco tiene número (se dejó sin teclear al sacar el carro), y no si lo tiene
+  assert.deepEqual(tarjetasDelTraspasoParaElPapel([{ ultimos4: '' }], [{ numero: '', cbc: '55' }]).puestas, [{ i: 0, numero: '', cbc: '55' }]);
+  assert.deepEqual(tarjetasDelTraspasoParaElPapel(TARJETAS, [{ numero: '', cbc: '55' }]).descartadas, [0]);
+  // basura
+  for (const raro of [undefined, null, 'x', 7, {}]) {
+    assert.deepEqual(tarjetasDelTraspasoParaElPapel(raro, raro), { puestas: [], descartadas: [] });
+  }
+});
+
+test('con lo que llegó de «Sacar carro» las cajas vienen llenas y la hoja ya lleva el número y el CBC de las dos tarjetas', () => {
+  const c = contenedorFalso();
+  pintarContratoImpreso(c, entrada(), { almacen: almacenEspia(), tarjetasDelTraspaso: DEL_TRASPASO });
+  assert.equal(c.nodo('#hc-t0-numero').value, NUMERO_COMPLETO);
+  assert.equal(c.nodo('#hc-t0-cbc').value, CBC);
+  assert.equal(c.nodo('#hc-t1-numero').value, NUMERO_2);
+  assert.equal(c.nodo('#hc-t1-cbc').value, CBC_2);
+  for (const dato of [NUMERO_COMPLETO, CBC, NUMERO_2, CBC_2]) assert.ok(c.vista().includes(dato), `la hoja lleva ${dato}`);
+  assert.ok(!c.vista().includes('•••• 3343'), 'ya no sale enmascarada');
+  assert.ok(!/el papel llevará el número enmascarado/.test(c.notas()), 'ni se dice que va enmascarada');
+  const pieza = c.nodo('[data-pieza="traspaso"]').innerHTML;
+  assert.match(pieza, /Tarjeta 1: el número y el CBC ya están puestos, vienen de «Sacar carro»/);
+  assert.match(pieza, /Tarjeta 2: el número y el CBC ya están puestos/);
+  for (const dato of [NUMERO_COMPLETO, CBC, NUMERO_2, CBC_2]) assert.ok(!pieza.includes(dato), 'el aviso no repite el número ni el CBC');
+});
+
+test('lo que llegó de «Sacar carro» se borra igual que lo tecleado: al terminar de imprimir se vacía todo, aviso incluido', () => {
+  const c = contenedorFalso();
+  let enElDialogo = null;
+  pintarContratoImpreso(c, entrada(), { almacen: almacenEspia(), tarjetasDelTraspaso: DEL_TRASPASO, imprimir: () => { enElDialogo = c.vista(); } });
+  c.nodo('[data-accion="imprimir"]').oyentes.click();
+  assert.ok(enElDialogo.includes(NUMERO_COMPLETO) && enElDialogo.includes(CBC) && enElDialogo.includes(NUMERO_2) && enElDialogo.includes(CBC_2), 'se imprimió con lo que vino');
+  for (const caja of ['#hc-t0-numero', '#hc-t0-cbc', '#hc-t1-numero', '#hc-t1-cbc']) assert.equal(c.nodo(caja).value, '', `${caja} vacía`);
+  assert.equal(c.nodo('[data-pieza="traspaso"]').innerHTML, '');
+  for (const dato of [NUMERO_COMPLETO, CBC, NUMERO_2, CBC_2]) assert.ok(!c.innerHTML.includes(dato) && !c.vista().includes(dato), `${dato} ya no está en pantalla`);
+  assert.ok(c.vista().includes('•••• 3343'), 'y la hoja vuelve a salir enmascarada');
+});
+
+test('una tarjeta que llegó con un número que no es la de este contrato NO se pone, se avisa en rojo y no se repite el número', () => {
+  const c = contenedorFalso();
+  const ajena = [{ numero: '4000 0000 0000 9999', cbc: '321' }, DEL_TRASPASO[1]];
+  pintarContratoImpreso(c, entrada(), { almacen: almacenEspia(), tarjetasDelTraspaso: ajena });
+  assert.equal(c.nodo('#hc-t0-numero').value, '');
+  assert.equal(c.nodo('#hc-t0-cbc').value, '');
+  assert.equal(c.nodo('#hc-t1-numero').value, NUMERO_2, 'la que sí coincide se pone');
+  const pieza = c.nodo('[data-pieza="traspaso"]').innerHTML;
+  assert.match(pieza, /role="alert"[^>]*><p>Tarjeta 1: lo que llegó de «Sacar carro» no coincide con la tarjeta de este contrato y NO se puso/);
+  assert.ok(!c.innerHTML.includes('9999') && !c.vista().includes('9999') && !c.vista().includes('321'), 'nada de lo ajeno llegó a la hoja ni al aviso');
+  assert.ok(/Tarjeta 1: el papel llevará el número enmascarado/.test(c.notas()), 'la 1 sigue enmascarada');
+});
+
+test('sin traspaso (dirección escrita a mano, recargar, volver otro día) la pantalla es la de siempre: cajas vacías, hoja enmascarada, ningún rastro', () => {
+  for (const nada of [undefined, [], null]) {
+    const c = contenedorFalso();
+    pintarContratoImpreso(c, entrada(), { almacen: almacenEspia(), ...(nada === undefined ? {} : { tarjetasDelTraspaso: nada ?? undefined }) });
+    assert.equal(c.nodo('#hc-t0-numero').value, '');
+    assert.equal(c.nodo('#hc-t0-cbc').value, '');
+    assert.equal(c.nodo('[data-pieza="traspaso"]').innerHTML, '');
+    assert.ok(c.vista().includes('•••• 3343'));
+    assert.ok(/Tarjeta 1: el papel llevará el número enmascarado/.test(c.notas()));
+  }
+});
+
+test('un contrato en efectivo (sin cajas de tarjeta) ignora lo que llegara del traspaso, sin romper', () => {
+  const c = contenedorFalso();
+  pintarContratoImpreso(c, entrada({ contrato: contrato({ tarjetas: [] }) }), { almacen: almacenEspia(), tarjetasDelTraspaso: DEL_TRASPASO });
+  assert.ok(c.vista().includes('hoja-contrato'));
+  assert.ok(!c.vista().includes(NUMERO_COMPLETO) && !c.innerHTML.includes(NUMERO_COMPLETO));
+  assert.match(c.nodo('[data-pieza="traspaso"]').innerHTML, /no coincide/, 'se dice que no se puso');
+});
+
+test('pintarImpresionDeContrato toma el traspaso LO PRIMERO, antes de leer nada, y se lo da a la hoja', async () => {
+  olvidarTraspaso();
+  const llamadas = [];
+  const { leer } = lecturas();
+  const envuelto = {
+    cargarContrato: async (id) => { llamadas.push('leer contrato'); return leer.cargarContrato(id); },
+    cargarClientes: async () => { llamadas.push('leer clientes'); return leer.cargarClientes(); },
+    cargarFlota: async () => { llamadas.push('leer flota'); return leer.cargarFlota(); },
+  };
+  const c = contenedorFalso();
+  await pintarImpresionDeContrato(c, 'c1', { leer: envuelto, tomar: (id) => { llamadas.push(`tomar ${id}`); return DEL_TRASPASO; } });
+  assert.equal(llamadas[0], 'tomar c1');
+  assert.ok(c.vista().includes(NUMERO_COMPLETO) && c.vista().includes(CBC_2));
+});
+
+test('el traspaso de verdad: lo de un contrato llega a la hoja de ESE contrato una vez, y NUNCA a la de otro', async () => {
+  olvidarTraspaso();
+  dejarTraspaso('c1', DEL_TRASPASO);
+  // se entra primero a la hoja de OTRO contrato: no ve nada
+  const otro = contenedorFalso();
+  await pintarImpresionDeContrato(otro, 'c2', { leer: lecturas({ contratoLeido: contrato({ id: 'c2', numero: 78 }) }).leer });
+  for (const dato of [NUMERO_COMPLETO, CBC, NUMERO_2, CBC_2, '4111']) assert.ok(!otro.innerHTML.includes(dato) && !otro.vista().includes(dato), `la hoja de otro contrato no lleva ${dato}`);
+  assert.equal(otro.nodo('#hc-t0-numero').value, '');
+  // y entrar a otra cerró el salto: la de c1 tampoco lo recibe ya
+  const primero = contenedorFalso();
+  await pintarImpresionDeContrato(primero, 'c1', { leer: lecturas().leer });
+  assert.equal(primero.nodo('#hc-t0-numero').value, '');
+  assert.ok(!primero.vista().includes(NUMERO_COMPLETO));
+  // el camino normal: se deja, se entra a ESE contrato, llega; una segunda vez ya no
+  dejarTraspaso('c1', DEL_TRASPASO);
+  const bien = contenedorFalso();
+  await pintarImpresionDeContrato(bien, 'c1', { leer: lecturas().leer });
+  assert.equal(bien.nodo('#hc-t0-numero').value, NUMERO_COMPLETO);
+  assert.ok(bien.vista().includes(CBC));
+  const otraVez = contenedorFalso();
+  await pintarImpresionDeContrato(otraVez, 'c1', { leer: lecturas().leer });
+  assert.equal(otraVez.nodo('#hc-t0-numero').value, '', 'recargar o volver a entrar pide los datos como siempre');
+});
+
+test('si el contrato no se puede leer, el traspaso igual se recogió: no queda esperando en memoria', async () => {
+  olvidarTraspaso();
+  dejarTraspaso('c1', DEL_TRASPASO);
+  const c = contenedorFalso();
+  await pintarImpresionDeContrato(c, 'c1', { leer: lecturas({ falla: { contrato: true } }).leer });
+  assert.match(c.innerHTML, /No se pudo leer este contrato/);
+  assert.ok(!c.innerHTML.includes(NUMERO_COMPLETO));
+  assert.deepEqual(tomarTraspaso('c1'), []);
+});
+
+test('ADR-001, de punta a punta con «Sacar carro»: guardar → imprimir llevan el número y el CBC a la hoja y a NINGÚN otro lugar, ni antes ni después', async () => {
+  olvidarTraspaso();
+  const almacen = almacenEspia();
+  const c = contenedorFalso();
+  let enElDialogo = null;
+  // la ventana de mentira que tiene el diálogo de imprimir: aquí es donde la hoja se «manda a la impresora»
+  const antes = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  globalThis.window = { print: () => { enElDialogo = c.vista(); }, addEventListener() {}, removeEventListener() {} };
+  const apuntes = await conEspias(async () => {
+    // lo último que hace «Guardar» en «Sacar carro», con la navegación de verdad hecha a mano: la ruta cambia y se dibuja la pantalla
+    let pendiente = null;
+    irDespuesDeGuardar({ contratoId: 'c1', tarjetas: DEL_TRASPASO, sigueAqui: true }, {
+      ir: (ruta) => { pendiente = pintarImpresionDeContrato(c, ruta.split('/').pop(), { leer: lecturas().leer }); },
+    });
+    await pendiente;
+    // ya vienen puestos; se imprime
+    assert.equal(c.nodo('#hc-t0-numero').value, NUMERO_COMPLETO);
+    c.nodo('[data-accion="imprimir"]').oyentes.click();
+  });
+  if (antes) Object.defineProperty(globalThis, 'window', antes); else delete globalThis.window;
+  assert.ok(enElDialogo.includes(NUMERO_COMPLETO) && enElDialogo.includes(CBC) && enElDialogo.includes(NUMERO_2) && enElDialogo.includes(CBC_2), 'la hoja que se mandó a imprimir llevaba las dos tarjetas completas');
+  assert.equal(c.nodo('#hc-t0-numero').value, '', 'al terminar de imprimir las cajas quedaron vacías');
+  assert.ok(!c.innerHTML.includes('4111') && !c.vista().includes('4111'));
+  assert.deepEqual(tomarTraspaso('c1'), [], 'y en memoria no queda nada');
+  assert.deepEqual(almacen.escrituras, []);
+  const todo = JSON.stringify(apuntes);
+  for (const dato of ['4111', '1111 1111', '5500', CBC, CBC_2, NUMERO_COMPLETO, NUMERO_2]) assert.ok(!todo.includes(dato), `«${dato}» llegó a otro lugar: ${todo}`);
+  // Lo único que se toca es la LECTURA de la calibración de la impresora (la clave de localStorage de siempre): ninguna escritura, ni
+  // sessionStorage, ni IndexedDB, ni la red, ni la consola.
+  assert.deepEqual(apuntes, [['localStorage', 'getItem', JSON.stringify(CLAVE_DE_CALIBRACIONES)]]);
 });
