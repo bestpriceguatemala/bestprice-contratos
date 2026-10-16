@@ -13,8 +13,16 @@
 // completo de la tarjeta y el CBC nunca deben llegar a guardarse. Por eso
 // `construirContrato` — la función que arma lo que de verdad se guarda— ni
 // siquiera puede recibirlos: quien la llama ya le pasa solo los últimos 4
-// dígitos (ver `leerTarjetas` más abajo). El CBC no se lee en ningún lado de
-// este archivo.
+// dígitos (ver `leerTarjetas` más abajo).
+//
+// Lo que cambió el 16 de octubre de 2026 (aclaración del ADR-001): hasta ese día el CBC no se leía en ningún
+// lado de este archivo y el número completo solo para quedarse con los últimos 4, y el mostrador tenía que
+// volver a teclear los dos en la pantalla de imprimir. Ahora, SOLO al guardar con éxito, `leerTarjetasEscritas`
+// (más abajo) lee el número completo y el CBC de las cajas y se los entrega a `traspasoDeTarjetas.js`, que los
+// lleva a la pantalla de imprimir ese mismo contrato y nada más. Siguen sin guardarse en ningún lado: ni en el
+// contrato, ni en IndexedDB, ni en Firestore, ni en `localStorage`/`sessionStorage`, ni en la dirección; viven
+// en una variable de memoria que se entrega una vez, se borra al cambiar de pantalla y vence al minuto (por qué
+// así, en traspasoDeTarjetas.js). `construirContrato` sigue sin recibirlos: el traspaso no pasa por el contrato.
 import { lineasSalida, resumen } from '../nucleo/contrato.js';
 import { avisosDeSalida } from '../nucleo/avisos.js';
 import { estadoReserva } from '../nucleo/reserva.js';
@@ -29,6 +37,7 @@ import {
   dinero, fecha, aviso, hora24, htmlAvisoRepetido,
 } from '../ui.js';
 import { textoAvisoSobrecobro } from './recibirCarro.js';
+import { dejarTraspaso, rutaDeImprimir } from './traspasoDeTarjetas.js';
 import { filtrar, textoDeCliente, normalizar } from '../nucleo/busqueda.js';
 import { avisoDeClienteRepetido } from '../nucleo/repetidos.js';
 // El alta rápida de aquí y la ficha de clientes.js tienen que pedir
@@ -99,6 +108,45 @@ const descripcionCarroAjeno = (c) => [c?.marca, c?.modelo].filter(Boolean).join(
  * de verdad.
  */
 const tarjetaTieneDatos = (t) => Boolean(t?.ultimos4 || t?.vencimiento || t?.banco || t?.autorizacion || q(t?.montoAutorizado));
+
+/**
+ * Del número completo y del CBC tecleados (`escritas`, una por tarjeta del formulario, en su orden), los que van a la
+ * pantalla de imprimir: uno por cada tarjeta que SÍ queda en el contrato y en el mismo orden, porque esa pantalla los junta
+ * por posición con `contrato.tarjetas`. Se usa el mismo filtro (`tarjetaTieneDatos`) que `construirContrato`: si la tarjeta 1
+ * se dejó vacía y la 2 no, el contrato guarda UNA tarjeta (la 2) y aquí también sale una (la 2). Un CBC suelto, de una tarjeta
+ * que no llegó al contrato, no tiene a qué papel pegarse y no se lleva. `leidas` es lo que ya devuelve `leerTarjetas` (con
+ * los últimos 4). Función pura.
+ */
+export function tarjetasParaImprimir(leidas, escritas) {
+  const lista = Array.isArray(leidas) ? leidas : [];
+  return lista
+    .map((leida, i) => ({ leida, escrita: escritas?.[i] }))
+    .filter(({ leida }) => tarjetaTieneDatos(leida))
+    .map(({ escrita }) => ({ numero: String(escrita?.numero ?? '').trim(), cbc: String(escrita?.cbc ?? '').trim() }));
+}
+
+/**
+ * A dónde se va al guardar la salida, y si hay tarjeta que llevar. Con número o CBC tecleados se va directo a imprimir ESE
+ * contrato (el salto que el traspaso necesita: cualquier otra pantalla en medio lo borraría); sin ellos, a la flota como
+ * siempre —una renta en efectivo no cambia—. Si la pantalla ya no está a la vista (se fue a otra parte mientras guardaba),
+ * no se lleva a nadie a imprimir: el aviso de guardado ya salió y no se le quita su pantalla. Función pura.
+ */
+export function destinoDespuesDeGuardar({ contratoId, tarjetas, sigueAqui }) {
+  const llevaTarjetas = Boolean(sigueAqui && contratoId && (tarjetas ?? []).some((t) => t.numero || t.cbc));
+  return { ruta: llevaTarjetas ? rutaDeImprimir(contratoId) : '#/flota', llevaTarjetas };
+}
+
+/**
+ * Lo último que hace «Guardar»: deja las tarjetas en el traspaso (o NADA, que borra lo que hubiera dejado la renta anterior:
+ * sacar un carro y luego otro, el segundo no puede traer nada del primero) y cambia de pantalla. Va aparte de `guardar` para
+ * poder probar el orden —primero se deja, después se va— con el traspaso de verdad y una navegación de mentira. Devuelve la ruta.
+ */
+export function irDespuesDeGuardar({ contratoId, tarjetas, sigueAqui }, { dejar = dejarTraspaso, ir = (ruta) => { location.hash = ruta; } } = {}) {
+  const { ruta, llevaTarjetas } = destinoDespuesDeGuardar({ contratoId, tarjetas, sigueAqui });
+  dejar(contratoId, llevaTarjetas ? tarjetas : []);
+  ir(ruta);
+  return ruta;
+}
 
 /**
  * Arma el contrato tal como se guarda (§7 del diseño), a partir de lo que ya
@@ -441,6 +489,44 @@ export function lectorDeCampos(el) {
     texto: (id) => val(id).trim(),
     marcado: (id) => Boolean(el(id)?.checked),
   };
+}
+
+/**
+ * Las tarjetas que se GUARDAN, leídas de las cajas: del número completo solo los últimos 4 dígitos, y del CBC nada (ADR-001: esto
+ * es lo que alimenta a `construirContrato`, y lo que sale de aquí se guarda en el contrato). La segunda solo si se marcó
+ * «Agregar segunda tarjeta».
+ */
+export function leerTarjetasDe({ val, texto, num, marcado }) {
+  const tarjetas = [{
+    ultimos4: ultimos4Digitos(val('sc-t1-numero')),
+    vencimiento: texto('sc-t1-vencimiento'),
+    banco: texto('sc-t1-banco'),
+    autorizacion: texto('sc-t1-autorizacion'),
+    montoAutorizado: num('sc-t1-monto'),
+  }];
+  if (marcado('sc-t2-agregar')) {
+    tarjetas.push({
+      ultimos4: ultimos4Digitos(val('sc-t2-numero')),
+      vencimiento: texto('sc-t2-vencimiento'),
+      banco: texto('sc-t2-banco'),
+      autorizacion: texto('sc-t2-autorizacion'),
+      montoAutorizado: num('sc-t2-monto'),
+    });
+  }
+  return tarjetas;
+}
+
+/**
+ * El número completo y el CBC, tal como se tecleron (ADR-001, aclaración del 16 de octubre de 2026): `[{ numero, cbc }]`, una por
+ * cada tarjeta del formulario y en su orden. Es el ÚNICO lugar del archivo donde se leen las cajas del CBC y donde se lee el
+ * número completo para algo más que sacarle los últimos 4. Solo se llama al guardar (`guardar`); el resultado se junta con
+ * `tarjetasParaImprimir` y se entrega a `irDespuesDeGuardar` (que lo deja en el traspaso). No se pasa a `construirContrato`, ni se
+ * escribe en ningún almacén, ni se muestra, ni se apunta en la consola.
+ */
+export function leerTarjetasEscritasDe({ val, marcado }) {
+  const escritas = [{ numero: val('sc-t1-numero'), cbc: val('sc-t1-cbc') }];
+  if (marcado('sc-t2-agregar')) escritas.push({ numero: val('sc-t2-numero'), cbc: val('sc-t2-cbc') });
+  return escritas;
 }
 
 /**
@@ -1062,7 +1148,8 @@ export function plantilla() {
           <h2>5. Tarjetas</h2>
           <p class="sc-nota">
             El número completo y el CBC solo se usan para imprimir el contrato; nunca se guardan
-            (ver ADR-001). Del sistema solo quedan los últimos 4 dígitos.
+            (ver ADR-001). Del sistema solo quedan los últimos 4 dígitos. Al guardar, pasan a la
+            pantalla de imprimir sin guardarse en ningún lado, para no teclearlos otra vez.
           </p>
           <div class="sc-campos">
             ${campo('sc-t1-numero', 'Número completo', { autocompletar: 'off' })}
@@ -1309,30 +1396,12 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     return { leida, fallo, cantidad: items.length };
   };
 
-  function leerTarjetas() {
-    // ADR-001: este es el único lugar de todo el archivo donde se leen los
-    // campos del número completo, y solo para quedarse con los últimos 4
-    // dígitos. El CBC (sc-t1-cbc / sc-t2-cbc) no se lee en ningún lado: no
-    // hace falta todavía porque este plan no imprime nada, así ninguna línea
-    // de código puede copiarlo a otro sitio por error.
-    const tarjetas = [{
-      ultimos4: ultimos4Digitos(val('sc-t1-numero')),
-      vencimiento: texto('sc-t1-vencimiento'),
-      banco: texto('sc-t1-banco'),
-      autorizacion: texto('sc-t1-autorizacion'),
-      montoAutorizado: num('sc-t1-monto'),
-    }];
-    if (marcado('sc-t2-agregar')) {
-      tarjetas.push({
-        ultimos4: ultimos4Digitos(val('sc-t2-numero')),
-        vencimiento: texto('sc-t2-vencimiento'),
-        banco: texto('sc-t2-banco'),
-        autorizacion: texto('sc-t2-autorizacion'),
-        montoAutorizado: num('sc-t2-monto'),
-      });
-    }
-    return tarjetas;
-  }
+  // ADR-001: `leerTarjetas` se queda con los últimos 4 dígitos y NADA MÁS: es la que alimenta a `construirContrato`, y lo que
+  // sale de ella se guarda. El número completo y el CBC los lee otra, aparte (`leerTarjetasEscritas`), solo para el traspaso a
+  // imprimir y solo al guardar; nunca se mezclan con lo que se guarda. Las dos viven fuera de la pantalla (ver arriba) para poder
+  // probarlas con los mismos ids.
+  const leerTarjetas = () => leerTarjetasDe({ val, texto, num, marcado });
+  const leerTarjetasEscritas = () => leerTarjetasEscritasDe({ val, marcado });
 
   // Lo que se lee del formulario lo arma leerFormularioDe (arriba, probado con
   // los mismos ids); aquí solo se le da lo que la pantalla recuerda.
@@ -1880,11 +1949,16 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       // este formulario usó (ya salió en otro contrato, se canceló o cambió). Por eso ya no existe el
       // aviso «guardado, pero la reservación NO se pudo marcar»: no puede pasar una mitad sin la otra.
       // La marca la sella guardarContrato con reservaParaGuardar/estadoReserva, nunca se escribe a mano.
+      // ADR-001 (aclaración del 16 de octubre de 2026): el número completo y el CBC se leen aquí, junto con el resto del
+      // formulario y antes de esperar a la nube, y viven solo en esta constante hasta que se entregan al traspaso.
+      const paraImprimir = tarjetasParaImprimir(leerTarjetas(), leerTarjetasEscritas());
       const guardado = await guardarContrato(contrato, { reservaDeOrigen: reservaOrigen });
       aviso(reservaOrigen
         ? `Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro. La reservación quedó entregada.`
         : `Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro.`, 'exito');
-      location.hash = '#/flota';
+      const idGuardado = guardado.id || contratoId;
+      // A imprimir ese contrato con las tarjetas puestas, o a la flota como siempre si no hay ninguna que llevar.
+      irDespuesDeGuardar({ contratoId: idGuardado, tarjetas: paraImprimir, sigueAqui: sigoVigente() });
     } catch (error) {
       aviso(textoFalloAlGuardarElContrato(error), 'error');
     } finally {

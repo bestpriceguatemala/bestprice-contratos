@@ -12,7 +12,9 @@ import {
   vistaDeBuscador, crearListaDeSesion, duenoDelContrato, lectorDeCampos, leerFormularioDe, plantilla, motivoParaNoGuardar,
   textoCarroPropioNoEncontrado, avisosConSobrecobro, avisoAnticipoDeMas, htmlAvisoDeDocumentoEnAlta,
   filaEmpleado, textoDelEmpleadoEscogido, empleadoParaEnter, cargarEmpleadosActivos,
+  leerTarjetasDe, leerTarjetasEscritasDe, tarjetasParaImprimir, destinoDespuesDeGuardar, irDespuesDeGuardar,
 } from '../js/pantallas/sacarCarro.js';
+import { tomarTraspaso, olvidarTraspaso } from '../js/pantallas/traspasoDeTarjetas.js';
 import { EMPLEADOS } from './fixtures/rentasConComision.mjs';
 import { resumen } from '../js/nucleo/contrato.js';
 import { construirReserva } from '../js/nucleo/reserva.js';
@@ -1569,4 +1571,153 @@ test('cargarEmpleadosActivos: los dados de baja no salen; una lectura fallida es
   assert.equal(r.fallo, false);
   assert.deepEqual(await cargarEmpleadosActivos(undefined, { leer: async () => ({ datos: null, fallo: true }) }), { datos: null, fallo: true });
   assert.deepEqual(await cargarEmpleadosActivos(undefined, { leer: async () => ({ datos: [], fallo: false }) }), { datos: [], fallo: false });
+});
+
+// ---------------------------------------------------------------------------
+// ADR-001, aclaración del 16 de octubre de 2026: el número completo y el CBC pasan de «Sacar carro» a «Imprimir contrato»
+// SIN guardarse. Aquí: qué se lee de las cajas, qué se lleva, a dónde se va, y que no toque nada de lo que se guarda.
+// (La vida del dato en memoria está en traspaso-de-tarjetas.test.mjs; la hoja con las cajas ya llenas, en contrato-impreso.test.mjs.)
+// ---------------------------------------------------------------------------
+
+/** Las cajas de las tarjetas de «Sacar carro» con valores de mentira, leídas con el mismo lector que la pantalla. */
+function lectorDeTarjetas({ t1 = {}, t2 = null } = {}) {
+  const valores = {};
+  const poner = (n, t) => {
+    const nombres = { numero: `sc-t${n}-numero`, cbc: `sc-t${n}-cbc`, vencimiento: `sc-t${n}-vencimiento`, banco: `sc-t${n}-banco`, autorizacion: `sc-t${n}-autorizacion`, monto: `sc-t${n}-monto` };
+    for (const [k, id] of Object.entries(nombres)) valores[id] = t[k] ?? '';
+  };
+  poner(1, t1);
+  poner(2, t2 ?? {});
+  return lectorDeCampos((id) => (id === 'sc-t2-agregar' ? { checked: t2 !== null } : { value: valores[id] }));
+}
+const T1 = { numero: '4111 1111 1111 3343', cbc: '827', vencimiento: '08/28', banco: 'BAC', autorizacion: 'A1', monto: '5000' };
+const T2 = { numero: '5500 0000 0000 0004', cbc: '9013', vencimiento: '01/29', banco: 'Banrural', autorizacion: 'B2', monto: '3000' };
+
+test('lo que se GUARDA de las tarjetas son los últimos 4 y nada más: ni el número completo ni el CBC salen de leerTarjetasDe ni del contrato', () => {
+  const lector = lectorDeTarjetas({ t1: T1, t2: T2 });
+  const leidas = leerTarjetasDe(lector);
+  assert.deepEqual(leidas.map((t) => t.ultimos4), ['3343', '0004']);
+  const contrato = construirContrato({ ...datosBase(), tarjetas: leidas });
+  const texto = JSON.stringify([leidas, contrato]);
+  for (const secreto of ['4111', '5500', '827', '9013', '1111 1111', '0000 0000']) {
+    assert.equal(texto.includes(secreto), false, `«${secreto}» no está en lo que se guarda`);
+  }
+  assert.deepEqual(Object.keys(contrato.tarjetas[0]).sort(), ['autorizacion', 'banco', 'montoAutorizado', 'ultimos4', 'vencimiento']);
+});
+
+test('leerTarjetasEscritasDe lee el número completo y el CBC de la caja que es, tarjeta por tarjeta, y la segunda solo si se marcó', () => {
+  assert.deepEqual(leerTarjetasEscritasDe(lectorDeTarjetas({ t1: T1, t2: T2 })), [
+    { numero: T1.numero, cbc: T1.cbc }, { numero: T2.numero, cbc: T2.cbc },
+  ]);
+  const sola = leerTarjetasEscritasDe(lectorDeTarjetas({ t1: T1 }));
+  assert.deepEqual(sola, [{ numero: T1.numero, cbc: T1.cbc }], 'sin marcar la segunda, aunque sus cajas tuvieran algo, no se lee');
+  assert.deepEqual(leerTarjetasEscritasDe(lectorDeTarjetas()), [{ numero: '', cbc: '' }]);
+});
+
+test('tarjetasParaImprimir lleva una por cada tarjeta que SÍ queda en el contrato, en su orden, con el mismo filtro que construirContrato', () => {
+  const casos = {
+    'solo la 1': { t1: T1 },
+    'las dos': { t1: T1, t2: T2 },
+    'la 1 vacía y la 2 con datos (el contrato guarda UNA: la 2)': { t1: {}, t2: T2 },
+    'la 1 con datos y la 2 marcada pero vacía': { t1: T1, t2: {} },
+    'ninguna (una renta en efectivo)': {},
+    'la 1 con solo el CBC (no queda en el contrato) y la 2 con datos': { t1: { cbc: '555' }, t2: T2 },
+  };
+  for (const [nombre, f] of Object.entries(casos)) {
+    const lector = lectorDeTarjetas(f);
+    const leidas = leerTarjetasDe(lector);
+    const llevadas = tarjetasParaImprimir(leidas, leerTarjetasEscritasDe(lector));
+    const contrato = construirContrato({ ...datosBase(), tarjetas: leidas });
+    assert.equal(llevadas.length, contrato.tarjetas.length, `${nombre}: tantas como el contrato`);
+    llevadas.forEach((t, i) => {
+      assert.equal(ultimos4Digitos(t.numero), contrato.tarjetas[i].ultimos4, `${nombre}: la tarjeta ${i + 1} es la del contrato`);
+    });
+  }
+  const sinNumero = tarjetasParaImprimir(leerTarjetasDe(lectorDeTarjetas({ t1: { cbc: '555' }, t2: T2 })), leerTarjetasEscritasDe(lectorDeTarjetas({ t1: { cbc: '555' }, t2: T2 })));
+  assert.equal(JSON.stringify(sinNumero).includes('555'), false, 'un CBC suelto, de una tarjeta que no llegó al contrato, no se lleva');
+  assert.deepEqual(tarjetasParaImprimir(undefined, undefined), []);
+  assert.deepEqual(tarjetasParaImprimir([{ ultimos4: '3343' }], undefined), [{ numero: '', cbc: '' }]);
+});
+
+test('destinoDespuesDeGuardar: con número o CBC se va a imprimir ESE contrato; sin ellos, a la flota como siempre; si ya no está en la pantalla, no se lleva a nadie', () => {
+  const con = [{ numero: T1.numero, cbc: '' }];
+  assert.deepEqual(destinoDespuesDeGuardar({ contratoId: 'c9', tarjetas: con, sigueAqui: true }), { ruta: '#/imprimir/c9', llevaTarjetas: true });
+  assert.equal(destinoDespuesDeGuardar({ contratoId: 'c9', tarjetas: [{ numero: '', cbc: '827' }], sigueAqui: true }).ruta, '#/imprimir/c9', 'solo el CBC también cuenta');
+  for (const tarjetas of [[], undefined, [{ numero: '', cbc: '' }]]) {
+    assert.deepEqual(destinoDespuesDeGuardar({ contratoId: 'c9', tarjetas, sigueAqui: true }), { ruta: '#/flota', llevaTarjetas: false });
+  }
+  assert.deepEqual(destinoDespuesDeGuardar({ contratoId: 'c9', tarjetas: con, sigueAqui: false }), { ruta: '#/flota', llevaTarjetas: false });
+  assert.deepEqual(destinoDespuesDeGuardar({ contratoId: '', tarjetas: con, sigueAqui: true }), { ruta: '#/flota', llevaTarjetas: false });
+});
+
+/** «Guardar» con una navegación de mentira: al ir a imprimir, la pantalla de imprimir (aquí, tomarTraspaso) toma lo que haya. */
+function guardarYNavegar(contratoId, tarjetas, sigueAqui = true) {
+  const visto = { ruta: null, alLlegar: null };
+  irDespuesDeGuardar({ contratoId, tarjetas, sigueAqui }, {
+    ir: (ruta) => {
+      visto.ruta = ruta;
+      const m = /^#\/imprimir\/(.+)$/.exec(ruta);
+      if (m) visto.alLlegar = tomarTraspaso(m[1]);
+    },
+  });
+  return visto;
+}
+
+test('irDespuesDeGuardar: primero se deja y después se va, así que la pantalla de imprimir recibe las dos tarjetas de ESE contrato', () => {
+  olvidarTraspaso();
+  const llevadas = [{ numero: T1.numero, cbc: T1.cbc }, { numero: T2.numero, cbc: T2.cbc }];
+  const visto = guardarYNavegar('c1', llevadas);
+  assert.equal(visto.ruta, '#/imprimir/c1');
+  assert.deepEqual(visto.alLlegar, llevadas);
+  assert.deepEqual(tomarTraspaso('c1'), [], 'y ya no queda nada para quien llegue después');
+});
+
+test('EL CASO FEO: sacar un carro con tarjeta y luego otro sin ella (o con otra) — el segundo no trae NADA del primero', () => {
+  olvidarTraspaso();
+  // el primero no llegó a imprimirse (la persona se fue a otra pantalla, o el salto no se completó): se simula dejando sin navegar
+  irDespuesDeGuardar({ contratoId: 'c1', tarjetas: [{ numero: T1.numero, cbc: T1.cbc }], sigueAqui: true }, { ir: () => {} });
+  // el segundo es en efectivo: a la flota, y lo del primero se borró
+  const sinTarjeta = guardarYNavegar('c2', []);
+  assert.equal(sinTarjeta.ruta, '#/flota');
+  assert.deepEqual(tomarTraspaso('c1'), [], 'lo del primero ya no está');
+  assert.deepEqual(tomarTraspaso('c2'), []);
+  // y con otra tarjeta: la pantalla de imprimir del segundo recibe SOLO lo del segundo
+  irDespuesDeGuardar({ contratoId: 'c3', tarjetas: [{ numero: T1.numero, cbc: T1.cbc }], sigueAqui: true }, { ir: () => {} });
+  const conOtra = guardarYNavegar('c4', [{ numero: T2.numero, cbc: T2.cbc }]);
+  assert.deepEqual(conOtra.alLlegar, [{ numero: T2.numero, cbc: T2.cbc }]);
+  assert.equal(JSON.stringify(conOtra.alLlegar).includes('3343'), false);
+  assert.equal(JSON.stringify(conOtra.alLlegar).includes('827'), false);
+  assert.deepEqual(tomarTraspaso('c3'), []);
+});
+
+test('si la pantalla ya no está a la vista al terminar de guardar, no se deja nada y se va a la flota como antes', () => {
+  olvidarTraspaso();
+  const visto = guardarYNavegar('c1', [{ numero: T1.numero, cbc: T1.cbc }], false);
+  assert.equal(visto.ruta, '#/flota');
+  assert.deepEqual(tomarTraspaso('c1'), []);
+});
+
+test('ADR-001 en el código de «Sacar carro»: las cajas del CBC se leen en UN lugar, y el número completo nunca llega a construirContrato', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/sacarCarro.js', import.meta.url), 'utf8');
+  const codigo = fuente.split('\n').filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*') && !l.trim().startsWith('/**')).join('\n');
+  for (const n of [1, 2]) {
+    assert.equal((codigo.match(new RegExp(`'sc-t${n}-cbc'`, 'g')) ?? []).length, 2, `la caja del CBC de la tarjeta ${n}: una vez dibujada y una vez leída (en leerTarjetasEscritasDe)`);
+  }
+  const inicioLectura = codigo.indexOf('export function leerTarjetasEscritasDe');
+  assert.ok(inicioLectura > 0);
+  const cbcLeido = [...codigo.matchAll(/val\('sc-t[12]-cbc'\)/g)].map((m) => m.index);
+  assert.equal(cbcLeido.length, 2);
+  assert.ok(cbcLeido.every((i) => i > inicioLectura && i < inicioLectura + 500), 'y las dos lecturas están dentro de leerTarjetasEscritasDe');
+  // construirContrato no sabe de ninguna caja ni de CBC
+  const cuerpo = codigo.slice(codigo.indexOf('export function construirContrato'), codigo.indexOf('export function duenoDelContrato'));
+  assert.ok(cuerpo.length > 500);
+  assert.equal(/cbc|sc-t\d|numeroCompleto/i.test(cuerpo), false);
+  // lo leído solo entra al traspaso: se lee una vez, antes de esperar a la nube, y se entrega después de guardar
+  assert.equal((codigo.match(/leerTarjetasEscritas\(\)/g) ?? []).length, 1);
+  const iLee = codigo.indexOf('tarjetasParaImprimir(leerTarjetas(), leerTarjetasEscritas())');
+  const iGuarda = codigo.indexOf('await guardarContrato(contrato');
+  const iVa = codigo.lastIndexOf('irDespuesDeGuardar({');
+  assert.ok(iLee > 0 && iLee < iGuarda && iGuarda < iVa, 'se lee, se guarda, se va');
+  assert.equal(/localStorage|sessionStorage|indexedDB|console\.|history\./.test(codigo), false, 'esta pantalla no escribe en ningún almacén ni en la consola');
+  assert.equal((codigo.match(/location\.hash\s*=/g) ?? []).length, 1, 'una sola salida de la pantalla al guardar: la de irDespuesDeGuardar');
 });
