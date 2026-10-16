@@ -1863,3 +1863,261 @@ body {
     break-after: avoid;
   }
 }
+
+/* ---------- El mantenimiento de un carro propio (§12b): el bloque de la ficha ----------
+   Va debajo del formulario del carro (pantallas/mantenimiento.js). Nada de eso lleva style="...": un estilo en línea
+   le gana a todo y nadie lo ve aquí. Los colores dicen lo mismo que la palabra de la etiqueta (Toca, Pronto, Al día),
+   nunca solos: la palabra manda. «Al día por fecha» y «Sin registro» NO van en verde — no se midió todo, y un verde
+   que no se ganó es una buena noticia inventada. */
+
+.mantenimiento {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 24px 40px;
+}
+
+.mantenimiento h2 {
+  margin: 8px 0 16px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.mantenimiento h3 {
+  margin: 24px 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--texto);
+}
+
+.mant-bloque {
+  background: var(--blanco);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 24px 28px;
+  margin-bottom: 16px;
+}
+
+.mant-bloque > *:first-child h3,
+.mant-bloque h3:first-child {
+  margin-top: 0;
+}
+
+.mant-km {
+  margin: 0 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.mant-km-desconocido {
+  color: var(--gris);
+  font-weight: 400;
+}
+
+.mant-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.mant-tabla th {
+  text-align: left;
+  padding: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gris);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.mant-tabla td {
+  padding: 10px 8px;
+  vertical-align: top;
+  border-top: 1px solid var(--borde);
+}
+
+.mant-intervalo {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--gris);
+}
+
+.mant-nada {
+  color: var(--gris);
+}
+
+.mant-lado {
+  margin: 0 0 4px;
+}
+
+.mant-lado-toca {
+  color: var(--rojo);
+}
+
+.mant-lado-desconocido,
+.mant-lado-sin-leer {
+  color: var(--gris);
+}
+
+.mant-fila-toca td:first-child {
+  border-left: 3px solid var(--rojo);
+}
+
+.mant-fila-pronto td:first-child {
+  border-left: 3px solid var(--amarillo);
+}
+
+.mant-etiqueta {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  background: var(--fondo);
+  color: var(--gris);
+}
+
+.mant-etiqueta-toca {
+  background: rgba(179, 38, 30, 0.1);
+  color: var(--rojo);
+}
+
+.mant-etiqueta-pronto {
+  background: rgba(255, 188, 1, 0.25);
+  color: #7a5200;
+}
+
+.mant-etiqueta-al-dia {
+  background: rgba(30, 122, 61, 0.1);
+  color: var(--verde);
+}
+
+.mant-historial {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mant-hist-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--borde);
+  font-size: 13px;
+}
+
+.mant-hist-fecha {
+  min-width: 96px;
+  color: var(--gris);
+}
+
+.mant-hist-no-cuenta {
+  color: var(--gris);
+}
+
+.mant-hist-no-cuenta strong {
+  text-decoration: line-through;
+}
+
+.mant-hist-nota {
+  font-size: 12px;
+  color: var(--gris);
+}
+
+.btn.mant-anular {
+  width: auto;
+  margin-left: auto;
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.mant-form h3 {
+  margin-top: 0;
+}
+
+.mant-campos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+}
+
+.mant-campos select {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--texto);
+  padding: 10px 12px;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  background: var(--blanco);
+}
+
+.mant-ayuda {
+  margin: 12px 0;
+  font-size: 12px;
+  color: var(--gris);
+}
+
+.mant-problemas {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--rojo);
+}
+
+.mant-form .btn-primario {
+  width: auto;
+}
+
+.mant-intervalos summary {
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.mant-intervalo-fila {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--borde);
+  font-size: 13px;
+}
+
+.mant-intervalo-fila:first-of-type {
+  margin-top: 8px;
+}
+
+.mant-intervalo-nombre {
+  min-width: 170px;
+}
+
+.mant-intervalo-fila input {
+  width: 90px;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+}
+
+.mant-intervalo-fila .btn {
+  width: auto;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.mant-porque {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 12px;
+  color: var(--gris);
+}

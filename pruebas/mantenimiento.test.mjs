@@ -12,7 +12,7 @@ import {
   SERVICIOS, ANTELACION, servicioDeTipo, kmLeido, kilometrajeDelCarro, textoDelKilometraje, intervaloDe, revisarIntervalo,
   conIntervalo, servicioCuenta, razonDeQueNoCuente, ultimoServicioDe, construirServicio, conServicioAgregado,
   conServicioAnulado, carroConServicio, carroConServicioAnulado, carroConIntervalo, estadoDeServicio, estadoDeMantenimiento,
-  avisosDeMantenimiento,
+  avisosDeMantenimiento, historialDeServicios,
 } from '../js/nucleo/mantenimiento.js';
 import { contratoConKilometraje } from './fixtures/contratoConKilometraje.mjs';
 import { carroPropio, carroConServicios } from './fixtures/carroConServicios.mjs';
@@ -347,6 +347,36 @@ test('ultimoServicioDe: el de fecha más reciente de ESE tipo, sin importar el o
     { tipo: 'aceite', fecha: '2026-09-15', km: null },
   ], HOY);
   assert.equal(ultimoServicioDe(empate.servicios, 'aceite', HOY).km, 17000);
+});
+
+test('historialDeServicios: todos, el más reciente primero, marcando cuáles cuentan y por qué no los demás', () => {
+  const base = carroConServicios(carroPropio(), [
+    { tipo: 'aceite', fecha: '2026-08-01', km: 10000 },
+    { tipo: 'frenos', fecha: '2026-10-01', km: 18000 },
+    { tipo: 'aceite', fecha: '2026-10-01', km: 18500 },
+  ], HOY);
+  const anulado = carroConServicioAnulado(base, 's1', HOY);
+  const conBasura = {
+    ...anulado,
+    servicios: [...anulado.servicios, { id: 'x1', tipo: 'aceite', fecha: '', km: 1 }, { id: 'x2', tipo: 'general', fecha: '2027-01-01', km: 2 }],
+  };
+  const h = historialDeServicios(conBasura.servicios, HOY);
+  assert.deepEqual(h.map((f) => f.id), ['x2', 's3', 's2', 's1', 'x1'], 'por fecha, a igual fecha el anotado después va primero, y el que no tiene fecha al final');
+  const porId = Object.fromEntries(h.map((f) => [f.id, f]));
+  assert.equal(porId.s3.cuenta, true);
+  assert.equal(porId.s3.razon, '');
+  assert.equal(porId.s3.nombre, 'Aceite y filtro');
+  assert.equal(porId.s3.km, 18500);
+  assert.equal(porId.s1.cuenta, false);
+  assert.equal(porId.s1.anulado, true);
+  assert.equal(porId.s1.anuladoEn, HOY);
+  assert.equal(porId.s1.razon, 'Anulado');
+  assert.equal(porId.x1.razon, 'Sin fecha válida: no cuenta');
+  assert.equal(porId.x2.razon, 'Fecha que todavía no llega: no cuenta');
+  assert.deepEqual(historialDeServicios(undefined, HOY), []);
+  assert.deepEqual(historialDeServicios([null, undefined], HOY), []);
+  assert.equal(historialDeServicios([{ id: 'z', tipo: 'inventado', fecha: '2026-10-01' }], HOY)[0].nombre, 'Servicio desconocido');
+  assert.equal(historialDeServicios([{ id: 'k', tipo: 'aceite', fecha: '2026-10-01', km: 0 }], HOY)[0].km, null, 'un 0 guardado no se muestra como 0 km');
 });
 
 // ---------------------------------------------------------------------------------------------------------------

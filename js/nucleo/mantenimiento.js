@@ -295,6 +295,35 @@ export function razonDeQueNoCuente(servicio, hoy) {
   return servicioCuenta(servicio, hoy) ? '' : 'No cuenta';
 }
 
+/**
+ * El historial de servicios de un carro para la ficha: TODOS, los que cuentan y los que no, el más reciente primero.
+ * `{ id, tipo, nombre, fecha, km, anulado, anuladoEn, cuenta, razon }`: `cuenta` y `razon` (por qué no cuenta, o `''`)
+ * los decide el núcleo, para que la ficha no tenga que adivinar cuál se pinta tachado. Uno sin fecha válida no tiene lugar
+ * en el tiempo y va al final. A igual fecha, el que se anotó después va primero.
+ */
+export function historialDeServicios(servicios, hoy) {
+  const filas = arreglo(servicios).filter(Boolean).map((s, orden) => ({
+    id: s.id ?? null,
+    tipo: s.tipo,
+    nombre: servicioDeTipo(s.tipo)?.nombre ?? 'Servicio desconocido',
+    fecha: typeof s.fecha === 'string' ? s.fecha : '',
+    km: kmLeido(s.km),
+    anulado: Boolean(s.anulado),
+    anuladoEn: s.anuladoEn ?? null,
+    cuenta: servicioCuenta(s, hoy),
+    razon: razonDeQueNoCuente(s, hoy),
+    orden,
+  }));
+  const conFecha = (f) => esFechaISO(f.fecha);
+  return filas
+    .sort((a, b) => {
+      if (conFecha(a) !== conFecha(b)) return conFecha(a) ? -1 : 1;
+      if (a.fecha !== b.fecha) return a.fecha < b.fecha ? 1 : -1;
+      return b.orden - a.orden;
+    })
+    .map(({ orden: _orden, ...fila }) => fila);
+}
+
 /** El último servicio de ese tipo que cuenta: el de fecha más reciente (a igual fecha, el de más kilómetros). `null` si no hay. */
 export function ultimoServicioDe(servicios, tipo, hoy) {
   let ultimo = null;

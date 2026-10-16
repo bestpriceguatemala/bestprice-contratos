@@ -5,15 +5,17 @@
 // Esta pantalla maneja cuatro vistas:
 // - #/carros: lista de todos los carros
 // - #/carros/nuevo: formulario para agregar un carro nuevo
-// - #/carros/:id: formulario para editar un carro existente
+// - #/carros/:id: formulario para editar un carro existente, y debajo el mantenimiento de ese carro
+//   (pantallas/mantenimiento.js: cuándo se hizo cada servicio y cuánto falta para el siguiente, §12b)
 // - #/habilitar/:id: marcar un carro como disponible de nuevo
 import { estadoCarro } from '../nucleo/estados.js';
 import { avisoDeCarroRepetido } from '../nucleo/repetidos.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
-  cargarFlota, cargarContratosAbiertos, guardarVehiculo, altaConIdFijo, nuevoIdVehiculo,
+  cargarFlota, cargarContratosAbiertos, cargarTodosLosContratos, guardarVehiculo, altaConIdFijo, nuevoIdVehiculo,
 } from '../datos.js';
 import { aviso, htmlAvisoRepetido } from '../ui.js';
+import { pintarMantenimiento } from './mantenimiento.js';
 
 /**
  * Construye el objeto vehículo para guardar, preservando campos que no vienen
@@ -245,7 +247,9 @@ export function formularioHTML() {
     </form>`;
 }
 
-async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, falloFlota = false) {
+async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, falloFlota = false, {
+  falloContratos = false, alLlegarTarde = () => {},
+} = {}) {
   const esNuevo = carroId === 'nuevo';
   let carro = null;
 
@@ -407,6 +411,25 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
   });
   el('frm-fuera').addEventListener('click', marcarFueraDeServicio);
   el('frm-habilitar').addEventListener('click', habilitar);
+
+  // El mantenimiento de este carro (§12b): solo un carro que ya existe lleva servicios. Va DEBAJO del formulario, no
+  // dentro: sus botones no son los de «Guardar carro». Cuando un servicio se anota, el carro de esta pantalla pasa a ser el
+  // que quedó guardado: si no, «Guardar carro» después reescribiría la lista de servicios de cuando se abrió la ficha.
+  if (carro) {
+    contenedor.insertAdjacentHTML('beforeend', '<section id="mantenimiento" class="mantenimiento"></section>');
+    const mantenimiento = pintarMantenimiento(el('mantenimiento'), {
+      carro, contratos, hoy, falloFlota, falloContratos, alCambiar: (guardado) => { carro = guardado; },
+    });
+    // Una lectura que llega después (la nube contestó, o falló) trae datos que pueden ser más nuevos o decir que la lectura
+    // cayó: el bloque se vuelve a dibujar y la ficha sigue trabajando con el carro más reciente.
+    alLlegarTarde((nuevos) => {
+      const masReciente = nuevos.flota.find((c) => c.id === carro.id);
+      if (masReciente) carro = masReciente;
+      mantenimiento.actualizar({
+        carro, contratos: nuevos.contratos, falloFlota: nuevos.falloFlota, falloContratos: nuevos.falloContratos,
+      });
+    });
+  }
 }
 
 // ---------- Vista: habilitar desde la flota ----------
@@ -479,10 +502,23 @@ export async function pintarCarros(contenedor, carroId) {
   let falloFlota = false;
   let falloContratos = false;
 
+  // La ficha de un carro que ya existe lee TODOS los contratos y no solo los abiertos: de sus contratos cerrados sale el
+  // kilometraje del carro para el mantenimiento (`kilometrajeDelCarro`), y con solo los abiertos casi nunca está. Es la misma
+  // lectura de la colección, sin el filtro. `estadoCarro` no necesita que se filtre: solo mira los que no han regresado.
+  const esFicha = Boolean(carroId) && carroId !== 'nuevo';
+  const cargarContratosDeEstaVista = esFicha ? cargarTodosLosContratos : cargarContratosAbiertos;
+
+  // Lo que la ficha registra para enterarse de una lectura que llega después de haber dibujado con la copia local.
+  let alLlegarTardeLaFicha = null;
+
   const repintar = () => {
     if (!sigoVigente()) return;
     if (hash === '#/carros') {
       dibujarLista(contenedor, flota, contratos, hoy, { falloFlota, falloContratos });
+    } else if (alLlegarTardeLaFicha) {
+      alLlegarTardeLaFicha({
+        flota, contratos, falloFlota, falloContratos,
+      });
     }
   };
 
@@ -492,7 +528,7 @@ export async function pintarCarros(contenedor, carroId) {
   // con la copia local VACÍA, se leía como «todavía no hay carros».
   const [rFlota, rContratos] = await Promise.all([
     cargarFlota((r) => { flota = r.datos; falloFlota = r.fallo; repintar(); }),
-    cargarContratosAbiertos((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); }),
+    cargarContratosDeEstaVista((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); }),
   ]);
   flota = rFlota.datos;
   contratos = rContratos.datos;
@@ -506,6 +542,9 @@ export async function pintarCarros(contenedor, carroId) {
     dibujarLista(contenedor, flota, contratos, hoy, { falloFlota, falloContratos });
   } else if (carroId) {
     // Es #/carros/nuevo o #/carros/:id
-    await dibujarFormulario(contenedor, carroId, flota, contratos, hoy, falloFlota);
+    await dibujarFormulario(contenedor, carroId, flota, contratos, hoy, falloFlota, {
+      falloContratos,
+      alLlegarTarde: (haceAlgo) => { alLlegarTardeLaFicha = haceAlgo; },
+    });
   }
 }
