@@ -752,9 +752,12 @@ export function pintarContratoImpreso(contenedor, entrada, {
   function vaciar() {
     tarjetasEfimeras = [];
     contenedor.querySelectorAll('.hc-tarjeta input').forEach((caja) => { caja.value = ''; });
-    el('[data-pieza="traspaso"]').innerHTML = '';
+    const delTraspaso = el('[data-pieza="traspaso"]');
+    if (delTraspaso) delTraspaso.innerHTML = '';
     restablecerDatosDelPapel();
-    redibujar();
+    // Al salir de la pantalla (hashchange) el enrutador ya dibujó OTRA encima, porque su oyente se puso antes que este: no hay hoja que
+    // redibujar y buscarla daba un error sin atrapar en la consola en cada salida (lo vio la prueba en Chrome, 16 de octubre de 2026).
+    if (el('[data-pieza="vista"]')) redibujar();
   }
 
   /**

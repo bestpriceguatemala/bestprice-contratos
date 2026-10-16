@@ -1443,6 +1443,22 @@ test('ADR-001: al salir de la pantalla (hashchange) también se vacían las caja
   }
 });
 
+test('al salir de la pantalla el enrutador ya dibujó otra encima: vaciar no revienta (antes lanzaba un error sin atrapar en cada salida)', () => {
+  const oyentes = {};
+  const ventana = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  globalThis.window = { addEventListener: (evento, fn) => { oyentes[evento] = fn; } };
+  try {
+    const c = contenedorFalso();
+    pintarContratoImpreso(c, entrada(), { almacen: almacenEspia(), tarjetasDelTraspaso: DEL_TRASPASO });
+    // el enrutador dibuja otra pantalla en el mismo contenedor: de la hoja ya no queda ninguna pieza
+    c.querySelector = () => null;
+    c.querySelectorAll = () => [];
+    assert.doesNotThrow(() => oyentes.hashchange());
+  } finally {
+    if (ventana) Object.defineProperty(globalThis, 'window', ventana); else delete globalThis.window;
+  }
+});
+
 test('el título del documento mientras se imprime lleva solo el número del contrato, nunca la tarjeta', () => {
   const guardados = { document: Object.getOwnPropertyDescriptor(globalThis, 'document'), window: Object.getOwnPropertyDescriptor(globalThis, 'window') };
   const oyentes = {};
