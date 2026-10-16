@@ -9,7 +9,7 @@ process.env.TZ = 'America/Guatemala';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  sumarDias, diasEntre, devolucionPrevista, diasAtraso, hoyISO, textoFecha, esFechaISO,
+  sumarDias, sumarMeses, diasEntre, devolucionPrevista, diasAtraso, hoyISO, textoFecha, esFechaISO,
 } from '../js/nucleo/fechas.js';
 
 test('suma días cruzando fin de mes y fin de año', () => {
@@ -116,4 +116,37 @@ test('esFechaISO: lo vacío o lo que no es texto no es una fecha', () => {
   assert.equal(esFechaISO(undefined), false);
   assert.equal(esFechaISO(null), false);
   assert.equal(esFechaISO(20261021), false);
+});
+
+// Mantenimiento (§12b): el intervalo de TIEMPO de un servicio se cuenta en meses de calendario («cada 3 meses»), no en
+// días: tres meses desde el 3 de julio son el 3 de octubre, y no «90 días» que caerían el 1 de octubre. Un mes no tiene
+// siempre el día que la fecha trae (el 31 no existe en febrero): ese día se queda en el último del mes, y no se pasa al
+// mes siguiente — «seis meses desde el 31 de agosto» es el 28 de febrero, no el 3 de marzo.
+test('sumarMeses: meses de calendario, con el mismo día del mes', () => {
+  assert.equal(sumarMeses('2026-07-03', 3), '2026-10-03');
+  assert.equal(sumarMeses('2026-10-16', 12), '2027-10-16');
+  assert.equal(sumarMeses('2026-10-16', 48), '2030-10-16');
+  assert.equal(sumarMeses('2026-11-15', 3), '2027-02-15', 'cruza el fin de año');
+  assert.equal(sumarMeses('2026-12-31', 1), '2027-01-31');
+});
+
+test('sumarMeses: si el mes de llegada no tiene ese día, cae en el último del mes (no en el mes siguiente)', () => {
+  assert.equal(sumarMeses('2026-08-31', 6), '2027-02-28');
+  assert.equal(sumarMeses('2026-01-31', 1), '2026-02-28');
+  assert.equal(sumarMeses('2027-12-31', 2), '2028-02-29', 'año bisiesto');
+  assert.equal(sumarMeses('2028-02-29', 12), '2029-02-28', 'un 29 de febrero un año después');
+  assert.equal(sumarMeses('2026-05-31', 1), '2026-06-30');
+});
+
+test('sumarMeses: cero y negativos funcionan; lo que no es un número entero de meses o una fecha da vacío', () => {
+  assert.equal(sumarMeses('2026-10-16', 0), '2026-10-16');
+  assert.equal(sumarMeses('2026-10-16', -3), '2026-07-16');
+  assert.equal(sumarMeses('2026-03-31', -1), '2026-02-28');
+  assert.equal(sumarMeses('2026-10-16', 2.5), '', 'medio mes no es una fecha');
+  assert.equal(sumarMeses('2026-10-16', 'tres'), '');
+  assert.equal(sumarMeses('2026-10-16', undefined), '');
+  assert.equal(sumarMeses('', 3), '');
+  assert.equal(sumarMeses('20261-10-16', 3), '', 'el año con cinco dígitos no es una fecha');
+  assert.equal(sumarMeses('2026-02-30', 3), '', 'un 30 de febrero tampoco');
+  assert.equal(sumarMeses('2026-10-16', 100000), '', 'tan lejos que se sale del calendario');
 });

@@ -44,6 +44,29 @@ export function sumarDias(iso, dias) {
   return aISO(ms);
 }
 
+/**
+ * Una fecha más (o menos) MESES de calendario: el intervalo de tiempo de un servicio de mantenimiento («cada 3 meses»)
+ * se cuenta así y no en días, porque «3 meses» desde el 3 de julio es el 3 de octubre y no los 90 días que caerían el 1.
+ *
+ * Si el mes de llegada no tiene ese día (el 31 no existe en febrero) la fecha se queda en el ÚLTIMO día de ese mes, no
+ * pasa al siguiente: seis meses desde el 31 de agosto son el 28 de febrero, no el 3 de marzo — un servicio no se atrasa
+ * días por cómo cae el calendario. Vacío si la fecha no se entiende, si los meses no son un entero, o si el resultado
+ * se sale del año de cuatro dígitos: nunca una fecha inventada.
+ */
+export function sumarMeses(iso, meses) {
+  if (!esFechaISO(iso)) return '';
+  const n = Number(meses);
+  if (typeof meses === 'boolean' || meses === null || meses === '' || !Number.isInteger(n)) return '';
+  const [anio, mes, dia] = iso.split('-').map(Number);
+  const total = (mes - 1) + n;
+  const anioDestino = anio + Math.floor(total / 12);
+  const mesDestino = ((total % 12) + 12) % 12;
+  // El día 0 del mes siguiente es el último de este: cuántos días tiene el mes de llegada.
+  const ultimoDia = new Date(Date.UTC(anioDestino, mesDestino + 1, 0)).getUTCDate();
+  const resultado = `${String(anioDestino).padStart(4, '0')}-${String(mesDestino + 1).padStart(2, '0')}-${String(Math.min(dia, ultimoDia)).padStart(2, '0')}`;
+  return esFechaISO(resultado) ? resultado : '';
+}
+
 /** Días completos entre dos fechas. Negativo si la segunda es anterior. */
 export function diasEntre(desde, hasta) {
   const a = aUTC(desde);
