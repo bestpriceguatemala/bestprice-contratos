@@ -1718,6 +1718,7 @@ test('ADR-001 en el código de «Sacar carro»: las cajas del CBC se leen en UN 
   const iGuarda = codigo.indexOf('await guardarContrato(contrato');
   const iVa = codigo.lastIndexOf('irDespuesDeGuardar({');
   assert.ok(iLee > 0 && iLee < iGuarda && iGuarda < iVa, 'se lee, se guarda, se va');
+  assert.ok(codigo.includes('sigueAqui: sigoVigente()'), 'solo se lleva a imprimir si la pantalla sigue a la vista');
   assert.equal(/localStorage|sessionStorage|indexedDB|console\.|history\./.test(codigo), false, 'esta pantalla no escribe en ningún almacén ni en la consola');
   assert.equal((codigo.match(/location\.hash\s*=/g) ?? []).length, 1, 'una sola salida de la pantalla al guardar: la de irDespuesDeGuardar');
 });

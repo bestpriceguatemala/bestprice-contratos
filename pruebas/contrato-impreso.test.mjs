@@ -1966,6 +1966,7 @@ test('con lo que llegó de «Sacar carro» las cajas vienen llenas y la hoja ya 
   for (const dato of [NUMERO_COMPLETO, CBC, NUMERO_2, CBC_2]) assert.ok(c.vista().includes(dato), `la hoja lleva ${dato}`);
   assert.ok(!c.vista().includes('•••• 3343'), 'ya no sale enmascarada');
   assert.ok(!/el papel llevará el número enmascarado/.test(c.notas()), 'ni se dice que va enmascarada');
+  assert.ok(c.innerHTML.includes('<div data-pieza="traspaso"></div>'), 'el lugar del aviso está en la pantalla (en un navegador de verdad, sin él no hay dónde escribirlo)');
   const pieza = c.nodo('[data-pieza="traspaso"]').innerHTML;
   assert.match(pieza, /Tarjeta 1: el número y el CBC ya están puestos, vienen de «Sacar carro»/);
   assert.match(pieza, /Tarjeta 2: el número y el CBC ya están puestos/);

@@ -131,6 +131,10 @@ test('NO SE QUEDA mientras el mostrador almuerza: pasado un minuto no hay nada, 
   assert.deepEqual(tomarTraspaso('c1'), [], 'una computadora dormida deja el temporizador pendiente: la hora se comprueba al tomar');
 });
 
+test('vive lo menos posible: no más de un minuto (el salto real dura milisegundos)', () => {
+  assert.ok(VIDA_DEL_TRASPASO_MS > 0 && VIDA_DEL_TRASPASO_MS <= 60 * 1000, `son ${VIDA_DEL_TRASPASO_MS} ms`);
+});
+
 test('el temporizador borra de verdad lo que nadie tomó, y se cancela cuando ya no hace falta', () => {
   const m = entornoFalso();
   dejarTraspaso('c1', [T1], m.entorno);
