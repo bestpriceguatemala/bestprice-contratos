@@ -50,8 +50,9 @@ import { yaVolvio } from './estados.js';
 // ESTOS NÚMEROS SON PROPUESTOS, no del dueño: la especificación pide dos intervalos por servicio pero no fija cuáles, y los
 // números son suyos (su taller, sus carros). Van como valores por omisión que se pueden cambiar en cada carro (ficha →
 // «Intervalos de este carro»). Un valor por omisión equivocado le cuesta una corrección; un aviso inventado le cuesta la
-// confianza en todos los avisos — por eso, ante la duda, se eligió el intervalo que el taller de aquí recomienda para uso
-// pesado y no el más largo del manual.
+// confianza en todos los avisos — por eso, ante la duda, se eligió el intervalo que suele recomendarse para uso pesado y
+// no el más largo del manual. Ninguno salió de una medición ni de los datos del negocio: son criterio general, para que el
+// dueño los confirme con su taller.
 //
 // Se pensó en carros de renta en Guatemala: muchos conductores distintos, ciudad con trancones y pendientes, caminos con
 // baches y «túmulos», calor y lluvia de mayo a octubre; y un carro de renta que anda unos 2,000 a 3,000 km al mes (un
@@ -62,7 +63,7 @@ export const SERVICIOS = Object.freeze([
     nombre: 'Aceite y filtro',
     km: 5000,
     meses: 3,
-    porque: 'Cada 5,000 km es lo que recomiendan los talleres de aquí para uso pesado (el manual dice 7,500–10,000 con uso '
+    porque: 'Cada 5,000 km es el intervalo que suele recomendarse para uso pesado (el manual dice 7,500–10,000 con uso '
       + 'normal; un carro de renta con muchos conductores, trancones y calor es uso severo). Los 3 meses son porque el aceite '
       + 'envejece aunque el carro esté parado entre rentas.',
   }),

@@ -197,7 +197,7 @@ test('los intervalos: los seis con sus números, el de siempre y el porqué; «v
   assert.match(html, /data-tipo="frenos">[\s\S]*?data-km value="30000"[\s\S]*?data-meses value="12"/);
   assert.equal((html.match(/data-volver-intervalo="/g) || []).length, 1);
   assert.match(html, /data-volver-intervalo="aceite">Volver a los de siempre \(5,000 km o 3 meses\)/);
-  assert.match(textoVisible(html), /De siempre: 5,000 km o 3 meses\. Cada 5,000 km es lo que recomiendan los talleres/);
+  assert.match(textoVisible(html), /De siempre: 5,000 km o 3 meses\. Cada 5,000 km es el intervalo que suele recomendarse/);
   assert.match(textoVisible(htmlIntervalos({ carro: carroPropio() })), /De siempre: 40,000 km o 48 meses\./);
   assert.doesNotMatch(htmlIntervalos({ carro: carroPropio() }), /data-volver-intervalo/);
 });
