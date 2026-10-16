@@ -1,0 +1,34 @@
+{
+ "V10": {
+  "campo": "horaTardia",
+  "numero": "150.00",
+  "qX": 185.24,
+  "numeroX": 196.86,
+  "baseY": 48.04,
+  "pt": 9.79
+ },
+ "V27": {
+  "campo": "seguroTerceros",
+  "numero": "120.00",
+  "qX": 185.24,
+  "numeroX": 195.29,
+  "baseY": 121.82,
+  "pt": 10.68
+ },
+ "V28": {
+  "campo": "seguro",
+  "numero": "72.00",
+  "numeroX": 197.49,
+  "baseY": 128.1,
+  "pt": 10.68,
+  "qX": 185.24
+ },
+ "V34": {
+  "campo": "combustiblePrecio",
+  "numero": "65.00",
+  "qX": 185.24,
+  "numeroX": 199.06,
+  "baseY": 154.16,
+  "pt": 8.9
+ }
+}
