@@ -90,18 +90,24 @@ test('sacar un carro y luego otro: lo del segundo reemplaza a lo del primero, y 
   assert.equal(JSON.stringify(del2).includes('123'), false);
 });
 
-test('una renta sin tarjeta (nada que llevar) también borra lo que hubiera dejado la anterior', () => {
+test('una renta sin tarjeta (nada que llevar) no deja nada y además borra lo que hubiera dejado la anterior', () => {
   const m = entornoFalso();
-  dejarTraspaso('c1', [T1], m.entorno);
-  dejarTraspaso('c2', [{ numero: '', cbc: '' }, { numero: '  ', cbc: undefined }], m.entorno);
-  assert.deepEqual(tomarTraspaso('c1'), []);
-  assert.deepEqual(tomarTraspaso('c2'), []);
-  dejarTraspaso('c1', [T1], m.entorno);
-  dejarTraspaso('c3', [], m.entorno);
-  assert.deepEqual(tomarTraspaso('c1'), []);
-  dejarTraspaso('c1', [T1], m.entorno);
-  dejarTraspaso('c4', null, m.entorno);
-  assert.deepEqual(tomarTraspaso('c1'), []);
+  const vacias = [
+    [{ numero: '', cbc: '' }, { numero: '  ', cbc: undefined }],
+    [],
+    null,
+    undefined,
+  ];
+  for (const vacia of vacias) {
+    // lo del segundo contrato: no existe (no se guardó una tarjeta en blanco que luego alguien tomaría)
+    dejarTraspaso('c1', [T1], m.entorno);
+    dejarTraspaso('c2', vacia, m.entorno);
+    assert.deepEqual(tomarTraspaso('c2'), [], `nada para el segundo (${JSON.stringify(vacia)})`);
+    // y lo del primero ya no está: lo borró el segundo aunque no llevara nada
+    dejarTraspaso('c1', [T1], m.entorno);
+    dejarTraspaso('c2', vacia, m.entorno);
+    assert.deepEqual(tomarTraspaso('c1'), [], `lo del primero se borró (${JSON.stringify(vacia)})`);
+  }
 });
 
 test('sin id de contrato no se deja nada, y quien pide sin id no recibe nada', () => {

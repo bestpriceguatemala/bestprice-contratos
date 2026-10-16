@@ -1939,6 +1939,8 @@ test('tarjetasDelTraspasoParaElPapel: se pone lo que es de ESTA tarjeta (misma p
   assert.deepEqual(tarjetasDelTraspasoParaElPapel(TARJETAS, DEL_TRASPASO), {
     puestas: [{ i: 0, numero: NUMERO_COMPLETO, cbc: CBC }, { i: 1, numero: NUMERO_2, cbc: CBC_2 }], descartadas: [],
   });
+  // un número que solo difiere en el cuarto dígito desde el final (…9343 contra …3343) no es la misma tarjeta
+  assert.deepEqual(tarjetasDelTraspasoParaElPapel(TARJETAS, [{ numero: '4000 0000 0000 9343', cbc: '1' }]).descartadas, [0]);
   // la tarjeta 1 llegó con el número de OTRA tarjeta: no se pone, y la 2 sí
   assert.deepEqual(tarjetasDelTraspasoParaElPapel(TARJETAS, [{ numero: '4000 0000 0000 9999', cbc: '111' }, DEL_TRASPASO[1]]), {
     puestas: [{ i: 1, numero: NUMERO_2, cbc: CBC_2 }], descartadas: [0],
