@@ -265,8 +265,9 @@ vencidos, saldo pendiente y devoluciones tardías anteriores.
 ### Carros
 
 Ficha con sus datos, propiedad y dueño, historial de rentas con kilometrajes y
-días trabajados. **Los montos cobrados y la utilidad de cada carro solo se ven
-con la contraseña.**
+días trabajados, y el **mantenimiento** de los carros de la flota propia (§12b): cuándo se hizo
+cada servicio, a qué kilometraje y cuánto falta para el siguiente. **Los montos cobrados y la
+utilidad de cada carro solo se ven con la contraseña.**
 
 ### Historial de contratos
 
@@ -313,7 +314,10 @@ Colecciones en Firestore:
 - `clientes` — datos personales, documentos y sus vencimientos, direcciones,
   teléfonos, correo, a quién se factura.
 - `vehiculos` — flota propia: código, placas, tipo, marca y línea, color,
-  modelo, propiedad, dueño, estado y motivo si está fuera de servicio.
+  modelo, propiedad, dueño, estado y motivo si está fuera de servicio, y su
+  mantenimiento: los servicios hechos y los intervalos que cambió el dueño en ese
+  carro (`servicios[]` e `intervalos{}`, §7b; viven DENTRO del documento del carro y
+  no en una colección aparte, §12b).
 - `contratos` — el contrato completo: cliente, carro (o los datos del carro
   ajeno), fechas, días, precios, seguros, extras, tarjetas enmascaradas,
   empleado, conductor, observaciones, estado, cierre y pagos.
@@ -674,7 +678,41 @@ tipo), y el sistema descuenta capacidad del tipo en ambos casos.
 
 **Del carro:**
 `codigo`, `placas`, `tipo`, `marca`, `linea`, `color`, `modelo`, `propiedad`,
-`dueno`, `fueraDeServicio`, `motivoFueraDeServicio`.
+`dueno`, `fueraDeServicio`, `motivoFueraDeServicio`, y los dos del mantenimiento
+(agregados el 16 de octubre de 2026): `servicios[]` e `intervalos{}`.
+
+- `servicios[]` son los servicios que se le han hecho al carro, cada uno
+  `{ id, tipo, fecha, km }` (y, si se anuló, `anulado` y `anuladoEn`). `tipo` es una de
+  seis llaves SIN acento y en este orden: `aceite` (aceite y filtro), `frenos` (pastillas
+  de freno), `llantas`, `bateria` (batería), `alineacion` (alineación y balanceo) y
+  `general` (servicio general). `fecha` es el día en que se hizo (ISO) y **es obligatoria**:
+  un servicio que no se puede fechar no cuenta para nada, ni resetea un plazo ni calla un
+  aviso. `km` es el kilometraje del odómetro CUANDO se hizo el servicio: un entero mayor
+  que cero, o `null` si no se sabe (nunca `0`: un cero guardado se leería como «anotado»).
+  **El kilometraje de un servicio se guarda con el servicio** porque él puede hacer el cambio
+  de aceite tres semanas después de que el carro volvió: el odómetro de hoy no es el último
+  `kmEntrada`. Eso no contradice §12b —lo que ella prohíbe es llevar un kilometraje aparte por
+  carro—; es anotar a qué kilometraje se hizo UN servicio. `id` se decide una vez por intención
+  (`altaConIdFijo(nuevoIdServicio)`, `js/datos.js`) para que un reintento tras un tiempo vencido
+  no lo agregue dos veces. `anulado` y `anuladoEn` se llaman **igual que en un pago** (§7b, «De
+  un pago»), a propósito: se anula y no se borra, porque un servicio mal tecleado (el
+  kilometraje con un cero de más) corrompería el plazo para siempre, y anulado deja de contar y
+  se ve en el historial. Uno que ya estaba anulado no vuelve a cambiar su fecha.
+- `intervalos{}` son los intervalos que el dueño cambió **en este carro**, `{ aceite: { km, meses } }`
+  con solo las llaves de los servicios que cambió. Un servicio que no está aquí rige por los
+  intervalos de siempre (`SERVICIOS`, `js/nucleo/mantenimiento.js`): así, el día que se cambie un
+  valor por omisión llega a los carros que nunca lo tocaron, y escribir justo los de siempre no
+  guarda nada. Un intervalo a medias, en cero o ilegible no rige: se usa el de siempre, nunca un hueco.
+- **El kilometraje de un carro NO es un campo.** Sale de sus contratos y se calcula en un solo
+  lugar, `kilometrajeDelCarro` (`js/nucleo/mantenimiento.js`): el mayor `cierre.kmEntrada` de los
+  que ya regresaron y el `kmSalida` de los demás (con su puente de lectura `kilometrajeSalida`,
+  abajo). **Sin contratos —o con contratos que nunca anotaron kilometraje— es «no se sabe», `null`,
+  y no cero**: un servicio calculado sobre un cero inventado avisa mal el primer día. Un
+  kilometraje guardado en `0` en un contrato es «no se anotó» (así lo trata `problemasDelCierre`).
+  Un carro ajeno no lleva mantenimiento (`Boolean(c.ajeno)` sigue siendo el único criterio).
+- Se escriben **dentro de una transacción que lee el carro** (`cambiarEnNubeYLocal`, `js/datos.js`),
+  nunca reescribiendo la copia que la pantalla tenía en memoria: un arreglo dentro de un documento se
+  pisa si dos pestañas lo guardan a ciegas, y un servicio perdido deja un aviso que no sale.
 
 **Del dueño de un carro ajeno** (colección `duenos`; agregado el 5 de octubre):
 `nombre`, `telefono`, `nit`, `nota`, `actualizado`.
@@ -864,8 +902,11 @@ en `js/respaldo/diseno.js`). Lo que no es obvio:
   estar enlazada.
 - `pantallas/contratos.js:formaDePago()` — lee `forma` o `formaPago`, por los pagos de la salida que
   salieron guardados con el segundo nombre.
-- `pantallas/recibirCarro.js:conKmSalidaNormalizado()` — el puente real entre `kmSalida` y
-  `kilometrajeSalida`, por los contratos antiguos que lo salvaron con el nombre viejo.
+- `nucleo/contrato.js:conKmSalidaNormalizado()` (la pantalla de Recibir carro lo vuelve a exportar) — el
+  puente real entre `kmSalida` y `kilometrajeSalida`, por los contratos antiguos que lo salvaron con el
+  nombre viejo. Bajó de `pantallas/recibirCarro.js` al núcleo el 16 de octubre de 2026 porque el
+  mantenimiento lo necesita para saber en cuántos kilómetros anda un carro, y un núcleo no importa de una
+  pantalla; una sola copia.
   `pantallas/contratos.js:dibujarDetalleEntrada()` llama a esta misma función antes de pintar el
   detalle de un contrato, para que un contrato viejo también muestre su kilometraje ahí — corregido en
   la revisión final de este plan, que encontró esta nota apuntando al lugar equivocado (decía que el
@@ -1319,7 +1360,10 @@ alternativas están en `docs/adr/ADR-004-el-respaldo-parcha-su-excel-sin-libreri
   que su hoja no tiene dónde guardar **no se mete en la columna que más se le
   parece**: queda vacío, o se escribe en COMENTARIOS con el monto y la razón, o se
   lista en pantalla como «lo que este archivo NO lleva» (reservaciones, comisiones,
-  pagos a dueños uno por uno, fichas de dueños, si un carro está fuera de servicio).
+  pagos a dueños uno por uno, fichas de dueños, si un carro está fuera de servicio). **Tampoco lleva
+  el mantenimiento** (los servicios de cada carro, `servicios[]`, ni sus intervalos): su hoja
+  VEHICULOS no tiene dónde guardarlos. Esa lista sale de `js/respaldo/mapa.js`, que no se tocó al
+  construir el mantenimiento (era de otro trabajo): falta agregarle una línea.
 - **Los totales son los de su hoja, no los del sistema.** El respaldo no escribe
   ningún total: SUBTOTAL, TOTAL COBRADO y UTILIDAD son sus fórmulas, que siguen en el
   archivo y se calculan al abrirlo. Sus fórmulas suman todo lo que el sistema cobra
@@ -1454,6 +1498,51 @@ carro. En la ficha se ve cuándo se hizo cada servicio, a qué kilometraje, y
 cuánto falta para el siguiente. Cuando falte poco, aparece donde ya aparecen los
 demás avisos.
 
+**Cómo se construyó** (16 de octubre de 2026). La regla vive una sola vez, en
+`js/nucleo/mantenimiento.js`; la ficha del carro (`#/carros/:carroId`, bloque «Mantenimiento»
+debajo del formulario, `js/pantallas/mantenimiento.js`) y el aviso de «Sacar carro» solo dibujan lo que
+ella contesta. No hay ruta ni entrada de menú nuevas, ni colección ni regla de Firestore nuevas: los
+servicios viven dentro del documento del carro (`servicios[]` e `intervalos{}`, §7b).
+
+- **Qué pregunta y cómo contesta.** *¿En cuántos kilómetros anda el carro?* El mayor kilometraje de sus
+  contratos (`kilometrajeDelCarro`), y **si ninguno lo trae es «no se sabe», nunca cero**. *¿Toca?* Cada
+  servicio mide los kilómetros (kilometraje del último servicio + su intervalo − el kilometraje del
+  carro) y el tiempo (fecha del último servicio + sus meses de calendario − hoy); toca con el que llegue
+  primero. Un lado que no se sabe no es «ok»: sin kilometraje, el tiempo sigue funcionando solo y el
+  renglón dice «Al día por fecha», no «Al día». Un servicio sin fecha válida, de fecha futura o anulado no
+  cuenta. Una lectura que falló (la flota, los contratos) nunca se dibuja como «al día»: lo que estaba bien
+  queda en «No se pudo confirmar» y la barra roja de siempre lo dice; lo malo se dice igual.
+- **Los intervalos de siempre son una PROPUESTA, no del dueño.** La especificación no los fija. Pensados
+  para carros de renta en Guatemala (muchos conductores, trancones, baches, calor y lluvia; unos 2,000 a
+  3,000 km al mes por carro, que no se midió), cada servicio lleva escrito su porqué en
+  `js/nucleo/mantenimiento.js` y en la ficha:
+
+  | Servicio | Km | Meses |
+  |---|---|---|
+  | Aceite y filtro | 5,000 | 3 |
+  | Pastillas de freno | 30,000 | 12 |
+  | Llantas | 40,000 | 48 |
+  | Batería | 60,000 | 36 |
+  | Alineación y balanceo | 10,000 | 6 |
+  | Servicio general | 20,000 | 12 |
+
+  Se pueden cambiar por carro en la ficha («Intervalos de este carro») y volver a los de siempre.
+- **Cuándo avisa.** A **500 km o 15 días** de que toque (`ANTELACION`): un carro de renta anda unos 80 km al
+  día, así que 500 km son más o menos una semana para meterlo al taller entre una renta y otra. Es
+  una propuesta también.
+- **Dónde aparece el aviso.** Donde ya aparecen los demás: la lista de avisos de «Sacar carro»
+  (`avisosDeSalida`, `js/nucleo/avisos.js`), **nivel medio** —advertencia y no candado: él decide si
+  renta el carro igual—. Avisa solo de lo que SABE: un carro sin servicios anotados no dice nada, y sin
+  kilometraje solo se mide el tiempo. Como «Sacar carro» solo lee los contratos abiertos (el kilometraje
+  de un carro con las rentas cerradas no está ahí), el kilometraje de AHORA es el que el mostrador escribe
+  como kilometraje de salida —el odómetro de ese momento—; vacío (0) es «no se anotó». Un carro ajeno no
+  lleva mantenimiento.
+- **Lo que NO tiene, a propósito.** Costo de cada servicio (no está en la especificación; si lo quiere,
+  va detrás de la contraseña de dinero, §11, como toda cifra de negocio) y notas libres. Un servicio mal
+  registrado se anula, no se borra.
+- **Pendientes para su revisión en pantalla.** Los seis intervalos, cuánta antelación quiere, y si quiere
+  el costo de cada servicio.
+
 ### El porcentaje de comisión no se toca en el mostrador
 
 Al probar el sistema publicado (24-sep-2026) el dueño lo dijo claro: hay cosas
@@ -1482,7 +1571,7 @@ no hay empleados) no puede guardar la salida, y cada razón se dice con sus pala
 3. Reservaciones y calendario.
 4. Impresión sobre el formulario preimpreso.
 5. Dinero: comisiones, pagos a dueños, empleados.
-6. Mantenimiento.
+6. Mantenimiento (hecho el 16 de octubre de 2026; ver «Cómo se construyó» arriba).
 7. Respaldo en su propio Excel.
 
 El cierre va antes que las reservaciones por una razón práctica: hoy el sistema
