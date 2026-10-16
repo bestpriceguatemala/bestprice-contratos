@@ -1098,7 +1098,7 @@ detalle del cobro, como la hoja IMP. CIERRE DE CONTRATO.
 En una reimpresión, el número de tarjeta sale enmascarado (`•••• 3343`), porque
 el completo nunca se guardó.
 
-### 8b. El contrato sobre el papel, tal como se construyó (14 de octubre de 2026)
+### 8b. El contrato sobre el papel, tal como se construyó (14 y 15 de octubre de 2026)
 
 Dónde vive: `js/nucleo/hojaContrato.js` (la tabla `CAMPOS` y la calibración, sin DOM),
 `js/pantallas/contratoImpreso.js` (la hoja, la hoja de prueba y las dos pantallas) y
@@ -1183,6 +1183,50 @@ en el código.
     papelería, por eso ni Excel ni el sistema lo imprimen y por eso el sistema le deja
     teclearlo a él al sacar el carro. No hay un campo `numero` en la tabla a propósito.
 
+**Lo que dijo el 15 de octubre de 2026, con la foto de su hoja membretada en blanco.** (El
+coordinador la describió; el orden de las casillas de la columna derecha del papel, de arriba
+abajo, es exactamente el orden de los campos medidos en el PDF de Excel: una comprobación
+independiente de la medición. El bloque de la tarjeta no existe en el papel, hay un área en blanco
+justo donde la tabla lo coloca; y el número de contrato viene preimpreso en rojo arriba a la
+derecha.)
+
+12. **«PREPARADO POR (CODIGO)»: el papel pide el código del empleado, no su nombre.** La casilla
+    (`T58:U59`, 16 mm) dice la palabra CÓDIGO impresa. El campo `empleadoCodigo` reemplazó a
+    `rentadoPor`: imprime lo que el contrato **selló** ese día en `empleadoCodigo`. Con la llave
+    ausente, `null` o `''` (un contrato viejo, o un empleado sin código escrito) la casilla sale en
+    **blanco** y él la escribe a mano, como el resto del papel. Nunca el nombre y nunca un código
+    buscado en la lista de empleados de hoy: el papel de aquel día llevaba el código de aquel día.
+    Al lado hay otra casilla, «COMPUTADO POR (CODIGO)», que ni Excel ni el sistema llenan; se deja así.
+13. **«LDW Q.» y «PAI Q.» traen la Q impresa en el papel.** Su «el papel no la trae» (punto 8) vale
+    para el resto de los montos. Esas dos casillas dicen la Q con punto, así que `seguro` y
+    `seguroPai` salen **sin** la Q, para que no se lea «Q. Q150.00». No es un `if` en el dibujo: es la
+    marca `sinQ` en la tabla `CAMPOS`, con su razón y su fecha, porque es un dato del papel y no una
+    preferencia del código. `deducibleCopia` (el deducible de abajo) también lleva `sinQ`, por otra
+    razón: el formato de su celda en Excel es «0.00», sin Q; esa parte del papel no se vio en la foto.
+14. **Carta u Oficio, por impresora.** `PAPELES` tiene `carta` (215.9 × 279.4 mm) y `oficio`
+    (8.5 × 13 pulgadas = 215.9 × 330.2 mm: **no** es Legal, que mide 14 pulgadas). Se escoge en la
+    pantalla de calibrar y se guarda con el resto del ajuste de esa impresora (`papel`). El ancho es
+    el mismo, así que la escala horizontal no cambia y la tabla de campos no se toca. Mientras él no
+    conteste cuál usa, la hoja nace en Carta: `PAPEL_POR_OMISION` es **una línea**.
+15. **Formato contable de seis casillas.** En Excel, las celdas de hora tardía, seguro de terceros,
+    LDW, combustible por galón, seguro de menores y varios (precio) tienen el formato
+    `_("Q"* #,##0.00_)`: la Q pegada al borde izquierdo y el número al derecho, con un hueco en
+    medio. Se midió en el PDF de Excel (la Q a unos 2.5 mm del borde izquierdo; el número termina a
+    unos 2.2 mm del derecho) y la hoja las dibuja así (`contable: true` en la tabla). **Duda abierta
+    en LDW:** Excel imprime su propia Q en el borde izquierdo de una casilla cuyo papel ya trae
+    «LDW Q.»: o la de Excel se encima justo sobre la impresa, o su papel de hoy sale con dos Q sin
+    que nadie lo note. No se sabe sin el papel enfrente. El sistema imprime solo el número, donde
+    Excel pone el suyo.
+
+**Lo que el papel permitiría y hoy no se hace (no es para ahora; decisión suya).** El papel tiene
+toda una columna de liquidación (DAÑOS, COMBUSTIBLE, VARIOS, DEDUCIBLE, TOTAL CARGOS, MENOS
+DEPOSITO, IMPORTE A PAGAR, TOTAL DUE, FIRMA DE LIQUIDACION) que su Excel **no imprime** y de la que
+el sistema ya tiene todos los datos al cerrar el contrato: una segunda impresión sobre el mismo
+papel al recibir el carro es una opción real. También hay casillas que el sistema podría llenar y no
+llena: RESERVACION No., CARRO DEVUELTO EN con su fecha y hora de entrada, MANEJADOS (los kilómetros
+recorridos, que el sistema sabe restando) y DIAS A / SEMANAS A. En TARJETA DE CIRCULACION el papel trae
+preimpresos «ORIGINAL Q 1,000.00» y «AUTENTICA Q 150.00»; el sistema no tiene ese dato y ahí no imprime.
+
 **Lo que hay que mirar con el papel enfrente el día de la calibración.** Ese día él tiene la
 hoja de prueba en una mano y su formulario en la otra, y puede contestar todo mirando:
 la calibración misma (la escala 0.77 es una hipótesis hasta entonces); si el papel tiene una
@@ -1191,6 +1235,10 @@ texto completo sale en la primera casilla y la segunda queda en blanco); si hay 
 el papel para las dos celdas blancas de Excel que no se agregaron (E27, la ciudad adicional,
 e I27, un `0` fijo); y la nacionalidad, que el papel pide y la ficha del cliente dejó de
 pedir el 3 de octubre.
+Desde el 15 de octubre se suman: si el papel es Carta u Oficio (y se deja su opción en la pantalla
+de calibrar); si en LDW se lee una sola Q o dos (punto 15); si «PREPARADO POR (CODIGO)» cae en su
+casilla de 16 mm y «COMPUTADO POR (CODIGO)», al lado, queda libre; y la parte de abajo del papel
+(el deducible y el seguro «segunda vez»), que no se vio en la foto.
 
 ## 9. Velocidad
 
