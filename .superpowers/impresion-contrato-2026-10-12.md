@@ -26,8 +26,13 @@ que falla sin el cambio y verificado imprimiendo a PDF en Chrome. **Falta contes
 | `68d4072` | la hoja puede armarse en Carta o en Oficio; se escoge al calibrar y se guarda por impresora; la carta es el papel por omisión (una línea) |
 | `1b4b8b0`, `f382041` | formato contable: dónde pone Excel la Q y el número (medido en su PDF) y la hoja los dibuja igual |
 | `6ef0d13` | §8b del diseño: lo del 15 de octubre y lo que el papel permitiría después |
+| `a0d7a5e` | 16 de octubre: el módulo del traspaso (memoria, atado al contrato, una vez, al minuto) y sus pruebas |
+| `8426704` | «Sacar carro» lee el número y el CBC al guardar y lleva a imprimir ese contrato |
+| `c7986ed`, `4b40708` | «Imprimir contrato» recibe el traspaso y lo pone en las cajas (y arregla el error de salir de la pantalla) |
+| las pruebas que le siguieron | tres huecos que las mutaciones encontraron |
+| `d17f96c` | ADR-001 (aclaración) y §8b del diseño, punto 16 |
 
-**Pruebas:** el árbol completo está verde, **2048 pruebas, 0 fallan** (el basal que se me dio era 1475; subió porque los otros agentes también agregaron). Las mías son
+**Pruebas:** (al 16 de octubre, tarde: el árbol completo, con lo de los demás agentes, **2149, 0 fallan**; las mías son 217: 76 + 116 + 17 + 8 nuevas en `sacarCarro.test.mjs`, ver «El traspaso».) Lo de antes del traspaso, el árbol completo estaba verde con **2048 pruebas, 0 fallan** (el basal que se me dio era 1475; subió porque los otros agentes también agregaron). Las mías son
 **181**: `pruebas/hoja-contrato.test.mjs` (76) y `pruebas/contrato-impreso.test.mjs` (105). Se mutaron `hojaContrato.js` (≈70 mutaciones), `contratoImpreso.js`
 (≈115) y el CSS (13): sobreviven solo 5, todas equivalentes (un `>=` contra `>` sobre un flotante exacto, una copia defensiva de un objeto que ya sale nuevo de `JSON.parse`,
 un `>= 0` cuando `monto(0)` ya devuelve vacío, un título que se calcula antes de teclear, y un `null` contra `''` que `filter(Boolean)` borra).
@@ -91,7 +96,42 @@ tocó el proyecto real. Chrome headless propio, `Emulation.setEmulatedMedia('pri
 El número completo y el CBC **solo existen en dos cajas de la pantalla de imprimir**. Viajan como el argumento `tarjetasEfimeras` de `armarContratoImpreso`, que **no los copia al contrato ni a ningún objeto que se parezca a uno** (las pruebas congelan el contrato,
 el cliente y el carro y arman la hoja: no lanza y no cambia), hasta el HTML de la hoja. Se borran al terminar el diálogo de imprimir (`afterprint`, imprima o cancele) y al salir de la pantalla; la hoja se vuelve a dibujar enmascarada (`•••• 3343`). Ningún
 módulo de `datos.js` se llama desde el flujo de imprimir. La pantalla dice en voz alta que **no se guarde esa hoja como PDF**, y el título del documento solo lleva «Contrato 77». Lo mismo se hizo con a quién se factura.
-**Lo que NO hice:** `sacarCarro.js` es de otro agente y sigue sin leer el CBC (lo teclea y lo descarta); por eso al imprimir se vuelve a teclear. Pasarlo desde «Sacar carro» pide una variable en memoria con el contrato y las dos cajas, y un cambio en ese archivo.
+**Esto cambió el 16 de octubre de 2026** (el dueño aprobó que no se teclee dos veces): «Sacar carro» ya SÍ lee el número y el CBC, solo al guardar, y los lleva en memoria a esta pantalla. Está contado abajo, en «El traspaso desde “Sacar carro”».
+
+## El traspaso desde «Sacar carro» (16 de octubre de 2026)
+
+**Qué hace.** Al guardar la salida con número o CBC tecleados, «Sacar carro» va directo a `#/imprimir/<ese contrato>` y la pantalla de imprimir ya trae las dos tarjetas puestas en las mismas cajas de siempre. Sin ellos (renta en efectivo) todo sigue igual y se va a la flota.
+**Lo que se movió fue `sacarCarro.js`** (era de otro agente, que ya terminó; lo leí por pedazos y no entero: las partes de tarjetas, de guardar y de leer el formulario, completas; el resto solo lo recorrí). Su comentario de cabecera y el de `leerTarjetas` ya no dicen «el CBC no se lee en ningún lado»: dicen lo nuevo.
+
+**Dónde vive el dato: una variable de memoria** en `js/pantallas/traspasoDeTarjetas.js` (nada más: ni almacén, ni red, ni consola, ni `import`; una prueba lee el código y lo exige). **Por qué cuatro defensas** (la razón está escrita en el código):
+1. **Atado al id del contrato.** La hoja de otro contrato no lo ve. Es el peor caso (la tarjeta de un cliente en el papel de otro) y la primera defensa: no depende de que alguien se acuerde de borrar.
+2. **Una sola vez.** Entrar a CUALQUIER pantalla de imprimir lo recoge y lo borra del módulo, sea de quien sea.
+3. **Al cambiar de pantalla** a cualquier lado que no sea imprimir ese contrato (`hashchange`). Si la ruta de imprimir no llegó a dibujarse, no queda esperando.
+4. **Un minuto.** El salto dura milisegundos; no puede quedarse mientras el mostrador almuerza. Se comprueba la hora al tomar (una computadora dormida deja el temporizador pendiente) y además un temporizador lo borra de verdad. El reloj no es una regla del negocio: es un seguro de memoria, y se inyecta para probar.
+Además: guardar otra renta SIEMPRE reemplaza (una renta sin tarjeta también borra lo anterior), y la pantalla de imprimir **solo pone** una tarjeta si el número termina en los últimos 4 dígitos que el contrato guardó; si no, no la pone y lo dice en rojo, sin repetir el número.
+
+**Una decisión mía que hay que mirar:** para que el salto sea de verdad un salto, «Guardar» va a imprimir ESE contrato cuando hay número o CBC; antes iba siempre a la flota (`location.hash = '#/flota'`). Si no hay tarjeta que llevar, sigue yendo a la flota. Si el dueño prefiere ir SIEMPRE a imprimir, es `destinoDespuesDeGuardar` en `sacarCarro.js` (una línea); si prefiere ir SIEMPRE a la flota, el traspaso deja de servir (cualquier pantalla en medio lo borra: es la defensa 3), así que sería otro diseño.
+Un contrato guardado cuya pantalla ya no está a la vista (se fue a otra parte mientras guardaba) no lleva a nadie a imprimir y no deja nada.
+
+**Qué cubren las pruebas** (36 nuevas: 17 en `pruebas/traspaso-de-tarjetas.test.mjs`, 8 en `sacarCarro.test.mjs`, 11 en `contrato-impreso.test.mjs`; y `pruebas/fixtures/espias.mjs`, los espías de ADR-001 que antes vivían dentro de una prueba):
+- la vida del dato: copia, una sola vez, otro contrato, reemplazo, renta sin tarjeta, sin id, un minuto (con y sin temporizador), cambio de pantalla (seis destinos), el salto normal, oyentes que no se acumulan, sin ventana; y **espías**: dejar, cambiar de pantalla, tomar, vencer y olvidar no tocan localStorage, sessionStorage, IndexedDB, fetch ni la consola;
+- qué se lee de las cajas (los ids correctos, la segunda tarjeta solo si se marcó), que lo que se GUARDA sigue siendo solo los últimos 4, y que la lista que se lleva es la del contrato (mismo filtro `tarjetaTieneDatos`, mismo orden: si la 1 está vacía y la 2 no, el contrato guarda una y se lleva una);
+- A DÓNDE se va al guardar, y el orden «primero se deja, después se va» con el traspaso de verdad y una navegación de mentira; **el caso feo** (un contrato con tarjeta, otro sin ella o con otra: el segundo no trae nada del primero);
+- la pantalla: cajas puestas, hoja con las dos tarjetas completas, avisos que no repiten el número, se vacía al imprimir y al salir, una tarjeta ajena no se pone, sin traspaso todo como siempre, el traspaso se recoge LO PRIMERO (antes de leer nada) y aunque el contrato no se pueda leer;
+- **de punta a punta con espías:** guardar → imprimir → afterprint: el número y el CBC no llegan a ningún lugar (lo único que se toca es la LECTURA de la calibración de la impresora).
+**Mutaciones:** 39 en una copia del árbol (el módulo, `sacarCarro.js` y `contratoImpreso.js`, más 2 sobre la salida de la pantalla); 2 sobrevivieron la primera vez y eran huecos reales (un `dejar` de «nada» que no se probaba de verdad, porque la prueba tomaba primero el otro contrato y eso ya lo borraba todo, y un cuarto dígito que no se comparaba): se escribieron las pruebas y **las 39 mueren**.
+
+**Verificado en un Chrome de verdad** (headless, sin credenciales, Firebase falso que además GUARDA lo escrito, IndexedDB v3, tarjetas de mentira; puerto 4437 comprobado libre y cerrado después, y también el 9418 del Chrome):
+- **A.** Sacar un carro tecleando DOS tarjetas con CBC, guardar: va a imprimir; las 4 cajas llegan llenas, el aviso dice que vienen de «Sacar carro», la hoja lleva los dos números y los dos CBC, la dirección y el título solo llevan el número de contrato. Al imprimir, la hoja que va a la impresora lleva todo; **el PDF de verdad (Carta) imprime las dos tarjetas completas** (rasterizado y mirado). Después de `afterprint` las cajas quedan vacías y la hoja vuelve a salir `•••• 3343` / `•••• 0452`.
+- **Rastro** antes de imprimir (sin contar las cajas, que lo llevan a propósito) y después (con el DOM): **cero** hallazgos en localStorage, sessionStorage, las seis tiendas de IndexedDB, la dirección, el título, `history.state`, `window.name`, las cookies, las escrituras del Firestore falso, los recursos cargados, la caché, las peticiones de red (63, ninguna lo lleva) y la consola. Lo que SÍ se guardó del contrato: solo los últimos 4, vencimiento, banco, autorización y monto.
+- **B.** Volver a entrar al mismo contrato, y recargar y entrar a otro: cajas vacías, hoja enmascarada, sin aviso.
+- **C. El caso feo.** Un contrato con tarjeta, sin imprimirlo se saca otro con OTRA tarjeta: la pantalla del segundo trae solo lo del segundo y nada del primero (ni en las cajas ni en la hoja); la hoja del primero, abierta después, está vacía.
+- **D.** Un contrato con tarjeta y luego uno sin ella: el segundo va a la flota y la hoja del primero está vacía.
+- **E.** Con el módulo de verdad en el Chrome de verdad: a los 2 s todavía está; ir a otra pantalla lo borra; ir a imprimir OTRO contrato lo borra; **tras 62 s reales sin tocar nada, ya no entrega nada** (el almuerzo).
+- **Un error que solo se vio en Chrome** y que arreglé con su prueba: al salir de la pantalla de imprimir, el enrutador ya dibujó otra encima antes de que llegue el aviso de cambio de dirección, y `vaciar` buscaba piezas que no existían: error sin atrapar en la consola en cada salida (venía de antes; mi línea nueva lo adelantó un paso). Ahora no hay ninguna excepción en toda la sesión.
+- Lo que quedó en la consola, nada mío: un 404 y el aviso de Chrome «Password field is not contained in a form» (la caja del CBC, de la primera entrega).
+**Solo por mirar:** el orden de los oyentes del cambio de dirección (el del enrutador, que dibuja la pantalla y la deja recoger el traspaso, y el del módulo, que lo borra si la ruta no es la de imprimir) se ve en el caso A; ninguna prueba lo ejercita con el enrutador de verdad.
+**Lo que el arnés NO prueba:** una recarga con F5 sobre un contrato recién guardado (la nube falsa del arnés se reinicia y lo pierde; se probó con uno ya sembrado) ni el diálogo de imprimir real de Chrome (se llama a `window.print` espiado y se imprime a PDF con la API de Chrome).
 
 ## La tabla de campos (71; posiciones medidas, en mm desde la esquina de arriba a la izquierda de la hoja, a tamaño de Excel; la segunda columna de posición es en la carta con el ajuste de fábrica 0.77)
 
