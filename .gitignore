@@ -1,2 +1,9 @@
 .DS_Store
 node_modules/
+
+# Rastros de las herramientas con las que se trabaja el proyecto: contadores de
+# sesion y configuracion de la maquina. No son del sistema, crecen en cada
+# sesion y el repositorio es publico.
+.claude-flow/
+.claude/proven-config.json
+.claude/.proven-config-version
