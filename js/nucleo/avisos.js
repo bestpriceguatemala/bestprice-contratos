@@ -7,6 +7,9 @@ import { diasEntre, textoFecha } from './fechas.js';
 import { resumen } from './contrato.js';
 import { textoDosDecimales } from './dinero.js';
 import { revisionDeDevoluciones, textoDeVecesTarde } from './historial.js';
+// El aviso de mantenimiento (§12b) lo contesta mantenimiento.js, que es quien sabe si a un carro le toca servicio; aquí
+// solo se pone junto a los demás. Ver el comentario donde se llama.
+import { avisosDeMantenimiento } from './mantenimiento.js';
 // seCruzan es la misma regla que antes vivía aquí duplicada como seEnciman:
 // tocarse no es cruzarse (un carro que regresa el 20 puede volver a salir el
 // 20, y eso pasa a diario), así que la comparación es estricta. Dos copias de
@@ -186,6 +189,18 @@ export function avisosDeSalida({
     });
     if (efecto && efecto.cabe !== true) avisos.push(alto(textoDeReservacionesSinCarro(efecto)));
   }
+
+  // Si a este carro le toca servicio (aceite, frenos, llantas, batería, alineación, servicio general), o le va a tocar
+  // pronto (§12b). De nivel medio: advertencia y no candado, él decide si lo renta igual. Lo contesta mantenimiento.js y
+  // solo avisa de lo que SABE: un carro sin servicios anotados no dice nada, y sin kilometraje solo se mide el tiempo.
+  //
+  // El kilometraje de AHORA es el que el mostrador escribe como kilometraje de salida: el odómetro de este momento, que
+  // es mejor dato que cualquier contrato anterior (y los contratos CERRADOS de este carro, de donde sale su kilometraje en
+  // la ficha, no los trae esta pantalla: solo lee los abiertos). Vacío es 0 (`construirContrato` guarda `q(kmSalida)`) y
+  // 0 es «no se anotó», no un odómetro en cero: mantenimiento.js lo lee así. Un número a medio escribir («1500» camino a
+  // «15000») es más chico que el final, así que puede callar un aviso por un instante pero no inventar uno.
+  // Un carro ajeno llega aquí como `null` (`entradaDeAvisos`): no lleva mantenimiento, no es de él.
+  avisos.push(...avisosDeMantenimiento({ carro, kilometraje: { km: contrato?.kmSalida }, hoy }));
 
   return [...avisos.filter((a) => a.nivel === 'alto'), ...avisos.filter((a) => a.nivel === 'medio')];
 }

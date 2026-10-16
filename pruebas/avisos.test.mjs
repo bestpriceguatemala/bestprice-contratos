@@ -9,6 +9,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { avisosDeSalida } from '../js/nucleo/avisos.js';
 import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
+import { construirContrato, entradaDeAvisos } from '../js/pantallas/sacarCarro.js';
+import { carroPropio, carroConServicios } from './fixtures/carroConServicios.mjs';
 
 const cliente = { id: 'k1', licenciaExpira: '2030-02-09', documentoExpira: '2030-02-09' };
 const carro = { id: 'v1', placas: 'P-234IFN' };
@@ -460,4 +462,75 @@ test('un carro ya habilitado, o sin esa marca, no avisa nada (carros.js guarda f
   assert.deepEqual(avisosDeSalida({ ...base, carro: { ...carroEnElTaller, fueraDeServicio: false } }), []);
   assert.deepEqual(avisosDeSalida({ ...base, carro: { ...carroEnElTaller, fueraDeServicio: false, motivoFueraDeServicio: '' } }), []);
   assert.deepEqual(avisosDeSalida({ ...base, carro: null }), [], 'un carro ajeno no tiene ficha en la flota');
+});
+
+// ---------- El mantenimiento del carro (§12b) ----------
+//
+// «Cuando falte poco, aparece donde ya aparecen los demás avisos». El carro llega a `avisosDeSalida` tal como está en la
+// flota —con sus `servicios[]`— y el kilometraje de ahora es el que el mostrador escribe como kilometraje de salida. Aquí
+// el borrador sale de `construirContrato` y el camino completo de `entradaDeAvisos` (la función que arma lo que «Sacar
+// carro» le pasa a los avisos, y que esta tarea no toca): si alguien le quita el carro o el borrador, esto falla.
+const HOY_MANT = '2026-10-16';
+const ACEITE_A_LOS_15000 = () => carroConServicios(carroPropio(), [{ tipo: 'aceite', fecha: '2026-09-16', km: 15000 }], HOY_MANT);
+const ACEITE_DE_JULIO = () => carroConServicios(carroPropio(), [{ tipo: 'aceite', fecha: '2026-07-03', km: 15000 }], HOY_MANT);
+const borradorDe = (carroDeLaFlota, kmSalida) => construirContrato({
+  id: null, numero: null, cliente: { id: 'k1', nombres: 'Juan', apellidos: 'Pérez' }, ajeno: false, carro: carroDeLaFlota, carroAjeno: null,
+  duenoId: null, fechaSalida: HOY_MANT, dias: 3, precioDia: 700, kmSalida, tarjetas: [], forma: 'efectivo', porcentajeTarjeta: 0, montoPago: 2100,
+  rentadoPor: 'Ana', porcentajeComision: 5,
+});
+const avisosDeLaSalida = (carroDeLaFlota, kmSalida, { ajeno = false } = {}) => avisosDeSalida(entradaDeAvisos({
+  borrador: borradorDe(carroDeLaFlota, kmSalida),
+  cliente: { id: 'k1', licenciaExpira: '2030-02-09', documentoExpira: '2030-02-09' },
+  carro: carroDeLaFlota,
+  ajeno,
+  carroId: carroDeLaFlota.id,
+  flota: [carroDeLaFlota],
+  hoy: HOY_MANT,
+}));
+
+test('mantenimiento: al escribir el kilometraje de salida, si al carro ya le toca servicio sale el aviso, de nivel medio', () => {
+  const r = avisosDeLaSalida(ACEITE_A_LOS_15000(), 20320);
+  assert.deepEqual(r, [{
+    nivel: 'medio',
+    mensaje: 'A este carro le toca servicio: aceite y filtro (le tocaba a los 20,000 km y el carro anda en 20,320).',
+  }]);
+});
+
+test('mantenimiento: a 500 km avisa «pronto»; a 501, no', () => {
+  assert.deepEqual(avisosDeLaSalida(ACEITE_A_LOS_15000(), 19500).map((a) => a.mensaje), [
+    'A este carro le toca servicio pronto: aceite y filtro (faltan 500 km, a los 20,000).',
+  ]);
+  assert.deepEqual(avisosDeLaSalida(ACEITE_A_LOS_15000(), 19499), []);
+});
+
+test('mantenimiento: con el kilometraje de salida sin escribir (0) no inventa nada, pero el tiempo sí avisa', () => {
+  assert.deepEqual(avisosDeLaSalida(ACEITE_A_LOS_15000(), 0), [], 'sin kilometraje y con el plazo lejos: callado, no «faltan 20,000 km»');
+  const r = avisosDeLaSalida(ACEITE_DE_JULIO(), 0);
+  assert.deepEqual(r.map((a) => a.mensaje), ['A este carro le toca servicio: aceite y filtro (le tocaba el 3 oct 2026).']);
+  assert.ok(!/km/.test(r[0].mensaje), 'no menciona kilómetros que nadie leyó');
+});
+
+test('mantenimiento: un carro sin servicios anotados no avisa de nada, por kilometraje que tenga el borrador', () => {
+  assert.deepEqual(avisosDeLaSalida(carroPropio(), 99000), []);
+});
+
+test('mantenimiento: un carro AJENO no lleva mantenimiento (llega como null por entradaDeAvisos)', () => {
+  assert.deepEqual(avisosDeLaSalida(ACEITE_DE_JULIO(), 21000, { ajeno: true }), []);
+});
+
+test('mantenimiento: va después de los avisos serios (la licencia vencida va primero)', () => {
+  const vencida = { id: 'k1', licenciaExpira: '2026-08-01', documentoExpira: '2030-02-09' };
+  const carroDeLaFlota = ACEITE_DE_JULIO();
+  const r = avisosDeSalida({
+    ...entradaDeAvisos({
+      borrador: borradorDe(carroDeLaFlota, 21000), cliente: vencida, carro: carroDeLaFlota, carroId: 'v1', flota: [carroDeLaFlota], hoy: HOY_MANT,
+    }),
+  });
+  assert.deepEqual(r.map((a) => a.nivel), ['alto', 'medio']);
+  assert.match(r[0].mensaje, /licencia/i);
+  assert.match(r[1].mensaje, /le toca servicio/);
+});
+
+test('mantenimiento: avisosDeSalida a secas, sin servicios en el carro, sigue sin decir nada (nada de lo de antes cambió)', () => {
+  assert.deepEqual(avisosDeSalida({ ...base, contrato: { ...contrato, kmSalida: 999999 } }), []);
 });
