@@ -1,7 +1,10 @@
-# Impresión del contrato sobre el papel preimpreso — informe final (14 de octubre de 2026)
+# Impresión del contrato sobre el papel preimpreso — informe final (14 de octubre de 2026; puesto al día el 16 de octubre)
 
 **Estado: construido, probado y verificado imprimiendo a PDF en un Chrome real. Falta lo único que solo el dueño puede hacer: imprimir la hoja de prueba en
 su impresora y calibrar.** Hasta entonces, la escala 0.77 es una hipótesis (muy probable: ver «Lo que se encontró»).
+**Puesto al día el 16 de octubre** con lo que él contestó el 15 (foto de su hoja en blanco): el papel pide el CÓDIGO del empleado, «LDW Q.» y «PAI Q.» traen la Q impresa,
+la hoja puede armarse en Carta u Oficio por impresora, y seis casillas de dinero llevan el formato contable de Excel (la Q a un extremo y el número al otro). Todo con prueba
+que falla sin el cambio y verificado imprimiendo a PDF en Chrome. **Falta contestar: cuál papel usa (hoy nace Carta, una línea) y la calibración con su impresora.**
 
 ## Commits (explícitos, sin `git add -A`)
 
@@ -19,11 +22,17 @@ su impresora y calibrar.** Hasta entonces, la escala 0.77 es una hipótesis (muy
 | `7a8eb08` | la primera versión de este informe |
 | `e7ef495`, `2c6d6ba` | las respuestas del 14 de octubre sobre la hora de entrada, la Q, el combustible y la autorización de la tarjeta 1 (casilla derivada), y su marca en la hoja de prueba |
 | `f48ac20`, `85eaf3a` | §8b: esas respuestas, el número de contrato preimpreso y lo que se mira el día de la calibración |
+| `27aa25a` | 15 de octubre: «PREPARADO POR (CODIGO)» imprime `empleadoCodigo` (en blanco si el contrato no lo trae, nunca el nombre) y `seguro`, `seguroPai` y `deducibleCopia` salen sin la Q (marca `sinQ` en la tabla) |
+| `68d4072` | la hoja puede armarse en Carta o en Oficio; se escoge al calibrar y se guarda por impresora; la carta es el papel por omisión (una línea) |
+| `1b4b8b0`, `f382041` | formato contable: dónde pone Excel la Q y el número (medido en su PDF) y la hoja los dibuja igual |
+| `6ef0d13` | §8b del diseño: lo del 15 de octubre y lo que el papel permitiría después |
 
-**Pruebas:** el árbol completo está verde, **2006 pruebas, 0 fallan** (el basal que se me dio era 1475; subió porque los otros dos agentes también agregaron). Las mías son
-**154**: `pruebas/hoja-contrato.test.mjs` (66) y `pruebas/contrato-impreso.test.mjs` (88). Se mutaron `hojaContrato.js` (≈70 mutaciones), `contratoImpreso.js`
+**Pruebas:** el árbol completo está verde, **2048 pruebas, 0 fallan** (el basal que se me dio era 1475; subió porque los otros agentes también agregaron). Las mías son
+**181**: `pruebas/hoja-contrato.test.mjs` (76) y `pruebas/contrato-impreso.test.mjs` (105). Se mutaron `hojaContrato.js` (≈70 mutaciones), `contratoImpreso.js`
 (≈115) y el CSS (13): sobreviven solo 5, todas equivalentes (un `>=` contra `>` sobre un flotante exacto, una copia defensiva de un objeto que ya sale nuevo de `JSON.parse`,
 un `>= 0` cuando `monto(0)` ya devuelve vacío, un título que se calcula antes de teclear, y un `null` contra `''` que `filter(Boolean)` borra).
+Lo del 15 de octubre se mutó aparte, en una copia del árbol (33 mutaciones: el formato contable, `sinQ`, `empleadoCodigo`, Carta/Oficio, lo que se guarda de la calibración y el CSS contable):
+**las 33 mueren**, ninguna sobrevive.
 
 ## Qué cubren las pruebas y qué solo se ve mirando
 
@@ -31,6 +40,9 @@ un `>= 0` cuando `monto(0)` ya devuelve vacío, un título que se calcula antes 
   (60 casillas, tolerancia 0.05 mm); `cajaDeRango` (celda, rango, columna/fila oculta, al revés, inexistente); las fechas del papel (sin `Date`, probado); la calibración
   (teclas, límites, un solo `transform`, almacén que lanza / con basura / vacío); `armarContratoImpreso` (de dónde sale cada casilla, ajeno, sin cliente, sin dato, dinero con `q()` y `dinero()`);
   el HTML escapado; la hoja de prueba; la pantalla con un DOM de mentira; la hoja de estilos **como texto**; y ADR-001 de punta a punta contra espías.
+- **Cubierto también (15 de octubre):** que cada casilla con formato contable en Excel lo lleve en la tabla (contra `campos-excel.json`); que las tres casillas `sinQ` salgan sin Q y el resto con ella;
+  que `empleadoCodigo` salga tal cual, en blanco si falta o está vacío (llave ausente, `null` y `''`) y nunca el nombre; que Carta y Oficio midan 215.9 × 279.4 y 215.9 × 330.2, que el papel se guarde
+  con la calibración y no se pierda, que una calibración vieja (sin `papel`) siga valiendo, y que los huecos del CSS contable (la Q a 2.49 mm, el número terminando a 2.2 mm del borde) sean los medidos.
 - **Solo por mirar (hecho, ver abajo):** que Chrome respete la página sin margen y la carta; que el `transform` del navegador sea la misma cuenta que `cajaEnPapel`; que las marcas salgan sin «Gráficos de fondo»;
   que el texto caiga donde lo pone Excel. **Y lo que nadie más que él puede ver: que el papel calce con su formulario.**
 
@@ -54,6 +66,12 @@ tocó el proyecto real. Chrome headless propio, `Emulation.setEmulatedMedia('pri
 - **ADR-001 en el navegador:** tecleé número, CBC, NIT y empresa; en el momento de llamar a imprimir la hoja los llevaba (y el título era «Contrato 77», sin nada de la tarjeta); al terminar (`afterprint`) las cajas quedaron vacías, el lugar y
   las tarifas de vuelta a como estaban y la hoja enmascarada. Busqué el número, el CBC, el NIT y la empresa en `localStorage`, `sessionStorage`, la dirección, el título, el historial, las seis tiendas de IndexedDB, las escrituras del Firestore falso (0), los recursos
   cargados, las peticiones de red y la consola: **no aparecen en ninguna.**
+- **Formato contable, impreso en Chrome (16 de octubre)** y medido en la hoja a tamaño de Excel contra el PDF de Excel (`analisis/imp-contrato/monto-contable-medido.json`), en mm desde la esquina de la hoja:
+  la «Q» cae a **0.03 mm** de la de Excel en las tres casillas que la llevan; el número empieza a 0.02, 0.08 y 0.01 mm de Excel en LDW (sin Q), seguro de terceros y combustible, y a **0.52 mm** en la
+  hora tardía (su número en el PDF de Excel termina (por la cuenta del ancho de las cifras) unos 0.6 mm más a la derecha que el de las otras casillas, aunque todas comparten el borde: parece una rareza de Excel, no lo investigué más, y es menos que un toque de flecha; no se ajustó casilla por casilla).
+  Que el número de LDW salga sin Q y a la derecha también se ve en el PDF.
+- **Oficio, impreso en Chrome (16 de octubre):** se escogió «Oficio» en la pantalla de calibrar y se imprimió la hoja de prueba: **una sola página**, `MediaBox` 612 × 936 pt (215.9 × 330.2 mm),
+  la regla llega a 330 mm y los pasos quedan abajo; la regla `@page` inyectada pisa a la de la carta (la hoja de estilos trae la de la carta y la pantalla agrega la del papel escogido).
 - **La escala importa:** a tamaño de Excel (1.0) quince casillas caen fuera de la carta; a 0.80, las dos columnas de horas. Hasta 0.79 todo cabe. Por eso la pantalla de calibrar y la de imprimir lo avisan.
 
 ## Lo que se encontró en el Excel (hoja «IMP. CONTRATO»)
@@ -110,7 +128,7 @@ módulo de `datos.js` se llama desde el flujo de imprimir. La pantalla dice en v
 | Lugar de salida | T9:V9 | 166.4 / 34.5 / 22.6 × 7.2 | 146.0 / 45.1 | `lugar` |  |
 | Fecha de entrada | W9:Y9 | 189.0 / 34.5 / 37.7 × 7.2 | 163.4 / 45.1 | `devolucionPrevista` |  |
 | Hora de entrada | Z9:Z10 | 226.7 / 34.5 / 23.6 × 11.6 | 192.5 / 45.1 | `horaSalida` | repite la salida (decisión suya) |
-| Hora tardía (precio) | V10:X12 | 182.7 / 41.8 / 26.4 × 10.1 | 158.6 / 50.7 | `TARIFAS_DEL_PAPEL.horaTardia` (Q150, del INGRESO DE DATOS de su Excel), precargada y corregible al imprimir | precargado, corregible |
+| Hora tardía (precio) | V10:X12 | 182.7 / 41.8 / 26.4 × 10.1 | 158.6 / 50.7 | `TARIFAS_DEL_PAPEL.horaTardia` (Q150, del INGRESO DE DATOS de su Excel), precargada y corregible al imprimir | precargado, corregible; formato contable |
 | NIT (persona o empresa) | A13:D14 | 0.0 / 51.8 / 34.9 × 12.9 | 17.9 / 58.4 | lo teclea en la pantalla de imprimir; no se guarda en ninguna parte | se teclea, no se guarda |
 | Persona o empresa | E13:L14 | 34.9 / 51.8 / 86.3 × 12.9 | 44.7 / 58.4 | lo teclea en la pantalla de imprimir; no se guarda en ninguna parte | se teclea, no se guarda |
 | Primer apellido | B15:H16 | 10.4 / 64.7 / 57.1 × 7.5 | 25.9 / 68.3 | `apellidos` completo (el sistema guarda los dos apellidos juntos) |  |
@@ -133,25 +151,25 @@ módulo de `datos.js` se llama desde el flujo de imprimir. La pantalla dice en v
 | Conductor adicional: nombre | N35:R38 | 121.2 / 153.5 / 37.0 × 17.6 | 111.2 / 136.7 | `conductorAdicional.nombre` | blanca en Excel, ahora se ve |
 | Conductor adicional: licencia | N39:R40 | 121.2 / 171.1 / 37.0 × 9.7 | 111.2 / 150.3 | `conductorAdicional.licencia` |  |
 | Precio por día (sin seguros) | V13:X14 | 182.7 / 51.8 / 26.4 × 12.9 | 158.6 / 58.4 | `precioDia` menos `seguroDia` menos `seguroTercerosDia` |  |
-| Seguro de terceros (por día) | V27:X27 | 182.7 / 112.7 / 26.4 × 10.1 | 158.6 / 105.3 | `seguroTercerosDia` |  |
-| Seguro (por día) | V28:X28 | 182.7 / 122.8 / 26.4 × 8.5 | 158.6 / 113.0 | `seguroDia` |  |
-| Combustible a (por galón) | V34:X35 | 182.7 / 150.7 / 26.4 × 7.5 | 158.6 / 134.6 | `TARIFAS_DEL_PAPEL.galon` (Q65, del INGRESO DE DATOS de su Excel), precargada y corregible al imprimir | precargado, corregible |
+| Seguro de terceros (por día) | V27:X27 | 182.7 / 112.7 / 26.4 × 10.1 | 158.6 / 105.3 | `seguroTercerosDia` | formato contable |
+| Seguro (por día) | V28:X28 | 182.7 / 122.8 / 26.4 × 8.5 | 158.6 / 113.0 | `seguroDia` | **sin Q** (el papel ya trae «LDW Q.»); formato contable |
+| Combustible a (por galón) | V34:X35 | 182.7 / 150.7 / 26.4 × 7.5 | 158.6 / 134.6 | `TARIFAS_DEL_PAPEL.galon` (Q65, del INGRESO DE DATOS de su Excel), precargada y corregible al imprimir | precargado, corregible; formato contable |
 | Deducible | U36:X37 | 174.6 / 158.2 / 34.5 × 9.1 | 152.3 / 140.4 | `deducible` |  |
 | « + iva » (texto fijo) | Y36:Y37 | 209.1 / 158.2 / 17.6 × 9.1 | 178.9 / 140.4 | texto fijo de Excel (el papel no lo trae) |  |
-| Deducible (segunda vez, abajo) | O46:Q46 | 127.8 / 195.0 / 27.3 × 4.4 | 116.3 / 168.7 | `deducible` |  |
+| Deducible (segunda vez, abajo) | O46:Q46 | 127.8 / 195.0 / 27.3 × 4.4 | 116.3 / 168.7 | `deducible` | sin Q (el formato de su celda es «0.00»); esa parte del papel no se vio en la foto |
 | Seguro (segunda vez, abajo) | O47:Q47 | 127.8 / 199.4 / 27.3 × 4.7 | 116.3 / 172.0 | `seguroDia` |  |
 | Carta poder: destino | R21:V22 | 155.1 / 88.5 / 33.9 × 11.9 | 137.3 / 86.7 | `lineasSalida`: detalle de la línea «Carta poder» |  |
 | Carta poder: precio | W21:X22 | 189.0 / 88.5 / 20.1 × 11.9 | 163.4 / 86.7 | `lineasSalida`: monto de la línea «Carta poder» |  |
 | Deducible bajo | V23:X24 | 182.7 / 100.5 / 26.4 × 7.2 | 158.6 / 95.9 | `deducibleBajo` | blanca en Excel, ahora se ve |
-| Seguro de menores (por día) | V25:X26 | 182.7 / 107.7 / 26.4 × 5.0 | 158.6 / 101.4 | `seguroMenoresDia` | blanca en Excel, ahora se ve |
-| Seguro PAI (por día) | U30:X31 | 174.6 / 136.6 / 34.5 × 7.2 | 152.3 / 123.7 | `seguroPaiDia` | blanca en Excel, ahora se ve |
+| Seguro de menores (por día) | V25:X26 | 182.7 / 107.7 / 26.4 × 5.0 | 158.6 / 101.4 | `seguroMenoresDia` | blanca en Excel, ahora se ve; formato contable |
+| Seguro PAI (por día) | U30:X31 | 174.6 / 136.6 / 34.5 × 7.2 | 152.3 / 123.7 | `seguroPaiDia` | blanca en Excel, ahora se ve; **sin Q** (el papel ya trae «PAI Q.») |
 | Varios: descripción | V32:X32 | 182.7 / 143.8 / 26.4 × 3.1 | 158.6 / 129.2 | `variosDescripcion` | blanca en Excel, ahora se ve |
-| Varios: precio | V33:X33 | 182.7 / 146.9 / 26.4 × 3.8 | 158.6 / 131.7 | `variosPrecio` | blanca en Excel, ahora se ve |
+| Varios: precio | V33:X33 | 182.7 / 146.9 / 26.4 × 3.8 | 158.6 / 131.7 | `variosPrecio` | blanca en Excel, ahora se ve; formato contable |
 | Tarjeta 1: autorización | M29:P31 | 121.2 / 131.2 / 21.0 × 12.6 | 111.2 / 119.6 | `tarjetas[0].autorizacion` | **DERIVADA, NO MEDIDA** |
 | Tarjeta 1: monto autorizado | Q29:T31 | 142.2 / 131.2 / 32.3 × 12.6 | 127.4 / 119.6 | `tarjetas[0].montoAutorizado` |  |
 | Tarjeta 2: monto autorizado | P32:R33 | 134.1 / 143.8 / 24.2 × 6.9 | 121.1 / 129.2 | `tarjetas[1].montoAutorizado` |  |
 | Tarjeta 2: autorización | M32:O33 | 121.2 / 143.8 / 12.9 × 6.9 | 111.2 / 129.2 | `tarjetas[1].autorizacion` | blanca en Excel, ahora se ve |
-| Rentado por | T58:U59 | 166.4 / 220.7 / 16.3 × 10.7 | 146.0 / 188.5 | `rentadoPor` |  |
+| Preparado por (código) | T58:U59 | 166.4 / 220.7 / 16.3 × 10.7 | 146.0 / 188.5 | `empleadoCodigo` (lo que el contrato selló ese día; en blanco si no lo trae) | el papel dice «PREPARADO POR (CODIGO)» y mide 16 mm; antes `rentadoPor` (el nombre) |
 
 Todos con la fuente y el tamaño de Excel por 0.89 (Arial o Arial Narrow), la alineación de Excel y el origen de la hoja en la carta a 17.90 / 18.52 mm.
 
@@ -164,6 +182,10 @@ Ese día él tiene la hoja de prueba en una mano y su formulario en la otra: pue
 3. **Apellidos y nombres:** ¿el papel tiene una casilla por apellido y una por nombre? El sistema los guarda en un solo texto, así que hoy el texto completo sale en la primera casilla y la segunda queda en blanco.
 4. **E27 e I27**, las dos celdas de letra blanca de Excel que no se agregaron: ¿hay casilla para ellas en el papel? (E27 sería la ciudad adicional; I27 es un `0` fijo.)
 5. **Nacionalidad:** el papel la pide (Excel la imprime) y la ficha del cliente dejó de pedirla el 3 de octubre, así que los clientes nuevos salen sin ella.
+6. **Carta u Oficio:** ¿qué papel usa? Se escoge en la pantalla de calibrar (se guarda con esa impresora); mientras no se escoja, la hoja nace en Carta (`PAPEL_POR_OMISION`, una línea). Oficio es 8.5 × 13 pulgadas, no Legal; el diálogo puede llamarlo «Oficio» o «Folio».
+7. **LDW: ¿una Q o dos?** Excel imprime su propia «Q» en el borde izquierdo de esa casilla y el papel ya trae «LDW Q.». ¿Se encima justo sobre la impresa, o su hoja de hoy sale con dos? El sistema imprime solo el número, a la derecha.
+8. **«PREPARADO POR (CODIGO)»** cae en su casilla de 16 mm, y **«COMPUTADO POR (CODIGO)»**, al lado, queda libre (ni Excel ni el sistema la llenan).
+9. **La parte de abajo del papel** (deducible y seguro «segunda vez», casillas `O46:Q46` y `O47:Q47`): no se vio en la foto; hoy se imprime como lo hace Excel.
 
 ### Ya contestadas por él (no volver a preguntar)
 
@@ -172,8 +194,18 @@ Ese día él tiene la hoja de prueba en una mano y su formulario en la otra: pue
 - **Hora de entrada:** «Igual que el Excel» (repite la de salida). **La «Q»:** su papel no la trae (se imprime). **Combustible de salida:** «Yo lo escribo mejor» (no se imprime).
 - **Autorización de la tarjeta 1:** sí, se imprime (casilla derivada).
 - **Número de contrato:** «yo pongo el número de contrato porque es el que está en las hojas membretadas»: viene preimpreso en su papelería, por eso no se imprime.
+- **De la foto de su hoja en blanco (15 de octubre):** la casilla se llama «PREPARADO POR (CODIGO)» (pide el código, no el nombre); «LDW Q.» y «PAI Q.» traen la Q impresa (esas dos salen sin Q, el resto con ella); el bloque de la tarjeta no existe en el papel (el sistema lo imprime en el área en blanco de arriba a la izquierda,
+  donde la tabla lo coloca); el orden de las casillas de la columna derecha calza uno a uno con los campos medidos en el PDF de Excel; el número de contrato viene preimpreso en rojo.
 
 ## Para el coordinador
+
+- **«Qué salió» de la medición del formato contable:** seis casillas de Excel llevan `_("Q"* #,##0.00_)` (hora tardía, seguro de terceros, LDW, combustible por galón, seguro de menores, varios: precio), que pone la Q pegada al borde izquierdo
+  y el número pegado al derecho. Se midió en el PDF de Excel (la Q a 2.49 mm del borde izquierdo, el número terminando a 2.2 mm del derecho) y la hoja las dibuja así. Impreso en Chrome calza a 0.03 mm la Q y a 0.01–0.08 mm el número,
+  salvo la hora tardía, a 0.52 mm. **Queda una duda que solo el papel resuelve (LDW: una Q o dos; punto 7 de la lista de la calibración).**
+- **Papel por omisión: Carta** (`PAPEL_POR_OMISION = 'carta'`, una línea en `js/nucleo/hojaContrato.js`). Cuando él conteste, o se cambia esa línea o él lo escoge en la pantalla de calibrar y queda guardado por impresora.
+- **Para después, decisión suya (no se hizo nada):** el papel trae una columna de liquidación (DAÑOS, COMBUSTIBLE, VARIOS, DEDUCIBLE, TOTAL CARGOS, MENOS DEPOSITO, IMPORTE A PAGAR, TOTAL DUE, FIRMA DE LIQUIDACION) que Excel no imprime y de la que el sistema ya tiene todos
+  los datos al cerrar el contrato: una segunda impresión sobre el mismo papel al recibir el carro. Y casillas que el sistema podría llenar y no llena: RESERVACION No., CARRO DEVUELTO EN con su fecha y hora de entrada, MANEJADOS (kilómetros recorridos, que se sabe restando) y DIAS A / SEMANAS A.
+  En TARJETA DE CIRCULACION el papel trae preimpresos «ORIGINAL Q 1,000.00» y «AUTENTICA Q 150.00»; el sistema no tiene ese dato.
 
 - El aviso amarillo «Respaldo en Excel» de otro agente **sí se imprime** cuando la pantalla de imprimir no pudo armar la hoja (le falta `no-imprimir`); con una hoja a la vista no sale, porque la regla del contrato esconde todo lo demás.
 - «Nueve textos» en el encargo eran **ocho** (diez campos: «EXPIRA:» y «CODIGO CBC» van dos veces) y «catorce» de letra blanca eran **nueve** con fuente (once celdas en Excel).
