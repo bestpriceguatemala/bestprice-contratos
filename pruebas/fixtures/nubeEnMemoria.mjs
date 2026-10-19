@@ -5,8 +5,10 @@
 // mezcla los mapas por dentro, `updateDoc` entiende 'a.b' y `deleteField()`, y `runTransaction`
 // hace lo que hace la de verdad: si alguien más escribió un documento que la transacción LEYÓ
 // antes de que ella escriba, se descarta y se vuelve a correr desde cero (y leer después de
-// escribir dentro de una transacción es un error, como en el SDK). Estas pruebas NO prueban
-// a Firebase.
+// escribir dentro de una transacción es un error, como en el SDK). Y, como el SDK, RECHAZA un
+// valor `undefined` en cualquier nivel de lo que se escribe (`setDoc`, `tx.set`, `updateDoc`,
+// lotes): sin eso, un `undefined` que en producción rompe el guardado pasaba todas las pruebas.
+// Estas pruebas NO prueban a Firebase.
 
 /**
  * Dónde hay un valor `undefined` dentro de lo que se va a escribir (`[]` si en ninguna parte), con el camino de cada uno.
@@ -17,6 +19,13 @@ export function valoresIndefinidos(valor, camino = '') {
   if (valor === null || typeof valor !== 'object') return [];
   if (Array.isArray(valor)) return valor.flatMap((x, i) => valoresIndefinidos(x, `${camino}[${i}]`));
   return Object.entries(valor).flatMap(([llave, x]) => valoresIndefinidos(x, camino ? `${camino}.${llave}` : llave));
+}
+
+/** Lo que hace el SDK de verdad al escribir: un `undefined` (en cualquier nivel) no se guarda, se lanza. */
+function exigirSinIndefinidos(funcion, ruta, datos) {
+  const [donde] = valoresIndefinidos(datos);
+  if (donde === undefined) return;
+  throw new Error(`Function ${funcion}() called with invalid data. Unsupported field value: undefined (found in field ${donde} in document ${ruta})`);
 }
 
 const sinId = ({ id: _id, ...resto }) => resto;
@@ -103,6 +112,7 @@ export function nubeEnMemoria({
       };
     },
     setDoc: async (ref, datos, opciones) => {
+      exigirSinIndefinidos('setDoc', ref.ruta, datos);
       llamadas.push(['setDoc', ref.ruta, structuredClone(datos), opciones, ref.db.nombre]);
       if (falla('setDoc', ref.ruta)) throw new Error('sin internet');
       // Las reglas: `pagosDueno`, `pagosComision` y `empleados` solo se escriben con la credencial de dinero.
@@ -135,7 +145,10 @@ export function nubeEnMemoria({
             const datos = docs.get(ref.ruta);
             return { exists: () => datos !== undefined, data: () => structuredClone(datos) };
           },
-          set: (ref, datos, opciones) => { escritos.set(ref.ruta, { datos: structuredClone(datos), merge: Boolean(opciones?.merge) }); },
+          set: (ref, datos, opciones) => {
+            exigirSinIndefinidos('Transaction.set', ref.ruta, datos);
+            escritos.set(ref.ruta, { datos: structuredClone(datos), merge: Boolean(opciones?.merge) });
+          },
         };
         const resultado = await funcion(tx);
         const alguienLoCambio = [...leidos].some(([ruta, version]) => (versiones.get(ruta) ?? 0) !== version);
@@ -151,6 +164,7 @@ export function nubeEnMemoria({
       throw new Error('La transacción no pudo terminar: otro la ganó demasiadas veces.');
     },
     updateDoc: async (ref, cambios) => {
+      exigirSinIndefinidos('updateDoc', ref.ruta, cambios);
       llamadas.push(['updateDoc', ref.ruta, Object.keys(cambios), ref.db.nombre]);
       if (falla('updateDoc', ref.ruta)) throw new Error('sin internet');
       if (!docs.has(ref.ruta)) throw new Error('El documento no existe.');
@@ -167,7 +181,10 @@ export function nubeEnMemoria({
     writeBatch: (db) => {
       const operaciones = [];
       return {
-        update: (ref, cambios) => { operaciones.push([ref, cambios]); },
+        update: (ref, cambios) => {
+          exigirSinIndefinidos('WriteBatch.update', ref.ruta, cambios);
+          operaciones.push([ref, cambios]);
+        },
         commit: async () => {
           llamadas.push(['commit', operaciones.map(([ref]) => ref.ruta), db.nombre]);
           if (falla('commit')) throw new Error('sin internet');
