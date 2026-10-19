@@ -723,16 +723,20 @@ tipo), y el sistema descuenta capacidad del tipo en ambos casos.
 - Se escriben **dentro de una transacción que lee el carro** (`cambiarEnNubeYLocal`, `js/datos.js`),
   nunca reescribiendo la copia que la pantalla tenía en memoria: un arreglo dentro de un documento se
   pisa si dos pestañas lo guardan a ciegas, y un servicio perdido deja un aviso que no sale.
-  **Un guardado del carro entero tampoco los escribe** («Guardar carro», «Marcar fuera de servicio»,
-  «Volver a habilitar» y `#/habilitar/:id`, que pasan por `guardarVehiculo`): para un carro que ya
-  existe lee el carro DENTRO de la transacción, le pone encima lo que trae la pantalla y deja
-  `servicios[]` e `intervalos{}` como la nube los tiene (`carroConLoDeLaFicha` y
-  `CAMPOS_DEL_MANTENIMIENTO`, `js/nucleo/mantenimiento.js`). Es una mezcla y no un rechazo
-  (`CODIGO_COPIA_VIEJA` es de los contratos) porque ese guardado no edita el historial: no hay dos
-  listas que reconciliar, y negarse por el sello `actualizado` —que sube con cada servicio anotado—
-  sería negarse por nada. Lo que sí sigue igual, y se dice: los campos sueltos del carro (placas,
-  color, si está fuera de servicio…) los escribe la pantalla tal como los trae, y el último que guarda
-  gana. Un carro NUEVO no tiene nada que leer y se crea como siempre.
+  **El guardado de la ficha («Guardar carro», `guardarVehiculo`) tampoco los escribe**, ni escribe las dos marcas
+  del taller, `fueraDeServicio` y `motivoFueraDeServicio`: cada mano escribe lo suyo
+  (`js/nucleo/carro.js`, `CAMPOS_CON_SU_PROPIO_ESCRITOR`). Las marcas del taller las escriben solo
+  «Marcar fuera de servicio» y «Volver a habilitar» (también `#/habilitar/:id`), que mandan SOLO esas dos
+  llaves y no el carro entero (`marcarCarroFueraDeServicio` y `habilitarCarro`). Para un carro que ya existe,
+  la ficha lee el carro DENTRO de la transacción, le pone encima lo que trae la pantalla y deja lo ajeno
+  como la nube lo tiene (`carroConLoDeLaFicha`). Es una mezcla y no un rechazo (`CODIGO_COPIA_VIEJA` es de
+  los contratos) porque la ficha no edita ni el historial ni el taller: no hay dos listas que reconciliar, y
+  negarse por el sello `actualizado` —que sube con cada servicio anotado— sería negarse por nada. Lo que
+  la copia vieja de una pantalla podía hacer, y ya no hace, es devolver el historial a una lista de ayer
+  o, peor, volver «disponible» un carro que otra computadora acababa de mandar al taller. Lo que sí sigue
+  igual, y se dice: los campos que la ficha escribe (placas, tipo, marca, línea, color, modelo) los
+  escribe la pantalla tal como los trae, y el último que guarda gana. Un carro NUEVO no tiene nada que leer
+  y se crea como siempre (sin marcas del taller: nace disponible).
 - **Ojo con los nombres: la misma palabra, otro dato.** Es lo contrario de «un dato, dos
   nombres» y cuesta igual, porque tampoco da error: da una respuesta equivocada.
   `servicios[].tipo` (`'aceite'`, `'frenos'`…) **no** es el `tipo` del carro (`'Pickup'`, `'Sedán'`):
