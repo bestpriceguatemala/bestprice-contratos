@@ -33,6 +33,30 @@ export function construirVehiculo(carroExistente, campos) {
   };
 }
 
+/**
+ * El carro tal como lo guarda «Marcar fuera de servicio»: el que la pantalla tiene, con las dos marcas puestas. Es un
+ * constructor y no un literal dentro del botón para que las pruebas armen el carro con LA MISMA función que la pantalla
+ * (un literal copiado en la prueba se desacuerda en silencio el día que el botón cambie).
+ */
+export function construirFueraDeServicio(carro, motivo) {
+  return {
+    id: carro.id,
+    ...carro,
+    fueraDeServicio: true,
+    motivoFueraDeServicio: motivo,
+  };
+}
+
+/** El carro tal como lo guardan «Volver a habilitar» (ficha) y `#/habilitar/:id`: las dos marcas, quitadas. */
+export function construirHabilitado(carro) {
+  return {
+    id: carro.id,
+    ...carro,
+    fueraDeServicio: false,
+    motivoFueraDeServicio: '',
+  };
+}
+
 // El texto libre que escribe el usuario se escapa antes de entrar al HTML
 // para que un "&" o un "<" sueltos no rompan la pantalla.
 function esc(texto) {
@@ -365,13 +389,7 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
 
     el('frm-fuera').disabled = true;
     try {
-      const actualizado = {
-        id: carro.id,
-        ...carro,
-        fueraDeServicio: true,
-        motivoFueraDeServicio: motivoTrim,
-      };
-      await guardarVehiculo(actualizado);
+      await guardarVehiculo(construirFueraDeServicio(carro, motivoTrim));
       aviso('Carro marcado fuera de servicio.', 'exito');
       location.hash = '#/carros';
     } catch (error) {
@@ -385,13 +403,7 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
   async function habilitar() {
     el('frm-habilitar').disabled = true;
     try {
-      const actualizado = {
-        id: carro.id,
-        ...carro,
-        fueraDeServicio: false,
-        motivoFueraDeServicio: '',
-      };
-      await guardarVehiculo(actualizado);
+      await guardarVehiculo(construirHabilitado(carro));
       aviso('Carro habilitado de nuevo.', 'exito');
       location.hash = '#/carros';
     } catch (error) {
@@ -454,13 +466,7 @@ async function habilitarDesdeFlota(contenedor, carroId) {
     }
 
     // Habilitar
-    const actualizado = {
-      id: carro.id,
-      ...carro,
-      fueraDeServicio: false,
-      motivoFueraDeServicio: '',
-    };
-    await guardarVehiculo(actualizado);
+    await guardarVehiculo(construirHabilitado(carro));
     aviso('Carro habilitado.', 'exito');
     location.hash = '#/carros';
   } catch (error) {
