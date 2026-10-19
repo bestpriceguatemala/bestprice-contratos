@@ -1,31 +1,35 @@
-// Guardar el carro entero (`guardarVehiculo`) sin devolverle el mantenimiento a una lista vieja.
+// Cada mano escribe lo suyo en el documento del carro: la ficha (`guardarVehiculo`), el mantenimiento y el taller.
 //
 // El hueco: «Guardar carro», «Marcar fuera de servicio», «Volver a habilitar» y `#/habilitar/:id` escribían el carro ENTERO
 // desde la copia que la pantalla tenía en memoria. Un carro lleva `servicios[]` (su historial de mantenimiento) e
 // `intervalos{}`; si otra computadora anotó un servicio después de que ésta sincronizó, esa escritura devolvía `servicios[]` a
-// la lista de antes —en silencio—. Estas pruebas arman DOS computadoras sobre la misma nube (cada una con su copia local y su
-// pantalla abierta sobre el carro) y comprueban las dos mitades de la regla:
+// la lista de antes —en silencio—. Y con las marcas del taller era peor: B manda el carro al taller y A, con la ficha de antes,
+// guarda un color: el carro reaparecía como rentable. Estas pruebas arman DOS computadoras sobre la misma nube (cada una con su
+// copia local y su pantalla abierta sobre el carro) y comprueban las dos mitades de la regla:
 //
-//   1. lo del mantenimiento NUNCA sale de la copia de la pantalla: se queda como la nube lo tiene ahora;
+//   1. lo que tiene su propio escritor (el mantenimiento y el taller, `CAMPOS_CON_SU_PROPIO_ESCRITOR`) NUNCA sale de la copia de
+//      la pantalla de la ficha: se queda como la nube lo tiene ahora; y cada escritor del taller escribe SOLO sus dos marcas;
 //   2. todo lo demás SÍ sale de la pantalla: lo que él escribe se guarda (el error de al revés, una edición que no se
 //      queda, es tan invisible como el primero).
 //
 // La Firestore de abajo es de MENTIRA (pruebas/fixtures/nubeEnMemoria.mjs): transacciones que se repiten si alguien tocó lo que
 // leyeron, y —como la de verdad— rechaza un valor `undefined`. NO prueba a Firebase. Los carros salen de los constructores de
-// verdad (`construirVehiculo`, `construirFueraDeServicio`, `construirHabilitado`, `carroConServicio`…), no de objetos escritos a mano.
+// verdad (`construirVehiculo`, `carroFueraDeServicio`, `carroHabilitado`, `carroConServicio`…), no de objetos escritos a mano.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  guardarVehiculo, registrarServicioDelCarro, anularServicioDelCarro, cambiarIntervaloDelCarro,
-  nuevoIdVehiculo, altaConIdFijo, CODIGO_DOCUMENTO_NO_ESTA, MENSAJE_CARRO_NO_ESTA,
+  guardarVehiculo, marcarCarroFueraDeServicio, habilitarCarro, registrarServicioDelCarro, anularServicioDelCarro,
+  cambiarIntervaloDelCarro, nuevoIdVehiculo, altaConIdFijo, CODIGO_DOCUMENTO_NO_ESTA, MENSAJE_CARRO_NO_ESTA,
 } from '../js/datos.js';
+import { construirVehiculo, textoFalloAlGuardarElCarro } from '../js/pantallas/carros.js';
 import {
-  construirVehiculo, construirFueraDeServicio, construirHabilitado, textoFalloAlGuardarElCarro,
-} from '../js/pantallas/carros.js';
-import {
-  CAMPOS_DEL_MANTENIMIENTO, carroConLoDeLaFicha, carroConServicio, carroConServicioAnulado, carroConIntervalo,
+  CAMPOS_DEL_MANTENIMIENTO, carroConServicio, carroConServicioAnulado, carroConIntervalo,
 } from '../js/nucleo/mantenimiento.js';
+import {
+  CAMPOS_DE_LA_DISPONIBILIDAD, CAMPOS_CON_SU_PROPIO_ESCRITOR, MENSAJE_FALTA_EL_MOTIVO,
+  carroConLoDeLaFicha, carroFueraDeServicio, carroHabilitado,
+} from '../js/nucleo/carro.js';
 import { nubeEnMemoria, copiaLocalEnMemoria, valoresIndefinidos } from './fixtures/nubeEnMemoria.mjs';
 import { carroPropio, carroConServicios } from './fixtures/carroConServicios.mjs';
 
@@ -124,30 +128,129 @@ test('lo mismo con un carro que todavía no tenía ningún servicio: la copia lo
   assert.deepEqual(ids(A.copia.guardados.get('v1')), ['s-1']);
 });
 
-test('«Marcar fuera de servicio» desde una copia atrasada tampoco devuelve el historial a la lista vieja', async () => {
+test('«Marcar fuera de servicio» escribe SOLO sus dos marcas: lo que otra computadora anotó o cambió mientras tanto se queda', async () => {
   const { nube, A, B, abrir } = dosComputadoras();
-  const copiaDeA = abrir();
+  abrir(); // A tiene la ficha abierta de antes… y el escritor del taller no la usa
   await registrarServicioDelCarro('v1', servicio(), B.deps);
+  await guardarDesdeElFormulario(abrir(), { color: 'Rojo' }, B.deps);
 
-  await guardarVehiculo(construirFueraDeServicio(copiaDeA, 'Taller de choque'), A.deps);
+  const guardado = await marcarCarroFueraDeServicio('v1', 'Taller de choque', A.deps);
 
   const enNube = nube.leer('vehiculos/v1');
   assert.equal(enNube.fueraDeServicio, true, 'lo que A pidió se guardó');
   assert.equal(enNube.motivoFueraDeServicio, 'Taller de choque');
-  assert.deepEqual(ids(enNube), ['s-0', 's-1']);
+  assert.deepEqual(ids(enNube), ['s-0', 's-1'], 'el servicio de B sigue ahí');
+  assert.equal(enNube.color, 'Rojo', 'y el color que B corrigió NO vuelve al de la ficha vieja de A');
+  assert.deepEqual(guardado, enNube);
+  assert.deepEqual(A.copia.guardados.get('v1'), enNube, 'y la copia local de A queda con el carro entero y al día');
 });
 
-test('«Volver a habilitar» (la ficha y `#/habilitar/:id` arman el carro con el mismo constructor) tampoco', async () => {
-  const { nube, A, B, abrir } = dosComputadoras(construirFueraDeServicio(carroConHistoria(), 'Revisión'));
-  const copiaDeA = abrir();
+test('«Volver a habilitar» (la ficha y `#/habilitar/:id`) quita SOLO sus dos marcas, y no devuelve nada a como estaba en la copia de A', async () => {
+  const { nube, A, B } = dosComputadoras(carroFueraDeServicio(carroConHistoria(), 'Revisión'));
   await registrarServicioDelCarro('v1', servicio(), B.deps);
+  await guardarVehiculo({ ...nube.leer('vehiculos/v1'), color: 'Rojo' }, B.deps);
 
-  await guardarVehiculo(construirHabilitado(copiaDeA), A.deps);
+  await habilitarCarro('v1', A.deps);
 
   const enNube = nube.leer('vehiculos/v1');
   assert.equal(enNube.fueraDeServicio, false, 'lo que A pidió se guardó');
   assert.equal(enNube.motivoFueraDeServicio, '');
   assert.deepEqual(ids(enNube), ['s-0', 's-1'], 'y el servicio sigue ahí');
+  assert.equal(enNube.color, 'Rojo');
+});
+
+test('marcar y habilitar cambian EXACTAMENTE las dos marcas del taller y ninguna llave más', async () => {
+  const { nube, A } = dosComputadoras();
+  const antes = nube.leer('vehiculos/v1');
+  const cambiadas = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).sort();
+  await marcarCarroFueraDeServicio('v1', 'Taller', A.deps);
+  const fuera = nube.leer('vehiculos/v1');
+  assert.deepEqual(cambiadas(antes, fuera).filter((k) => k !== 'actualizado'), [...CAMPOS_DE_LA_DISPONIBILIDAD].sort());
+  await habilitarCarro('v1', A.deps);
+  assert.deepEqual(cambiadas(fuera, nube.leer('vehiculos/v1')).filter((k) => k !== 'actualizado'), [...CAMPOS_DE_LA_DISPONIBILIDAD].sort());
+});
+
+test('marcar fuera de servicio exige un motivo, también en el escritor (no solo en el botón): sin motivo no se escribe nada', async () => {
+  const { nube, A } = dosComputadoras();
+  for (const motivo of ['', '   ', undefined, null]) {
+    await assert.rejects(marcarCarroFueraDeServicio('v1', motivo, A.deps), { message: MENSAJE_FALTA_EL_MOTIVO });
+  }
+  assert.equal(nube.escriturasEnTransaccion('vehiculos/v1').length, 0);
+  assert.equal(nube.leer('vehiculos/v1').fueraDeServicio, undefined);
+  await marcarCarroFueraDeServicio('v1', '  Taller de choque  ', A.deps);
+  assert.equal(nube.leer('vehiculos/v1').motivoFueraDeServicio, 'Taller de choque', 'y se guarda sin espacios sobrantes');
+});
+
+test('marcar y habilitar sobre un carro que ya no está, o con la nube caída, se rechazan sin escribir nada y la pantalla dice por qué', async () => {
+  const { nube, A } = dosComputadoras();
+  nube.docs.delete('vehiculos/v1');
+  const antes = structuredClone(A.copia.guardados.get('v1'));
+  for (const intento of [() => marcarCarroFueraDeServicio('v1', 'Taller', A.deps), () => habilitarCarro('v1', A.deps)]) {
+    const error = await intento().then(() => null, (e) => e);
+    assert.equal(error.codigo, CODIGO_DOCUMENTO_NO_ESTA);
+    assert.equal(textoFalloAlGuardarElCarro(error, 'marcar el carro'), MENSAJE_CARRO_NO_ESTA);
+  }
+  assert.equal(nube.docs.has('vehiculos/v1'), false);
+  assert.deepEqual(A.copia.guardados.get('v1'), antes);
+
+  const caida = dosComputadoras();
+  caida.nube.fallan.push({ op: 'tx.get' });
+  await assert.rejects(habilitarCarro('v1', caida.A.deps), /sin internet/);
+  assert.equal(caida.nube.escriturasEnTransaccion('vehiculos/v1').length, 0);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// El carro del taller no reaparece rentable (la misma regla, otra llave)
+// ---------------------------------------------------------------------------------------------------------------
+
+test('B manda el carro al taller y A guarda su ficha desde una copia de antes — de un carro que alguna vez pasó por «Volver a habilitar» —: el carro SIGUE fuera de servicio', async () => {
+  // «Volver a habilitar» deja `fueraDeServicio: false` ESCRITO; la copia de A trae esa marca y, con el guardado de antes, la devolvía a `false`.
+  const { nube, A, B } = dosComputadoras();
+  await habilitarCarro('v1', B.deps); // el carro ya pasó por «Volver a habilitar»: la marca es un `false` explícito, no una llave ausente
+  const copiaDeA = nube.leer('vehiculos/v1'); // la ficha de A, abierta: disponible
+  assert.equal(copiaDeA.fueraDeServicio, false, 'punto de partida: el `false` está escrito');
+  await marcarCarroFueraDeServicio('v1', 'Taller de choque', B.deps); // B lo manda al taller
+
+  await guardarDesdeElFormulario(copiaDeA, { color: 'Negro' }, A.deps);
+
+  const enNube = nube.leer('vehiculos/v1');
+  assert.equal(enNube.color, 'Negro', 'lo que A tecleó se guardó');
+  assert.equal(enNube.fueraDeServicio, true, 'y el carro SIGUE en el taller');
+  assert.equal(enNube.motivoFueraDeServicio, 'Taller de choque');
+  assert.equal(A.copia.guardados.get('v1').fueraDeServicio, true, 'y la copia local de A ya lo sabe');
+});
+
+test('al revés: B habilita el carro y A guarda su ficha de antes (fuera de servicio): el carro NO vuelve al taller', async () => {
+  const { nube, A, B } = dosComputadoras(carroFueraDeServicio(carroConHistoria(), 'Revisión'));
+  const copiaDeA = nube.leer('vehiculos/v1');
+  await habilitarCarro('v1', B.deps);
+
+  await guardarDesdeElFormulario(copiaDeA, { color: 'Negro' }, A.deps);
+
+  const enNube = nube.leer('vehiculos/v1');
+  assert.equal(enNube.color, 'Negro');
+  assert.equal(enNube.fueraDeServicio, false);
+  assert.equal(enNube.motivoFueraDeServicio, '');
+});
+
+test('cada marca del taller que traiga la ficha se ignora, también la que está escrita a mano en el alta', async () => {
+  for (const campo of CAMPOS_DE_LA_DISPONIBILIDAD) {
+    const { nube, A, abrir } = dosComputadoras();
+    await guardarVehiculo({ ...abrir(), [campo]: campo === 'fueraDeServicio' ? true : 'Lo que trae la ficha' }, A.deps);
+    assert.equal(campo in nube.leer('vehiculos/v1'), false, `${campo}: la ficha no la escribe`);
+  }
+  const nube = nubeEnMemoria({ contadores: { vehiculos: { ultimo: 3 } } });
+  const copia = copiaLocalEnMemoria();
+  const deps = { iniciar: nube.iniciar, guardarCopia: copia.guardarCopia, avisar: () => {} };
+  const alta = altaConIdFijo(() => nuevoIdVehiculo({ iniciar: nube.iniciar }));
+  const guardado = await guardarVehiculo(await alta.paraGuardar({
+    ...construirVehiculo({}, {
+      id: undefined, codigo: undefined, placas: 'P-123ABC', tipo: 'Sedán', marca: 'Toyota', linea: 'Yaris', color: 'Blanco', modelo: '2022',
+    }),
+    fueraDeServicio: true,
+    motivoFueraDeServicio: 'x',
+  }), deps);
+  assert.equal(nube.leer(`vehiculos/${guardado.id}`).fueraDeServicio, undefined, 'un carro nuevo nace disponible');
 });
 
 test('un servicio ANULADO en otra computadora no se «desanula» al guardar desde una copia atrasada', async () => {
@@ -215,25 +318,25 @@ test('A guarda el carro y B anota un servicio AL MISMO TIEMPO: quedan las dos co
 // La otra mitad: lo que él escribe SÍ se queda (el error de al revés)
 // ---------------------------------------------------------------------------------------------------------------
 
-test('cada campo del carro que no es del mantenimiento se guarda, aunque la nube tenga otro valor (§7b, «Del carro»)', async () => {
+test('cada campo del carro que la ficha escribe se guarda, aunque la nube tenga otro valor (§7b, «Del carro»)', async () => {
   // `codigo` no se prueba aquí: no se edita, se asigna una vez. `id` y `actualizado` los sella el escritor.
   const casos = [
     ['placas', 'P-999ZZZ'], ['tipo', 'Sedán'], ['marca', 'Kia'], ['linea', 'Rio'], ['color', 'Plateado'], ['modelo', '2024'],
-    ['propiedad', 'Propio'], ['dueno', 'Mario López'], ['fueraDeServicio', true], ['motivoFueraDeServicio', 'Golpe'],
-    ['unCampoQueElFormularioNoConoce', 'se arrastra tal cual'],
+    ['propiedad', 'Propio'], ['dueno', 'Mario López'], ['unCampoQueElFormularioNoConoce', 'se arrastra tal cual'],
   ];
+  // Todo lo que NO tiene su propio escritor: si el carro llegara a tener un campo más, esta lista es la que lo recordaría.
   for (const [campo, valor] of casos) {
-    const base = { ...carroPropio(), [campo]: valor === true ? false : `${valor} (de antes)` };
+    const base = { ...carroPropio(), [campo]: `${valor} (de antes)` };
     const { nube, A, abrir } = dosComputadoras(base);
     await guardarVehiculo({ ...abrir(), [campo]: valor }, A.deps);
     assert.equal(nube.leer('vehiculos/v1')[campo], valor, `${campo}: la edición no se quedó`);
   }
 });
 
-test('un campo que la pantalla deja vacío («») se guarda vacío: es el motivo que se borra, no «no sé»', async () => {
-  const { nube, A, abrir } = dosComputadoras({ ...carroPropio(), fueraDeServicio: true, motivoFueraDeServicio: 'Taller' });
-  await guardarVehiculo(construirHabilitado(abrir()), A.deps);
-  assert.equal(nube.leer('vehiculos/v1').motivoFueraDeServicio, '');
+test('un campo que la pantalla deja vacío («») se guarda vacío: el nombre de un color que se borra no es «no sé»', async () => {
+  const { nube, A, abrir } = dosComputadoras();
+  await guardarVehiculo({ ...abrir(), color: '' }, A.deps);
+  assert.equal(nube.leer('vehiculos/v1').color, '');
 });
 
 test('lo que la nube tiene y la pantalla no conoce se conserva (como con `merge`, que es lo que hacía antes)', async () => {
@@ -244,11 +347,10 @@ test('lo que la nube tiene y la pantalla no conoce se conserva (como con `merge`
 });
 
 test('un valor `undefined` en la copia de la pantalla significa «no sé», no «bórralo»: no pisa la nube ni llega a Firestore', async () => {
-  const { nube, A, abrir } = dosComputadoras({ ...carroPropio(), fueraDeServicio: true, motivoFueraDeServicio: 'Taller' });
-  await guardarVehiculo({ ...abrir(), fueraDeServicio: undefined, motivoFueraDeServicio: undefined, color: 'Rojo' }, A.deps);
+  const { nube, A, abrir } = dosComputadoras({ ...carroPropio(), dueno: 'Mario López' });
+  await guardarVehiculo({ ...abrir(), dueno: undefined, color: 'Rojo' }, A.deps);
   const enNube = nube.leer('vehiculos/v1');
-  assert.equal(enNube.fueraDeServicio, true);
-  assert.equal(enNube.motivoFueraDeServicio, 'Taller');
+  assert.equal(enNube.dueno, 'Mario López');
   assert.equal(enNube.color, 'Rojo');
 });
 
@@ -372,42 +474,84 @@ test('un alta con un campo en `undefined` lo deja fuera en vez de mandárselo a 
 // Qué es «del mantenimiento» (una sola lista, y que sea la verdad)
 // ---------------------------------------------------------------------------------------------------------------
 
-test('CAMPOS_DEL_MANTENIMIENTO son exactamente las llaves que tocan los tres cambios del mantenimiento — ni una más, ni una menos', () => {
-  const carro = carroPropio();
-  const conServicio = carroConServicio(carro, { id: 's-1', tipo: 'aceite', fecha: '2026-10-10', km: 15000 });
+/** Las llaves que cambian entre cada par `[antes, después]` (menos el sello, que sube con todo). */
+function llavesTocadas(pares) {
   const tocadas = new Set();
-  const comparar = (antes, despues) => {
+  for (const [antes, despues] of pares) {
     for (const llave of new Set([...Object.keys(antes), ...Object.keys(despues)])) {
       if (JSON.stringify(antes[llave]) !== JSON.stringify(despues[llave])) tocadas.add(llave);
     }
-  };
-  comparar(carro, conServicio);
-  comparar(conServicio, carroConServicioAnulado(conServicio, 's-1', HOY));
-  comparar(carro, carroConIntervalo(carro, 'aceite', { km: 7500, meses: 4 }));
-  assert.deepEqual([...tocadas].sort(), [...CAMPOS_DEL_MANTENIMIENTO].sort(),
-    'un campo nuevo del mantenimiento que no esté en la lista volvería a ser pisado por un guardado del carro entero');
+  }
+  tocadas.delete('actualizado');
+  return [...tocadas].sort();
+}
+
+test('CAMPOS_DEL_MANTENIMIENTO son exactamente las llaves que tocan los tres cambios del mantenimiento — ni una más, ni una menos', () => {
+  const carro = carroPropio();
+  const conServicio = carroConServicio(carro, { id: 's-1', tipo: 'aceite', fecha: '2026-10-10', km: 15000 });
+  assert.deepEqual(llavesTocadas([
+    [carro, conServicio],
+    [conServicio, carroConServicioAnulado(conServicio, 's-1', HOY)],
+    [carro, carroConIntervalo(carro, 'aceite', { km: 7500, meses: 4 })],
+  ]), [...CAMPOS_DEL_MANTENIMIENTO].sort(),
+  'un campo nuevo del mantenimiento que no esté en la lista volvería a ser pisado por un guardado de la ficha');
 });
 
-test('carroConLoDeLaFicha: lo del mantenimiento es de la nube; lo demás, de la pantalla; `undefined` no pisa; nada se muta', () => {
+test('CAMPOS_DE_LA_DISPONIBILIDAD son exactamente las llaves que tocan marcar y habilitar — y los dos grupos no se pisan', () => {
+  const carro = carroPropio();
+  const fuera = carroFueraDeServicio(carro, 'Golpe');
+  assert.deepEqual(llavesTocadas([[carro, fuera], [fuera, carroHabilitado(fuera)]]), [...CAMPOS_DE_LA_DISPONIBILIDAD].sort());
+  assert.deepEqual(CAMPOS_DEL_MANTENIMIENTO.filter((c) => CAMPOS_DE_LA_DISPONIBILIDAD.includes(c)), [], 'una llave con DOS dueños es una llave que nadie cuida');
+  assert.deepEqual([...CAMPOS_CON_SU_PROPIO_ESCRITOR].sort(), [...CAMPOS_DEL_MANTENIMIENTO, ...CAMPOS_DE_LA_DISPONIBILIDAD].sort());
+});
+
+test('todo escritor del carro que lee la nube dentro de la transacción está contado: hay cinco, y la ficha no es ninguno de ellos', () => {
+  // Si alguien agrega un sexto (`cambiarEnNubeYLocal('vehiculos', …)` en otra función), tiene que decidir de quién son SUS llaves y
+  // agregarlas a `CAMPOS_CON_SU_PROPIO_ESCRITOR`: si no, el guardado de la ficha las seguiría pisando desde una copia vieja.
+  const fuente = leerFuente('../js/datos.js');
+  const cuerpo = (nombre) => { const i = fuente.indexOf(`export async function ${nombre}(`); return fuente.slice(i, fuente.indexOf('\n}\n', i)); };
+  const escritores = [...fuente.matchAll(/^export async function (\w+)\(/gm)].map((m) => m[1])
+    .filter((nombre) => nombre !== 'guardarVehiculo') // la ficha también lee el carro dentro de la transacción, pero lo suyo es otro grupo de llaves
+    .filter((nombre) => cuerpo(nombre).includes("cambiarEnNubeYLocal('vehiculos'")).sort();
+  assert.deepEqual(escritores, [
+    'anularServicioDelCarro', 'cambiarIntervaloDelCarro', 'habilitarCarro', 'marcarCarroFueraDeServicio', 'registrarServicioDelCarro',
+  ]);
+  for (const nombre of escritores) {
+    assert.ok(!/guardarVehiculo\(|guardarLocal\(/.test(cuerpo(nombre)), `${nombre} reescribe el carro con la copia de la pantalla o toca la copia local suelta`);
+  }
+  assert.ok(cuerpo('guardarVehiculo').includes('carroConLoDeLaFicha('), 'y la ficha pasa por la función que deja lo ajeno como está');
+});
+
+test('carroConLoDeLaFicha: lo que tiene su propio escritor es de la nube; lo demás, de la pantalla; `undefined` no pisa; nada se muta', () => {
   const fresco = {
-    id: 'v1', codigo: 1, placas: 'P-1', color: 'Blanco', servicios: [{ id: 's-1' }], intervalos: { aceite: { km: 1, meses: 1 } }, soloNube: 1,
+    id: 'v1', codigo: 1, placas: 'P-1', color: 'Blanco', servicios: [{ id: 's-1' }], intervalos: { aceite: { km: 1, meses: 1 } },
+    fueraDeServicio: true, motivoFueraDeServicio: 'Taller', soloNube: 1,
   };
   const deLaFicha = {
-    id: 'v1', codigo: 1, placas: 'P-2', color: undefined, servicios: [], intervalos: {}, fueraDeServicio: true,
+    id: 'v1', codigo: 1, placas: 'P-2', color: undefined, servicios: [], intervalos: {}, fueraDeServicio: false, motivoFueraDeServicio: '', modelo: '2024',
   };
   const copiaFresco = structuredClone(fresco);
   const copiaFicha = structuredClone(deLaFicha);
   assert.deepEqual(carroConLoDeLaFicha(fresco, deLaFicha), {
-    id: 'v1', codigo: 1, placas: 'P-2', color: 'Blanco', servicios: [{ id: 's-1' }], intervalos: { aceite: { km: 1, meses: 1 } }, soloNube: 1, fueraDeServicio: true,
+    id: 'v1', codigo: 1, placas: 'P-2', color: 'Blanco', servicios: [{ id: 's-1' }], intervalos: { aceite: { km: 1, meses: 1 } },
+    fueraDeServicio: true, motivoFueraDeServicio: 'Taller', soloNube: 1, modelo: '2024',
   });
   assert.deepEqual(fresco, copiaFresco);
   assert.deepEqual(deLaFicha, copiaFicha);
   assert.deepEqual(carroConLoDeLaFicha(fresco, undefined), fresco, 'sin nada de la pantalla, la nube se queda como está');
   assert.notEqual(carroConLoDeLaFicha(fresco, undefined), fresco, 'y es una copia, no el mismo objeto');
-  // Sin mantenimiento en ninguno de los dos lados no se inventa la llave (Firestore no acepta `undefined`).
-  const sin = carroConLoDeLaFicha({ id: 'v1', placas: 'P-1' }, { id: 'v1', placas: 'P-2', servicios: [{ id: 'x' }] });
-  assert.equal('servicios' in sin, false);
-  assert.equal('intervalos' in sin, false);
+  // Sin esas llaves en ninguno de los dos lados no se inventan (Firestore no acepta `undefined`).
+  const sin = carroConLoDeLaFicha({ id: 'v1', placas: 'P-1' }, { id: 'v1', placas: 'P-2', servicios: [{ id: 'x' }], fueraDeServicio: true });
+  for (const llave of CAMPOS_CON_SU_PROPIO_ESCRITOR) assert.equal(llave in sin, false, llave);
+});
+
+test('carroFueraDeServicio y carroHabilitado: las dos marcas y nada más, sin tocar el carro recibido', () => {
+  const carro = carroPropio();
+  const copia = structuredClone(carro);
+  assert.deepEqual(carroFueraDeServicio(carro, '  Golpe  '), { ...carro, fueraDeServicio: true, motivoFueraDeServicio: 'Golpe' });
+  assert.deepEqual(carroHabilitado(carroFueraDeServicio(carro, 'Golpe')), { ...carro, fueraDeServicio: false, motivoFueraDeServicio: '' });
+  assert.deepEqual(carro, copia);
+  assert.throws(() => carroFueraDeServicio(carro, ''), { message: MENSAJE_FALTA_EL_MOTIVO });
 });
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -425,8 +569,8 @@ test('ninguna de las escrituras al carro lleva `undefined`: alta, guardar, marca
     id: undefined, codigo: undefined, placas: 'P-123ABC', tipo: 'Sedán', marca: 'Toyota', linea: 'Yaris', color: 'Blanco', modelo: '2022',
   })), deps);
   carro = await guardarDesdeElFormulario(carro, { color: 'Negro' }, deps);
-  carro = await guardarVehiculo(construirFueraDeServicio(carro, 'Taller'), deps);
-  carro = await guardarVehiculo(construirHabilitado(carro), deps);
+  carro = await marcarCarroFueraDeServicio(carro.id, 'Taller', deps);
+  carro = await habilitarCarro(carro.id, deps);
   carro = await registrarServicioDelCarro(carro.id, servicio({ km: null }), deps);
   carro = await anularServicioDelCarro(carro.id, 's-1', deps);
   carro = await cambiarIntervaloDelCarro(carro.id, 'aceite', { km: 7500, meses: 4 }, deps);
@@ -450,11 +594,14 @@ test('textoFalloAlGuardarElCarro: un carro que ya no está dice por qué; cualqu
   assert.equal(textoFalloAlGuardarElCarro(undefined, 'habilitar el carro'), 'No se pudo habilitar el carro. Intenta de nuevo.');
 });
 
-test('estructura: los cuatro guardados de carros.js usan los constructores exportados y el texto de fallo de la función pura', () => {
+test('estructura: la ficha guarda con guardarVehiculo y los botones del taller con sus escritores, con el texto de fallo de la función pura', () => {
   const codigo = leerFuente('../js/pantallas/carros.js').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
-  assert.match(codigo, /guardarVehiculo\(construirFueraDeServicio\(carro, motivoTrim\)\)/);
-  assert.equal([...codigo.matchAll(/guardarVehiculo\(construirHabilitado\(carro\)\)/g)].length, 2, 'la ficha y la ruta #/habilitar');
+  assert.equal([...codigo.matchAll(/\bguardarVehiculo\(/g)].length, 1, '«Guardar carro» es el ÚNICO que escribe la ficha');
   assert.match(codigo, /guardarVehiculo\(await alta\.paraGuardar\(vehiculo\)\)/);
+  assert.match(codigo, /await marcarCarroFueraDeServicio\(carro\.id, motivoTrim\)/);
+  assert.equal([...codigo.matchAll(/await habilitarCarro\(carro\.id\)/g)].length, 2, 'la ficha y la ruta #/habilitar');
+  assert.doesNotMatch(codigo, /fueraDeServicio: (true|false)|motivoFueraDeServicio:/, 'ninguna pantalla arma las marcas del taller: eso es del escritor');
+  assert.match(codigo, /aviso\(MENSAJE_FALTA_EL_MOTIVO, 'error'\)/, 'y el motivo obligatorio dice lo mismo en el botón y en el escritor');
   for (const queSeIntentaba of ['guardar el carro', 'marcar el carro', 'habilitar el carro']) {
     assert.ok(codigo.includes(`textoFalloAlGuardarElCarro(error, '${queSeIntentaba}')`), queSeIntentaba);
   }

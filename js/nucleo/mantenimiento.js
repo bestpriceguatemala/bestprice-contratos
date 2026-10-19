@@ -408,31 +408,14 @@ export function carroConIntervalo(carro, tipo, intervalo) {
  * `intervalos{}` (los que cambió el dueño en ese carro). Las escriben SOLO `carroConServicio`, `carroConServicioAnulado` y
  * `carroConIntervalo`, que `datos.js` aplica sobre el carro leído DENTRO de la transacción que lo escribe.
  *
- * Por qué hay una lista: un guardado del carro entero («Guardar carro», «Marcar fuera de servicio», «Volver a habilitar»)
- * parte de la copia que la pantalla tiene en memoria, y esa copia puede traer el historial de ayer. Esas llaves no son
- * suyas: el historial no se edita en ese formulario, así que no hay edición que proteger al dejarlas como la nube las tiene
- * y sí un historial entero que perder si se escriben. Si el mantenimiento llega a tener una llave más, va AQUÍ (una prueba
- * compara esta lista con lo que de verdad tocan los tres cambios de arriba, para que no se pueda olvidar).
+ * Por qué hay una lista: un guardado de la ficha del carro («Guardar carro») parte de la copia que la pantalla tiene en memoria,
+ * y esa copia puede traer el historial de ayer. Esas llaves no son suyas: el historial no se edita en ese formulario, así que no
+ * hay edición que proteger al dejarlas como la nube las tiene y sí un historial entero que perder si se escriben. Si el
+ * mantenimiento llega a tener una llave más, va AQUÍ (una prueba compara esta lista con lo que de verdad tocan los tres
+ * cambios de arriba, para que no se pueda olvidar). La regla de qué NO escribe la ficha, con las del taller incluidas, vive en
+ * `nucleo/carro.js` (`carroConLoDeLaFicha`).
  */
 export const CAMPOS_DEL_MANTENIMIENTO = Object.freeze(['servicios', 'intervalos']);
-
-/**
- * El carro como queda cuando un guardado del carro entero se aplica sobre lo que la nube tiene AHORA (`fresco`):
- *   - todo lo que la pantalla trae se escribe encima (lo que él teclea tiene que quedarse: el error de al revés, una edición
- *     que no se guarda, es tan invisible como el de perder el historial);
- *   - EXCEPTO el mantenimiento (`CAMPOS_DEL_MANTENIMIENTO`), que se queda como la nube lo tiene;
- *   - lo que la nube tiene y la pantalla no conoce, se conserva (como con `merge`, que es lo que se hacía antes);
- *   - un valor `undefined` en la pantalla es «no sé», no «bórralo»: no pisa nada (y Firestore no lo acepta).
- * `id` y `actualizado` los vuelve a sellar quien escribe (`cambiarEnNubeYLocal`). No toca ninguno de los dos objetos.
- */
-export function carroConLoDeLaFicha(fresco, deLaFicha) {
-  const carro = { ...fresco };
-  for (const [campo, valor] of Object.entries(deLaFicha ?? {})) {
-    if (valor === undefined || CAMPOS_DEL_MANTENIMIENTO.includes(campo)) continue;
-    carro[campo] = valor;
-  }
-  return carro;
-}
 
 // ---------------------------------------------------------------------------------------------------------------
 // ¿Toca? Cuánto falta, de cada lado, y cuál llega primero

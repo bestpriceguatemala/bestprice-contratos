@@ -12,9 +12,10 @@ import { estadoCarro } from '../nucleo/estados.js';
 import { avisoDeCarroRepetido } from '../nucleo/repetidos.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
-  cargarFlota, cargarContratosAbiertos, cargarTodosLosContratos, guardarVehiculo, altaConIdFijo, nuevoIdVehiculo,
-  CODIGO_DOCUMENTO_NO_ESTA,
+  cargarFlota, cargarContratosAbiertos, cargarTodosLosContratos, guardarVehiculo, marcarCarroFueraDeServicio, habilitarCarro,
+  altaConIdFijo, nuevoIdVehiculo, CODIGO_DOCUMENTO_NO_ESTA,
 } from '../datos.js';
+import { MENSAJE_FALTA_EL_MOTIVO } from '../nucleo/carro.js';
 import { aviso, htmlAvisoRepetido } from '../ui.js';
 import { pintarMantenimiento } from './mantenimiento.js';
 
@@ -24,11 +25,11 @@ import { pintarMantenimiento } from './mantenimiento.js';
  * entera, así que lo que no se copia aquí desaparece de la pantalla aunque
  * siga en la nube — por eso es crítico hacer un merge.
  *
- * Ojo con lo que este merge NO decide: `guardarVehiculo` (datos.js) de un carro que ya existe lee el
- * carro de la nube DENTRO de la transacción y le pone encima lo que este objeto trae, EXCEPTO `servicios[]` e
- * `intervalos{}`, que se quedan como la nube los tiene aunque este objeto traiga la lista de cuando se abrió la ficha.
- * Lo demás (placas, color, fueraDeServicio…) se escribe tal como llega aquí: es lo que el dueño acaba de hacer en esta
- * pantalla, y es lo que no debe quedarse sin guardar.
+ * Ojo con lo que este merge NO decide: `guardarVehiculo` (datos.js) de un carro que ya existe lee el carro de la nube DENTRO
+ * de la transacción y le pone encima lo que este objeto trae, EXCEPTO lo que tiene su propio escritor (`CAMPOS_CON_SU_PROPIO_ESCRITOR`,
+ * nucleo/carro.js): `servicios[]` e `intervalos{}` (el mantenimiento) y `fueraDeServicio` y `motivoFueraDeServicio` (el taller) se quedan
+ * como la nube los tiene aunque este objeto traiga los de cuando se abrió la ficha. Lo demás (placas, tipo, marca, línea, color, modelo)
+ * es lo que el dueño acaba de teclear en esta pantalla, y es lo que no debe quedarse sin guardar.
  */
 export function construirVehiculo(carroExistente, campos) {
   return {
@@ -37,30 +38,6 @@ export function construirVehiculo(carroExistente, campos) {
     ...campos,
     // Garantizar que propiedad sea siempre 'Propio' en esta pantalla
     propiedad: 'Propio',
-  };
-}
-
-/**
- * El carro tal como lo guarda «Marcar fuera de servicio»: el que la pantalla tiene, con las dos marcas puestas. Es un
- * constructor y no un literal dentro del botón para que las pruebas armen el carro con LA MISMA función que la pantalla
- * (un literal copiado en la prueba se desacuerda en silencio el día que el botón cambie).
- */
-export function construirFueraDeServicio(carro, motivo) {
-  return {
-    id: carro.id,
-    ...carro,
-    fueraDeServicio: true,
-    motivoFueraDeServicio: motivo,
-  };
-}
-
-/** El carro tal como lo guardan «Volver a habilitar» (ficha) y `#/habilitar/:id`: las dos marcas, quitadas. */
-export function construirHabilitado(carro) {
-  return {
-    id: carro.id,
-    ...carro,
-    fueraDeServicio: false,
-    motivoFueraDeServicio: '',
   };
 }
 
@@ -400,13 +377,13 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
 
     const motivoTrim = motivo.trim();
     if (!motivoTrim) {
-      aviso('Escribe un motivo para marcar el carro fuera de servicio.', 'error');
+      aviso(MENSAJE_FALTA_EL_MOTIVO, 'error');
       return;
     }
 
     el('frm-fuera').disabled = true;
     try {
-      await guardarVehiculo(construirFueraDeServicio(carro, motivoTrim));
+      await marcarCarroFueraDeServicio(carro.id, motivoTrim);
       aviso('Carro marcado fuera de servicio.', 'exito');
       location.hash = '#/carros';
     } catch (error) {
@@ -420,7 +397,7 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
   async function habilitar() {
     el('frm-habilitar').disabled = true;
     try {
-      await guardarVehiculo(construirHabilitado(carro));
+      await habilitarCarro(carro.id);
       aviso('Carro habilitado de nuevo.', 'exito');
       location.hash = '#/carros';
     } catch (error) {
@@ -483,7 +460,7 @@ async function habilitarDesdeFlota(contenedor, carroId) {
     }
 
     // Habilitar
-    await guardarVehiculo(construirHabilitado(carro));
+    await habilitarCarro(carro.id);
     aviso('Carro habilitado.', 'exito');
     location.hash = '#/carros';
   } catch (error) {

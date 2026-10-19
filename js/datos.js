@@ -20,8 +20,9 @@ import {
 } from './nucleo/liquidacion.js';
 import { estadoReserva } from './nucleo/reserva.js';
 import {
-  construirServicio, carroConServicio, carroConServicioAnulado, carroConIntervalo, carroConLoDeLaFicha,
+  construirServicio, carroConServicio, carroConServicioAnulado, carroConIntervalo,
 } from './nucleo/mantenimiento.js';
+import { carroConLoDeLaFicha, carroFueraDeServicio, carroHabilitado } from './nucleo/carro.js';
 import { resumen } from './nucleo/contrato.js';
 import { q, textoDosDecimales } from './nucleo/dinero.js';
 import { hoyISO } from './nucleo/fechas.js';
@@ -1172,29 +1173,30 @@ export async function siguienteCodigoCarro({ iniciar = iniciarFirebase } = {}) {
 }
 
 /**
- * Guarda un carro de la flota propia en la nube y refresca la copia local. Lo usan «Guardar carro», «Marcar fuera de
- * servicio», «Volver a habilitar» y `#/habilitar/:id`.
+ * Guarda la FICHA de un carro de la flota propia en la nube y refresca la copia local: lo que él teclea en «Guardar carro» (placas,
+ * tipo, marca, línea, color, modelo) y el alta de un carro nuevo. NO escribe lo que tiene su propio escritor —el mantenimiento
+ * (`servicios[]`, `intervalos{}`) ni la disponibilidad (`fueraDeServicio`, `motivoFueraDeServicio`), ver `nucleo/carro.js`—: eso lo
+ * escriben `registrarServicioDelCarro` y compañía, `marcarCarroFueraDeServicio` y `habilitarCarro`, cada uno leyendo el carro de la nube
+ * DENTRO de su transacción.
  *
- * **Un carro que YA existe** (trae su código) se guarda leyéndolo DENTRO de la transacción que lo escribe
- * (`cambiarEnNubeYLocal`) y poniéndole encima lo que la pantalla trae (`carroConLoDeLaFicha`), EXCEPTO el mantenimiento:
- * `servicios[]` e `intervalos{}` se quedan como la nube los tiene ahora. Antes se escribía la copia entera que la pantalla
- * tenía en memoria, y si otra computadora había anotado un servicio después de que ésta sincronizó, esa escritura devolvía el
- * historial a la lista de antes —en silencio, y con el `merge` ni siquiera se podía quitar un intervalo que otra computadora
- * había quitado—. Y la copia LOCAL, que se reemplaza entera, dejaba a la pantalla sin ver el servicio que acababan de anotar.
+ * **Un carro que YA existe** (trae su código) se guarda leyéndolo DENTRO de la transacción que lo escribe (`cambiarEnNubeYLocal`) y
+ * poniéndole encima lo que la pantalla trae (`carroConLoDeLaFicha`), menos lo ajeno. Antes se escribía la copia entera que la pantalla
+ * tenía en memoria, y si otra computadora había anotado un servicio —o mandado el carro al taller— después de que ésta sincronizó, esa
+ * escritura devolvía el historial a la lista de antes y el carro del taller a «disponible», en silencio; con el `merge` ni siquiera se
+ * podía quitar un intervalo que otra computadora había quitado. Y la copia LOCAL, que se reemplaza entera, dejaba a la pantalla sin ver
+ * lo que acababan de anotar.
  *
- * Por qué se mezcla y no se niega (como `guardarContrato` con `CODIGO_COPIA_VIEJA`): aquello se niega porque dos listas de
- * pagos no se pueden mezclar sin adivinar —un pago que está en las dos se contaría doble—. Aquí no hay nada que adivinar: este
- * guardado no edita el historial, así que la lista de la nube es la buena por construcción. Y negarse por el sello
- * `actualizado` sería negarse por nada: cada servicio que se anota lo sube, así que el guardado de un color rechazaría a
- * cualquiera que hubiera anotado un servicio en la otra computadora, y «recarga y vuelve a hacerlo» aprende a ignorarse. Lo
- * que SÍ queda es lo de siempre para los campos sueltos (placas, color, si está fuera de servicio…): quien guarda de último gana
- * sobre lo que su pantalla trae, y si dos computadoras cambian el mismo campo a la vez se queda el de la última.
+ * Por qué se mezcla y no se niega (como `guardarContrato` con `CODIGO_COPIA_VIEJA`): aquello se niega porque dos listas de pagos no se
+ * pueden mezclar sin adivinar —un pago que está en las dos se contaría doble—. Aquí no hay nada que adivinar: este guardado no edita
+ * ni el historial ni el taller, así que lo de la nube es lo bueno por construcción. Y negarse por el sello `actualizado` sería negarse
+ * por nada: cada servicio que se anota lo sube, así que guardar un color rechazaría a cualquiera que hubiera anotado un servicio en la otra
+ * computadora, y «recarga y vuelve a hacerlo» aprende a ignorarse. Lo que SÍ queda es «quien guarda de último gana» en los campos
+ * que la ficha sí escribe (placas, color…): un color que se pisa es un color.
  *
  * **Un carro nuevo** no tiene nada que leer: trae su `id` (`nuevoIdVehiculo()`, pedido antes del primer intento) y no trae
  * código; se escribe con `setDoc` como siempre, con el código del contador. Si el primer intento vence pero sí llegó, el
- * reintento cae en el mismo documento (`merge` no manda `servicios`, así que tampoco toca el mantenimiento que ya tuviera).
- * El código correlativo se pide en cada intento, así que ese reintento gasta otro y deja un hueco en la numeración (se
- * explica; un carro repetido, no).
+ * reintento cae en el mismo documento (`merge` no manda lo ajeno, así que tampoco lo toca). El código correlativo se pide en cada
+ * intento, así que ese reintento gasta otro y deja un hueco en la numeración (se explica; un carro repetido, no).
  */
 export async function guardarVehiculo(vehiculo, deps = {}) {
   // Antes de gastar un código: un alta sin id no se puede repetir sin duplicarse (ver `guardarCliente`).
@@ -1203,9 +1205,9 @@ export async function guardarVehiculo(vehiculo, deps = {}) {
     return cambiarEnNubeYLocal('vehiculos', vehiculo.id, (fresco) => carroConLoDeLaFicha(fresco, vehiculo), deps);
   }
   const codigo = await siguienteCodigoCarro({ iniciar: deps.iniciar });
-  // `carroConLoDeLaFicha({}, …)`: un alta no escribe mantenimiento (un carro nuevo no tiene historial) y la regla vale para
-  // TODO guardado del carro, no solo para el que trae código: un carro que ya existía pero llegó sin él no puede devolver su
-  // historial a una lista vieja por haber entrado por aquí. De paso, ningún `undefined` llega a Firestore.
+  // `carroConLoDeLaFicha({}, …)`: un alta no escribe lo ajeno (un carro nuevo no tiene historial ni está en el taller) y la regla vale
+  // para TODO guardado de la ficha, no solo para el que trae código: un carro que ya existía pero llegó sin él no puede devolver su
+  // historial a una lista vieja ni volver a «disponible» por haber entrado por aquí. De paso, ningún `undefined` llega a Firestore.
   return guardarEnNubeYLocal('vehiculos', vehiculo, (id) => ({
     ...carroConLoDeLaFicha({}, vehiculo), id, codigo, actualizado: Date.now(),
   }), deps);
@@ -1295,6 +1297,20 @@ export async function anularServicioDelCarro(carroId, servicioId, { fecha = hoyI
 /** Cambia los intervalos de un servicio en este carro, o los devuelve a los de siempre con `intervalo` en `null`. */
 export async function cambiarIntervaloDelCarro(carroId, tipo, intervalo, deps) {
   return cambiarEnNubeYLocal('vehiculos', carroId, (carro) => carroConIntervalo(carro, tipo, intervalo), deps);
+}
+
+/**
+ * «Marcar fuera de servicio»: escribe SOLO las dos marcas del taller (`fueraDeServicio` y `motivoFueraDeServicio`) sobre el carro que la nube
+ * tiene ahora, no sobre la copia de la pantalla. Así, mandar un carro al taller desde una ficha vieja no devuelve el color, las placas ni el
+ * historial a como estaban cuando se abrió la ficha. El motivo es obligatorio (`carroFueraDeServicio`).
+ */
+export async function marcarCarroFueraDeServicio(carroId, motivo, deps) {
+  return cambiarEnNubeYLocal('vehiculos', carroId, (carro) => carroFueraDeServicio(carro, motivo), deps);
+}
+
+/** «Volver a habilitar» (la ficha y `#/habilitar/:id`): quita SOLO las dos marcas del taller, sobre el carro que la nube tiene ahora. */
+export async function habilitarCarro(carroId, deps) {
+  return cambiarEnNubeYLocal('vehiculos', carroId, (carro) => carroHabilitado(carro), deps);
 }
 
 /**

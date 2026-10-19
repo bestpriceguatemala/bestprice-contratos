@@ -683,12 +683,14 @@ test('H-2: el carro nuevo reintentado cae en el mismo documento; el código corr
 
 test('estructura: cada pantalla que da de alta guarda con el id decidido de antemano (`altaConIdFijo`) y lo suelta al terminar', () => {
   // [archivo, guardado, función que acuña, llamadas en total, de ellas, altas que pasan por paraGuardar()]
-  // Las que sobran son EDICIONES de algo que ya existe y ya traen su id (carros: marcar fuera de servicio, habilitar).
+  // Las que sobran son EDICIONES de algo que ya existe y ya traen su id. En carros ya no sobra ninguna (19 oct 2026): «Marcar fuera de
+  // servicio» y «Volver a habilitar» dejaron de pasar por `guardarVehiculo` y tienen su propio escritor (`marcarCarroFueraDeServicio`,
+  // `habilitarCarro`: escriben solo las dos marcas del taller), así que todas las llamadas que quedan son altas.
   const sitios = [
     ['reservas', 'guardarReserva', 'nuevoIdReserva', 1, 1],
     ['clientes', 'guardarCliente', 'nuevoIdCliente', 1, 1],
     ['duenos', 'guardarDueno', 'nuevoIdDueno', 1, 1],
-    ['carros', 'guardarVehiculo', 'nuevoIdVehiculo', 4, 1],
+    ['carros', 'guardarVehiculo', 'nuevoIdVehiculo', 1, 1],
     ['sacarCarro', 'guardarCliente', 'nuevoIdCliente', 1, 1],
     ['sacarCarro', 'guardarDueno', 'nuevoIdDueno', 1, 1],
     ['dinero', 'guardarDueno', 'nuevoIdDueno', 1, 1],
