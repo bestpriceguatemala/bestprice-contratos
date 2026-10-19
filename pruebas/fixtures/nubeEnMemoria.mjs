@@ -8,6 +8,17 @@
 // escribir dentro de una transacción es un error, como en el SDK). Estas pruebas NO prueban
 // a Firebase.
 
+/**
+ * Dónde hay un valor `undefined` dentro de lo que se va a escribir (`[]` si en ninguna parte), con el camino de cada uno.
+ * Firestore de verdad lo rechaza en cualquier nivel, también dentro de arreglos y mapas.
+ */
+export function valoresIndefinidos(valor, camino = '') {
+  if (valor === undefined) return [camino || '(la raíz)'];
+  if (valor === null || typeof valor !== 'object') return [];
+  if (Array.isArray(valor)) return valor.flatMap((x, i) => valoresIndefinidos(x, `${camino}[${i}]`));
+  return Object.entries(valor).flatMap(([llave, x]) => valoresIndefinidos(x, camino ? `${camino}.${llave}` : llave));
+}
+
 const sinId = ({ id: _id, ...resto }) => resto;
 
 const BORRAR = Symbol('deleteField');

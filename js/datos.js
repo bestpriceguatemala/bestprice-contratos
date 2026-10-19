@@ -20,7 +20,7 @@ import {
 } from './nucleo/liquidacion.js';
 import { estadoReserva } from './nucleo/reserva.js';
 import {
-  construirServicio, carroConServicio, carroConServicioAnulado, carroConIntervalo,
+  construirServicio, carroConServicio, carroConServicioAnulado, carroConIntervalo, carroConLoDeLaFicha,
 } from './nucleo/mantenimiento.js';
 import { resumen } from './nucleo/contrato.js';
 import { q, textoDosDecimales } from './nucleo/dinero.js';
@@ -1172,23 +1172,37 @@ export async function siguienteCodigoCarro({ iniciar = iniciarFirebase } = {}) {
 }
 
 /**
- * Guarda un carro de la flota propia en la nube y refresca la copia local.
- * Mismo patrón que `guardarContrato()`: si no trae código todavía (alta
- * nueva) lo toma de `siguienteCodigoCarro()`; si ya lo trae (edición de un
- * carro existente) se respeta ese mismo código en vez de gastar uno nuevo.
- * `vehiculo.id`, si viene, hace que se edite ese mismo documento en vez de
- * crear uno — así "marcar fuera de servicio" y "volver a habilitar" (que
- * llaman a esto de nuevo sobre un carro ya dado de alta) actualizan el carro
- * que ya existe. **Un carro nuevo trae su `id`** (`nuevoIdVehiculo()`, pedido antes
- * del primer intento): si el primer intento vence pero sí llegó, el reintento cae en
- * el mismo documento. El código correlativo se pide en cada intento, así que ese
- * reintento gasta otro y deja un hueco en la numeración (se explica; un carro
- * repetido, no).
+ * Guarda un carro de la flota propia en la nube y refresca la copia local. Lo usan «Guardar carro», «Marcar fuera de
+ * servicio», «Volver a habilitar» y `#/habilitar/:id`.
+ *
+ * **Un carro que YA existe** (trae su código) se guarda leyéndolo DENTRO de la transacción que lo escribe
+ * (`cambiarEnNubeYLocal`) y poniéndole encima lo que la pantalla trae (`carroConLoDeLaFicha`), EXCEPTO el mantenimiento:
+ * `servicios[]` e `intervalos{}` se quedan como la nube los tiene ahora. Antes se escribía la copia entera que la pantalla
+ * tenía en memoria, y si otra computadora había anotado un servicio después de que ésta sincronizó, esa escritura devolvía el
+ * historial a la lista de antes —en silencio, y con el `merge` ni siquiera se podía quitar un intervalo que otra computadora
+ * había quitado—. Y la copia LOCAL, que se reemplaza entera, dejaba a la pantalla sin ver el servicio que acababan de anotar.
+ *
+ * Por qué se mezcla y no se niega (como `guardarContrato` con `CODIGO_COPIA_VIEJA`): aquello se niega porque dos listas de
+ * pagos no se pueden mezclar sin adivinar —un pago que está en las dos se contaría doble—. Aquí no hay nada que adivinar: este
+ * guardado no edita el historial, así que la lista de la nube es la buena por construcción. Y negarse por el sello
+ * `actualizado` sería negarse por nada: cada servicio que se anota lo sube, así que el guardado de un color rechazaría a
+ * cualquiera que hubiera anotado un servicio en la otra computadora, y «recarga y vuelve a hacerlo» aprende a ignorarse. Lo
+ * que SÍ queda es lo de siempre para los campos sueltos (placas, color, si está fuera de servicio…): quien guarda de último gana
+ * sobre lo que su pantalla trae, y si dos computadoras cambian el mismo campo a la vez se queda el de la última.
+ *
+ * **Un carro nuevo** no tiene nada que leer: trae su `id` (`nuevoIdVehiculo()`, pedido antes del primer intento) y no trae
+ * código; se escribe con `setDoc` como siempre, con el código del contador. Si el primer intento vence pero sí llegó, el
+ * reintento cae en el mismo documento (`merge` no manda `servicios`, así que tampoco toca el mantenimiento que ya tuviera).
+ * El código correlativo se pide en cada intento, así que ese reintento gasta otro y deja un hueco en la numeración (se
+ * explica; un carro repetido, no).
  */
 export async function guardarVehiculo(vehiculo, deps = {}) {
   // Antes de gastar un código: un alta sin id no se puede repetir sin duplicarse (ver `guardarCliente`).
   exigirId(vehiculo);
-  const codigo = vehiculo?.codigo || (await siguienteCodigoCarro({ iniciar: deps.iniciar }));
+  if (vehiculo.codigo) {
+    return cambiarEnNubeYLocal('vehiculos', vehiculo.id, (fresco) => carroConLoDeLaFicha(fresco, vehiculo), deps);
+  }
+  const codigo = await siguienteCodigoCarro({ iniciar: deps.iniciar });
   return guardarEnNubeYLocal('vehiculos', vehiculo, (id) => ({ ...vehiculo, id, codigo, actualizado: Date.now() }), deps);
 }
 

@@ -13,6 +13,7 @@ import { avisoDeCarroRepetido } from '../nucleo/repetidos.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
   cargarFlota, cargarContratosAbiertos, cargarTodosLosContratos, guardarVehiculo, altaConIdFijo, nuevoIdVehiculo,
+  CODIGO_DOCUMENTO_NO_ESTA,
 } from '../datos.js';
 import { aviso, htmlAvisoRepetido } from '../ui.js';
 import { pintarMantenimiento } from './mantenimiento.js';
@@ -55,6 +56,16 @@ export function construirHabilitado(carro) {
     fueraDeServicio: false,
     motivoFueraDeServicio: '',
   };
+}
+
+/**
+ * Lo que se le dice al dueño cuando un guardado del carro no salió. Un carro que ya no está en la flota (alguien lo quitó
+ * mientras la ficha estaba abierta) trae su propia frase, porque «intenta de nuevo» no sirve: la copia de la pantalla sigue
+ * apuntando a un carro que no existe. Función pura.
+ */
+export function textoFalloAlGuardarElCarro(error, queSeIntentaba) {
+  if (error?.codigo === CODIGO_DOCUMENTO_NO_ESTA) return error.message;
+  return `No se pudo ${queSeIntentaba}. Intenta de nuevo.`;
 }
 
 // El texto libre que escribe el usuario se escapa antes de entrar al HTML
@@ -370,7 +381,7 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
       aviso(`Carro ${guardado.codigo} guardado.`, 'exito');
       location.hash = '#/carros';
     } catch (error) {
-      aviso('No se pudo guardar el carro. Intenta de nuevo.', 'error');
+      aviso(textoFalloAlGuardarElCarro(error, 'guardar el carro'), 'error');
       console.error(error);
     } finally {
       el('frm-guardar').disabled = false;
@@ -393,7 +404,7 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
       aviso('Carro marcado fuera de servicio.', 'exito');
       location.hash = '#/carros';
     } catch (error) {
-      aviso('No se pudo marcar el carro. Intenta de nuevo.', 'error');
+      aviso(textoFalloAlGuardarElCarro(error, 'marcar el carro'), 'error');
       console.error(error);
     } finally {
       el('frm-fuera').disabled = false;
@@ -407,7 +418,7 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
       aviso('Carro habilitado de nuevo.', 'exito');
       location.hash = '#/carros';
     } catch (error) {
-      aviso('No se pudo habilitar el carro. Intenta de nuevo.', 'error');
+      aviso(textoFalloAlGuardarElCarro(error, 'habilitar el carro'), 'error');
       console.error(error);
     } finally {
       el('frm-habilitar').disabled = false;
@@ -470,7 +481,7 @@ async function habilitarDesdeFlota(contenedor, carroId) {
     aviso('Carro habilitado.', 'exito');
     location.hash = '#/carros';
   } catch (error) {
-    aviso('No se pudo habilitar el carro. Intenta de nuevo.', 'error');
+    aviso(textoFalloAlGuardarElCarro(error, 'habilitar el carro'), 'error');
     console.error(error);
     location.hash = '#/carros';
   }
