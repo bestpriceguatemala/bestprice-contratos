@@ -12,6 +12,8 @@ import { leerZip, escribirZip } from '../js/respaldo/zip.js';
 import { hojasDelLibro, xmlDe, ponerXml } from '../js/respaldo/libro.js';
 import { abrirLibro, leerPlantilla } from './fixtures/leerLibro.mjs';
 import * as F from './fixtures/datosParaRespaldo.mjs';
+import { construirCierre } from '../js/nucleo/cierre.js';
+import { yaVolvio } from '../js/nucleo/estados.js';
 
 const armar = (cambios = {}) => armarRespaldo({
   plantilla: leerPlantilla(),
@@ -201,6 +203,87 @@ test('CONTRATOS: un contrato todavía afuera no trae nada de lo que se llena al 
   assert.equal(libro.texto('CONTRATOS', `AC${f}`), 'Lleno');
   assert.equal(libro.numero('CONTRATOS', `AD${f}`), fraccionDeHora('09:30'));
   assert.equal(libro.texto('CONTRATOS', `BZ${f}`), 'EFECTIVO');
+});
+
+// ---------------------------------------------------------------------------
+// AF «HORA ENTRADA» y AG «LUGAR ENTRADA» (decisión del dueño, 16 de octubre de 2026):
+// «El lugar siempre va a ser en la oficina. La hora es lo que importa porque si se pasa de la hora yo decido cuánto le cobro.»
+// En su hoja se llenan al salir con la hora que se espera; el respaldo lleva la REAL, la de `cierre.horaReal`.
+// ---------------------------------------------------------------------------
+
+/** Un solo contrato en el archivo, y la celda de una columna de su fila (la primera de datos: la 6). */
+const soloEste = async (contrato) => {
+  const r = await armar({ contratos: [contrato] });
+  const libro = await abrirLibro(r.bytes);
+  return { libro, xml: libro.xml('CONTRATOS'), avisos: r.avisos };
+};
+/** Una renta que sigue afuera (la 101), recibida de verdad con los campos que se le den: el cierre sale del constructor del sistema. */
+const recibida = (campos) => construirCierre(F.rentadoAlDia(), campos);
+
+test('AF HORA ENTRADA lleva la hora REAL de regreso de cada contrato, no la de salida, y las rentas que siguen afuera la dejan vacía', async () => {
+  const { libro } = await respaldo();
+  for (const c of F.contratosDe2026()) {
+    const esperada = yaVolvio(c) ? fraccionDeHora(c.cierre.horaReal) : null;
+    assert.equal(libro.numero('CONTRATOS', `AF${fila(c.numero)}`), esperada, `contrato ${c.numero}`);
+  }
+  // el contrato que sale a las 15:00 y regresa a las 11:15: el archivo dice 11:15
+  const f = fila(102);
+  assert.equal(libro.numero('CONTRATOS', `AD${f}`), fraccionDeHora('15:00'));
+  assert.equal(libro.numero('CONTRATOS', `AF${f}`), fraccionDeHora('11:15'));
+  // y el que sigue afuera tiene hora de salida (09:30) pero ninguna de entrada
+  assert.equal(libro.numero('CONTRATOS', `AD${fila(101)}`), fraccionDeHora('09:30'));
+  assert.equal(libro.numero('CONTRATOS', `AF${fila(101)}`), null);
+  // y todo contrato que regresó trae su hora (los demás no tienen hora de salida, así que una copia de ella saldría vacía)
+  for (const n of [103, 104, 105, 106, 107, 108]) assert.notEqual(libro.numero('CONTRATOS', `AF${fila(n)}`), null, `contrato ${n}`);
+});
+
+test('AF: una renta recibida SIN hora real (en blanco, o de antes de que se pidiera) queda VACÍA: ni un cero, ni la hora de salida, ni un aviso', async () => {
+  const enBlanco = recibida({ fechaReal: '2026-10-12', horaReal: '', kmEntrada: 45500 });
+  const anterior = recibida({ fechaReal: '2026-10-12', kmEntrada: 45500 });
+  assert.equal('horaReal' in anterior.cierre, false, 'el cierre de antes de que existiera el campo no lo trae');
+  for (const [nombre, contrato] of [['en blanco', enBlanco], ['sin el campo', anterior]]) {
+    const { libro, xml, avisos } = await soloEste(contrato);
+    assert.equal(libro.numero('CONTRATOS', 'AD6'), fraccionDeHora('09:30'), `${nombre}: la hora de salida sí está`);
+    assert.equal(libro.numero('CONTRATOS', 'AF6'), null, nombre);
+    assert.match(xml, /<c r="AF6" s="\d+"\/>/, `${nombre}: la celda queda vacía, sin <v>`);
+    assert.deepEqual(avisos.filter((a) => /hora/i.test(a)), [], `${nombre}: no es un problema que haya que gritar`);
+  }
+});
+
+test('AF: las 00:00 SON una hora (se escribe el cero de Excel); vacío es vacío — no se confunden', async () => {
+  const { libro, xml } = await soloEste(recibida({ fechaReal: '2026-10-12', horaReal: '00:00', kmEntrada: 45500 }));
+  assert.equal(libro.numero('CONTRATOS', 'AF6'), 0);
+  assert.match(xml, /<c r="AF6" s="\d+"><v>0<\/v><\/c>/);
+});
+
+test('AF: una hora que no se entiende (guardada a mano o por otra vía) queda VACÍA y se dice — nunca un cero que se lea como medianoche', async () => {
+  for (const mala of ['25:99', '9am', '1030']) {
+    const { libro, xml, avisos } = await soloEste(recibida({ fechaReal: '2026-10-12', horaReal: mala, kmEntrada: 45500 }));
+    assert.equal(libro.numero('CONTRATOS', 'AF6'), null, mala);
+    assert.match(xml, /<c r="AF6" s="\d+"\/>/, mala);
+    assert.ok(avisos.some((a) => a.includes(`«${mala}»`) && /no se entiende/.test(a)), `${mala}: ${avisos.join(' | ')}`);
+  }
+});
+
+test('AF y AG solo se llenan cuando el carro YA VOLVIÓ: una hora o un lugar sueltos en un cierre sin fecha de regreso no cuentan', async () => {
+  const suelto = recibida({ horaReal: '10:30', lugarEntrada: 'Oficina' });
+  assert.equal(yaVolvio(suelto), false);
+  const { libro } = await soloEste(suelto);
+  assert.deepEqual(Object.values(libro.textos('CONTRATOS', ['AF6', 'AG6', 'BG6'])), [null, null, null]);
+  // el mismo contrato, ya con su fecha de regreso, sí los lleva
+  const volvio = await soloEste(recibida({ fechaReal: '2026-10-12', horaReal: '10:30', lugarEntrada: 'Oficina', kmEntrada: 45500 }));
+  assert.equal(volvio.libro.numero('CONTRATOS', 'AF6'), fraccionDeHora('10:30'));
+  assert.equal(volvio.libro.texto('CONTRATOS', 'AG6'), 'Oficina');
+});
+
+test('AG LUGAR ENTRADA es el lugar anotado al RECIBIR, no el de salida: el contrato que salió del aeropuerto regresa a la oficina', async () => {
+  const { libro } = await respaldo();
+  const f = fila(102);
+  assert.equal(libro.texto('CONTRATOS', `AE${f}`), 'Aeropuerto');
+  assert.equal(libro.texto('CONTRATOS', `AG${f}`), 'Oficina');
+  // el que sigue afuera tiene lugar de salida y ninguno de entrada: la columna no se rellena con «lo que más se le parece»
+  assert.equal(libro.texto('CONTRATOS', `AE${fila(101)}`), 'Oficina');
+  assert.equal(libro.texto('CONTRATOS', `AG${fila(101)}`), null);
 });
 
 test('CONTRATOS: el nombre del cliente se escribe como lo escribe su hoja (apellidos primero)', async () => {

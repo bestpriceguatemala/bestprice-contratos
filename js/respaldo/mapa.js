@@ -13,7 +13,7 @@ import {
   q, suma, recargoTarjeta, textoConQ,
 } from '../nucleo/dinero.js';
 import { lineasSalida, horaTardiaDe, resumen } from '../nucleo/contrato.js';
-import { garantiaPorLiberar } from '../nucleo/estados.js';
+import { garantiaPorLiberar, yaVolvio } from '../nucleo/estados.js';
 import { nombresResueltos } from '../nucleo/cliente.js';
 import { pagoAnulado } from '../nucleo/liquidacion.js';
 import { serialDeFecha, fraccionDeHora } from './hojas.js';
@@ -329,6 +329,8 @@ function armarContrato(c, fila, { codigoDeCliente, clientePorId, codigoDeCarro, 
   const [t1, t2] = [tarjeta(0), tarjeta(1)];
   const horaTardia = horaTardiaDe(c);
   const renta = lineasSalida(c).find((l) => l.concepto === 'Renta')?.monto ?? 0;
+  // Lo anotado al recibir, o nada si el carro sigue afuera (ver AF y AG más abajo).
+  const alRegresar = yaVolvio(c) ? cierre : null;
 
   const clienteCodigo = codigoDeCliente.get(c.clienteId);
   if (!clienteCodigo) avisos.push(`Contrato ${c.numero}: su cliente (${aTexto(c.clienteNombre) ?? 'sin nombre'}) no entró a la hoja CLIENTES; el contrato queda con el nombre, sin código de cliente.`);
@@ -366,8 +368,14 @@ function armarContrato(c, fila, { codigoDeCliente, clientePorId, codigoDeCarro, 
     AC: aTexto(c.combustibleSalida),
     AD: { hora: c.horaSalida },
     AE: aTexto(c.lugar),
-    AF: { hora: cierre?.horaReal },
-    AG: aTexto(cierre?.lugarEntrada),
+    // AF y AG llevan lo que se anotó al RECIBIR el carro (`cierre`), y solo cuando el carro ya volvió (`yaVolvio`, la única
+    // marca de un regreso). En su hoja esas dos columnas se llenan al SALIR, con la hora que se espera; el sistema no guarda una
+    // hora prevista de entrada y sí la real, y la real es la que importa. Decisión del dueño, 16 de octubre de 2026:
+    // «El lugar siempre va a ser en la oficina. La hora es lo que importa porque si se pasa de la hora yo decido cuánto le cobro.»
+    // Una renta que todavía no regresa no tiene hora real: AF queda VACÍA, no se rellena con la hora de salida ni con nada que
+    // se le parezca (un cero ahí se leería como las 12 de la noche). AG es el lugar anotado al recibir; tampoco se inventa.
+    AF: { hora: alRegresar?.horaReal },
+    AG: aTexto(alRegresar?.lugarEntrada),
     AH: aMonto(horaTardia.alSalir + horaTardia.alRecibir),
     AL: aTexto(c.rentadoPor),
     AM: aMonto(c.seguroMenoresDia),

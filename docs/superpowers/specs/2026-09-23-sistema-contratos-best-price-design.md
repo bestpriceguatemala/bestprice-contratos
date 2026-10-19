@@ -1379,6 +1379,22 @@ alternativas están en `docs/adr/ADR-004-el-respaldo-parcha-su-excel-sin-libreri
   el mantenimiento** (los servicios de cada carro, `servicios[]`, ni sus intervalos): su hoja
   VEHICULOS no tiene dónde guardarlos. Esa lista sale de `js/respaldo/mapa.js`, que no se tocó al
   construir el mantenimiento (era de otro trabajo): falta agregarle una línea.
+- **La hora y el lugar de entrada (columnas AF y AG): la hora REAL.** Decisión del dueño del
+  16 de octubre de 2026: *«El lugar siempre va a ser en la oficina. La hora es lo que importa
+  porque si se pasa de la hora yo decido cuánto le cobro.»* En su hoja esas dos columnas se llenan
+  **al salir el carro**, con la hora que se espera; el sistema no guarda una hora prevista de
+  entrada, pero sí la real, que es la que sirve para decidir el cobro. Por eso `AF HORA ENTRADA`
+  lleva `cierre.horaReal` (§7b, «Del cierre») y `AG LUGAR ENTRADA` lleva `cierre.lugarEntrada`, lo
+  anotado al recibir el carro. Hasta ese día estaban mapeadas «por parecido de nombre, a confirmar
+  con él»; ya no son pregunta. Las dos se llenan **solo cuando el carro ya volvió**
+  (`cierre.fechaReal`, la única marca de un regreso): un contrato que todavía no se recibe no tiene
+  hora real y AF queda **vacía**, igual que una renta recibida sin que se anotara la hora o de
+  antes de que se pidiera. Nunca se rellena con la hora de salida ni con un cero (las 00:00 sí se
+  escriben: son una hora). AG tampoco se escribe como un «OFICINA» fijo: si la oficina es siempre
+  el lugar, lo anotado al recibir ya lo dice, y un valor puesto por el respaldo taparía el día que
+  no fuera así. Una consecuencia que hay que saber: en las filas que el respaldo escribe AF es la
+  hora **real**, y en las que él agregue a mano con su método de siempre seguirá siendo la que
+  esperaba; son dos cosas distintas en la misma columna.
 - **Los totales son los de su hoja, no los del sistema.** El respaldo no escribe
   ningún total: SUBTOTAL, TOTAL COBRADO y UTILIDAD son sus fórmulas, que siguen en el
   archivo y se calculan al abrirlo. Sus fórmulas suman todo lo que el sistema cobra
