@@ -1639,15 +1639,41 @@ test('tarjetasParaImprimir lleva una por cada tarjeta que SÍ queda en el contra
   assert.deepEqual(tarjetasParaImprimir([{ ultimos4: '3343' }], undefined), [{ numero: '', cbc: '' }]);
 });
 
-test('destinoDespuesDeGuardar: con número o CBC se va a imprimir ESE contrato; sin ellos, a la flota como siempre; si ya no está en la pantalla, no se lleva a nadie', () => {
+test('destinoDespuesDeGuardar: guardar una salida SIEMPRE lleva a imprimir ESE contrato, haya tarjeta, solo CBC o ninguna (decisión del dueño, 16 de octubre de 2026)', () => {
   const con = [{ numero: T1.numero, cbc: '' }];
   assert.deepEqual(destinoDespuesDeGuardar({ contratoId: 'c9', tarjetas: con, sigueAqui: true }), { ruta: '#/imprimir/c9', llevaTarjetas: true });
-  assert.equal(destinoDespuesDeGuardar({ contratoId: 'c9', tarjetas: [{ numero: '', cbc: '827' }], sigueAqui: true }).ruta, '#/imprimir/c9', 'solo el CBC también cuenta');
-  for (const tarjetas of [[], undefined, [{ numero: '', cbc: '' }]]) {
-    assert.deepEqual(destinoDespuesDeGuardar({ contratoId: 'c9', tarjetas, sigueAqui: true }), { ruta: '#/flota', llevaTarjetas: false });
+  assert.deepEqual(destinoDespuesDeGuardar({ contratoId: 'c9', tarjetas: [{ numero: '', cbc: '827' }], sigueAqui: true }), { ruta: '#/imprimir/c9', llevaTarjetas: true }, 'solo el CBC también cuenta');
+  // la renta en efectivo (o sin nada tecleado en las cajas): ANTES iba a la flota; ahora va a imprimir, pero NO lleva tarjetas
+  for (const tarjetas of [[], undefined, [{ numero: '', cbc: '' }], [{ numero: '', cbc: '' }, { numero: '', cbc: '' }]]) {
+    assert.deepEqual(destinoDespuesDeGuardar({ contratoId: 'c9', tarjetas, sigueAqui: true }), { ruta: '#/imprimir/c9', llevaTarjetas: false }, JSON.stringify(tarjetas));
   }
+});
+
+test('destinoDespuesDeGuardar: si la pantalla ya no está a la vista, o no hay id de contrato, no se lleva a imprimir ni se lleva tarjeta (la flota de siempre)', () => {
+  const con = [{ numero: T1.numero, cbc: '' }];
   assert.deepEqual(destinoDespuesDeGuardar({ contratoId: 'c9', tarjetas: con, sigueAqui: false }), { ruta: '#/flota', llevaTarjetas: false });
-  assert.deepEqual(destinoDespuesDeGuardar({ contratoId: '', tarjetas: con, sigueAqui: true }), { ruta: '#/flota', llevaTarjetas: false });
+  assert.deepEqual(destinoDespuesDeGuardar({ contratoId: 'c9', tarjetas: [], sigueAqui: false }), { ruta: '#/flota', llevaTarjetas: false }, 'sin tarjeta tampoco: la guarda es de la pantalla, no de la tarjeta');
+  assert.deepEqual(destinoDespuesDeGuardar({ contratoId: 'c9', tarjetas: con, sigueAqui: undefined }), { ruta: '#/flota', llevaTarjetas: false });
+  for (const contratoId of ['', null, undefined]) {
+    assert.deepEqual(destinoDespuesDeGuardar({ contratoId, tarjetas: con, sigueAqui: true }), { ruta: '#/flota', llevaTarjetas: false }, `id ${JSON.stringify(contratoId)}`);
+    assert.deepEqual(destinoDespuesDeGuardar({ contratoId, tarjetas: [], sigueAqui: true }), { ruta: '#/flota', llevaTarjetas: false }, `id ${JSON.stringify(contratoId)} sin tarjeta`);
+  }
+});
+
+test('«a dónde voy» y «hay tarjeta que llevar» son preguntas distintas: a imprimir SIN tarjeta no deja NADA en el traspaso (lo que el traspaso recibe no sale de la ruta)', () => {
+  const llamadas = [];
+  const dejar = (id, tarjetas) => llamadas.push({ id, tarjetas });
+  // el mostrador abrió las cajas y las dejó vacías: la lista trae renglones, pero ninguno con número ni CBC
+  const vacias = [{ numero: '', cbc: '' }];
+  const ruta = irDespuesDeGuardar({ contratoId: 'c5', tarjetas: vacias, sigueAqui: true }, { dejar, ir: () => {} });
+  assert.equal(ruta, '#/imprimir/c5');
+  assert.deepEqual(llamadas, [{ id: 'c5', tarjetas: [] }], 'va a imprimir y deja NADA (que además borra lo de la renta anterior)');
+  // y con tarjeta sí se deja, tal cual
+  irDespuesDeGuardar({ contratoId: 'c6', tarjetas: [{ numero: T1.numero, cbc: T1.cbc }], sigueAqui: true }, { dejar, ir: () => {} });
+  assert.deepEqual(llamadas[1], { id: 'c6', tarjetas: [{ numero: T1.numero, cbc: T1.cbc }] });
+  // y con la pantalla ya fuera de vista no se deja nada aunque haya tarjeta tecleada
+  irDespuesDeGuardar({ contratoId: 'c7', tarjetas: [{ numero: T1.numero, cbc: T1.cbc }], sigueAqui: false }, { dejar, ir: () => {} });
+  assert.deepEqual(llamadas[2], { id: 'c7', tarjetas: [] });
 });
 
 /** «Guardar» con una navegación de mentira: al ir a imprimir, la pantalla de imprimir (aquí, tomarTraspaso) toma lo que haya. */
@@ -1672,15 +1698,22 @@ test('irDespuesDeGuardar: primero se deja y después se va, así que la pantalla
   assert.deepEqual(tomarTraspaso('c1'), [], 'y ya no queda nada para quien llegue después');
 });
 
-test('EL CASO FEO: sacar un carro con tarjeta y luego otro sin ella (o con otra) — el segundo no trae NADA del primero', () => {
+test('EL CASO FEO: sacar un carro con tarjeta y luego otro sin ella (o con otra) — el segundo llega a imprimir SU contrato y no trae NADA del primero', () => {
   olvidarTraspaso();
   // el primero no llegó a imprimirse (la persona se fue a otra pantalla, o el salto no se completó): se simula dejando sin navegar
   irDespuesDeGuardar({ contratoId: 'c1', tarjetas: [{ numero: T1.numero, cbc: T1.cbc }], sigueAqui: true }, { ir: () => {} });
-  // el segundo es en efectivo: a la flota, y lo del primero se borró
+  // el segundo es en efectivo: ahora TAMBIÉN va a imprimir (su contrato), y llega con las cajas vacías: lo del primero se borró
   const sinTarjeta = guardarYNavegar('c2', []);
-  assert.equal(sinTarjeta.ruta, '#/flota');
+  assert.equal(sinTarjeta.ruta, '#/imprimir/c2');
+  assert.deepEqual(sinTarjeta.alLlegar, [], 'la hoja de la renta en efectivo no trae ninguna tarjeta, y menos la de otro cliente');
   assert.deepEqual(tomarTraspaso('c1'), [], 'lo del primero ya no está');
   assert.deepEqual(tomarTraspaso('c2'), []);
+  // lo mismo si el segundo, en efectivo, llega con las cajas abiertas pero vacías
+  irDespuesDeGuardar({ contratoId: 'c1b', tarjetas: [{ numero: T1.numero, cbc: T1.cbc }], sigueAqui: true }, { ir: () => {} });
+  const cajasVacias = guardarYNavegar('c2b', [{ numero: '', cbc: '' }]);
+  assert.equal(cajasVacias.ruta, '#/imprimir/c2b');
+  assert.deepEqual(cajasVacias.alLlegar, []);
+  assert.deepEqual(tomarTraspaso('c1b'), []);
   // y con otra tarjeta: la pantalla de imprimir del segundo recibe SOLO lo del segundo
   irDespuesDeGuardar({ contratoId: 'c3', tarjetas: [{ numero: T1.numero, cbc: T1.cbc }], sigueAqui: true }, { ir: () => {} });
   const conOtra = guardarYNavegar('c4', [{ numero: T2.numero, cbc: T2.cbc }]);
@@ -1695,6 +1728,9 @@ test('si la pantalla ya no está a la vista al terminar de guardar, no se deja n
   const visto = guardarYNavegar('c1', [{ numero: T1.numero, cbc: T1.cbc }], false);
   assert.equal(visto.ruta, '#/flota');
   assert.deepEqual(tomarTraspaso('c1'), []);
+  // sin tarjeta tampoco se le lleva a imprimir: lo que manda es que la pantalla siga a la vista
+  const sinTarjeta = guardarYNavegar('c2', [], false);
+  assert.equal(sinTarjeta.ruta, '#/flota');
 });
 
 test('ADR-001 en el código de «Sacar carro»: las cajas del CBC se leen en UN lugar, y el número completo nunca llega a construirContrato', () => {

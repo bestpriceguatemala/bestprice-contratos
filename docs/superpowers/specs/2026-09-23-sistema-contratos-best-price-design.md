@@ -1263,13 +1263,28 @@ derecha.)
     Aprobado por el dueño: con el cliente enfrente, no se teclean dos veces. Es una aclaración del
     ADR-001, que la lleva escrita. Al guardar la salida **con número o CBC tecleados**, la pantalla va
     directo a imprimir ESE contrato y las dos tarjetas ya vienen puestas; sin ellos (una renta en
-    efectivo) todo sigue igual y se va a la flota. Los datos viven en una variable de memoria
+    efectivo) no se deja nada en el traspaso (a dónde se va en ese caso lo cambió el punto 17: antes
+    iba a la flota, desde el 19 de octubre también va a imprimir). Los datos viven en una variable de memoria
     (`js/pantallas/traspasoDeTarjetas.js`) y en ningún almacén. Se cierra por cuatro lados: atados al
     id del contrato (la hoja de otro contrato no los ve), entregados una sola vez, borrados al cambiar
     de pantalla a cualquier lado que no sea imprimir ese contrato, y vencidos al minuto. Guardar otra
     renta los reemplaza, y una sin tarjeta también los borra. La pantalla de imprimir los pone solo si
     el número termina en los últimos 4 dígitos que el contrato guardó. Si no llegó nada (dirección
     escrita a mano, recargar, volver otro día) las cajas están vacías y se teclean como siempre.
+17. **Guardar una salida siempre lleva a imprimir (decisión del 16 de octubre de 2026; construido el
+    19).** Dicho por el dueño: *«La tarjeta siempre se imprime al contrato para que el cliente la
+    vea.»* Él imprime un contrato por cada renta, en su papel membretado. El botón ya decía
+    «Guardar e imprimir contrato», pero hacía dos cosas según cómo pagó el cliente (con número o CBC
+    tecleados iba a imprimir; en efectivo, a la flota), y eso es lo que rechazó. Ahora
+    `destinoDespuesDeGuardar` (`js/pantallas/sacarCarro.js`) contesta **dos preguntas que no se
+    mezclan**: la *ruta* es la hoja de imprimir de ESE contrato siempre que haya id de contrato y la
+    pantalla siga a la vista (`sigueAqui`; si se fue a otra parte mientras guardaba, no se le lleva a
+    una hoja que no esperaba y la ruta es la flota de siempre); y `llevaTarjetas`, que sigue
+    significando «hay número o CBC tecleados» y es lo **único** que decide si se deja algo en el
+    traspaso del punto 16. Una renta en efectivo llega a imprimir con las cajas vacías, y lo que
+    hubiera dejado la renta anterior ya se borró. Deducir lo segundo de lo primero («voy a imprimir,
+    luego hay tarjeta») sería volver a dejar en memoria lo que no hay, que es el camino a que la
+    tarjeta de un cliente salga en la hoja de otro. Las cuatro defensas del punto 16 no cambian.
 
 **Lo que el papel permitiría y hoy no se hace (no es para ahora; decisión suya).** El papel tiene
 toda una columna de liquidación (DAÑOS, COMBUSTIBLE, VARIOS, DEDUCIBLE, TOTAL CARGOS, MENOS

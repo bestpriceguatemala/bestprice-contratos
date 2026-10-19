@@ -126,14 +126,25 @@ export function tarjetasParaImprimir(leidas, escritas) {
 }
 
 /**
- * A dónde se va al guardar la salida, y si hay tarjeta que llevar. Con número o CBC tecleados se va directo a imprimir ESE
- * contrato (el salto que el traspaso necesita: cualquier otra pantalla en medio lo borraría); sin ellos, a la flota como
- * siempre —una renta en efectivo no cambia—. Si la pantalla ya no está a la vista (se fue a otra parte mientras guardaba),
- * no se lleva a nadie a imprimir: el aviso de guardado ya salió y no se le quita su pantalla. Función pura.
+ * A dónde se va al guardar la salida, y si hay tarjeta que llevar. Son DOS preguntas distintas y no se mezclan:
+ *
+ *  - `ruta`: guardar una salida lleva SIEMPRE a imprimir ESE contrato, haya tarjeta o no. Decisión del dueño del 16 de octubre
+ *    de 2026: «La tarjeta siempre se imprime al contrato para que el cliente la vea». Imprime un contrato por cada renta, en su
+ *    papel membretado, y el botón dice «Guardar e imprimir contrato»: no puede llevar a dos lugares según cómo pagó el cliente
+ *    (antes, una renta en efectivo iba a la flota).
+ *  - `llevaTarjetas`: ¿hay algo tecleado (número o CBC) que dejar en el traspaso? Es lo único que decide si se deja algo. NO se
+ *    deduce de la ruta: ahora casi toda salida va a imprimir, y si «voy a imprimir» significara «hay tarjeta», la salida en efectivo
+ *    dejaría en el traspaso lo que no tiene, y una tarjeta de un cliente podría salir en la hoja de otro (ver traspasoDeTarjetas.js).
+ *
+ * `sigueAqui` manda sobre las dos: si la pantalla ya no está a la vista (se fue a otra parte mientras guardaba), no se lo lleva a
+ * imprimir una hoja que no estaba esperando (el aviso de guardado ya salió) y no se deja nada: ese salto lo borraría de todos modos
+ * al cambiar de pantalla (defensa 3 del traspaso). Sin id de contrato tampoco hay qué imprimir. En esos dos casos la ruta es la de
+ * siempre, la flota. Función pura.
  */
 export function destinoDespuesDeGuardar({ contratoId, tarjetas, sigueAqui }) {
-  const llevaTarjetas = Boolean(sigueAqui && contratoId && (tarjetas ?? []).some((t) => t.numero || t.cbc));
-  return { ruta: llevaTarjetas ? rutaDeImprimir(contratoId) : '#/flota', llevaTarjetas };
+  const hayAdonde = Boolean(sigueAqui && contratoId);
+  const llevaTarjetas = hayAdonde && (tarjetas ?? []).some((t) => t.numero || t.cbc);
+  return { ruta: hayAdonde ? rutaDeImprimir(contratoId) : '#/flota', llevaTarjetas };
 }
 
 /**
@@ -1957,7 +1968,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
         ? `Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro. La reservación quedó entregada.`
         : `Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro.`, 'exito');
       const idGuardado = guardado.id || contratoId;
-      // A imprimir ese contrato con las tarjetas puestas, o a la flota como siempre si no hay ninguna que llevar.
+      // A imprimir ese contrato (siempre, decisión del 16 de octubre), con las tarjetas puestas si se tecleó alguna.
       irDespuesDeGuardar({ contratoId: idGuardado, tarjetas: paraImprimir, sigueAqui: sigoVigente() });
     } catch (error) {
       aviso(textoFalloAlGuardarElContrato(error), 'error');
