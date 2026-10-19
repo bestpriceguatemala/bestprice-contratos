@@ -1,8 +1,12 @@
 # `guardarVehiculo`: el historial de mantenimiento ya no retrocede (19 de octubre de 2026)
 
-**Estado: terminado, árbol verde, todo commiteado.** `npm test` = **2243 pasan, 0 fallan** al cerrar (el encargo decía 2194; otros agentes
-suben commits al mismo árbol y el total sube solo: lo mío son **39 pruebas nuevas**, 26 en `pruebas/guardar-vehiculo.test.mjs` y 13 en
-`pruebas/nube-en-memoria.test.mjs`). `pruebas/concurrencia.test.mjs`: **56 de 56, sin tocar una sola línea** (`git diff 4c73a00 HEAD` sobre ese archivo está vacío).
+**Estado: terminado, árbol verde, todo commiteado.** `npm test` = **2259 pasan, 0 fallan** al cerrar la segunda pasada (el encargo decía 2194; otros agentes
+suben commits al mismo árbol y el total sube solo). Lo mío: `pruebas/guardar-vehiculo.test.mjs` (35) y `pruebas/nube-en-memoria.test.mjs` (13).
+`pruebas/concurrencia.test.mjs`: **56 de 56**. Las dos pruebas que el encargo mandaba leer (~530 y ~678) no se tocaron; en la **segunda pasada** (el taller, abajo) UNA
+expectativa de estructura de ese archivo cambió de 4 a 1 y está explicada en su sección: es el único cambio, y es consecuencia directa de que marcar y habilitar ya no pasan por `guardarVehiculo`.
+
+**Dos pasadas.** La primera cerró el historial (`servicios[]`, `intervalos{}`). La segunda, pedida por quien coordina al leer el informe, cerró **la misma regla con otras dos llaves**:
+`fueraDeServicio` y `motivoFueraDeServicio` (el carro del taller que reaparece rentable). Lo que primero dejé como «preocupación 1» quedó resuelto, no anotado.
 
 ## Commits (en orden)
 
@@ -14,6 +18,9 @@ suben commits al mismo árbol y el total sube solo: lo mío son **39 pruebas nue
 | `9eae53e` | migaja 2: §7b, «Ojo con los nombres» (y una línea de qué escribe y qué no un guardado del carro entero) |
 | `36bce48` | el alta también deja fuera el mantenimiento y los `undefined` (la regla es de TODO guardado del carro) |
 | `eef14f3` | una prueba más de la función pura |
+| `c811758` | el informe (primera pasada) |
+| `ee57ce6` | **segunda pasada, el taller**: `nucleo/carro.js`, `marcarCarroFueraDeServicio` y `habilitarCarro`, la ficha ya no escribe las marcas, pruebas, y el único cambio a `concurrencia.test.mjs` |
+| `d080d21` | §7b: cada mano escribe lo suyo en el carro |
 
 ## El hueco, reproducido antes de arreglarlo (y con clic real)
 
@@ -48,15 +55,36 @@ nube caída, carro que ya no existe, `undefined`, alta sin código).
 
 Ninguna escritura fue rechazada por `undefined` en todo el recorrido.
 
+**Segunda pasada, también con botones reales** (árboles `ee57ce6` y, de control, `c811758`; mismos puertos, mismo arnés; el carro `vA` sembrado con `fueraDeServicio: false` ya escrito, como queda después de un «Volver a habilitar»):
+
+| qué se hizo | árbol de antes (`c811758`) | con el arreglo (`ee57ce6`) |
+|---|---|---|
+| otra computadora manda el carro al taller; aquí «Guardar carro» con el color en Negro | nube: color Negro, **`fueraDeServicio: false`, motivo vacío** (el carro del taller reaparece rentable) | color Negro, **`fueraDeServicio: true`, motivo «Taller de choque»**, y el servicio que otra computadora anotó; la copia local igual; una sola escritura |
+| otra computadora cambia el color y anota un servicio; aquí «Volver a habilitar» | — | habilitado, motivo vacío, **el color de la otra computadora** (no el de esta ficha) y los tres servicios |
+| lo mismo con «Marcar fuera de servicio» (con `prompt` que contesta «Golpe en la puerta») | — | fuera de servicio con su motivo, el color de la otra computadora y los cuatro servicios |
+| `#/habilitar/vA` con la nube cambiada por otra computadora | — | habilitado, color y los cinco servicios de la nube; una `tx.set`; la copia local al día |
+| «Marcar fuera de servicio» con el motivo en blanco | — | «Escribe un motivo para marcar el carro fuera de servicio.», cero escrituras |
+
+Cero `undefined` rechazados otra vez. Puertos 4741 y 4742 apagados y comprobados libres.
+
 ## Qué se hizo
+
+Cada llave del documento del carro la escribe UNA mano (`js/nucleo/carro.js`, la regla escrita una sola vez):
+
+| mano | llaves | escritor |
+|---|---|---|
+| la ficha | placas, tipo, marca, línea, color, modelo… (todo lo que no es de otra mano) | `guardarVehiculo` |
+| el mantenimiento | `servicios[]`, `intervalos{}` (`CAMPOS_DEL_MANTENIMIENTO`) | `registrarServicioDelCarro`, `anularServicioDelCarro`, `cambiarIntervaloDelCarro` |
+| el taller | `fueraDeServicio`, `motivoFueraDeServicio` (`CAMPOS_DE_LA_DISPONIBILIDAD`) | `marcarCarroFueraDeServicio`, `habilitarCarro` |
 
 | capa | cambio |
 |---|---|
-| `js/nucleo/mantenimiento.js` | `CAMPOS_DEL_MANTENIMIENTO = ['servicios', 'intervalos']` (la lista, una sola vez) y `carroConLoDeLaFicha(fresco, deLaFicha)`, pura |
-| `js/datos.js` | `guardarVehiculo` de un carro que YA existe (trae `codigo`) pasa por `cambiarEnNubeYLocal`: lee el carro DENTRO de la transacción y le pone encima lo de la pantalla, menos el mantenimiento. Un carro nuevo se sigue escribiendo con `setDoc` |
-| `js/pantallas/carros.js` | los dos constructores, y `textoFalloAlGuardarElCarro` (un carro que ya no está dice por qué, no «intenta de nuevo»); el comentario de `construirVehiculo` al día |
+| `js/nucleo/carro.js` (nuevo) | las dos listas y su unión `CAMPOS_CON_SU_PROPIO_ESCRITOR`; `carroFueraDeServicio` / `carroHabilitado` (puras; el motivo es obligatorio también en el escritor, no solo en el botón); `carroConLoDeLaFicha(fresco, deLaFicha)`, que deja como está lo de las dos manos ajenas |
+| `js/nucleo/mantenimiento.js` | `CAMPOS_DEL_MANTENIMIENTO` (la lista del mantenimiento; `carroConLoDeLaFicha` se mudó a `carro.js`) |
+| `js/datos.js` | `guardarVehiculo` de un carro que YA existe (trae `codigo`) pasa por `cambiarEnNubeYLocal`; y los dos escritores nuevos, por el mismo `cambiarEnNubeYLocal` que los del mantenimiento. Un carro nuevo se sigue escribiendo con `setDoc` |
+| `js/pantallas/carros.js` | «Marcar fuera de servicio», «Volver a habilitar» y `#/habilitar/:id` llaman a sus escritores con el id (ya no arman ni mandan ningún carro); `textoFalloAlGuardarElCarro`; el motivo obligatorio usa el mensaje del núcleo. Los dos constructores que había exportado en la primera pasada se quitaron: ya no arman nada |
 | `pruebas/fixtures/nubeEnMemoria.mjs` | rechaza `undefined` en `setDoc`, `tx.set`, `updateDoc` y lote; exporta `valoresIndefinidos` |
-| `docs/…-design.md` §7b | el glosario y la regla de quién escribe qué |
+| `docs/…-design.md` §7b | el glosario («Ojo con los nombres») y la regla de quién escribe qué |
 
 ## Evaluación de lo que propuso quien lo encontró
 
@@ -65,8 +93,8 @@ Ninguna escritura fue rechazada por `undefined` en todo el recorrido.
 **La forma es la correcta y es el patrón que ya tenía el archivo** (`cambiarEnNubeYLocal`, el mismo de anotar/anular/intervalos). Cuatro cosas distintas:
 
 1. **No hay una lista blanca de «campos del formulario».** Es la parte que pide el encargo mirar con cuidado, y la respuesta es que la lista correcta es la
-   contraria: se escribe TODO lo que trae la pantalla, EXCEPTO lo que tiene su propio escritor (`servicios`, `intervalos`). Una lista blanca
-   (`codigo, placas, tipo… motivoFueraDeServicio`) es exactamente el error de al revés: el día que alguien agrega un campo al carro (`dueno`, un `km`, lo
+   contraria: se escribe TODO lo que trae la pantalla, EXCEPTO lo que tiene su propio escritor (`servicios`, `intervalos` y, desde la segunda pasada, `fueraDeServicio` y `motivoFueraDeServicio`). Una lista blanca
+   (`codigo, placas, tipo… motivoFueraDeServicio`, como en la propuesta) es exactamente el error de al revés: el día que alguien agrega un campo al carro (`dueno`, un `km`, lo
    que sea) o un campo que el formulario «no conoce», esa edición no se guarda y nada lo dice. Con la lista negra ese error no se puede cometer por campos
    sueltos: cada campo del §7b, y uno inventado, se prueba que se guarda (`cada campo del carro que no es del mantenimiento se guarda…`). La lista negra
    sí puede quedarse corta, y para eso hay una prueba que la compara con lo que de verdad tocan `carroConServicio`, `carroConServicioAnulado` y
@@ -75,7 +103,7 @@ Ninguna escritura fue rechazada por `undefined` en todo el recorrido.
    el `merge` de antes.
 3. **Un `undefined` de la pantalla es «no sé», no «bórralo».** Firestore los rechaza; el SDK real habría roto el guardado.
 4. **El alta también pasa por la misma función** (`36bce48`): un carro que ya existía pero llegó sin código entraba por el alta y mandaba su lista vieja.
-   Ahora «`guardarVehiculo` no escribe `servicios` ni `intervalos` nunca» es una propiedad de la función entera, no de una de sus dos ramas.
+   Ahora «`guardarVehiculo` no escribe lo que tiene su propio escritor, nunca» es una propiedad de la función entera, no de una de sus dos ramas.
 
 ## La decisión: ¿se mezcla o se niega?
 
@@ -94,25 +122,32 @@ Por qué NO es un `CODIGO_COPIA_VIEJA`:
 4. **No se pierde lo que él acaba de hacer.** El miedo del encargo —una mezcla silenciosa que descarta una edición suya— no pasa: todo lo que la pantalla trae
    se escribe, salvo las dos llaves que esa pantalla no puede editar. Está probado campo por campo, y con la lista negra no hay un campo que se pueda olvidar.
 
-**Lo que SÍ sigue siendo «el último que guarda gana», y hay que decirlo** (es lo de siempre, no lo hice peor ni mejor; el informe del 9 de octubre ya lo dejó anotado
-para carros, reservaciones, clientes y dueños): los campos sueltos del carro. Si dos computadoras cambian el MISMO campo, queda el de la última. Y hay una versión
-más fea del mismo hecho, que prefiero decir con todas sus letras:
+**Lo que SÍ sigue siendo «el último que guarda gana», y hay que decirlo** (es lo de siempre; el informe del 9 de octubre ya lo dejó anotado para carros, reservaciones, clientes y
+dueños): los campos que la ficha escribe (placas, tipo, marca, línea, color, modelo). Si dos computadoras cambian el MISMO campo, queda el de la última, y si la ficha de A está
+atrasada y A guarda, esos seis campos salen de la ficha de A. **Con el taller y el historial fuera de ese saco, lo que queda es un color que se pisa, y un color que se pisa es un color**:
+no se negó, porque un rechazo ahí costaría guardados fallidos por nada (lo mismo que se argumentó contra la guardia por `actualizado`).
 
-- **La copia vieja de A puede devolver un campo suelto que B cambió.** «Marcar fuera de servicio» y «Volver a habilitar» escriben el carro entero que la pantalla
-  tiene (`{ ...carro, fueraDeServicio: … }`), así que si B cambió el color mientras tanto, A lo devuelve al de antes. Y la peor, comprobada con el código de verdad: **B marca el
-  carro fuera de servicio (está en el taller) y A, con la ficha abierta de antes, aprieta «Guardar carro» para corregir el color: si ese carro ya había pasado alguna vez por
-  «Volver a habilitar» (que guarda `fueraDeServicio: false` de forma explícita), la copia de A trae esa marca y la devuelve a `false`: el carro reaparece como rentable.** Un carro
-  que nunca se ha marcado no tiene esa llave y no sufre esto. Requiere dos computadoras, la ficha abierta justo en esa ventana, y que se guarde desde esa copia; por eso no lo traté
-  como parte de este hueco, que pierde algo que no se puede reconstruir (un historial), pero es de la misma especie y **lo más grave que queda**.
-- Arreglarlo es una decisión de política que no me toca: (a) dejarlo como está; (b) **negar** solo si cambió un campo suelto desde que se abrió la ficha (la pantalla
-  tendría que pasar la copia que abrió, `abierto`, y la regla sería «cambió algo que no es del mantenimiento» —ese sí es un caso de rechazo, con su frase—); o (c) que cada
-  botón mande SOLO lo que cambia (`{ id, codigo, fueraDeServicio, motivoFueraDeServicio }` en marcar y habilitar), con la base fresca que `guardarVehiculo` ya pone.
-  Yo haría (c) para los dos botones del taller —es barato y no necesita frase nueva— y preguntaría por (b) para «Guardar carro». No lo hice porque (c) cambia lo que mandan
-  tres botones y (b) agrega una frase nueva que el dueño va a leer, y ninguna de las dos estaba en el encargo.
+## Segunda pasada: el carro del taller no reaparece rentable
+
+En la primera pasada dejé anotado como lo más grave que quedaba: B manda el carro al taller y A, con la ficha abierta de antes, aprieta «Guardar carro» para corregir el color; si ese
+carro ya había pasado alguna vez por «Volver a habilitar» (que deja `fueraDeServicio: false` ESCRITO), la copia de A trae esa marca y la devuelve a `false`: el carro del taller
+reaparece como rentable. Comprobado con el código de la primera pasada (un carro que nunca se ha marcado no tiene la llave y no lo sufre).
+
+Quien coordina lo resolvió con el principio que ya estaba aplicado: `construirVehiculo` ya decía que las marcas del taller **no vienen del formulario**, así que la ficha no es su dueña, igual que no
+es dueña de `servicios[]`. Lo que se hizo:
+
+- Las dos marcas se suman a lo que la ficha NO escribe (`CAMPOS_CON_SU_PROPIO_ESCRITOR`), con el mismo mecanismo (`carroConLoDeLaFicha`).
+- «Marcar fuera de servicio» y «Volver a habilitar» (la ficha y `#/habilitar/:id`) ya no mandan el carro entero: llaman a `marcarCarroFueraDeServicio(id, motivo)` y `habilitarCarro(id)`, que leen
+  el carro de la nube dentro de la transacción y cambian SOLO sus dos llaves. Un color que otra computadora corrigió ya no vuelve al de la ficha vieja al mandar un carro al taller.
+- La prueba de «llaves contra escritores» cubre ahora las dos manos: las llaves que de verdad tocan `carroFueraDeServicio`/`carroHabilitado` son EXACTAMENTE `CAMPOS_DE_LA_DISPONIBILIDAD`; los dos grupos
+  no se pisan; y una prueba de estructura lee `datos.js` y exige que todo escritor que lea el carro dentro de la transacción esté contado (hoy cinco, más la ficha): un sexto sin contar falla.
+- **La prueba que importa**, la del recorrido completo: B marca el carro fuera de servicio y A guarda su ficha desde una copia de antes de un carro que ya pasó por «Volver a habilitar» → el carro SIGUE
+  fuera de servicio, con el motivo, y el color de A se guardó; y la contraria (B habilita, A guarda su ficha de antes: no vuelve al taller). Mueren con el mutante «las marcas dejan de ser ajenas a la ficha».
+  Contra el código de la primera pasada el mismo recorrido, ejecutado con el código de verdad, deja `fueraDeServicio: false`.
 
 ## Lo que `concurrencia.test.mjs` decía y cómo se respetó
 
-Las dos pruebas que encargo mandaba leer no se tocan y pasan:
+Lo que NO se tocó (las dos pruebas que el encargo mandaba leer):
 
 - **~530, `H-2 (vehiculos)`** (`nubeLenta`): inyecta el tiempo vencido en `setDoc`. Por eso el **alta tiene que seguir siendo un `setDoc`** y no una transacción: si el alta
   pasara por `cambiarEnNubeYLocal`, el primer intento nunca recibiría el fallo inyectado y la prueba se rompería (lo comprobé con un mutante: 7 pruebas mueren). Las
@@ -122,7 +157,19 @@ Las dos pruebas que encargo mandaba leer no se tocan y pasan:
   Por eso «ya existe» es **«trae su código»** (lo que ya decía el comentario de la función desde el primer commit: «si ya lo trae, edición de un carro existente»), no una lectura.
   Todo carro guardado por la app trae código desde el primer commit (`305f72e`).
 
+**Lo que SÍ cambió, y lo digo porque el encargo pedía parar y explicar antes de tocar una expectativa de ese archivo.** Una sola: la prueba de estructura
+`cada pantalla que da de alta guarda con el id decidido de antemano` contaba **4** llamadas a `guardarVehiculo` en `carros.js` (la alta + «marcar», «habilitar» de la ficha y la ruta) y ahora
+cuenta **1**, porque con la segunda pasada esos tres botones llaman a sus propios escritores. No toqué la decisión que esa prueba protege (toda alta decide su id antes del primer intento, H-2:
+sigue exigiendo que la única llamada reciba el registro de `paraGuardar()` y que `altaConIdFijo(nuevoIdVehiculo)` y `.terminada()` estén ahí); es el recuento de las llamadas que sobraban, que su propio
+comentario describía como «marcar fuera de servicio, habilitar». Lo hice porque la instrucción de la segunda pasada («marcar y habilitar escriben solo sus dos campos» con las marcas fuera del guardado
+de la ficha) no se puede cumplir sin que dejen de pasar por `guardarVehiculo`. Va en el mismo commit que el cambio (`ee57ce6`) para que cada commit esté verde, con el comentario de la prueba al día.
+Si prefieren otra salida, es revertir ese commit: la primera pasada queda entera.
+
 ## Mutaciones (todas matadas)
+
+**Segunda pasada: 15 mutantes más, 15 muertos** (`mutantes3.json`, mismo arnés): las marcas del taller dejan de ser ajenas a la ficha; solo `fueraDeServicio` es del taller; habilitar deja el motivo viejo; el motivo no se recorta o no es obligatorio; marcar toca otra llave; la lista dice una llave de más; la ruta o el botón vuelven a guardar el carro entero; la ficha vuelve a escribir todo encima de la nube; el alta vuelve a mandar las marcas; un sexto escritor sin contar; marcar usa el cambio de habilitar; el botón arma su propio texto del motivo; habilitar escribe otra llave. Los del recorrido del encargo (N1 y N9) los matan, entre otras, `B manda el carro al taller y A guarda su ficha…` y su contraria.
+
+Primera pasada:
 
 Sobre una COPIA del árbol (`scratchpad/mut/`; nunca el árbol compartido, porque hay otros agentes corriendo pruebas), con `mutar.mjs`: sustitución exacta, suite entera, restaura.
 **32 mutantes, 32 muertos.** Entre ellos:
@@ -170,5 +217,5 @@ Los que sobrevivían al principio eran código redundante (`?? {}` en `carroConL
 
 ## Lo que NO toqué
 
-`js/pantallas/sacarCarro.js`, `js/respaldo/*`, `version.txt`, `js/version.js`, `pruebas/concurrencia.test.mjs`, `firestore.rules`.
+`js/pantallas/sacarCarro.js`, `js/respaldo/*`, `version.txt`, `js/version.js`, `firestore.rules`, y —por indicación de quien coordina— `js/pantallas/recibirCarro.js` y `js/nucleo/cierre.js`. De `pruebas/concurrencia.test.mjs`, solo lo explicado arriba (una expectativa de estructura, 4 → 1).
 Del «Dónde quedamos» (punto 4), con esto quedan cerradas la línea de §7b y la prueba de `undefined`; la del respaldo (`mapa.js`) ya la hizo otro agente (`2cc02f2`).
