@@ -65,7 +65,30 @@ Cubre `servicios[]` e `intervalos{}`. No se enumeran los seis tipos de servicio 
 2. **Dos hallazgos de su palabra que NO toqué (no eran lo pedido):**
    - El campo «Lugar de entrada» de «Recibir carro» es texto libre sin valor por omisión; si «siempre es la oficina», lo lógico es que venga puesto «Oficina». Hoy, si el mostrador lo deja en blanco, AG sale vacía en el respaldo.
    - La hoja impresa precarga «lugar de entrada» con el lugar de SALIDA (`hojaContrato.js`, decisión del 14 de octubre: «casi toda renta vuelve donde salió»). Su frase del 16 («siempre va a ser en la oficina») la contradice; la decisión de qué precargar es suya.
-3. **La hora real no es obligatoria al recibir** (`problemasDelCierre` no la pide). Si la deja en blanco, AF queda vacía en el respaldo, y es justo la hora con la que él decide el cobro. No lo cambié ni lo avisé («no avisos que no pidió»); es una decisión suya si debe pedirse.
+3. **La hora real no es obligatoria al recibir** (`problemasDelCierre` no la pide). Si la deja en blanco, AF queda vacía en el respaldo, y es justo la hora con la que él decide el cobro. *Resuelto el mismo día: ver «4. El aviso de la hora real en blanco».*
 4. **AF mezcla dos significados en su hoja:** las filas que escribe el respaldo traen la hora real; las que él agregue a mano con su método traen la que esperaba. Está dicho en §10, no en pantalla.
 5. **«Lo que este archivo NO lleva» está debajo de los botones de bajar**, no antes (el aviso de privacidad sí va antes). Está `open`, y no lo moví porque no era lo pedido.
 6. **Guardar cuando la pantalla ya no está a la vista** sigue mandando a `#/flota` (comportamiento fijado por una prueba existente desde el 16; era `location.hash = '#/flota'` incondicional antes). Quien se fue a otra pantalla mientras se guardaba aterriza en la flota. El comentario viejo decía «no se le quita su pantalla»; lo reescribí para no prometer eso.
+
+## 4. El aviso de la hora real en blanco al recibir  (HECHO; tarea que llegó con el informe, decisión del dueño: «Que te avise, sin bloquear.»)
+
+**Dónde vive la regla.** `problemasDelCierre` solo guarda lo que IMPIDE guardar (la pantalla apaga el botón mientras devuelva algo, y `guardar()` se niega), así que no cabía ahí. Se agregó `avisosDelCierre(contrato, cierre)` junto a ella en `js/nucleo/cierre.js`: pura, devuelve `[{ nivel, mensaje }]` como `avisosDeSalida`. La pantalla (`js/pantallas/recibirCarro.js`) solo la llama y pinta; no compara la hora.
+- Avisa si `!yaVolvio(contrato)` y la hora real está en blanco (vacía, espacios, `null`, sin la llave). `yaVolvio` es la única regla de «el carro regresó» (`cierre.fechaReal`): un contrato ya recibido —corregirlo, o uno de antes que se cerró sin hora— no se queja.
+- Nivel `medio` (el ámbar que ya existe, `.sc-avisos-lista li.nivel-medio`), al final de la lista de arriba del botón, después de los problemas y del aviso de sobrecobro (que están en rojo). No cuenta para `disabled` ni para `guardar()`.
+- No sale en el modo de solo cobro (no se recibe nada ahí).
+
+**La frase** (un renglón, tuteo como los demás avisos, con sus palabras «se pasó de la hora»):
+«La hora real de entrada está en blanco, y sobre ella decides cuánto cobrar si el cliente se pasó de la hora.»
+Nombra el campo como se llama en el formulario («Hora real de entrada»), dice por qué importa y no manda nada. Descarté «Falta la hora real» (es justo el «falta un campo» que no servía) y cualquier cosa que empezara con una orden.
+
+**Pruebas** (6 en `cierre.test.mjs`, 2 en `recibirCarro.test.mjs`; contratos de `contratoDeUnCarro`, que usa `construirContrato`/`construirCierre`/`contratoParaGuardar`):
+- sin hora al recibir: un aviso, nivel `medio`, con «hora real de entrada», «cuánto cobrar» y «se pasó de la hora», que no empieza con «Falta» y mide menos de 140 caracteres;
+- con hora (incluidas las `00:00`): nada;
+- vacía / solo espacios / `undefined` / `null` / sin la llave / sin cierre: lo mismo;
+- NO bloquea: `problemasDelCierre` da `[]` con la hora en blanco, igual que con ella; y un problema de verdad sigue siéndolo con el aviso presente;
+- contrato ya recibido (cerrado sin hora, o con un cierre de antes del campo): nada, también en la corrección;
+- pantalla: `htmlDeLosAvisosDelCierre` pinta `nivel-medio` (un nivel desconocido no se vuelve rojo) y escapa el texto; prueba de código: UNA llamada a `avisosDelCierre`, después del `return` del solo cobro, ninguna expresión `disabled` ni `guardar()` la mencionan, y `horaReal` aparece solo 2 veces en la pantalla (leer del campo, ponerlo en el campo): la regla no se escribe dos veces.
+
+**Mutaciones (13, todas matadas):** quitar `yaVolvio`; nunca avisar; avisar siempre; sin `trim`; nivel `alto`; frase sin el porqué; meterlo como problema que bloquea; `disabled` con avisos; `guardar()` mirando avisos; pantalla sin cablear; rojo siempre; sin escapar; regla repetida en la pantalla.
+
+**Lo que NO se hizo:** no hay clic real en el navegador (la pantalla de recibir no tiene arnés de montaje y armar uno exige la nube); la parte de la pantalla se sostiene con las funciones puras y las pruebas de código de arriba. **Una duda de criterio:** el aviso sale aunque el carro haya vuelto un día ANTES de lo previsto (donde la hora no cambia ningún cobro). No lo acoté porque sería inventar una regla de cuándo importa la hora y porque la hora también es la que el respaldo lleva en AF; si le estorba en esos casos, es una condición más en `avisosDelCierre`.

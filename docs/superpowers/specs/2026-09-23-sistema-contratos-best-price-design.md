@@ -253,6 +253,16 @@ hora real de entrada, kilometraje, combustible, daños, hora tardía (precio),
 varios, descuento y forma de pago del saldo. El sistema muestra el detalle del cobro (§5), y al guardar
 libera el carro e imprime el cierre.
 
+La **hora real de entrada** no es obligatoria, pero si queda en blanco la pantalla lo
+dice —en ámbar, sin apagar el botón—: *«La hora real de entrada está en blanco, y sobre ella
+decides cuánto cobrar si el cliente se pasó de la hora.»* Decisión del dueño del 19 de
+octubre de 2026, a la pregunta de si el sistema debía pedirla: *«Que te avise, sin
+bloquear.»* La regla es `avisosDelCierre` (`nucleo/cierre.js`), una lista aparte de
+`problemasDelCierre`, que es la que sí impide guardar: si los avisos entraran ahí, el botón
+se apagaría por algo que es suyo decidir. Solo sale al recibir por primera vez; un contrato
+que ya se recibió (se está corrigiendo, o es uno de antes que se cerró sin hora) no se queja.
+Esa hora es la que el respaldo lleva en `AF HORA ENTRADA` (§10).
+
 Botón aparte, **Liberar garantía**, que cierra el contrato cuando ya no queda
 saldo.
 
@@ -1414,7 +1424,7 @@ alternativas están en `docs/adr/ADR-004-el-respaldo-parcha-su-excel-sin-libreri
   con él»; ya no son pregunta. Las dos se llenan **solo cuando el carro ya volvió**
   (`cierre.fechaReal`, la única marca de un regreso): un contrato que todavía no se recibe no tiene
   hora real y AF queda **vacía**, igual que una renta recibida sin que se anotara la hora o de
-  antes de que se pidiera. Nunca se rellena con la hora de salida ni con un cero (las 00:00 sí se
+  antes de que se pidiera (al recibir, la pantalla avisa si la hora queda en blanco: §6). Nunca se rellena con la hora de salida ni con un cero (las 00:00 sí se
   escriben: son una hora). AG tampoco se escribe como un «OFICINA» fijo: si la oficina es siempre
   el lugar, lo anotado al recibir ya lo dice, y un valor puesto por el respaldo taparía el día que
   no fuera así. Una consecuencia que hay que saber: en las filas que el respaldo escribe AF es la

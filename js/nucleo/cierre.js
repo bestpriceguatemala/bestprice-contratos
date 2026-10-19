@@ -7,12 +7,17 @@
 //
 // Nunca ajustar una cifra para que cuadre. Si el descuento es mayor que lo que
 // hay que cobrar, se lo decimos tal como es.
+//
+// Aquí hay dos listas y no se mezclan. `problemasDelCierre` es lo que IMPIDE guardar: la pantalla apaga el botón mientras
+// haya alguno. `avisosDelCierre` es lo que se le DICE y él decide: advertencias, no candados (como los de avisos.js).
+// Si un aviso entrara en la primera lista, el botón se apagaría por algo que es suyo decidir.
 
 import {
   q, textoDosDecimales, textoConQ, textoEntero,
 } from './dinero.js';
 import { diasEntre, textoFecha, esFechaISO } from './fechas.js';
 import { resumen, horaTardiaDe } from './contrato.js';
+import { yaVolvio } from './estados.js';
 
 /**
  * Arma el cierre del contrato preservando todo lo que ya traía.
@@ -133,4 +138,29 @@ export function problemasDelCierre(contrato, cierre, hoy) {
   }
 
   return problemas;
+}
+
+/**
+ * Lo que se le dice al recibir el carro y NO impide guardar (ver la cabecera: no es un `problema`). `[{ nivel, mensaje }]`,
+ * como los de avisos.js; vacío si no hay nada que decir. Función pura.
+ *
+ * Hoy es uno: la hora real de entrada en blanco. Decisión del dueño, 19 de octubre de 2026 (a la pregunta de si el sistema
+ * debía pedirla): «Que te avise, sin bloquear». La anota porque sobre esa hora decide cuánto cobra cuando el cliente se pasa
+ * (§10: «si se pasa de la hora yo decido cuánto le cobro»); el sistema no la calcula ni la exige, y un cierre sin ella
+ * queda sin la única constancia de a qué hora llegó el carro. La frase le recuerda eso y nada más.
+ *
+ * Solo al recibir el carro por primera vez. Si el contrato ya volvió (`yaVolvio`, la única marca de un regreso) esta pantalla
+ * lo está CORRIGIENDO, y un contrato de antes que se cerró sin hora no empieza a quejarse ahora: el aviso es del momento de
+ * recibir. `cierre.horaReal` llega ya pasado por `hora24` (recibirCarro.js), así que una hora a medias («9:») también llega
+ * en blanco, que es lo que es.
+ */
+export function avisosDelCierre(contrato, cierre) {
+  const avisos = [];
+  if (!yaVolvio(contrato) && !String(cierre?.horaReal ?? '').trim()) {
+    avisos.push({
+      nivel: 'medio',
+      mensaje: 'La hora real de entrada está en blanco, y sobre ella decides cuánto cobrar si el cliente se pasó de la hora.',
+    });
+  }
+  return avisos;
 }

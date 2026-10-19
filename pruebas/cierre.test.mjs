@@ -5,8 +5,10 @@
 // una fecha anterior a la salida, un descuento inventado.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { construirCierre, problemasDelCierre } from '../js/nucleo/cierre.js';
+import { construirCierre, problemasDelCierre, avisosDelCierre } from '../js/nucleo/cierre.js';
 import { resumen } from '../js/nucleo/contrato.js';
+import { yaVolvio } from '../js/nucleo/estados.js';
+import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
 
 const contrato = () => ({
   id: 'c1', numero: 1, carroId: 'v1',
@@ -262,4 +264,60 @@ test('un monto negativo en combustible, daños, hora tardía, varios o descuento
 test('cero y vacío en esos montos no son negativos: el cierre del ejemplo sigue sin problemas', () => {
   assert.deepEqual(problemasDelCierre(contrato(), { ...campos, danos: 0, combustible: 0, varios: 0, descuento: 0, horaTardia: 0 }), []);
   assert.deepEqual(problemasDelCierre(contrato(), campos), []);
+});
+
+// ---------------------------------------------------------------------------
+// La hora real de entrada en blanco: se le DICE, no se le impide (decisión del dueño, 19 de octubre de 2026: «Que te avise, sin bloquear»)
+// ---------------------------------------------------------------------------
+
+// Un carro que sale el 3 de octubre por 9 días y que vuelve a tiempo; el contrato sale del constructor y de `contratoParaGuardar`.
+const porRecibir = () => contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 9 });
+const alRecibir = { fechaReal: '2026-10-12', horaReal: '10:30', lugarEntrada: 'Oficina', kmEntrada: 0, combustible: 0, danos: 0, varios: 0, descuento: 0 };
+
+test('recibir sin hora real: un aviso que dice POR QUÉ importa, con sus palabras (cuánto cobrar si el cliente se pasó de la hora)', () => {
+  const contratoPorRecibir = porRecibir();
+  assert.equal(yaVolvio(contratoPorRecibir), false);
+  const avisos = avisosDelCierre(contratoPorRecibir, { ...alRecibir, horaReal: '' });
+  assert.equal(avisos.length, 1);
+  assert.equal(avisos[0].nivel, 'medio', 'ámbar: advertencia, no el rojo de lo que impide guardar');
+  assert.match(avisos[0].mensaje, /hora real de entrada/);
+  assert.match(avisos[0].mensaje, /cuánto cobrar/);
+  assert.match(avisos[0].mensaje, /se pasó de la hora/);
+  assert.doesNotMatch(avisos[0].mensaje, /^Falta/, 'no es «falta un campo»');
+  assert.ok(avisos[0].mensaje.length < 140, 'un renglón, sin sermón');
+});
+
+test('con la hora real puesta no se dice nada', () => {
+  assert.deepEqual(avisosDelCierre(porRecibir(), alRecibir), []);
+  assert.deepEqual(avisosDelCierre(porRecibir(), { ...alRecibir, horaReal: '00:00' }), [], 'las 00:00 son una hora');
+});
+
+test('en blanco es en blanco: vacía, solo espacios o sin la llave dicen lo mismo', () => {
+  const { horaReal, ...sinLlave } = alRecibir;
+  for (const cierre of [{ ...alRecibir, horaReal: '' }, { ...alRecibir, horaReal: '   ' }, { ...alRecibir, horaReal: undefined }, { ...alRecibir, horaReal: null }, sinLlave, undefined]) {
+    assert.equal(avisosDelCierre(porRecibir(), cierre).length, 1, JSON.stringify(cierre));
+  }
+});
+
+test('NO bloquea: la misma hora en blanco no es un problema del cierre, así que el botón de guardar sigue prendido', () => {
+  const contratoPorRecibir = porRecibir();
+  assert.deepEqual(problemasDelCierre(contratoPorRecibir, alRecibir, '2026-10-12'), []);
+  assert.deepEqual(problemasDelCierre(contratoPorRecibir, { ...alRecibir, horaReal: '' }, '2026-10-12'), [], 'con la hora en blanco, lo que impide guardar es lo mismo que con ella: nada');
+  // y un problema de verdad sigue siendo problema, haya aviso o no
+  const conAmbos = { ...alRecibir, horaReal: '', fechaReal: '' };
+  assert.equal(problemasDelCierre(contratoPorRecibir, conAmbos, '2026-10-12').length, 1);
+  assert.equal(avisosDelCierre(contratoPorRecibir, conAmbos).length, 1);
+});
+
+test('un contrato que YA se recibió (corregirlo, o uno de antes que se cerró sin hora) no se queja: el aviso es del momento de recibir', () => {
+  const recibido = contratoDeUnCarro({ fechaSalida: '2026-10-03', dias: 9, recibidoEl: '2026-10-12' });
+  assert.equal(yaVolvio(recibido), true);
+  // el mismo contrato, cerrado sin hora
+  const cerradoSinHora = construirCierre(recibido, { horaReal: '' });
+  assert.equal(cerradoSinHora.cierre.horaReal, '');
+  assert.deepEqual(avisosDelCierre(cerradoSinHora, { ...cerradoSinHora.cierre }), []);
+  assert.deepEqual(avisosDelCierre(cerradoSinHora, { ...alRecibir, horaReal: '' }), [], 'aunque en la corrección la deje en blanco');
+  // y uno de antes de que el campo existiera: el cierre ni trae la llave
+  const { horaReal, ...cierreViejo } = recibido.cierre;
+  assert.deepEqual(avisosDelCierre({ ...recibido, cierre: cierreViejo }, cierreViejo), []);
 });

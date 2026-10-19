@@ -12,7 +12,7 @@ import {
   conKmSalidaNormalizado, textoBotonPago, textoAvisoRecibido, textoSaldo, totalDeEstaCobranza,
   leerParametroRuta, textoAvisoCobro, valoresIniciales, textoCorreccion, textoNotaDeSoloCobro, fechaDelCobro,
   textoEstadoPago, textoAvisoSobrecobro, montoInicialPago, leerCamposDelCierre, plantilla, textoFalloAlGuardarElCierre,
-  datosDeSalida,
+  datosDeSalida, htmlDeLosAvisosDelCierre,
 } from '../js/pantallas/recibirCarro.js';
 import { construirContrato } from '../js/pantallas/sacarCarro.js';
 import { dinero } from '../js/ui.js';
@@ -789,4 +789,36 @@ test('cada clase rc-* que dibuja la salida está definida en css/estilos.css, y 
 test('mientras el «ver todo» está cerrado el CSS enseña «Ver todo», y abierto enseña «Ocultar»: sin JavaScript', () => {
   assert.match(CSS_SIN_COMENTARIOS, /\.rc-salida-todo\[open\]\s+\.rc-ver\s*\{[^}]*display:\s*none/);
   assert.match(CSS_SIN_COMENTARIOS, /\.rc-salida-todo:not\(\[open\]\)\s+\.rc-ocultar\s*\{[^}]*display:\s*none/);
+});
+
+// ---------------------------------------------------------------------------
+// El aviso de la hora real en blanco, en la pantalla (la regla vive en nucleo/cierre.js)
+// ---------------------------------------------------------------------------
+
+test('htmlDeLosAvisosDelCierre: ámbar (nivel-medio), nunca el rojo de los problemas; el texto entra escapado; sin avisos, nada', () => {
+  assert.deepEqual(htmlDeLosAvisosDelCierre([]), []);
+  assert.deepEqual(htmlDeLosAvisosDelCierre(undefined), []);
+  const [li] = htmlDeLosAvisosDelCierre([{ nivel: 'medio', mensaje: 'Sobre <b>esta</b> hora & más' }]);
+  assert.equal(li, '<li class="nivel-medio">Sobre &lt;b&gt;esta&lt;/b&gt; hora &amp; más</li>');
+  assert.match(htmlDeLosAvisosDelCierre([{ nivel: 'cualquiera', mensaje: 'x' }])[0], /nivel-medio/, 'un nivel que no se conoce no se pinta de rojo');
+});
+
+test('la pantalla de recibir pone el aviso de la hora aparte de los problemas: solo `problemas` apaga el botón y solo `problemasDelCierre` frena el guardado', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/recibirCarro.js', import.meta.url), 'utf8');
+  const codigo = fuente.split('\n').filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*') && !l.trim().startsWith('/**')).join('\n');
+  // se calcula en UN lugar, con la regla del núcleo, y después del modo de solo cobro (que no recibe nada y retorna antes)
+  assert.equal((codigo.match(/avisosDelCierre\(/g) ?? []).length, 1);
+  const iAviso = codigo.indexOf('avisosDelCierre(contrato, campos)');
+  assert.ok(iAviso > codigo.indexOf("el('rc-guardar').textContent = 'Cobrar';"), 'no sale en el modo de solo cobro');
+  assert.ok(iAviso > codigo.indexOf('const problemas = problemasDelCierre(contrato, campos, hoyISO());'));
+  // el botón se apaga solo por los problemas
+  const apagados = [...codigo.matchAll(/el\('rc-guardar'\)\.disabled = ([^;]+);/g)].map((m) => m[1]);
+  assert.ok(apagados.length >= 2);
+  assert.ok(apagados.every((e) => !/avis/i.test(e)), apagados.join(' | '));
+  // y guardar no mira los avisos: sigue siendo `problemasDelCierre` quien lo frena
+  const guardar = codigo.slice(codigo.indexOf('async function guardar(ev)'), codigo.indexOf("el('rc-form').addEventListener('input'"));
+  assert.ok(guardar.includes('problemasDelCierre('));
+  assert.equal(/avisosDelCierre/.test(guardar), false);
+  // la regla no se vuelve a escribir en la pantalla: `horaReal` solo se LEE del campo y se pone en el campo, nunca se compara
+  assert.equal((codigo.match(/horaReal/g) ?? []).length, 2, 'leerCamposDelCierre y el valor inicial del campo; ninguna cuenta más');
 });

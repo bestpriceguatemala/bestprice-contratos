@@ -22,7 +22,7 @@
 // construirCierre: agrega el pago directo sobre el contrato tal como está,
 // para que un cierre ya hecho no se pueda reabrir ni reeditar por accidente
 // desde aquí.
-import { construirCierre, problemasDelCierre } from '../nucleo/cierre.js';
+import { construirCierre, problemasDelCierre, avisosDelCierre } from '../nucleo/cierre.js';
 import {
   lineasDevolucion, lineasSalida, resumen, horaTardiaDe, conKmSalidaNormalizado,
 } from '../nucleo/contrato.js';
@@ -173,6 +173,15 @@ export function textoAvisoSobrecobro(saldo, monto) {
   const m = q(monto);
   if (!(s > 0) || !(m > s)) return null;
   return `Estás cobrando ${dinero(m)} y solo te debe ${dinero(s)}. Van a quedar ${dinero(q(m - s))} a favor del cliente.`;
+}
+
+/**
+ * Los avisos del cierre (`avisosDelCierre`, nucleo/cierre.js) como renglones de la lista de arriba del botón. En el nivel que
+ * traen —el `medio` es el ámbar de «te lo digo y tú decides»—, no en el rojo de los problemas: el rojo es lo que impide guardar y
+ * esto no. El texto sale escapado. Función pura.
+ */
+export function htmlDeLosAvisosDelCierre(avisos) {
+  return (avisos ?? []).map((a) => `<li class="nivel-${a.nivel === 'alto' ? 'alto' : 'medio'}">${esc(a.mensaje)}</li>`);
 }
 
 /**
@@ -742,10 +751,13 @@ export async function pintarRecibirCarro(contenedor, parametroRuta) {
     // Los problemas de problemasDelCierre (nucleo/cierre.js) van en rojo,
     // justo arriba del botón, y mientras haya alguno el botón no guarda. El
     // aviso de sobrecobro se ve en el mismo lugar pero nunca se suma a ellos.
+    // Los avisosDelCierre (la hora real en blanco) van al final, en ámbar, y
+    // tampoco cuentan para el botón: solo `problemas` lo apaga.
     const problemas = problemasDelCierre(contrato, campos, hoyISO());
     el('rc-problemas').innerHTML = [
       ...problemas.map((m) => `<li class="nivel-alto">${esc(m)}</li>`),
       ...avisoSobrecobroHTML,
+      ...htmlDeLosAvisosDelCierre(avisosDelCierre(contrato, campos)),
     ].join('');
     el('rc-guardar').disabled = problemas.length > 0 || guardando;
   }
