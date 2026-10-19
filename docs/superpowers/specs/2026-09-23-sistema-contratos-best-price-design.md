@@ -713,6 +713,25 @@ tipo), y el sistema descuenta capacidad del tipo en ambos casos.
 - Se escriben **dentro de una transacción que lee el carro** (`cambiarEnNubeYLocal`, `js/datos.js`),
   nunca reescribiendo la copia que la pantalla tenía en memoria: un arreglo dentro de un documento se
   pisa si dos pestañas lo guardan a ciegas, y un servicio perdido deja un aviso que no sale.
+  **Un guardado del carro entero tampoco los escribe** («Guardar carro», «Marcar fuera de servicio»,
+  «Volver a habilitar» y `#/habilitar/:id`, que pasan por `guardarVehiculo`): para un carro que ya
+  existe lee el carro DENTRO de la transacción, le pone encima lo que trae la pantalla y deja
+  `servicios[]` e `intervalos{}` como la nube los tiene (`carroConLoDeLaFicha` y
+  `CAMPOS_DEL_MANTENIMIENTO`, `js/nucleo/mantenimiento.js`). Es una mezcla y no un rechazo
+  (`CODIGO_COPIA_VIEJA` es de los contratos) porque ese guardado no edita el historial: no hay dos
+  listas que reconciliar, y negarse por el sello `actualizado` —que sube con cada servicio anotado—
+  sería negarse por nada. Lo que sí sigue igual, y se dice: los campos sueltos del carro (placas,
+  color, si está fuera de servicio…) los escribe la pantalla tal como los trae, y el último que guarda
+  gana. Un carro NUEVO no tiene nada que leer y se crea como siempre.
+- **Ojo con los nombres: la misma palabra, otro dato.** Es lo contrario de «un dato, dos
+  nombres» y cuesta igual, porque tampoco da error: da una respuesta equivocada.
+  `servicios[].tipo` (`'aceite'`, `'frenos'`…) **no** es el `tipo` del carro (`'Pickup'`, `'Sedán'`):
+  los dos viven en el mismo documento. `servicios[].km` es el odómetro CUANDO se hizo ese servicio y
+  **no** es `kmSalida` ni `kmEntrada` del contrato (el odómetro al salir y al regresar en una renta): se
+  teclea en la ficha del carro, vale solo para ese servicio y no sube el kilometraje del carro, que sale
+  de los contratos. Y `intervalos{ aceite: { km, meses } }.km` es una distancia ENTRE servicios (5,000),
+  no una lectura del odómetro. No se renombra ninguno —cada uno es lo que dice su lugar—; lo que se
+  exige es que nadie lea uno como si fuera otro.
 
 **Del dueño de un carro ajeno** (colección `duenos`; agregado el 5 de octubre):
 `nombre`, `telefono`, `nit`, `nota`, `actualizado`.
