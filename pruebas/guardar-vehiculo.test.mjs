@@ -402,6 +402,8 @@ test('carroConLoDeLaFicha: lo del mantenimiento es de la nube; lo demás, de la 
   });
   assert.deepEqual(fresco, copiaFresco);
   assert.deepEqual(deLaFicha, copiaFicha);
+  assert.deepEqual(carroConLoDeLaFicha(fresco, undefined), fresco, 'sin nada de la pantalla, la nube se queda como está');
+  assert.notEqual(carroConLoDeLaFicha(fresco, undefined), fresco, 'y es una copia, no el mismo objeto');
   // Sin mantenimiento en ninguno de los dos lados no se inventa la llave (Firestore no acepta `undefined`).
   const sin = carroConLoDeLaFicha({ id: 'v1', placas: 'P-1' }, { id: 'v1', placas: 'P-2', servicios: [{ id: 'x' }] });
   assert.equal('servicios' in sin, false);
