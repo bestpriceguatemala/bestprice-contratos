@@ -1203,7 +1203,12 @@ export async function guardarVehiculo(vehiculo, deps = {}) {
     return cambiarEnNubeYLocal('vehiculos', vehiculo.id, (fresco) => carroConLoDeLaFicha(fresco, vehiculo), deps);
   }
   const codigo = await siguienteCodigoCarro({ iniciar: deps.iniciar });
-  return guardarEnNubeYLocal('vehiculos', vehiculo, (id) => ({ ...vehiculo, id, codigo, actualizado: Date.now() }), deps);
+  // `carroConLoDeLaFicha({}, …)`: un alta no escribe mantenimiento (un carro nuevo no tiene historial) y la regla vale para
+  // TODO guardado del carro, no solo para el que trae código: un carro que ya existía pero llegó sin él no puede devolver su
+  // historial a una lista vieja por haber entrado por aquí. De paso, ningún `undefined` llega a Firestore.
+  return guardarEnNubeYLocal('vehiculos', vehiculo, (id) => ({
+    ...carroConLoDeLaFicha({}, vehiculo), id, codigo, actualizado: Date.now(),
+  }), deps);
 }
 
 // ---------- Cambiar un documento sobre lo que la nube tiene AHORA (mantenimiento, §12b) ----------

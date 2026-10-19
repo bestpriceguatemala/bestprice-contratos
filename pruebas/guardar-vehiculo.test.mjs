@@ -340,6 +340,34 @@ test('el reintento de un alta que sí había llegado no toca el mantenimiento qu
   assert.deepEqual(ids(nube.leer(`vehiculos/${primero.id}`)), ['s-1']);
 });
 
+test('un carro que llega SIN código (aunque ya exista) tampoco escribe el mantenimiento que la copia traiga: la regla es de todo guardado del carro', async () => {
+  const { nube, A, abrir } = dosComputadoras();
+  nube.docs.set('vehiculos/v1', {
+    ...structuredClone(nube.docs.get('vehiculos/v1')),
+    servicios: [...nube.docs.get('vehiculos/v1').servicios, { id: 's-1', tipo: 'aceite', fecha: '2026-10-10', km: 15000 }],
+  });
+  const { codigo: _sin, ...sinCodigo } = abrir(); // la copia vieja, con UN servicio y sin código
+  nube.docs.set('contadores/vehiculos', { ultimo: 7 });
+
+  await guardarVehiculo({ ...sinCodigo, color: 'Rojo' }, A.deps);
+
+  assert.deepEqual(ids(nube.leer('vehiculos/v1')), ['s-0', 's-1']);
+  assert.equal(nube.escrituras('vehiculos/v1').at(-1)[2].servicios, undefined, 'y ni siquiera se manda: el `merge` no la toca');
+});
+
+test('un alta con un campo en `undefined` lo deja fuera en vez de mandárselo a Firestore (que lo rechaza)', async () => {
+  const nube = nubeEnMemoria({ contadores: { vehiculos: { ultimo: 3 } } });
+  const copia = copiaLocalEnMemoria();
+  const deps = { iniciar: nube.iniciar, guardarCopia: copia.guardarCopia, avisar: () => {} };
+  const alta = altaConIdFijo(() => nuevoIdVehiculo({ iniciar: nube.iniciar }));
+  const nuevo = construirVehiculo({}, {
+    id: undefined, codigo: undefined, placas: 'P-123ABC', tipo: 'Sedán', marca: 'Toyota', linea: 'Yaris', color: undefined, modelo: '2022',
+  });
+  const guardado = await guardarVehiculo(await alta.paraGuardar(nuevo), deps);
+  assert.equal('color' in nube.leer(`vehiculos/${guardado.id}`), false);
+  assert.equal(guardado.codigo, 4);
+});
+
 // ---------------------------------------------------------------------------------------------------------------
 // Qué es «del mantenimiento» (una sola lista, y que sea la verdad)
 // ---------------------------------------------------------------------------------------------------------------

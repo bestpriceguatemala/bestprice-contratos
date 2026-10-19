@@ -23,6 +23,12 @@ import { pintarMantenimiento } from './mantenimiento.js';
  * del formulario (como fueraDeServicio). La copia local en IndexedDB se reemplaza
  * entera, así que lo que no se copia aquí desaparece de la pantalla aunque
  * siga en la nube — por eso es crítico hacer un merge.
+ *
+ * Ojo con lo que este merge NO decide: `guardarVehiculo` (datos.js) de un carro que ya existe lee el
+ * carro de la nube DENTRO de la transacción y le pone encima lo que este objeto trae, EXCEPTO `servicios[]` e
+ * `intervalos{}`, que se quedan como la nube los tiene aunque este objeto traiga la lista de cuando se abrió la ficha.
+ * Lo demás (placas, color, fueraDeServicio…) se escribe tal como llega aquí: es lo que el dueño acaba de hacer en esta
+ * pantalla, y es lo que no debe quedarse sin guardar.
  */
 export function construirVehiculo(carroExistente, campos) {
   return {
