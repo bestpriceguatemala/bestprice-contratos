@@ -11,7 +11,10 @@ import {
   olvidarElDescarteDelRecordatorio, AVISO_DE_PRIVACIDAD, RUTA_DEL_RESPALDO, bajarLaPlantilla, MENSAJE_SIN_PLANTILLA, MENSAJE_GENERICO,
 } from '../js/pantallas/respaldo.js';
 import { estadoDeLosAnios } from '../js/nucleo/respaldo.js';
-import { NO_SE_RESPALDA, ErrorDeRespaldo } from '../js/respaldo/mapa.js';
+import { NO_SE_RESPALDA, ErrorDeRespaldo, armarCeldas } from '../js/respaldo/mapa.js';
+import { carroConIntervalo } from '../js/nucleo/mantenimiento.js';
+import { carroPropio, carroConServicios } from './fixtures/carroConServicios.mjs';
+import * as F from './fixtures/datosParaRespaldo.mjs';
 
 const leer = (ruta) => readFileSync(new URL(ruta, import.meta.url), 'utf8');
 const sinComentarios = (texto) => texto.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -97,6 +100,39 @@ test('lo que el archivo NO lleva está a la vista, con cada punto de la lista', 
   for (const punto of NO_SE_RESPALDA) assert.ok(html.includes(punto.replace(/&/g, '&amp;')), punto);
   assert.match(html, /reservaciones/);
   assert.match(html, /COMENTARIOS/);
+});
+
+test('lo que el archivo NO lleva dice, en la pantalla donde se baja, que el mantenimiento de la flota no va: ni el historial de servicios ni los intervalos', () => {
+  const sobreElMantenimiento = NO_SE_RESPALDA.filter((t) => /mantenimiento/i.test(t));
+  assert.equal(sobreElMantenimiento.length, 1, 'una línea, en la lista que sale de mapa.js');
+  assert.match(sobreElMantenimiento[0], /servicios/);
+  assert.match(sobreElMantenimiento[0], /cada cuánto/);
+  assert.match(sobreElMantenimiento[0], /VEHICULOS/, 'y dice por qué: dónde lo guardaría su hoja y no puede');
+  const resultado = {
+    nombre: 'Best Price 2026.xlsx', cuenta: { clientes: 1, vehiculos: 1, contratos: 1 }, avisos: [], anotado: true,
+  };
+  // la lista se dibuja siempre, igual que la advertencia: en blanco, cargando, armando, con error y con resultado
+  for (const ui of [{}, { cargando: true }, { trabajando: 2026 }, { error: 'algo' }, { resultado }]) {
+    const html = htmlDeLaPantalla({ anios: anios({}, '2026-10-14'), ...ui });
+    const lista = html.slice(html.indexOf('rs-no-lleva'));
+    assert.ok(lista.includes(sobreElMantenimiento[0]), `en la lista de lo que no lleva (${Object.keys(ui).join(',') || 'normal'})`);
+    assert.match(lista, /El mantenimiento de la flota/);
+  }
+});
+
+test('y es verdad: un carro con servicios e intervalos se respalda IGUAL que uno sin ellos (el mantenimiento no cambia ni una celda del archivo)', () => {
+  const sin = carroPropio();
+  const con = carroConIntervalo(carroConServicios(sin, [
+    { tipo: 'aceite', fecha: '2026-07-03', km: 15000 },
+    { tipo: 'frenos', fecha: '2026-08-20', km: 18500 },
+  ], '2026-10-16'), 'aceite', { km: 4000, meses: 1 });
+  assert.equal(con.servicios.length, 2);
+  assert.deepEqual(con.intervalos.aceite, { km: 4000, meses: 1 });
+  const armar = (carro) => armarCeldas({ anio: 2026, clientes: F.clientes(), vehiculos: [carro], contratos: [], pagosDueno: [] });
+  assert.deepEqual(armar(con).celdas.vehiculos, armar(sin).celdas.vehiculos);
+  assert.deepEqual(armar(con).avisos, armar(sin).avisos);
+  // y las siete columnas que su hoja tiene para un carro son las únicas que se escriben
+  assert.deepEqual([...new Set(armar(con).celdas.vehiculos.map((c) => c.ref.replace(/\d+$/, '')))], ['B', 'C', 'D', 'E', 'F', 'G', 'H']);
 });
 
 test('un error y los avisos del archivo se dibujan, y el texto de los clientes entra ESCAPADO (un nombre con «<» no rompe ni ejecuta nada)', () => {

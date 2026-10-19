@@ -51,6 +51,10 @@ export const NO_SE_RESPALDA = [
   'Las fichas de los dueños de carros ajenos (teléfono, NIT y nota): su hoja solo guarda el nombre.',
   'Los abonos de cada pago de las rentas, uno por uno: la hoja guarda la forma de pago y el porcentaje de tarjeta; si fueron varios, el detalle va en COMENTARIOS.',
   'Si un carro de la flota está fuera de servicio y por qué.',
+  // Los servicios (`servicios[]`) y los intervalos (`intervalos{}`) viven dentro de cada carro, y su hoja VEHICULOS tiene siete columnas
+  // (placas, tipo, marca y línea, color, modelo, propiedad, dueño) y ninguna donde guardarlos. Estaba dicho solo en §10 del diseño; un
+  // respaldo cuyos huecos solo se documentan en un archivo de diseño es un respaldo cuyos huecos nadie conoce hasta el día que lo necesita.
+  'El mantenimiento de la flota (la pantalla Mantenimiento): los servicios que se le han hecho a cada carro y cada cuánto le toca cada uno. Su hoja VEHICULOS no tiene dónde guardarlos.',
 ];
 
 // ---------------------------------------------------------------------------

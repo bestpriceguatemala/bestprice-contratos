@@ -44,3 +44,28 @@ Palabras del dueño, 16 de octubre: «El lugar siempre va a ser en la oficina. L
 **Mutaciones (todas matadas):** AF ← `horaSalida`; sin `yaVolvio` (AF y AG por separado); `|| '00:00'`; `|| c.horaSalida`; AG ← `c.lugar`; AG constante; AF siempre vacía; `valorDe`: `fraccion || null`, `?? 0`, hora vacía → 0.
 
 **Diseño:** §10, viñeta nueva «La hora y el lugar de entrada (columnas AF y AG)» con la fecha y sus palabras.
+
+## 3. La pantalla del respaldo dice que el mantenimiento no va  (HECHO)
+
+**Qué cambió.** `NO_SE_RESPALDA` (`js/respaldo/mapa.js`, la lista que dibuja `js/pantallas/respaldo.js` en el bloque «Lo que este archivo NO lleva», siempre visible y abierto) tiene una línea más, junto a la del «fuera de servicio»:
+«El mantenimiento de la flota (la pantalla Mantenimiento): los servicios que se le han hecho a cada carro y cada cuánto le toca cada uno. Su hoja VEHICULOS no tiene dónde guardarlos.»
+Cubre `servicios[]` e `intervalos{}`. No se enumeran los seis tipos de servicio en el texto a propósito: si mañana hay un séptimo, la frase no se queda vieja.
+
+**Pruebas** (`pruebas/respaldo-pantalla.test.mjs`, 2 nuevas):
+- La lista de `mapa.js` tiene exactamente UNA línea sobre el mantenimiento y dice «servicios», «cada cuánto» y «VEHICULOS»; la pantalla la dibuja dentro de `rs-no-lleva` en los cinco estados (normal, cargando, armando, con error, con resultado). La prueba que ya existía (`for (const punto of NO_SE_RESPALDA)`) NO habría fallado si la línea desaparecía.
+- Que la frase sea verdad: `armarCeldas` con un carro con servicios (`carroConServicios`) e intervalos (`carroConIntervalo`), ambos de los constructores del sistema, da celdas IDÉNTICAS (y los mismos avisos) que el mismo carro sin ellos, y las únicas columnas de VEHICULOS que se escriben son B–H.
+
+**Mutaciones (todas matadas):** quitar la línea; quitarle «VEHICULOS»; quitarle «servicios»; escribir el número de servicios en la columna I; escribir un intervalo en la columna J.
+
+**Diseño:** §10 (la viñeta que decía «falta agregarle una línea» ahora dice que se agregó y cómo se vigila); §7b «Del respaldo, de campo a columna»: Carros (`servicios[]`/`intervalos{}` sin columna) y Contratos (HORA/LUGAR ENTRADA salen de `cierre.horaReal`/`cierre.lugarEntrada`; esa frase es del punto 2 y quedó en este commit).
+
+## Preocupaciones
+
+1. **AG: no lo volví un «OFICINA» fijo.** «Deja de ser pregunta» lo leí como: ya no hay que confirmar con él qué lleva la columna. AG sigue llevando `cierre.lugarEntrada` (lo anotado al recibir) y vacío si el carro no ha vuelto. Escribir «OFICINA» a todos habría sobrescrito un lugar anotado distinto y puesto un lugar de entrada en rentas que todavía no regresan. Si lo que quiso decir es «AG siempre dice OFICINA», es una línea en `armarContrato` (`mapa.js`) y dos pruebas que cambiar (`AG LUGAR ENTRADA es el lugar anotado al RECIBIR…` y la de `yaVolvio`).
+2. **Dos hallazgos de su palabra que NO toqué (no eran lo pedido):**
+   - El campo «Lugar de entrada» de «Recibir carro» es texto libre sin valor por omisión; si «siempre es la oficina», lo lógico es que venga puesto «Oficina». Hoy, si el mostrador lo deja en blanco, AG sale vacía en el respaldo.
+   - La hoja impresa precarga «lugar de entrada» con el lugar de SALIDA (`hojaContrato.js`, decisión del 14 de octubre: «casi toda renta vuelve donde salió»). Su frase del 16 («siempre va a ser en la oficina») la contradice; la decisión de qué precargar es suya.
+3. **La hora real no es obligatoria al recibir** (`problemasDelCierre` no la pide). Si la deja en blanco, AF queda vacía en el respaldo, y es justo la hora con la que él decide el cobro. No lo cambié ni lo avisé («no avisos que no pidió»); es una decisión suya si debe pedirse.
+4. **AF mezcla dos significados en su hoja:** las filas que escribe el respaldo traen la hora real; las que él agregue a mano con su método traen la que esperaba. Está dicho en §10, no en pantalla.
+5. **«Lo que este archivo NO lleva» está debajo de los botones de bajar**, no antes (el aviso de privacidad sí va antes). Está `open`, y no lo moví porque no era lo pedido.
+6. **Guardar cuando la pantalla ya no está a la vista** sigue mandando a `#/flota` (comportamiento fijado por una prueba existente desde el 16; era `location.hash = '#/flota'` incondicional antes). Quien se fue a otra pantalla mientras se guardaba aterriza en la flota. El comentario viejo decía «no se le quita su pantalla»; lo reescribí para no prometer eso.

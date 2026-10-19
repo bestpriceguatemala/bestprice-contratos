@@ -874,14 +874,16 @@ en `js/respaldo/diseno.js`). Lo que no es obvio:
   `licenciaEmitidaEn`. `facturarA` no tiene celda en sus filas de datos.
 - **Carros.** El carro con `codigo` k va en la fila k+2, para que la columna CODIGO de su
   hoja (que cuenta sola) diga lo mismo que la pantalla de Carros. `fueraDeServicio` y
-  `motivoFueraDeServicio` no tienen columna.
+  `motivoFueraDeServicio` no tienen columna, ni `servicios[]` e `intervalos{}` (el mantenimiento, §10).
 - **Contratos.** `numero` va en A y las filas son contiguas desde la 6 (su hoja pega la
   siguiente renta en `COUNT(A6:A1005)+6`: un hueco la pegaría encima de otra). `clienteId`
   y `carroId` se traducen a los códigos de su hoja; un carro ajeno deja COD. CARRO vacío y
   llena las columnas SUBARR. con `carroAjeno{placas, tipo, marca, color, modelo, dueno,
   costoDia}`. `tarjetas[]` entran como `XXXX XXXX XXXX` y `ultimos4` (ADR-001); su hoja
   tiene dos, de la tercera en adelante van a COMENTARIOS. Las fechas son fechas de Excel y
-  las horas fracciones del día. `pagos[]` se resume en FORMA DE PAGO (una forma, o MIXTO)
+  las horas fracciones del día. HORA ENTRADA y LUGAR ENTRADA salen de `cierre.horaReal` y
+  `cierre.lugarEntrada` (la hora **real**, no la prevista; vacías mientras el carro no haya
+  vuelto: §10). `pagos[]` se resume en FORMA DE PAGO (una forma, o MIXTO)
   y en % TARJETA (solo si todo se pagó con tarjeta con un mismo porcentaje).
   `duenoId`/`pagosDueno` dicen PAGADO AL DUEÑO (SI/NO) y su fecha.
 - **Sin campo en el sistema:** PERSONA O EMPRESA y NIT, T. CIRCULACION ORIGINAL y
@@ -1377,8 +1379,12 @@ alternativas están en `docs/adr/ADR-004-el-respaldo-parcha-su-excel-sin-libreri
   lista en pantalla como «lo que este archivo NO lleva» (reservaciones, comisiones,
   pagos a dueños uno por uno, fichas de dueños, si un carro está fuera de servicio). **Tampoco lleva
   el mantenimiento** (los servicios de cada carro, `servicios[]`, ni sus intervalos): su hoja
-  VEHICULOS no tiene dónde guardarlos. Esa lista sale de `js/respaldo/mapa.js`, que no se tocó al
-  construir el mantenimiento (era de otro trabajo): falta agregarle una línea.
+  VEHICULOS no tiene dónde guardarlos. Esa lista sale de `js/respaldo/mapa.js` (`NO_SE_RESPALDA`) y la
+  pantalla donde se baja el archivo la dibuja siempre; el mantenimiento entró a ella el 19 de octubre
+  de 2026 (se construyó el 16 sin tocar esa lista, que era de otro trabajo: un hueco que solo está
+  dicho en este documento es un hueco que nadie conoce hasta el día que se necesita el respaldo). Una prueba compara el
+  respaldo de un carro con servicios e intervalos contra el de uno sin ellos y exige que sea
+  idéntico, para que la lista no pueda decir algo que ya no es verdad.
 - **La hora y el lugar de entrada (columnas AF y AG): la hora REAL.** Decisión del dueño del
   16 de octubre de 2026: *«El lugar siempre va a ser en la oficina. La hora es lo que importa
   porque si se pasa de la hora yo decido cuánto le cobro.»* En su hoja esas dos columnas se llenan
