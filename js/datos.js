@@ -288,14 +288,22 @@ export async function cargarReservas(alLlegar) {
  * debería tener que saber que este filtro existe.
  */
 export async function cargarContratosAbiertos(alLlegar, deps) {
-  const estaAbierto = (c) => ['rentado', 'devuelto'].includes(c?.estado || 'rentado');
-  const soloAbiertos = (contratos) => contratos.filter(estaAbierto);
   const r = await cargarConSincronia(
     'contratos',
-    alLlegar && ((res) => alLlegar({ datos: soloAbiertos(res.datos), fallo: res.fallo })),
+    alLlegar && ((res) => alLlegar({ datos: contratosAbiertosDe(res.datos), fallo: res.fallo })),
     deps,
   );
-  return { datos: soloAbiertos(r.datos), fallo: r.fallo };
+  return { datos: contratosAbiertosDe(r.datos), fallo: r.fallo };
+}
+
+/**
+ * De una lista de contratos, los que todavía piden algo (la regla de «abierto» que `cargarContratosAbiertos` aplica al leer): se mira el
+ * campo `estado` guardado, y uno sin él cuenta como abierto. Se exporta para que quien lee TODOS los contratos (`cargarTodosLosContratos`:
+ * «Sacar carro» y Clientes, que necesitan también el último año de lo cerrado) saque los abiertos de esa MISMA lectura con la MISMA regla, y no
+ * haya una segunda definición de «abierto» ni una segunda lectura de la nube.
+ */
+export function contratosAbiertosDe(contratos) {
+  return (Array.isArray(contratos) ? contratos : []).filter((c) => ['rentado', 'devuelto'].includes(c?.estado || 'rentado'));
 }
 
 /**

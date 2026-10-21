@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   cambiarEnNubeYLocal, registrarServicioDelCarro, anularServicioDelCarro, cambiarIntervaloDelCarro, nuevoIdServicio,
-  cargarTodosLosContratos, cargarContratosAbiertos, altaConIdFijo, CODIGO_DOCUMENTO_NO_ESTA, MENSAJE_CARRO_NO_ESTA,
+  cargarTodosLosContratos, cargarContratosAbiertos, contratosAbiertosDe, altaConIdFijo, CODIGO_DOCUMENTO_NO_ESTA, MENSAJE_CARRO_NO_ESTA,
 } from '../js/datos.js';
 import { nubeEnMemoria, copiaLocalEnMemoria } from './fixtures/nubeEnMemoria.mjs';
 import { carroPropio, carroConServicios } from './fixtures/carroConServicios.mjs';
@@ -246,6 +246,19 @@ test('cargarTodosLosContratos trae también los CERRADOS; cargarContratosAbierto
   assert.deepEqual(todos.datos.map((c) => c.id).sort(), ['c1', 'c2']);
   assert.equal(todos.fallo, false);
   assert.equal(kilometrajeDelCarro('v1', todos.datos).km, 14800);
+});
+
+test('contratosAbiertosDe: de la lectura de TODOS saca exactamente lo que devuelve cargarContratosAbiertos (una sola regla de «abierto»)', async () => {
+  const cerrado = contratoConKilometraje({ id: 'c1', numero: 1, fechaSalida: '2026-09-01', kmSalida: 14000, recibidoEl: '2026-09-05', kmEntrada: 14800 });
+  const afuera = contratoConKilometraje({ id: 'c2', numero: 2, carroId: 'v2', fechaSalida: '2026-10-10', kmSalida: 5000 });
+  const { estado: _sinEstado, ...viejoSinEstado } = contratoConKilometraje({ id: 'c3', numero: 3, carroId: 'v3', fechaSalida: '2026-10-11', kmSalida: 100 });
+  const nube = nubeEnMemoria({ contratos: [cerrado, afuera, viejoSinEstado] });
+  const deps = (copia) => ({ iniciar: nube.iniciar, leerCopia: copia.leerCopia, guardarCopia: copia.guardarCopia, borrarCopia: copia.borrarCopia });
+  const abiertos = await cargarContratosAbiertos(undefined, deps(copiaLocalEnMemoria()));
+  const todos = await cargarTodosLosContratos(undefined, deps(copiaLocalEnMemoria()));
+  assert.deepEqual(contratosAbiertosDe(todos.datos).map((c) => c.id).sort(), abiertos.datos.map((c) => c.id).sort());
+  assert.deepEqual(contratosAbiertosDe(todos.datos).map((c) => c.id).sort(), ['c2', 'c3'], 'uno sin `estado` guardado cuenta como abierto: nunca desaparece');
+  assert.deepEqual(contratosAbiertosDe(undefined), [], 'lo que no es una lista no es «todos abiertos» ni revienta');
 });
 
 // Mismo contrato que las demás lecturas (`cargarConSincronia`): con copia local se sirve al instante y la nube llega por

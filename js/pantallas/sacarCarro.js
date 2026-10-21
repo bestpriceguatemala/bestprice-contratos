@@ -29,7 +29,7 @@ import { estadoReserva } from '../nucleo/reserva.js';
 import { devolucionPrevista, hoyISO, esFechaISO } from '../nucleo/fechas.js';
 import { q, suma, recargoTarjeta } from '../nucleo/dinero.js';
 import {
-  cargarFlota, cargarContratosAbiertos, cargarReservas, cargarAjustes, cargarClientes,
+  cargarFlota, cargarTodosLosContratos, contratosAbiertosDe, cargarReservas, cargarAjustes, cargarClientes,
   guardarCliente, guardarContrato, siguienteNumeroContrato, nuevoIdContrato, agregarPago,
   cargarDuenos, guardarDueno, cargarEmpleados, CODIGO_RESERVACION_CAMBIO, altaConIdFijo, nuevoIdCliente, nuevoIdDueno,
 } from '../datos.js';
@@ -336,16 +336,26 @@ export function duenoDelContrato({ escogido, buscado = '', nuevo = '' }) {
  *   flota y TODOS los contratos abiertos, y se dice cuál es la reservación de origen: esa tampoco compite contra sí
  *   misma. `avisosDeSalida` los cruza con la misma regla que el formulario de reservaciones.
  *
+ * - `historial` es lo que se leyó de TODOS los contratos (`{ datos, fallo }`, ver `cargarTodosLosContratos`): de ahí sale el último año del
+ *   cliente escogido para «ya devolvió tarde». Los abiertos (`contratosAbiertos`) salen de esa misma lectura con `contratosAbiertosDe`.
+ *
  * El precio y los días mínimos no se mandan a propósito: el dueño pone el precio que quiere y no quiere avisos.
  */
 export function entradaDeAvisos({
-  borrador, cliente, carro, ajeno = false, carroId, reservaId = null, flota = [], reservas = [], contratosAbiertos = [], hoy,
+  borrador, cliente, carro, ajeno = false, carroId, reservaId = null, flota = [], reservas = [], contratosAbiertos = [], historial = null, hoy,
 }) {
   return {
     cliente,
     carro: ajeno ? null : carro,
     contrato: borrador,
     contratosDelCliente: cliente ? contratosAbiertos.filter((c) => c.clienteId === cliente.id) : [],
+    // El último año de rentas de ESTE cliente, cerradas o no (`historial` es lo que se leyó de TODOS los contratos, `{ datos, fallo }`, o
+    // `null` mientras no llega): lo que necesita «ya devolvió tarde» (nucleo/historial.js), porque el cliente que devolvió tarde, pagó y
+    // cerró es el caso normal y los abiertos nunca lo ven (H-4). La ventana de un año la aplica la regla, no esta función. Un `fallo` viaja
+    // tal cual: una lectura caída no es «un cliente sin historial».
+    historialDelCliente: cliente && historial
+      ? { datos: historial.datos.filter((c) => c.clienteId === cliente.id), fallo: Boolean(historial.fallo) }
+      : null,
     contratosDelCarro: ajeno || !carroId ? [] : contratosAbiertos.filter((c) => c.carroId === carroId),
     reservasDelCarro: ajeno || !carroId ? [] : reservas.filter((r) => r.carroId === carroId && r.id !== reservaId),
     flota,
@@ -1351,6 +1361,9 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
 
   let flota = [];
   let contratosAbiertos = [];
+  // Lo que se leyó de TODOS los contratos (`{ datos, fallo }`, `null` mientras no llega): de ahí salen los abiertos y, para los avisos, el último
+  // año del cliente escogido (H-4, «ya devolvió tarde»: casi todo lo que devolvió tarde ya está cerrado).
+  let historial = null;
   let reservas = [];
   let ajustes = {};
   let clienteSeleccionado = null;
@@ -1528,6 +1541,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       flota,
       reservas,
       contratosAbiertos,
+      historial,
       hoy: hoyISO(),
     }));
     // avisosDeSalida arma una lista nueva en cada llamada, así que agregarle aquí no toca nada ajeno.
@@ -2079,7 +2093,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // La de empleados también se pide al abrir: sin ella no se puede guardar la salida (hace falta saber quién rentó).
   buscadorEmpleados.pedir();
 
-  // cargarFlota/cargarContratosAbiertos/cargarReservas sirven la copia local
+  // cargarFlota/cargarTodosLosContratos/cargarReservas sirven la copia local
   // al instante y nunca rechazan (T9), igual que en flota.js; entregan
   // { datos, fallo } (CRÍTICO 2 de la revisión final) — esta pantalla
   // todavía no tiene dónde mostrar ese fallo (no hay una barra como la de
@@ -2096,7 +2110,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // falta un try/catch.
   const [rFlota, rContratos, rReservas, ajustesCargados] = await Promise.all([
     cargarFlota((r) => { flota = r.datos; falloFlota = r.fallo; if (sigoVigente()) refrescarCarro(); }),
-    cargarContratosAbiertos((r) => { contratosAbiertos = r.datos; if (sigoVigente()) recalcular(); }),
+    cargarTodosLosContratos((r) => { historial = r; contratosAbiertos = contratosAbiertosDe(r.datos); if (sigoVigente()) recalcular(); }),
     // Tarea 9: cada sincronía de reservas es también una oportunidad de
     // encontrar la reservación de origen (`reservaId`) si la primera lectura
     // (copia local, abajo) todavía no la tenía — intentarAplicarReserva() ya
@@ -2111,7 +2125,8 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   ]);
   flota = rFlota.datos;
   falloFlota = rFlota.fallo;
-  contratosAbiertos = rContratos.datos;
+  historial = rContratos;
+  contratosAbiertos = contratosAbiertosDe(rContratos.datos);
   reservas = rReservas.datos;
   ajustes = ajustesCargados;
   if (!sigoVigente()) return;

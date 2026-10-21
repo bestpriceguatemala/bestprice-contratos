@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { avisosDeSalida } from '../js/nucleo/avisos.js';
 import { contratoDeUnCarro } from './fixtures/contratoDeUnCarro.mjs';
 import { construirContrato, entradaDeAvisos } from '../js/pantallas/sacarCarro.js';
+import { readFileSync } from 'node:fs';
 import { carroPropio, carroConServicios } from './fixtures/carroConServicios.mjs';
 
 const cliente = { id: 'k1', licenciaExpira: '2030-02-09', documentoExpira: '2030-02-09' };
@@ -533,4 +534,44 @@ test('mantenimiento: va después de los avisos serios (la licencia vencida va pr
 
 test('mantenimiento: avisosDeSalida a secas, sin servicios en el carro, sigue sin decir nada (nada de lo de antes cambió)', () => {
   assert.deepEqual(avisosDeSalida({ ...base, contrato: { ...contrato, kmSalida: 999999 } }), []);
+});
+
+// H-4, el cableado de «Sacar carro». La regla de arriba estaba hecha y probada, pero NADA le entregaba el historial: `entradaDeAvisos` no lo
+// recibía ni lo pasaba, y `cargarContratosDelCliente`, que estos comentarios nombran, nunca existió. En pantalla Juan (3 días tarde, contrato
+// CERRADO) seguía sin avisar. «Sacar carro» ya lee TODA la colección de contratos (y los guarda en la copia local) y tiraba los cerrados en
+// memoria; ahora los conserva y se los da a los avisos como `historial`, y `entradaDeAvisos` saca de ahí lo de ESE cliente.
+const ELEGIDO = { id: 'k1', licenciaExpira: '2030-02-09', documentoExpira: '2030-02-09' };
+const sacandoAJuan = ({ historial, contratosAbiertos = [], cliente = ELEGIDO } = {}) => avisosDeSalida(entradaDeAvisos({
+  borrador: borradorDe(carroPropio(), 0), cliente, carro: carroPropio(), carroId: 'v1', flota: [carroPropio()], contratosAbiertos, historial, hoy: HOY_MANT,
+}));
+const de = (contrato, clienteId) => ({ ...contrato, clienteId });
+
+test('H-4, «Sacar carro»: sacarle otro carro a Juan, que devolvió tarde en un contrato ya CERRADO, lo avisa', () => {
+  const cerrado = juanTardeYCerrado();
+  assert.equal(cerrado.estado, 'cerrado');
+  const r = sacandoAJuan({ historial: { datos: [cerrado], fallo: false } });
+  assert.deepEqual(r.map((a) => a.mensaje), ['Este cliente ya devolvió tarde 1 vez en el último año.']);
+});
+
+test('H-4, «Sacar carro»: del historial (que trae los contratos de TODOS) cuenta solo lo de ESE cliente', () => {
+  const deOtro = de(juanTardeYCerrado(), 'k2');
+  assert.deepEqual(sacandoAJuan({ historial: { datos: [deOtro], fallo: false } }), []);
+  const mezclado = [deOtro, de(juanTardeYCerrado(), 'k1')];
+  assert.deepEqual(sacandoAJuan({ historial: { datos: mezclado, fallo: false } }).map((a) => a.mensaje), ['Este cliente ya devolvió tarde 1 vez en el último año.']);
+});
+
+test('H-4, «Sacar carro»: una lectura que falló nunca se dibuja como un cliente sin historial, y mientras no llega no se inventa nada', () => {
+  assert.match(sacandoAJuan({ historial: { datos: [], fallo: true } })[0].mensaje, /No se pudo revisar si este cliente ya devolvió tarde/);
+  assert.deepEqual(sacandoAJuan({ historial: null }), []);
+  assert.deepEqual(sacandoAJuan({}), []);
+  // sin cliente escogido no hay historial de nadie
+  assert.deepEqual(sacandoAJuan({ historial: { datos: [juanTardeYCerrado()], fallo: false }, cliente: null }), []);
+});
+
+test('H-4, «Sacar carro»: la pantalla lee TODOS los contratos y se los pasa a los avisos como historial (no solo los abiertos)', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/sacarCarro.js', import.meta.url), 'utf8');
+  assert.match(fuente, /cargarTodosLosContratos\(/, 'la lectura que conserva los cerrados');
+  assert.doesNotMatch(fuente, /cargarContratosAbiertos\(/, 'la que los tira antes de que nadie los vea');
+  assert.match(fuente, /entradaDeAvisos\(\{[^}]*\bhistorial\b/s, 'y se los da a la regla');
+  assert.match(fuente, /contratosAbiertosDe\(/, 'los abiertos salen de esa misma lectura, con la misma regla de «abierto» que datos.js');
 });
