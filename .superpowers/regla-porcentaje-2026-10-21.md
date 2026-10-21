@@ -232,7 +232,7 @@ Firestore; la prueba que fija la expresión exacta del archivo obliga a que camb
 | sha | qué |
 |---|---|
 | `f4ba5fa` | la regla, el archivo de deshacer y la prueba |
-| (el siguiente) | ADR-002, §11/§7b/§12b del diseño, el comentario de `datos.js` y este informe |
+| `e2a3234` | ADR-002, §11/§7b/§12b del diseño, el comentario de `datos.js` y este informe |
 
 ## 9. Preocupaciones
 
