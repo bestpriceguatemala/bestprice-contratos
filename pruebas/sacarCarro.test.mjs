@@ -12,7 +12,7 @@ import {
   vistaDeBuscador, crearListaDeSesion, duenoDelContrato, lectorDeCampos, leerFormularioDe, plantilla, motivoParaNoGuardar,
   textoCarroPropioNoEncontrado, avisosConSobrecobro, avisoAnticipoDeMas, htmlAvisoDeDocumentoEnAlta,
   filaEmpleado, textoDelEmpleadoEscogido, empleadoParaEnter, cargarEmpleadosActivos,
-  leerTarjetasDe, leerTarjetasEscritasDe, tarjetasParaImprimir, destinoDespuesDeGuardar, irDespuesDeGuardar,
+  leerTarjetasDe, leerTarjetasEscritasDe, tarjetasParaImprimir, destinoDespuesDeGuardar, irDespuesDeGuardar, lecturaConNubeDetras,
 } from '../js/pantallas/sacarCarro.js';
 import { tomarTraspaso, olvidarTraspaso } from '../js/pantallas/traspasoDeTarjetas.js';
 import { EMPLEADOS } from './fixtures/rentasConComision.mjs';
@@ -1757,4 +1757,56 @@ test('ADR-001 en el código de «Sacar carro»: las cajas del CBC se leen en UN 
   assert.ok(codigo.includes('sigueAqui: sigoVigente()'), 'solo se lleva a imprimir si la pantalla sigue a la vista');
   assert.equal(/localStorage|sessionStorage|indexedDB|console\.|history\./.test(codigo), false, 'esta pantalla no escribe en ningún almacén ni en la consola');
   assert.equal((codigo.match(/location\.hash\s*=/g) ?? []).length, 1, 'una sola salida de la pantalla al guardar: la de irDespuesDeGuardar');
+});
+
+// ---------------------------------------------------------------------------
+// Lo que la nube trajo por detrás no lo pisa la copia local que se devolvió primero
+//
+// «Sacar carro» pide la flota, los contratos y las reservaciones, que sirven la copia LOCAL al instante y avisan por `alLlegar` si la nube trae algo
+// distinto (o si falla), y las espera junto con `cargarAjustes()`, que sí va a la red. Cuando la nube contestaba ANTES que los ajustes, lo que la
+// pantalla asignaba al terminar de esperar era la copia local —más vieja— y pisaba lo que la nube ya había traído: probado en el navegador, un carro
+// que OTRA computadora mandó al taller se ofrecía sin ningún aviso (la copia de esta computadora todavía lo tenía disponible), y un contrato que otra
+// computadora acababa de abrir sobre ese carro tampoco avisaba. También se perdía el aviso de que la nube había fallado.
+// ---------------------------------------------------------------------------
+
+test('lecturaConNubeDetras: lo que llega por detrás de la nube es lo más nuevo, llegue antes o después de la respuesta inmediata', () => {
+  const local = { datos: ['carro disponible (copia local)'], fallo: false };
+  const nube = { datos: ['carro en el taller (nube)'], fallo: false };
+
+  const despues = lecturaConNubeDetras(); // primero la copia local, después la nube: el orden «normal»
+  despues.inmediata(local);
+  despues.deLaNube(nube);
+  assert.deepEqual(despues.actual, nube);
+
+  const antes = lecturaConNubeDetras(); // la nube contesta ANTES de que la pantalla termine de esperar: el orden que perdía datos
+  antes.deLaNube(nube);
+  antes.inmediata(local);
+  assert.deepEqual(antes.actual, nube, 'la respuesta inmediata (la copia local) no pisa lo que la nube ya trajo');
+
+  const sola = lecturaConNubeDetras(); // sin nada por detrás, vale la copia local
+  sola.inmediata(local);
+  assert.deepEqual(sola.actual, local);
+});
+
+test('lecturaConNubeDetras: un fallo que llegó por detrás no se borra con la respuesta inmediata (una lectura caída nunca se dibuja como buena)', () => {
+  const l = lecturaConNubeDetras();
+  l.deLaNube({ datos: ['copia local'], fallo: true });
+  l.inmediata({ datos: ['copia local'], fallo: false });
+  assert.equal(l.actual.fallo, true);
+});
+
+test('lecturaConNubeDetras: antes de que llegue algo no hay lectura (null), y quien la lee no inventa un «no hay nada»', () => {
+  assert.equal(lecturaConNubeDetras().actual, null);
+});
+
+test('«Sacar carro» pasa las tres lecturas con sincronía de fondo por lecturaConNubeDetras y ya no asigna al terminar de esperar la respuesta inmediata', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/sacarCarro.js', import.meta.url), 'utf8');
+  for (const lectura of ['flota', 'contratos', 'reservas']) {
+    assert.match(fuente, new RegExp(`${lectura}\\.deLaNube\\(r\\)`), `${lectura}: lo que llega por detrás se anota como de la nube`);
+    assert.match(fuente, new RegExp(`${lectura}\\.inmediata\\(`), `${lectura}: la respuesta inmediata entra solo si la nube no llegó antes`);
+  }
+  // lo que la hacía: asignar la copia local al terminar de esperar, pisando lo que la nube ya trajo
+  assert.doesNotMatch(fuente, /\n\s+flota = rFlota\.datos;/);
+  assert.doesNotMatch(fuente, /\n\s+reservas = rReservas\.datos;/);
+  assert.doesNotMatch(fuente, /contratosAbiertosDe\(rContratos\.datos\)/);
 });

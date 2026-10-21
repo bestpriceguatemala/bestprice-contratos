@@ -932,6 +932,26 @@ export async function cargarEmpleadosActivos(_alLlegar, { leer = cargarEmpleados
   return { datos: r.datos.filter(estaActivo), fallo: false };
 }
 
+/**
+ * Lo que una lectura con sincronía de fondo tiene AHORA (`cargarFlota`, `cargarTodosLosContratos`, `cargarReservas`, de datos.js). Entrega DOS veces:
+ * la promesa devuelve al instante la copia local (`inmediata`) y, si la nube trae algo distinto o falla, `alLlegar` avisa después (`deLaNube`).
+ * Lo de la nube es SIEMPRE lo más nuevo, aunque llegue antes de que la pantalla termine de esperar a las demás lecturas —el `Promise.all` de
+ * `pintarSacarCarro` incluye `cargarAjustes()`, que va a la red—: si lo inmediato se asignara al terminar de esperar, pisaría lo que la nube ya trajo
+ * (un carro que OTRA computadora mandó al taller, un contrato que otra computadora acaba de abrir sobre ese carro) o borraría el aviso de que la
+ * nube falló. `actual` es la última lectura `{ datos, fallo }`, o `null` mientras no llega ninguna.
+ */
+export function lecturaConNubeDetras() {
+  let actual = null;
+  let llegoLaNube = false;
+  return {
+    /** Lo que devolvió la promesa (la copia local): vale solo si la nube todavía no trajo nada. */
+    inmediata(lectura) { if (!llegoLaNube) actual = lectura; },
+    /** Lo que llegó por `alLlegar` (la nube trajo algo distinto, o falló): siempre más nuevo. */
+    deLaNube(lectura) { actual = lectura; llegoLaNube = true; },
+    get actual() { return actual; },
+  };
+}
+
 // Las listas de la sesión: viven en el módulo, no en la pantalla, y por eso
 // sobreviven de una apertura a otra. La de EMPLEADOS no está aquí a propósito: se lee de nuevo en cada apertura
 // (ver `listaDeEmpleados` en pintarSacarCarro), porque de ella sale el porcentaje que se sella en el contrato y tiene
@@ -1364,6 +1384,9 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // Lo que se leyó de TODOS los contratos (`{ datos, fallo }`, `null` mientras no llega): de ahí salen los abiertos y, para los avisos, el último
   // año del cliente escogido (H-4, «ya devolvió tarde»: casi todo lo que devolvió tarde ya está cerrado).
   let historial = null;
+  // Lo que cada lectura con sincronía de fondo entregó, para que la copia local (lo primero que devuelven) no pise lo que la nube trajo antes de que
+  // esta pantalla termine de esperar a las demás (ver `lecturaConNubeDetras`).
+  const lecturas = { flota: lecturaConNubeDetras(), contratos: lecturaConNubeDetras(), reservas: lecturaConNubeDetras() };
   let reservas = [];
   let ajustes = {};
   let clienteSeleccionado = null;
@@ -2109,13 +2132,19 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // la nube falla o el documento no existe todavía), así que tampoco hace
   // falta un try/catch.
   const [rFlota, rContratos, rReservas, ajustesCargados] = await Promise.all([
-    cargarFlota((r) => { flota = r.datos; falloFlota = r.fallo; if (sigoVigente()) refrescarCarro(); }),
-    cargarTodosLosContratos((r) => { historial = r; contratosAbiertos = contratosAbiertosDe(r.datos); if (sigoVigente()) recalcular(); }),
+    cargarFlota((r) => { lecturas.flota.deLaNube(r); flota = r.datos; falloFlota = r.fallo; if (sigoVigente()) refrescarCarro(); }),
+    cargarTodosLosContratos((r) => {
+      lecturas.contratos.deLaNube(r);
+      historial = r;
+      contratosAbiertos = contratosAbiertosDe(r.datos);
+      if (sigoVigente()) recalcular();
+    }),
     // Tarea 9: cada sincronía de reservas es también una oportunidad de
     // encontrar la reservación de origen (`reservaId`) si la primera lectura
     // (copia local, abajo) todavía no la tenía — intentarAplicarReserva() ya
     // se cuida de aplicarla una sola vez.
     cargarReservas((r) => {
+      lecturas.reservas.deLaNube(r);
       reservas = r.datos;
       if (!sigoVigente()) return;
       intentarAplicarReserva();
@@ -2123,11 +2152,14 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     }),
     cargarAjustes(),
   ]);
-  flota = rFlota.datos;
-  falloFlota = rFlota.fallo;
-  historial = rContratos;
-  contratosAbiertos = contratosAbiertosDe(rContratos.datos);
-  reservas = rReservas.datos;
+  // Lo inmediato (la copia local) entra solo si la nube no trajo nada antes; si ya llegó algo por detrás, eso es lo vigente.
+  lecturas.flota.inmediata(rFlota);
+  lecturas.contratos.inmediata(rContratos);
+  lecturas.reservas.inmediata(rReservas);
+  ({ datos: flota, fallo: falloFlota } = lecturas.flota.actual);
+  historial = lecturas.contratos.actual;
+  contratosAbiertos = contratosAbiertosDe(historial.datos);
+  reservas = lecturas.reservas.actual.datos;
   ajustes = ajustesCargados;
   if (!sigoVigente()) return;
   intentarAplicarReserva();
