@@ -12,7 +12,9 @@
 import {
   q, suma, recargoTarjeta, textoConQ,
 } from '../nucleo/dinero.js';
-import { lineasSalida, horaTardiaDe, resumen } from '../nucleo/contrato.js';
+import {
+  lineasSalida, horaTardiaDe, resumen, conKmSalidaNormalizado,
+} from '../nucleo/contrato.js';
 import { garantiaPorLiberar, yaVolvio } from '../nucleo/estados.js';
 import { nombresResueltos } from '../nucleo/cliente.js';
 import { pagoAnulado } from '../nucleo/liquidacion.js';
@@ -351,7 +353,9 @@ function armarContrato(c, fila, { codigoDeCliente, clientePorId, codigoDeCarro, 
     F: { fecha: c.fechaSalida },
     G: aMonto(c.dias),
     H: { fecha: c.devolucionPrevista },
-    I: aMonto(c.kmSalida),
+    // El puente de §7b: un contrato viejo trae el kilometraje de salida como `kilometrajeSalida` (el mismo puente de recibir, el detalle,
+    // el mantenimiento y el papel). Sin él esa renta salía con la columna vacía en su archivo.
+    I: aMonto(conKmSalidaNormalizado(c).kmSalida),
     J: aMonto(c.precioDia),
     K: aMonto(renta),
     L: aMonto(c.deducible),

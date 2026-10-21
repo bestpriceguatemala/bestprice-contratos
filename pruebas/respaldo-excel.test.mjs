@@ -286,6 +286,18 @@ test('AG LUGAR ENTRADA es el lugar anotado al RECIBIR, no el de salida: el contr
   assert.equal(libro.texto('CONTRATOS', `AG${fila(101)}`), null);
 });
 
+test('I KM SALIDA: un contrato viejo que guardó el kilometraje como `kilometrajeSalida` lo lleva igual que uno de hoy (el puente de §7b)', async () => {
+  // La pantalla de recibir, el detalle, el mantenimiento y (desde hoy) el papel leen el kilometraje por `conKmSalidaNormalizado`; el
+  // respaldo se lo saltaba y dejaba la columna I vacía en esas rentas, justo el dato con el que se sabe cuánto anduvo el carro.
+  const { kmSalida: _nuevo, ...sinElNombreNuevo } = F.rentadoAlDia();
+  const viejo = { ...sinElNombreNuevo, kilometrajeSalida: 45000 };
+  assert.equal('kmSalida' in viejo, false, 'la prueba parte de un contrato que NO trae kmSalida');
+  const { libro } = await soloEste(viejo);
+  assert.equal(libro.numero('CONTRATOS', 'I6'), 45000);
+  // el de hoy no cambia
+  assert.equal((await soloEste(F.rentadoAlDia())).libro.numero('CONTRATOS', 'I6'), 45000);
+});
+
 test('CONTRATOS: el nombre del cliente se escribe como lo escribe su hoja (apellidos primero)', async () => {
   const { libro } = await respaldo();
   assert.equal(libro.texto('CONTRATOS', 'C8'), 'Álvarez Zelaya Ana');
