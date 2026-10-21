@@ -151,6 +151,18 @@ test('alertasDe: «Devolvió tarde» cuenta el último año, cerrado o no, y no 
   assert.equal(vecesTarde([vieja, reciente], HOY), 1);
 });
 
+// Al leer TODOS los contratos la deuda no puede cambiar de respuesta: «Saldo pendiente» sigue saliendo de los ABIERTOS, los mismos que mira el aviso de
+// «Sacar carro» (la misma persona no puede tener dos respuestas, ver `saldoPendienteDe`). Un contrato guardado como `cerrado` con una cuenta que hoy no
+// cuadra (un cierre de antes de que se cobraran los «varios» de la devolución, por ejemplo) no se vuelve de pronto una deuda en esta pantalla.
+test('alertasDe: con TODOS los contratos del cliente, el saldo pendiente sigue saliendo solo de los abiertos', () => {
+  const cliente = { id: 'k1' };
+  const cerradoQueHoyDebe = { ...contratoDeUnCarro({ id: 'c-viejo', fechaSalida: '2026-08-03', dias: 4, recibidoEl: '2026-08-07', danos: 200 }), estado: 'cerrado' };
+  assert.ok(saldoPendienteDe([cerradoQueHoyDebe]) > 0, 'el escenario: su cuenta de hoy dice que debe');
+  assert.equal(alertasDe(cliente, [cerradoQueHoyDebe], HOY).find((a) => a.tipo === 'Saldo pendiente'), undefined);
+  const abierto = { ...cerradoQueHoyDebe, id: 'c-abierto', estado: 'devuelto' };
+  assert.match(alertasDe(cliente, [cerradoQueHoyDebe, abierto], HOY).find((a) => a.tipo === 'Saldo pendiente').texto, /Q200\.00/);
+});
+
 test('H-4, Clientes: la pantalla lee TODOS los contratos y la lista de rentas de la ficha sigue siendo solo la de los abiertos', () => {
   const fuente = readFileSync(new URL('../js/pantallas/clientes.js', import.meta.url), 'utf8');
   assert.match(fuente, /cargarTodosLosContratos\(/, 'la lectura que conserva los cerrados, para el último año de devoluciones');

@@ -121,7 +121,9 @@ export function alertasDe(cliente, contratosCliente, hoy) {
     alertas.push({ tipo: 'Documento vencido', texto: `Documento vencido el ${fecha(cliente.documentoExpira)}.` });
   }
 
-  const saldo = saldoPendienteDe(contratosCliente);
+  // La deuda sale de los ABIERTOS, los mismos que mira el aviso de «Sacar carro»: la misma persona no puede tener dos respuestas. Un contrato guardado
+  // como cerrado con una cuenta que hoy no cuadra (un cierre de antes de alguna regla de cobro) no se vuelve de pronto una deuda aquí.
+  const saldo = saldoPendienteDe(contratosAbiertosDe(contratosCliente));
   if (saldo > 0) {
     alertas.push({ tipo: 'Saldo pendiente', texto: `Saldo pendiente: ${dinero(saldo)}.` });
   }
