@@ -22,6 +22,9 @@ import {
   leerParametroRuta, textoCorreccion, montoInicialPago, plantilla as plantillaDeRecibir,
 } from '../js/pantallas/recibirCarro.js';
 import { emparejar } from '../js/router.js';
+import { construirContrato } from '../js/pantallas/sacarCarro.js';
+import { construirCierre } from '../js/nucleo/cierre.js';
+import { contratoParaGuardar } from '../js/datos.js';
 import { estadoContrato, creditoDelCliente } from '../js/nucleo/estados.js';
 import {
   rentadoAlDia, rentadoConSobrepago, devueltoDebiendo, cerradoAlDia, cerradoConCredito,
@@ -676,6 +679,34 @@ test('H-8, el detalle sigue trayendo «Volver», y el botón de recibir no es un
 test('H-8, el detalle de un contrato sin id no dibuja un enlace roto', () => {
   const html = plantillaDetalle({ numero: 3, dias: 1, precioDia: 1, pagos: [] });
   assert.doesNotMatch(html, /#\/recibir\//);
+});
+
+// Los kilómetros son un entero con separador de miles, igual en la salida y en la entrada del MISMO detalle, y «no se anotó» (0) es un «—» y no
+// un odómetro en cero (§7b: un 0 aquí es «no se anotó»; recibirCarro.js ya lo trata así). El detalle decía «12,000» abajo de «Datos de la salida» y
+// «12900» abajo de «Cobro al recibir» (sin miles, y con los decimales de un q() si se había tecleado «12900.5»), y mostraba «0» donde no se anotó nada.
+const valorDelCampo = (html, etiqueta) => new RegExp(`${etiqueta}\\s*<input[^>]*value="([^"]*)"`).exec(html)?.[1];
+const conKilometros = (kmSalida, kmEntrada) => {
+  const salida = construirContrato({
+    id: 'c-km', numero: 90, cliente: { id: 'k1', nombres: 'Juan', apellidos: 'Pérez' }, ajeno: false,
+    carro: { id: 'v1', placas: 'P-111AAA', marca: 'Toyota', linea: 'Hilux' }, fechaSalida: '2026-10-03', dias: 4, precioDia: 700,
+    forma: 'efectivo', porcentajeTarjeta: 0, montoPago: 2800, rentadoPor: 'Ana', porcentajeComision: 5, kmSalida,
+  });
+  const recibido = construirCierre(salida, {
+    fechaReal: '2026-10-07', horaReal: '10:00', lugarEntrada: 'Oficina', kmEntrada, combustible: 0, danos: 0, varios: 0, descuento: 0,
+  });
+  return contratoParaGuardar(recibido, { id: 'c-km', numero: 90, ahora: 1790000000000 });
+};
+
+test('el detalle dice los kilómetros de entrada y de salida igual (enteros con miles), y lo que no se anotó como «—», no como «0»', () => {
+  const con = plantillaDetalle(conKilometros(12000, 12900));
+  assert.equal(valorDelCampo(con, 'Kilometraje de salida'), '12,000');
+  assert.equal(valorDelCampo(con, 'Kilometraje de entrada'), '12,900');
+  // un kilometraje tecleado con decimales no los enseña
+  assert.equal(valorDelCampo(plantillaDetalle(conKilometros(12000, 12900.5)), 'Kilometraje de entrada'), '12,901');
+  // sin kilometrajes anotados (vacío es 0 al guardar): «—», nunca «0» ni «0.00»
+  const sin = plantillaDetalle(conKilometros(0, 0));
+  assert.equal(valorDelCampo(sin, 'Kilometraje de salida'), '—');
+  assert.equal(valorDelCampo(sin, 'Kilometraje de entrada'), '—');
 });
 
 test('H-8 y H-9: las pantallas nuevas usan clases de CSS, no style="" (y las clases existen en la hoja de estilos)', () => {

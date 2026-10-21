@@ -464,6 +464,12 @@ function camposCarroAjeno(c) {
         ${campoSoloLectura('Dueño del carro', c.carroAjeno.dueno)}`;
 }
 
+/**
+ * Un kilometraje tal como se lee: entero con miles («12,900»), igual en la salida y en la entrada; y «no se anotó» (0, vacío) es '' —el campo
+ * lo pinta «—»—, nunca un «0» que se lea como un odómetro en cero (§7b: un 0 guardado es «no se anotó»). Los kilómetros no llevan centavos.
+ */
+const textoDeKilometraje = (valor) => (q(valor) > 0 ? textoEntero(valor) : '');
+
 function seccionSalida(c) {
   const carro = [c?.carroPlacas, c?.carroDescripcion].filter(Boolean).join(' · ') || '—';
   const conductor = c?.conductorAdicional?.nombre || '';
@@ -479,7 +485,7 @@ function seccionSalida(c) {
         ${campoSoloLectura('Lugar', c?.lugar)}
         ${campoSoloLectura('Días contratados', c?.dias)}
         ${campoSoloLectura('Precio por día', c?.precioDia != null ? dinero(c.precioDia) : '')}
-        ${campoSoloLectura('Kilometraje de salida', c?.kmSalida != null ? textoEntero(c.kmSalida) : '')}
+        ${campoSoloLectura('Kilometraje de salida', textoDeKilometraje(c?.kmSalida))}
         ${campoSoloLectura('Combustible de salida', c?.combustibleSalida)}
         ${textoHoraTardia(c) ? campoSoloLectura('Hora tardía', textoHoraTardia(c)) : ''}
         ${camposCarroAjeno(c)}
@@ -520,7 +526,7 @@ function seccionCobroDevolucion(c, r) {
         ${campoSoloLectura('Fecha real de entrada', fecha(c.cierre.fechaReal))}
         ${campoSoloLectura('Hora real de entrada', c.cierre.horaReal)}
         ${campoSoloLectura('Lugar de entrada', c.cierre.lugarEntrada)}
-        ${campoSoloLectura('Kilometraje de entrada', c.cierre.kmEntrada)}
+        ${campoSoloLectura('Kilometraje de entrada', textoDeKilometraje(c.cierre.kmEntrada))}
         ${campoSoloLectura('Días de atraso', r.diasAtraso > 0 ? pluralDias(r.diasAtraso) : 'Sin atraso')}
       </div>
       <ul class="sc-lineas">
