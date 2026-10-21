@@ -572,6 +572,6 @@ test('H-4, «Sacar carro»: la pantalla lee TODOS los contratos y se los pasa a 
   const fuente = readFileSync(new URL('../js/pantallas/sacarCarro.js', import.meta.url), 'utf8');
   assert.match(fuente, /cargarTodosLosContratos\(/, 'la lectura que conserva los cerrados');
   assert.doesNotMatch(fuente, /cargarContratosAbiertos\(/, 'la que los tira antes de que nadie los vea');
-  assert.match(fuente, /entradaDeAvisos\(\{[^}]*\bhistorial\b/s, 'y se los da a la regla');
+  assert.match(fuente, /avisosDeSalida\(entradaDeAvisos\(\{[^}]*\bhistorial\b/s, 'y se los da a la regla (la llamada de la pantalla, no la definición de la función)');
   assert.match(fuente, /contratosAbiertosDe\(/, 'los abiertos salen de esa misma lectura, con la misma regla de «abierto» que datos.js');
 });
