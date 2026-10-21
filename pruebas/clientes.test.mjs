@@ -133,6 +133,32 @@ test('alertasDe: cuántas veces devolvió tarde, en singular y en plural', () =>
   assert.match(alerta2.texto, /2 veces\./);
 });
 
+// H-4, Clientes. «Devolvió tarde» tenía su propia copia de la regla (cuenta todo lo que le pasen, sin ventana) y la pantalla solo le pasaba los
+// contratos ABIERTOS, así que casi nunca se prendía: el que devolvió tarde, pagó y cerró (el caso normal) salía limpio. El dueño decidió mirar el
+// ÚLTIMO AÑO (nucleo/historial.js, la regla que ya usa «Sacar carro»). Ahora la pantalla lee TODOS los contratos, y esta cuenta es esa regla: cuenta
+// lo cerrado, y no cuenta lo de hace más de un año.
+test('alertasDe: «Devolvió tarde» cuenta el último año, cerrado o no, y no lo de hace más de un año (la regla de nucleo/historial.js)', () => {
+  const cliente = { id: 'k1' };
+  const reciente = contratoDeUnCarro({ id: 'c-reciente', fechaSalida: '2026-08-03', dias: 4, recibidoEl: '2026-08-10', danos: 0 });
+  const vieja = contratoDeUnCarro({ id: 'c-vieja', fechaSalida: '2024-08-03', dias: 4, recibidoEl: '2024-08-10', danos: 0 });
+  assert.equal(reciente.estado, 'cerrado', 'el escenario: pagó y cerró, no está entre los abiertos');
+  const tarde = (contratos) => alertasDe(cliente, contratos, HOY).find((a) => a.tipo === 'Devolvió tarde');
+  assert.match(tarde([reciente]).texto, /1 vez\./);
+  assert.equal(tarde([vieja]), undefined, 'hace más de un año no cuenta');
+  assert.match(tarde([vieja, reciente]).texto, /1 vez\./, 'solo la de este año');
+  // sin `hoy` no hay ventana (vecesTarde a secas sigue contando todo lo que se le pasa)
+  assert.equal(vecesTarde([vieja, reciente]), 2);
+  assert.equal(vecesTarde([vieja, reciente], HOY), 1);
+});
+
+test('H-4, Clientes: la pantalla lee TODOS los contratos y la lista de rentas de la ficha sigue siendo solo la de los abiertos', () => {
+  const fuente = readFileSync(new URL('../js/pantallas/clientes.js', import.meta.url), 'utf8');
+  assert.match(fuente, /cargarTodosLosContratos\(/, 'la lectura que conserva los cerrados, para el último año de devoluciones');
+  assert.doesNotMatch(fuente, /cargarContratosAbiertos\(/);
+  assert.match(fuente, /seccionHistorial\(contratosAbiertosDe\(/, '«Rentas abiertas» no se llena de cerradas');
+  assert.doesNotMatch(fuente, /const vecesTarde|function vecesTarde[\s\S]{0,200}filter\(/, 'una sola copia de la regla de «devolvió tarde»');
+});
+
 test('alertasDe: pueden salir varias alertas juntas, cada una con su tipo', () => {
   const cliente = { id: 'k1', licenciaExpira: '2020-01-01' };
   const contratos = [{ clienteId: 'k1', dias: 1, precioDia: 500, pagos: [] }];

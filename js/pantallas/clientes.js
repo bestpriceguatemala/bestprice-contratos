@@ -17,10 +17,11 @@ import {
 import { filtrar, textoDeCliente } from '../nucleo/busqueda.js';
 import { avisoDeClienteRepetido } from '../nucleo/repetidos.js';
 import { resumen } from '../nucleo/contrato.js';
+import { devolucionesTardias } from '../nucleo/historial.js';
 import { diasEntre, hoyISO } from '../nucleo/fechas.js';
 import { suma } from '../nucleo/dinero.js';
 import {
-  cargarClientes, cargarContratosAbiertos, guardarCliente, altaConIdFijo, nuevoIdCliente,
+  cargarClientes, cargarTodosLosContratos, contratosAbiertosDe, guardarCliente, altaConIdFijo, nuevoIdCliente,
 } from '../datos.js';
 import { dinero, fecha, aviso, htmlAvisoRepetido } from '../ui.js';
 
@@ -90,9 +91,13 @@ export function saldoPendienteDe(contratosCliente) {
   return suma(...contratosCliente.map((c) => Math.max(0, resumen(c).saldo)));
 }
 
-/** Cuántas veces regresó tarde, contando solo lo que ya se cerró (con cierre). */
-export function vecesTarde(contratosCliente) {
-  return contratosCliente.filter((c) => resumen(c).diasAtraso > 0).length;
+/**
+ * Cuántas veces regresó tarde en el ÚLTIMO AÑO, cerrado o no el contrato. No es una regla de esta pantalla: es la de nucleo/historial.js
+ * (`devolucionesTardias`), la misma que usa «ya devolvió tarde» de «Sacar carro», para que las dos no puedan contar distinto. Esta pantalla tenía
+ * su propia copia, sin ventana, y solo le llegaban los contratos abiertos. Sin `hoy` no hay ventana: cuenta todo lo que se le pase.
+ */
+export function vecesTarde(contratosCliente, hoy) {
+  return devolucionesTardias(contratosCliente, hoy);
 }
 
 /**
@@ -102,13 +107,9 @@ export function vecesTarde(contratosCliente) {
  * ficha) — una sola función que las decide todas, para que la lista y la
  * ficha nunca se desacuerden sobre qué cuenta como alerta.
  *
- * `contratosCliente` viene de `cargarContratosAbiertos()` (datos.js): trae
- * los contratos 'rentado' y 'devuelto', que son los únicos que pueden tener
- * saldo pendiente (uno 'cerrado' ya no debe nada, por definición de
- * `estadoContrato()`). Un contrato cerrado con un atraso histórico no se
- * vuelve a contar aquí todavía — la Tarea 8 (historial de contratos) es la
- * que trae también los cerrados, y esta pantalla se apoyará en eso cuando
- * exista.
+ * `contratosCliente` son TODOS los contratos del cliente (`cargarTodosLosContratos`, datos.js), cerrados incluidos: el saldo pendiente solo
+ * sale de los abiertos (uno 'cerrado' ya no debe nada, por definición de `estadoContrato()`, y `saldoPendienteDe` no suma saldos a favor), pero
+ * «Devolvió tarde» necesita justo los cerrados: el cliente que devolvió tarde, pagó y cerró es el caso normal (H-4). Cuenta el último año.
  */
 export function alertasDe(cliente, contratosCliente, hoy) {
   const alertas = [];
@@ -125,7 +126,7 @@ export function alertasDe(cliente, contratosCliente, hoy) {
     alertas.push({ tipo: 'Saldo pendiente', texto: `Saldo pendiente: ${dinero(saldo)}.` });
   }
 
-  const tarde = vecesTarde(contratosCliente);
+  const tarde = vecesTarde(contratosCliente, hoy);
   if (tarde > 0) {
     alertas.push({ tipo: 'Devolvió tarde', texto: `Devolvió tarde ${tarde} ${tarde === 1 ? 'vez' : 'veces'}.` });
   }
@@ -184,10 +185,24 @@ export function textoClienteNoEncontrado(falloClientes) {
     : 'No se encontró este cliente.';
 }
 
-function filasCuerpo(clientes, contratos, hoy) {
+/**
+ * Los contratos agrupados por cliente, una sola vez. Con TODOS los contratos (y no solo los abiertos) filtrar la lista entera por cada fila de la
+ * tabla —y de nuevo en cada tecla del buscador— sería recorrer miles de contratos por cliente.
+ */
+function contratosPorCliente(contratos) {
+  const porCliente = new Map();
+  for (const c of contratos || []) {
+    if (!c?.clienteId) continue;
+    if (!porCliente.has(c.clienteId)) porCliente.set(c.clienteId, []);
+    porCliente.get(c.clienteId).push(c);
+  }
+  return porCliente;
+}
+
+function filasCuerpo(clientes, porCliente, hoy) {
   if (!clientes.length) return '<tr><td colspan="4" class="pendiente">Sin resultados.</td></tr>';
   return clientes
-    .map((c) => filaCliente(c, alertasDe(c, contratosDe(c, contratos), hoy)))
+    .map((c) => filaCliente(c, alertasDe(c, porCliente.get(c.id) ?? [], hoy)))
     .join('');
 }
 
@@ -197,6 +212,7 @@ function dibujarLista(contenedor, clientes, contratos, hoy, fallos = {}) {
   const ordenados = [...clientes].sort(
     (a, b) => nombreCompleto(a).localeCompare(nombreCompleto(b), 'es'),
   );
+  const porCliente = contratosPorCliente(contratos);
 
   contenedor.innerHTML = `
     <div class="carros-contenido">
@@ -215,7 +231,7 @@ function dibujarLista(contenedor, clientes, contratos, hoy, fallos = {}) {
         </thead>
         <tbody id="cli-filas">${
           ordenados.length
-            ? filasCuerpo(ordenados, contratos, hoy)
+            ? filasCuerpo(ordenados, porCliente, hoy)
             : htmlListaVacia(fallos)
         }</tbody>
       </table>
@@ -238,7 +254,7 @@ function dibujarLista(contenedor, clientes, contratos, hoy, fallos = {}) {
   if (ordenados.length) {
     el('cli-buscar').addEventListener('input', (ev) => {
       const resultado = filtrar(ordenados, ev.target.value, textoDeCliente);
-      el('cli-filas').innerHTML = filasCuerpo(resultado, contratos, hoy);
+      el('cli-filas').innerHTML = filasCuerpo(resultado, porCliente, hoy);
       cablearFilas();
     });
   }
@@ -350,11 +366,9 @@ function filaHistorial(c) {
     </tr>`;
 }
 
-// El historial muestra los contratos abiertos del cliente (cargarContratosAbiertos,
-// datos.js): rentados, devueltos y cualquiera con saldo o garantía pendiente.
-// Los ya cerrados todavía no se traen aquí — eso es lo que agrega la Tarea 8
-// (historial de contratos, con su propio cargarContratos) — así que por ahora
-// esta lista puede no traer una renta ya cobrada y cerrada hace tiempo.
+// El historial muestra solo los contratos ABIERTOS del cliente (`contratosAbiertosDe`, datos.js): rentados, devueltos y cualquiera con saldo o
+// garantía pendiente. La pantalla lee TODOS los contratos (para «Devolvió tarde», que necesita los cerrados del último año), pero esta lista
+// sigue siendo la de lo abierto: las rentas ya cobradas y cerradas están en Contratos.
 export function seccionHistorial(contratosCliente) {
   const ordenados = [...contratosCliente].sort(
     (a, b) => String(b?.fechaSalida || '').localeCompare(String(a?.fechaSalida || '')),
@@ -408,7 +422,7 @@ async function dibujarFicha(contenedor, clienteId, clientes, contratos, hoy, fal
           </div>
         </form>
       </div>
-      ${esNuevo ? '' : seccionHistorial(contratosCliente)}
+      ${esNuevo ? '' : seccionHistorial(contratosAbiertosDe(contratosCliente))}
     </div>`;
 
   function leerCampos() {
@@ -484,7 +498,7 @@ export async function pintarClientes(contenedor, clienteId) {
   const hoy = hoyISO();
 
   // En un abrir en frío (sin nada todavía en memoria de esta sesión) esta
-  // pantalla se quedaba en blanco mientras cargarClientes/cargarContratosAbiertos
+  // pantalla se quedaba en blanco mientras cargarClientes/cargarTodosLosContratos
   // contestaban — las otras tres pantallas (flota.js, contratos.js,
   // recibirCarro.js) ya avisan "Cargando…" en ese mismo momento.
   contenedor.innerHTML = '<p class="pendiente">Cargando…</p>';
@@ -508,14 +522,14 @@ export async function pintarClientes(contenedor, clienteId) {
     }
   };
 
-  // cargarClientes/cargarContratosAbiertos (datos.js) devuelven { datos,
+  // cargarClientes/cargarTodosLosContratos (datos.js) devuelven { datos,
   // fallo } (T9): `datos` cae a la copia local en vez de a un arreglo vacío
   // inventado, y `fallo` dice que la nube no contestó — se muestra (barra roja),
   // porque «sigue como estaba» en silencio, con la copia local VACÍA, se leía como
   // «todavía no hay clientes».
   const [rClientes, rContratos] = await Promise.all([
     cargarClientes((r) => { clientes = r.datos; falloClientes = r.fallo; repintar(); }),
-    cargarContratosAbiertos((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); }),
+    cargarTodosLosContratos((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); }),
   ]);
   clientes = rClientes.datos;
   contratos = rContratos.datos;
