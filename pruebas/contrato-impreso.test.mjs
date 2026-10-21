@@ -353,6 +353,18 @@ test('un carro de la flota que no se encontró deja tipo, color y modelo en blan
   assert.ok(!armarContratoImpreso({ contrato: contratoAjeno(), cliente: cliente(), carro: null }).avisos.some((a) => /ficha del carro/.test(a)));
 });
 
+// Un contrato guardado cuando «Sacar carro» todavía escribía el kilometraje de salida como `kilometrajeSalida` (el puente de lectura
+// que §7b dice que no va a desaparecer nunca: `conKmSalidaNormalizado`). La hoja del papel se saltaba el puente y dejaba la casilla del
+// kilometraje en blanco en un papel que se firma, mientras que la pantalla de recibir, el detalle del contrato y el mantenimiento sí lo leían.
+test('un contrato viejo que guardó el kilometraje como `kilometrajeSalida` lo imprime igual que uno de hoy', () => {
+  const { kmSalida: _nuevo, ...sinElNombreNuevo } = contrato();
+  const viejo = { ...sinElNombreNuevo, kilometrajeSalida: 234343 };
+  assert.equal('kmSalida' in viejo, false, 'la prueba parte de un contrato que NO trae kmSalida');
+  assert.equal(armarContratoImpreso({ contrato: viejo, cliente: cliente(), carro: CARRO }).valores.kmSalida, '234343');
+  // y uno de hoy no cambia: si trae los dos, manda el nombre nuevo (el puente no pisa un kmSalida que ya viene puesto)
+  assert.equal(armarContratoImpreso({ contrato: { ...viejo, kmSalida: 100, kilometrajeSalida: 999 }, cliente: cliente(), carro: CARRO }).valores.kmSalida, '100');
+});
+
 test('lo que falta sale vacío: ni «0», ni «undefined», ni «null», ni «NaN», ni «Q0.00»', () => {
   const v = armarContratoImpreso({ contrato: contratoMinimo(), cliente: { id: 'k2', nombres: 'Ana', apellidos: 'Ruiz' }, carro: { id: 'v2', placas: 'P-000AAA' } }).valores;
   for (const [id, texto] of Object.entries(v)) {

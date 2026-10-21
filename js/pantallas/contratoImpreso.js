@@ -39,7 +39,7 @@
 //     porque el número completo nunca existió en el sistema (§8 y ADR-001).
 //   - La hoja con el número completo no debe guardarse como PDF: sería un archivo con tarjeta y CBC en la computadora.
 //     La pantalla lo dice en voz alta, y el título del documento solo lleva el número de contrato.
-import { lineasSalida } from '../nucleo/contrato.js';
+import { lineasSalida, conKmSalidaNormalizado } from '../nucleo/contrato.js';
 import { nombresResueltos } from '../nucleo/cliente.js';
 import { q } from '../nucleo/dinero.js';
 import {
@@ -222,6 +222,11 @@ export function armarContratoImpreso({
   if (!contrato || typeof contrato !== 'object' || !contrato.id) {
     throw new Error('Falta el contrato guardado que se va a imprimir.');
   }
+  // El puente de lectura del kilometraje (§7b): un contrato guardado cuando «Sacar carro» lo escribía como `kilometrajeSalida` lo trae
+  // con ese nombre. Las demás pantallas que lo leen (recibir, el detalle, el mantenimiento) pasan por `conKmSalidaNormalizado`; esta
+  // hoja se lo saltaba y dejaba en blanco la casilla del kilometraje en un papel que se firma. Se normaliza aquí, una vez, para todas
+  // las casillas que lean `contrato`.
+  contrato = conKmSalidaNormalizado(contrato);
   if (!cliente || typeof cliente !== 'object') {
     throw new Error(
       `No se encontró al cliente del contrato N.° ${contrato.numero ?? '—'}: sin sus datos el papel saldría sin nombre ni documento. Recarga la pantalla e intenta de nuevo.`,
