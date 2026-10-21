@@ -1140,6 +1140,14 @@ anotado para el día que no sea así: (1) decidir si basta con que el mostrador 
 porcentajes (se leen, no se cambian) o no; (2) la regla de la escritura, aunque se decida
 lo primero. Ninguna de las dos se resuelve cambiando de lugar el campo.
 
+**Actualización del 21 de octubre de 2026.** El punto (2) se decidió y está escrito en
+`firestore.rules` (§11 y ADR-002): el porcentaje de un contrato que ya existe no cambia
+salvo con la credencial de dinero, y borrar contratos también la pide. **La parte de la
+razón 2 que decía «y que al crearlo sea igual al del empleado que dice `empleadoId`» NO se
+hizo**: crear sigue abierto a cualquier sesión, con las razones en ADR-002 (falla cerrada, no se
+puede probar aquí, y hay maneras reales de bloquear una salida legítima). El punto (1) sigue
+pendiente: el mostrador sigue leyendo los porcentajes.
+
 **Una renta cuyo costo de verdad no se puede leer no se puede pagar, y eso es
 correcto.** `construirPagoDueno` se niega, con una frase que dice cuáles rentas
 son. Hay dos causas y piden cosas distintas: que el costo nunca se anotó (el
@@ -1484,6 +1492,24 @@ Firestore: `ajustes` ya se lee y se escribe con la sesión normal.
 - **Reglas de Firestore**: las publica el dueño a mano en la consola de
   Firebase, como en el sistema de la aceitera. Cuando cambien, se le entrega el
   archivo completo para pegar.
+- **El porcentaje de comisión de un contrato no lo cambia el mostrador** (21 de octubre
+  de 2026; las palabras del dueño: *«Sí, no quiero que nadie se suba el porcentaje.»*). El
+  porcentaje se sella en el contrato cuando el carro sale, y la pantalla de comisiones paga
+  ese número; antes cualquier sesión del mostrador podía reescribirlo desde las
+  herramientas del navegador. Ahora `firestore.rules` exige, en un contrato que ya existe:
+  **actualizar** solo si el porcentaje queda igual (con la credencial de dinero, siempre: así
+  enlaza el dueño las rentas viejas a un empleado) y **borrar** solo con la credencial de
+  dinero (el sistema no borra contratos; sin cerrar el borrado, bastaría borrar y volver a
+  crear el contrato con otro porcentaje). **Crear queda abierto a propósito**: cerrarlo
+  pide comparar contra el porcentaje del empleado con un `get()` que, si se equivoca, deja
+  al mostrador sin poder sacar un carro con el cliente enfrente, y desde este repositorio no
+  se puede probar (no hay emulador). Qué se decidió, por qué, qué no cierra (leer, `empleadoId`,
+  crear) y cuándo valdría la pena cerrar crear: ADR-002, actualización del 21 de octubre.
+  **El archivo de reglas no es lo que Firebase aplica hasta que el dueño lo pega**, y cuando
+  lo cambia se le entrega también el archivo de antes (`firestore.rules.anterior-2026-10-21.txt`) para que pueda
+  deshacerlo. Una prueba (`pruebas/regla-porcentaje.test.mjs`) fija lo que la regla da por
+  hecho del código —que ningún camino del mostrador cambia el porcentaje, que el único que lo
+  cambia sale por la app de dinero—, pero **no prueba la regla en Firebase**.
 
 ## 12. Lo que este sistema NO hace
 
@@ -1633,6 +1659,11 @@ empleados por código o por nombre, el contrato sella el porcentaje del empleado
 mostrarlo, y la lista de empleados con su porcentaje vive en Dinero → Empleados, detrás
 de la contraseña. Quien no tiene a quién escoger (la lista no se pudo leer, o todavía
 no hay empleados) no puede guardar la salida, y cada razón se dice con sus palabras.
+
+**Cerrado también en las reglas el 21 de octubre de 2026** (§11): el porcentaje que el
+contrato sella ya no se puede cambiar desde el mostrador en un contrato que existe. Ese
+mismo día quedó dicho lo que no se cierra: quien sabe crear un contrato con las herramientas
+del navegador todavía puede crearlo con el porcentaje que quiera (ADR-002).
 
 ### Orden de construcción
 

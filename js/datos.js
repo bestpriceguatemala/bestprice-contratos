@@ -2468,10 +2468,11 @@ export async function cargarPagosComision({ iniciar = iniciarFirebase, dbDinero 
 export async function enlazarContratosAlEmpleado(ids, empleadoId, {
   idsConPorcentaje = [], porcentajeComision, iniciar = iniciarFirebase, dbDinero = dbDeDinero, ahora = Date.now(),
 } = {}) {
-  // Con la credencial de dinero y no con la del mostrador, aunque las reglas de hoy dejen escribir contratos a cualquier
-  // sesión: enlazar —y sobre todo cambiar el porcentaje de una renta— es una decisión del dueño sobre dinero, y el día que
-  // la regla distinga quién puede tocar `porcentajeComision` (ver «Pendientes conocidos del dinero», §7b) esta escritura ya
-  // viene con la credencial correcta. Sin sesión de dinero se niega antes de escribir nada.
+  // Con la credencial de dinero y no con la del mostrador: enlazar —y sobre todo cambiar el porcentaje de una renta— es una
+  // decisión del dueño sobre dinero, y desde el 21 de octubre de 2026 `firestore.rules` le niega a la sesión del mostrador
+  // cualquier cambio de `porcentajeComision` en un contrato que ya existe (§11 del diseño, ADR-002). Esta escritura solo pasa
+  // porque sale con la credencial de dinero: por eso de `iniciar()` se toma únicamente el módulo (`fsMod`) y nunca su `db`, y
+  // `pruebas/regla-porcentaje.test.mjs` lo vigila. Sin sesión de dinero se niega antes de escribir nada.
   const db = dbDinero();
   if (!db) throw new Error(MENSAJE_ENLACE_SIN_DINERO);
   const lista = [...new Set((Array.isArray(ids) ? ids : []).filter(Boolean))];
