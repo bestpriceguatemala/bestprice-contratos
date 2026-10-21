@@ -17,18 +17,59 @@ service cloud.firestore {
     match /contadores/{id} { allow read, write: if haySesion(); }
 
     match /contratos/{id} {
-      allow read, write: if haySesion();
+      // EL PORCENTAJE DE COMISIÓN NO LO CAMBIA EL MOSTRADOR (regla del 21 de octubre de 2026).
+      //
+      // Qué protege: `porcentajeComision` se sella en el contrato el día que el carro sale (el que
+      // tenía el empleado que lo rentó ese día) y la pantalla de comisiones paga ESE número. Antes,
+      // cualquier sesión del mostrador podía reescribirlo desde las herramientas del navegador.
+      // Ahora, en un contrato que YA existe:
+      //   - ACTUALIZAR: el porcentaje no puede cambiar, salvo con la credencial de dinero (así enlaza
+      //     el dueño las rentas viejas a un empleado, en Dinero > Comisiones). En una actualización
+      //     `request.resource.data` es el documento ENTERO como va a quedar, no un parche: un guardado
+      //     que ni menciona el porcentaje lo deja igual y pasa. Un contrato sin el campo y uno con
+      //     `null` cuentan lo mismo (el `get(..., null)` de abajo), así que uno de antes de que el campo
+      //     existiera se sigue guardando; lo que no puede es RECIBIR un porcentaje que no tenía.
+      //   - BORRAR: solo con la credencial de dinero. El sistema no borra contratos (no hay un solo
+      //     `deleteDoc` en js/, y una prueba lo vigila). Está cerrado porque, si cualquiera pudiera
+      //     borrar, bastaría borrar el contrato y volver a crearlo con el mismo id y otro porcentaje,
+      //     y lo de arriba no serviría de nada.
+      //
+      // Lo que NO protege, a propósito, dicho aquí para que nadie crea que sí:
+      //   - CREAR: cualquier sesión puede crear un contrato NUEVO con el porcentaje que quiera.
+      //     Cerrarlo exigiría comparar contra `empleados/{empleadoId}` con `get()`, que se niega si ese
+      //     empleado no existe o si el porcentaje que trae el formulario ya no es el que el empleado
+      //     tiene (el dueño lo cambió con el formulario abierto), y eso dejaría a alguien sin poder
+      //     sacar un carro con el cliente enfrente. Está decidido y explicado en ADR-002
+      //     (actualización del 21 de octubre de 2026).
+      //   - LEER: cualquier sesión sigue leyendo `porcentajeComision`, en el contrato y en `empleados`.
+      //   - Los demás campos del contrato (quién lo rentó, días, precios...): cualquier sesión los
+      //     sigue escribiendo, como siempre.
+      function sinTocarElPorcentaje() {
+        return request.resource.data.get('porcentajeComision', null) == resource.data.get('porcentajeComision', null);
+      }
+      allow read: if haySesion();
+      allow create: if haySesion();
+      allow update: if haySesion() && (esDinero() || sinTocarElPorcentaje());
+      allow delete: if esDinero();
+
       // Aquí vive el costo por día que se le paga al dueño de un carro ajeno:
       // se escribe al crear el contrato, pero solo se puede LEER con la
       // credencial del área de dinero.
       //
       // OJO — este comentario decía antes "el costo del dueño Y LA COMISIÓN", y
       // era falso: `porcentajeComision` sigue en la raíz del contrato, donde lo
-      // lee cualquiera con la sesión del mostrador. Moverlo quedó pendiente a
-      // propósito (ver §7b del diseño y ADR-002), y mientras el dueño sea el
-      // único usuario no hace daño — pero hay que decidirlo antes de que un
-      // empleado use el mostrador. El diferimiento está bien; lo que no estaba
-      // bien era un comentario que lo volvía invisible.
+      // LEE cualquiera con la sesión del mostrador (su escritura sí quedó
+      // cerrada, arriba, el 21 de octubre de 2026). Esconder la lectura quedó
+      // pendiente a propósito (ver §7b del diseño y ADR-002): el mostrador
+      // necesita leer el porcentaje del empleado para sellarlo, y ese vive en
+      // `empleados`, que cualquier sesión lee. Mientras el dueño sea el único
+      // usuario no hace daño. El diferimiento está bien; lo que no estaba bien
+      // era un comentario que lo volvía invisible.
+      //
+      // Aquí NO vive ningún porcentaje: esta subcolección solo guarda `costoDia`
+      // y el sistema solo lee ese campo de aquí. Si algún día algo se lee de
+      // aquí que sea dinero de comisión, hay que cambiar también `create, update:
+      // if haySesion()` de abajo, porque cualquier sesión puede escribirlo.
       // El UID es el de la cuenta dinero@bestpricegt.com, que el dueño creó el
       // 5 de octubre de 2026. Si algún día esa cuenta cambia, este número tiene
       // que cambiar aquí también, o el área de dinero deja de abrir.

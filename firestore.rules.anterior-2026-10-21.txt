@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function haySesion() { return request.auth != null; }
+    function esDinero() { return request.auth != null && request.auth.uid == 'GyyHuczWAzXILS99b0FtmpD06mK2'; }
+
+    match /clientes/{id}   { allow read, write: if haySesion(); }
+    match /vehiculos/{id}  { allow read, write: if haySesion(); }
+    match /reservas/{id}   { allow read, write: if haySesion(); }
+    // Los dueños de carros ajenos se leen y escriben con la sesión normal: el
+    // alta rápida ocurre en el mostrador, con el carro afuera y el cliente
+    // esperando. Lo que SÍ queda tras la credencial de dinero es cuánto se le
+    // paga a cada uno (pagosDueno, abajo, y contratos/{id}/privado).
+    match /duenos/{id}     { allow read, write: if haySesion(); }
+    match /empleados/{id}  { allow read: if haySesion(); allow write: if esDinero(); }
+    match /ajustes/{id}    { allow read: if haySesion(); allow write: if haySesion(); }
+    match /contadores/{id} { allow read, write: if haySesion(); }
+
+    match /contratos/{id} {
+      allow read, write: if haySesion();
+      // Aquí vive el costo por día que se le paga al dueño de un carro ajeno:
+      // se escribe al crear el contrato, pero solo se puede LEER con la
+      // credencial del área de dinero.
+      //
+      // OJO — este comentario decía antes "el costo del dueño Y LA COMISIÓN", y
+      // era falso: `porcentajeComision` sigue en la raíz del contrato, donde lo
+      // lee cualquiera con la sesión del mostrador. Moverlo quedó pendiente a
+      // propósito (ver §7b del diseño y ADR-002), y mientras el dueño sea el
+      // único usuario no hace daño — pero hay que decidirlo antes de que un
+      // empleado use el mostrador. El diferimiento está bien; lo que no estaba
+      // bien era un comentario que lo volvía invisible.
+      // El UID es el de la cuenta dinero@bestpricegt.com, que el dueño creó el
+      // 5 de octubre de 2026. Si algún día esa cuenta cambia, este número tiene
+      // que cambiar aquí también, o el área de dinero deja de abrir.
+      match /privado/{doc} {
+        allow create, update: if haySesion();
+        allow read, delete: if esDinero();
+      }
+    }
+
+    match /pagosComision/{id} { allow read, write: if esDinero(); }
+    // Los pagos a dueños de carros ajenos: cuánto se le pagó a cada quién y
+    // cuándo. Solo con la credencial de dinero, igual que pagosComision.
+    match /pagosDueno/{id}    { allow read, write: if esDinero(); }
+  }
+}
