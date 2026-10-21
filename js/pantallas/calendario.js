@@ -12,6 +12,7 @@ import { textoAnticipo } from '../nucleo/reserva.js';
 import { resumen } from '../nucleo/contrato.js';
 import { diasEntre, hoyISO, textoFecha, esFechaISO } from '../nucleo/fechas.js';
 import { cargarReservas, cargarContratosAbiertos, cargarFlota } from '../datos.js';
+import { lecturaConNubeDetras } from '../nucleo/lecturas.js';
 import { dinero } from '../ui.js';
 
 // El texto libre (nombre de cliente, nota...) se escapa antes de entrar al
@@ -425,14 +426,20 @@ export async function pintarCalendario(contenedor, fecha) {
 
   repintar();
 
+  // Lo que cada lectura con sincronía de fondo entregó: la copia local (lo primero que devuelven) no pisa lo que la nube trajo antes de que termine
+  // la espera de las demás (ver nucleo/lecturas.js).
+  const lecturas = { reservas: lecturaConNubeDetras(), flota: lecturaConNubeDetras(), contratos: lecturaConNubeDetras() };
   const [rReservas, rFlota, rContratos] = await Promise.all([
-    cargarReservas((r) => { reservas = r.datos; falloReservas = r.fallo; repintar(); }),
-    cargarFlota((r) => { flota = r.datos; falloFlota = r.fallo; repintar(); }),
-    cargarContratosAbiertos((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); }),
+    cargarReservas((r) => { lecturas.reservas.deLaNube(r); reservas = r.datos; falloReservas = r.fallo; repintar(); }),
+    cargarFlota((r) => { lecturas.flota.deLaNube(r); flota = r.datos; falloFlota = r.fallo; repintar(); }),
+    cargarContratosAbiertos((r) => { lecturas.contratos.deLaNube(r); contratos = r.datos; falloContratos = r.fallo; repintar(); }),
   ]);
-  reservas = rReservas.datos; falloReservas = rReservas.fallo;
-  flota = rFlota.datos; falloFlota = rFlota.fallo;
-  contratos = rContratos.datos; falloContratos = rContratos.fallo;
+  lecturas.reservas.inmediata(rReservas);
+  lecturas.flota.inmediata(rFlota);
+  lecturas.contratos.inmediata(rContratos);
+  ({ datos: reservas, fallo: falloReservas } = lecturas.reservas.actual);
+  ({ datos: flota, fallo: falloFlota } = lecturas.flota.actual);
+  ({ datos: contratos, fallo: falloContratos } = lecturas.contratos.actual);
 
   repintar();
 }

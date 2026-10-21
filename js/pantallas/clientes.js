@@ -23,6 +23,7 @@ import { suma } from '../nucleo/dinero.js';
 import {
   cargarClientes, cargarTodosLosContratos, contratosAbiertosDe, guardarCliente, altaConIdFijo, nuevoIdCliente,
 } from '../datos.js';
+import { lecturaConNubeDetras } from '../nucleo/lecturas.js';
 import { dinero, fecha, aviso, htmlAvisoRepetido } from '../ui.js';
 
 // El texto libre que escribe el mostrador se escapa antes de entrar al HTML,
@@ -529,14 +530,17 @@ export async function pintarClientes(contenedor, clienteId) {
   // inventado, y `fallo` dice que la nube no contestó — se muestra (barra roja),
   // porque «sigue como estaba» en silencio, con la copia local VACÍA, se leía como
   // «todavía no hay clientes».
+  // Lo que cada lectura con sincronía de fondo entregó: la copia local (lo primero que devuelven) no pisa lo que la nube trajo antes de que termine
+  // la espera de las demás (ver nucleo/lecturas.js).
+  const lecturas = { clientes: lecturaConNubeDetras(), contratos: lecturaConNubeDetras() };
   const [rClientes, rContratos] = await Promise.all([
-    cargarClientes((r) => { clientes = r.datos; falloClientes = r.fallo; repintar(); }),
-    cargarTodosLosContratos((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); }),
+    cargarClientes((r) => { lecturas.clientes.deLaNube(r); clientes = r.datos; falloClientes = r.fallo; repintar(); }),
+    cargarTodosLosContratos((r) => { lecturas.contratos.deLaNube(r); contratos = r.datos; falloContratos = r.fallo; repintar(); }),
   ]);
-  clientes = rClientes.datos;
-  contratos = rContratos.datos;
-  falloClientes = rClientes.fallo;
-  falloContratos = rContratos.fallo;
+  lecturas.clientes.inmediata(rClientes);
+  lecturas.contratos.inmediata(rContratos);
+  ({ datos: clientes, fallo: falloClientes } = lecturas.clientes.actual);
+  ({ datos: contratos, fallo: falloContratos } = lecturas.contratos.actual);
 
   if (!sigoVigente()) return;
 

@@ -25,6 +25,9 @@
 // así, en traspasoDeTarjetas.js). `construirContrato` sigue sin recibirlos: el traspaso no pasa por el contrato.
 import { lineasSalida, resumen } from '../nucleo/contrato.js';
 import { avisosDeSalida } from '../nucleo/avisos.js';
+import { lecturaConNubeDetras } from '../nucleo/lecturas.js';
+// Se vuelve a exportar desde aquí: es lo que esta pantalla usa y donde sus pruebas lo buscan primero.
+export { lecturaConNubeDetras };
 import { estadoReserva } from '../nucleo/reserva.js';
 import { devolucionPrevista, hoyISO, esFechaISO } from '../nucleo/fechas.js';
 import { q, suma, recargoTarjeta } from '../nucleo/dinero.js';
@@ -930,26 +933,6 @@ export async function cargarEmpleadosActivos(_alLlegar, { leer = cargarEmpleados
   const r = await leer();
   if (r?.fallo || !Array.isArray(r?.datos)) return { datos: null, fallo: true };
   return { datos: r.datos.filter(estaActivo), fallo: false };
-}
-
-/**
- * Lo que una lectura con sincronía de fondo tiene AHORA (`cargarFlota`, `cargarTodosLosContratos`, `cargarReservas`, de datos.js). Entrega DOS veces:
- * la promesa devuelve al instante la copia local (`inmediata`) y, si la nube trae algo distinto o falla, `alLlegar` avisa después (`deLaNube`).
- * Lo de la nube es SIEMPRE lo más nuevo, aunque llegue antes de que la pantalla termine de esperar a las demás lecturas —el `Promise.all` de
- * `pintarSacarCarro` incluye `cargarAjustes()`, que va a la red—: si lo inmediato se asignara al terminar de esperar, pisaría lo que la nube ya trajo
- * (un carro que OTRA computadora mandó al taller, un contrato que otra computadora acaba de abrir sobre ese carro) o borraría el aviso de que la
- * nube falló. `actual` es la última lectura `{ datos, fallo }`, o `null` mientras no llega ninguna.
- */
-export function lecturaConNubeDetras() {
-  let actual = null;
-  let llegoLaNube = false;
-  return {
-    /** Lo que devolvió la promesa (la copia local): vale solo si la nube todavía no trajo nada. */
-    inmediata(lectura) { if (!llegoLaNube) actual = lectura; },
-    /** Lo que llegó por `alLlegar` (la nube trajo algo distinto, o falló): siempre más nuevo. */
-    deLaNube(lectura) { actual = lectura; llegoLaNube = true; },
-    get actual() { return actual; },
-  };
 }
 
 // Las listas de la sesión: viven en el módulo, no en la pantalla, y por eso

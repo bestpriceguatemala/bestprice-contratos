@@ -236,7 +236,8 @@ test('la pantalla no lleva estilos en línea: cada ajuste es una clase del CSS',
 test('la ficha lee TODOS los contratos (de ahí sale el kilometraje) y la lista sigue leyendo solo los abiertos', () => {
   assert.match(CARROS, /const esFicha = Boolean\(carroId\) && carroId !== 'nuevo';/);
   assert.match(CARROS, /const cargarContratosDeEstaVista = esFicha \? cargarTodosLosContratos : cargarContratosAbiertos;/);
-  assert.match(CARROS, /cargarContratosDeEstaVista\(\(r\) => \{ contratos = r\.datos; falloContratos = r\.fallo; repintar\(\); \}\)/);
+  // (con `lecturas.contratos.deLaNube(r)`: lo que la nube trae por detrás no lo pisa la copia local, ver nucleo/lecturas.js)
+  assert.match(CARROS, /cargarContratosDeEstaVista\(\(r\) => \{ lecturas\.contratos\.deLaNube\(r\); contratos = r\.datos; falloContratos = r\.fallo; repintar\(\); \}\)/);
 });
 
 test('la ficha le pasa al bloque los dos fallos de lectura y se entera de las lecturas que llegan tarde', () => {

@@ -26,6 +26,7 @@ import {
   cargarReservas, cargarFlota, cargarContratosAbiertos, guardarReserva, cancelarReserva, buscarClientes,
   altaConIdFijo, nuevoIdReserva,
 } from '../datos.js';
+import { lecturaConNubeDetras } from '../nucleo/lecturas.js';
 import { fecha, aviso } from '../ui.js';
 
 // El texto libre (nombre suelto por teléfono, nota, tipo de vehículo...) se
@@ -664,14 +665,20 @@ export async function pintarReservas(contenedor, reservaId) {
   // "no hay reservaciones" (T9, y el hallazgo que ya le costó una vuelta de
   // revisión a flota.js) — `datos` cae a la copia local en vez de a un
   // arreglo vacío inventado, y `fallo` es lo que decide qué avisa barraFallo.
+  // Lo que cada lectura con sincronía de fondo entregó: la copia local (lo primero que devuelven) no pisa lo que la nube trajo antes de que termine
+  // la espera de las demás (ver nucleo/lecturas.js).
+  const lecturas = { reservas: lecturaConNubeDetras(), flota: lecturaConNubeDetras(), contratos: lecturaConNubeDetras() };
   const [rReservas, rFlota, rContratos] = await Promise.all([
-    cargarReservas((r) => { reservas = r.datos; falloReservas = r.fallo; repintar(); }),
-    cargarFlota((r) => { flota = r.datos; falloFlota = r.fallo; repintar(); }),
-    cargarContratosAbiertos((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); }),
+    cargarReservas((r) => { lecturas.reservas.deLaNube(r); reservas = r.datos; falloReservas = r.fallo; repintar(); }),
+    cargarFlota((r) => { lecturas.flota.deLaNube(r); flota = r.datos; falloFlota = r.fallo; repintar(); }),
+    cargarContratosAbiertos((r) => { lecturas.contratos.deLaNube(r); contratos = r.datos; falloContratos = r.fallo; repintar(); }),
   ]);
-  reservas = rReservas.datos; falloReservas = rReservas.fallo;
-  flota = rFlota.datos; falloFlota = rFlota.fallo;
-  contratos = rContratos.datos; falloContratos = rContratos.fallo;
+  lecturas.reservas.inmediata(rReservas);
+  lecturas.flota.inmediata(rFlota);
+  lecturas.contratos.inmediata(rContratos);
+  ({ datos: reservas, fallo: falloReservas } = lecturas.reservas.actual);
+  ({ datos: flota, fallo: falloFlota } = lecturas.flota.actual);
+  ({ datos: contratos, fallo: falloContratos } = lecturas.contratos.actual);
 
   if (!sigoVigente()) return;
 

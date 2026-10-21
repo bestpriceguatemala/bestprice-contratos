@@ -16,6 +16,7 @@ import {
   altaConIdFijo, nuevoIdVehiculo, CODIGO_DOCUMENTO_NO_ESTA,
 } from '../datos.js';
 import { MENSAJE_FALTA_EL_MOTIVO } from '../nucleo/carro.js';
+import { lecturaConNubeDetras } from '../nucleo/lecturas.js';
 import { aviso, htmlAvisoRepetido } from '../ui.js';
 import { pintarMantenimiento } from './mantenimiento.js';
 
@@ -526,14 +527,17 @@ export async function pintarCarros(contenedor, carroId) {
   // revisión final): `datos` cae a la copia local en vez de a un arreglo vacío inventado, y
   // `fallo` dice que la nube no contestó — se muestra, porque «sigue como estaba» en silencio,
   // con la copia local VACÍA, se leía como «todavía no hay carros».
+  // Lo que cada lectura con sincronía de fondo entregó: la copia local (lo primero que devuelven) no pisa lo que la nube trajo antes de que termine
+  // la espera de las demás (ver nucleo/lecturas.js).
+  const lecturas = { flota: lecturaConNubeDetras(), contratos: lecturaConNubeDetras() };
   const [rFlota, rContratos] = await Promise.all([
-    cargarFlota((r) => { flota = r.datos; falloFlota = r.fallo; repintar(); }),
-    cargarContratosDeEstaVista((r) => { contratos = r.datos; falloContratos = r.fallo; repintar(); }),
+    cargarFlota((r) => { lecturas.flota.deLaNube(r); flota = r.datos; falloFlota = r.fallo; repintar(); }),
+    cargarContratosDeEstaVista((r) => { lecturas.contratos.deLaNube(r); contratos = r.datos; falloContratos = r.fallo; repintar(); }),
   ]);
-  flota = rFlota.datos;
-  contratos = rContratos.datos;
-  falloFlota = rFlota.fallo;
-  falloContratos = rContratos.fallo;
+  lecturas.flota.inmediata(rFlota);
+  lecturas.contratos.inmediata(rContratos);
+  ({ datos: flota, fallo: falloFlota } = lecturas.flota.actual);
+  ({ datos: contratos, fallo: falloContratos } = lecturas.contratos.actual);
 
   if (!sigoVigente()) return;
 
