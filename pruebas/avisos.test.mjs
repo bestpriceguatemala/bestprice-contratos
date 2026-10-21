@@ -96,8 +96,8 @@ test('avisa si el cliente ya devolvió tarde antes', () => {
 //
 // Prueba del sistema (7 oct 2026): Juan devolvió 3 días tarde, pagó y el contrato quedó CERRADO; al sacarle
 // otro carro no salía nada, porque el aviso solo miraba los contratos abiertos. El dueño decidió mirar el
-// último año de rentas de ese cliente (nucleo/historial.js), leído aparte (`cargarContratosDelCliente`) y
-// entregado aquí como `historialDelCliente`: `{ datos, fallo }`, o `null` si todavía no llega.
+// último año de rentas de ese cliente (nucleo/historial.js), sacado de la lectura de TODOS los contratos (ver al final de este archivo, «el
+// cableado de «Sacar carro»») y entregado aquí como `historialDelCliente`: `{ datos, fallo }`, o `null` si todavía no llega.
 // ---------------------------------------------------------------------------
 
 // Juan, con el contrato que la prueba del sistema le dejó: sale el 3 ago, debía volver el 7, volvió el 10.
@@ -537,7 +537,7 @@ test('mantenimiento: avisosDeSalida a secas, sin servicios en el carro, sigue si
 });
 
 // H-4, el cableado de «Sacar carro». La regla de arriba estaba hecha y probada, pero NADA le entregaba el historial: `entradaDeAvisos` no lo
-// recibía ni lo pasaba, y `cargarContratosDelCliente`, que estos comentarios nombran, nunca existió. En pantalla Juan (3 días tarde, contrato
+// recibía ni lo pasaba, y `cargarContratosDelCliente`, que estos comentarios nombraban, nunca existió (los comentarios ya no la nombran). En pantalla Juan (3 días tarde, contrato
 // CERRADO) seguía sin avisar. «Sacar carro» ya lee TODA la colección de contratos (y los guarda en la copia local) y tiraba los cerrados en
 // memoria; ahora los conserva y se los da a los avisos como `historial`, y `entradaDeAvisos` saca de ahí lo de ESE cliente.
 const ELEGIDO = { id: 'k1', licenciaExpira: '2030-02-09', documentoExpira: '2030-02-09' };

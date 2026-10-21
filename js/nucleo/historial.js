@@ -66,8 +66,9 @@ export function devolucionesTardias(contratos, hoy) {
  *
  * - `abiertos`: sus contratos abiertos, que la pantalla ya tiene. Son un piso: si la lectura del historial
  *   falla, lo que ya se sabe de ahí sigue contando.
- * - `historial`: `{ datos, fallo }` de la lectura del último año (`cargarContratosDelCliente`), o `null` si
- *   todavía no se pidió o no hay cliente.
+ * - `historial`: `{ datos, fallo }` con las rentas de ESTE cliente, cerradas o no, sacadas de la lectura de TODOS los
+ *   contratos (`cargarTodosLosContratos`, datos.js; «Sacar carro» las filtra en `entradaDeAvisos` y Clientes agrupa por
+ *   cliente), o `null` si todavía no llega o no hay cliente. La ventana de un año la aplica esta regla, no la lectura.
  *
  * `sinLeer` es la bandera que no puede perderse: con la lectura caída, «0 veces» NO quiere decir «nunca
  * devolvió tarde» sino «no se sabe», y mostrarlo como un récord limpio es una tranquilidad que el cliente no

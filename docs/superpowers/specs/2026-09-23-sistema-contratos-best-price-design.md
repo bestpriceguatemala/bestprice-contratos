@@ -240,7 +240,12 @@ Avisos mientras se escribe:
 
 - Licencia o DPI del cliente vencidos.
 - El cliente tiene saldo pendiente de otro contrato.
-- El cliente ya devolvió tarde antes.
+- El cliente ya devolvió tarde antes. Cuenta **el último año** de sus rentas, cerradas o no (decisión del dueño, 7–12 de octubre de
+  2026: no todo su historial, porque cada cliente que se escoge sería una lectura más grande, y una devolución tarde de hace tres años
+  no informa la decisión de hoy). La regla es una sola, `nucleo/historial.js`, y la comparten este aviso y la marca «Devolvió tarde» de
+  Clientes; las dos leen TODOS los contratos (`cargarTodosLosContratos`) y la regla aplica la ventana. Estuvo hecha a medias hasta el 21 de
+  octubre: la regla existía, pero ninguna pantalla le entregaba lo cerrado y el aviso seguía mirando solo lo abierto. Si la lectura falla,
+  el aviso lo dice («no se pudo revisar…», «al menos…»): una lectura caída no es un cliente sin historial.
 - El carro tiene otro contrato encima de esas fechas.
 
 Al final: el total estimado, el pago que se recibe (monto, forma de pago,

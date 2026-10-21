@@ -78,9 +78,9 @@ function textoDeReservacionesSinCarro({ tipo, unidades, cabe, afectadas, seguro 
 // los que sí importan.
 //
 // `contratosDelCliente` son sus contratos ABIERTOS: de ahí sale lo que debe. Lo que devolvió tarde sale del
-// ÚLTIMO AÑO de sus rentas, cerradas o no (`historialDelCliente`: `{ datos, fallo }` de
-// `cargarContratosDelCliente`, o `null` mientras no llega), porque un cliente que devolvió tarde, pagó y
-// cerró es el caso normal y los abiertos nunca lo ven (H-4).
+// ÚLTIMO AÑO de sus rentas, cerradas o no (`historialDelCliente`: `{ datos, fallo }` con lo de ESE cliente de
+// la lectura de TODOS los contratos —lo arma `entradaDeAvisos`, sacarCarro.js—, o `null` mientras no llega), porque
+// un cliente que devolvió tarde, pagó y cerró es el caso normal y los abiertos nunca lo ven (H-4).
 //
 // `reservasDelCarro` son las apartadas para ESTE carro exacto. Las que solo piden un tipo no tienen carro, así
 // que no están ahí: para ellas hacen falta `flota`, TODAS las `reservas` y TODOS los `contratosAbiertos` (no
