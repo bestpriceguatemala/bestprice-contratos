@@ -23,7 +23,7 @@ import {
 import {
   estadoContrato, pendientesDe, garantiaPorLiberar, creditoDelCliente, yaVolvio,
 } from '../nucleo/estados.js';
-import { filtrar, textoDeContrato } from '../nucleo/busqueda.js';
+import { filtrarContratos } from '../nucleo/busqueda.js';
 import {
   q, textoDosDecimales, textoEntero, conTarjeta,
 } from '../nucleo/dinero.js';
@@ -141,9 +141,9 @@ export function filtrarPorEstado(contratos, filtro) {
   return criterio ? contratos.filter(criterio) : contratos;
 }
 
-/** Lo que de verdad se pinta: por estado primero, el buscador encima (filtrar/textoDeContrato, busqueda.js). */
+/** Lo que de verdad se pinta: por estado primero, el buscador encima (filtrarContratos, busqueda.js: el número del papel incluido). */
 export function contratosVisibles(contratos, { filtro, consulta } = {}) {
-  return filtrar(filtrarPorEstado(contratos, filtro), consulta, textoDeContrato);
+  return filtrarContratos(filtrarPorEstado(contratos, filtro), consulta);
 }
 
 /** La clase de la fila en tabla-carros, reutilizando los mismos colores que carros.js/flota.js. */
