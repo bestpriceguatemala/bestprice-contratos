@@ -34,9 +34,10 @@
 import { comisionDe } from '../nucleo/comision.js';
 import {
   agruparPorEmpleado, cuentaDeEmpleado, elegirParaPagoDeComision, totalGeneralDeComisiones, rentasSinPagar, estadoDeComision,
-  periodosDePago, sinMarcarDeComision,
+  periodosDePago, sinMarcarDeComision, quincenaDe,
 } from '../nucleo/comisiones.js';
-import { pagoAnulado } from '../nucleo/liquidacion.js';
+import { pagoAnulado, totalesDePagos } from '../nucleo/liquidacion.js';
+import { q } from '../nucleo/dinero.js';
 import { porcentajeAnotado, estaActivo, ordenarEmpleados } from '../nucleo/empleado.js';
 import { atrasoDe } from '../nucleo/contrato.js';
 import { hoyISO, esFechaISO } from '../nucleo/fechas.js';
@@ -48,10 +49,13 @@ import {
 } from '../datos.js';
 import { dinero, fecha, aviso } from '../ui.js';
 import { mostrar } from '../router.js';
+import { escribirLibro } from '../respaldo/libroNuevo.js';
+import { serialDeFecha } from '../respaldo/hojas.js';
 import {
   FORMAS_DE_PAGO, etiquetaDeForma, crearLector, problemaDeLaFechaDelPago, parchearMarcado, alOlvidarElDinero, enElAreaDeDinero,
   razonDeNoCierre,
 } from './dinero.js';
+import { descargarArchivo } from './respaldo.js';
 
 // El texto libre (nombres, placas, el nombre escrito a mano) se escapa antes de entrar al HTML, igual que en las demás pantallas.
 function esc(texto) {
@@ -81,6 +85,11 @@ export const MENSAJE_COMISION_FALLO = 'No se pudo registrar el pago. Revisa tu i
 export const MENSAJE_ANULAR_COMISION_SIN_COMPROBAR = 'No se pudo comprobar si este pago sigue como lo ves, y anularlo sin saberlo podría pisar una anulación que ya se hizo. Revisa tu internet e intenta de nuevo; no se anuló nada.';
 export const MENSAJE_ANULAR_COMISION_NO_ESTA = 'Este pago ya no está en la lista de pagos. No se anuló nada; la lista ya está al día, revísala.';
 export const MENSAJE_ANULAR_COMISION_FALLO = 'No se pudo anular el pago. Revisa tu internet y vuelve a intentarlo: si ya había quedado anulado, no se anula dos veces.';
+/** Lo que se dice junto al botón de la lista: qué es el archivo y lo que NO es (el respaldo del año no lleva las comisiones). */
+export const TEXTO_DE_LA_COPIA = 'El Excel es tu copia: lleva todas las cuentas, con lo que se debe, lo que todavía no se paga y cada pago. No se baja solo, y el respaldo del año no lleva las comisiones: si no lo bajas de vez en cuando, esta historia solo existe en el sistema. Lleva el nombre de los clientes de cada renta: guárdalo donde solo entres tú.';
+/** Lo mismo, junto al botón de la ficha de un empleado. */
+export const TEXTO_DE_LA_COPIA_DE_UNA = 'El Excel lleva esta cuenta entera: lo que se le debe, lo que todavía no se paga y cada pago, también los anulados. Lleva el nombre de los clientes de cada renta: guárdalo donde solo entres tú.';
+
 export const MENSAJE_ENLACE_COMISION_FALLO = 'No se pudieron enlazar las rentas. Revisa tu internet e intenta de nuevo: repetirlo no daña nada.';
 
 const FRASES_CONOCIDAS = new Set([
@@ -337,6 +346,332 @@ export async function anularElPagoDeComision({
 }
 
 // ---------------------------------------------------------------------------
+// Bajar la cuenta en Excel (23 de octubre de 2026)
+// ---------------------------------------------------------------------------
+//
+// El respaldo anual NO lleva las comisiones ni sus pagos (§10): viven solo en Firebase, y si él perdiera el acceso esa historia no
+// existiría en nada que sea suyo. Este archivo es la copia que él guarda: la cuenta de un empleado (o la de todos) con lo que se le
+// debe, lo que todavía no se paga y cada pago. NO es un comprobante para el empleado (ver el informe y §6).
+//
+// Ninguna regla se repite aquí. Cada cifra sale de lo que ya calculó el núcleo —`comisionDe` para cada renta, `cuenta.totalPorPagar`,
+// `totalEstimado`, `totalPorCerrar` y `pagosQueCambiaron` de `cuentaDeEmpleado`, `totalesDePagos` y `totalGeneralDeComisiones` para
+// las sumas, `quincenaDe` para el mes y la quincena— o de lo que el pago guardó. Y el archivo lleva tres reglas que se explican solas:
+//   - LO QUE ES DEUDA NO SE MEZCLA CON LO QUE NO LO ES. «Por pagar», «Estimada» y «Ya regresó, falta que cierre» son tres columnas
+//     distintas: sumar una columna entera tiene que dar una cifra que significa algo (el mismo motivo por el que el núcleo suma por
+//     separado `totalEstimado` y `totalPorCerrar`).
+//   - LO PAGADO ES LO QUE SE GUARDÓ. El monto de un pago es el `monto` del pago, no lo que sus rentas suman hoy; si hoy suman otra
+//     cosa (se corrigió un cierre después de pagar), la hoja «Pagos» lo dice aparte con las palabras de la pantalla.
+//   - ES SOBRE ESA PERSONA. Lleva la renta (número, fechas, placas, cliente por su nombre, días, base, porcentaje, comisión) y sus
+//     pagos. No lleva lo que el cliente pagó, ni su saldo ni su garantía (la pantalla dice por qué una renta no cierra; el archivo solo
+//     dice que no ha cerrado), ni el costo de un carro ajeno, ni la utilidad, ni nada de otro empleado.
+
+export const MENSAJE_BAJAR_SIN_SESION = 'No se bajó nada: la sesión del área de dinero se cerró. Escribe la contraseña otra vez y vuelve a apretar el botón.';
+export const MENSAJE_BAJAR_CUENTA_YA_NO_ESTA = 'No se bajó nada: esta cuenta ya no está en la lista (quizá se enlazó a un empleado). Vuelve a la lista de comisiones.';
+export const MENSAJE_BAJAR_SIN_CUENTAS = 'No se bajó nada: todavía no hay rentas ni empleados en la lista.';
+export const MENSAJE_BAJAR_FALLO = 'No se bajó nada: no se pudo armar el archivo. Revisa tu internet y vuelve a apretar el botón; si sigue igual, recarga la página.';
+
+/** Un error cuya frase ya está pensada para él: se le dice tal cual. Cualquier otro se cambia por `MENSAJE_BAJAR_FALLO`. */
+export class ErrorDeBajada extends Error {}
+
+/** Lo que dice la columna «Estado» de la hoja «Rentas» para cada situación de una renta. */
+export const ESTADOS_EN_EXCEL = {
+  'por-pagar': 'Por pagar',
+  estimada: 'Todavía no se paga: el carro sigue afuera (estimada)',
+  'sin-cerrar': 'Todavía no se paga: el carro regresó, falta que cierre el contrato',
+  pagada: 'Ya pagada',
+  'sin-comision': 'Cerrada y sin comisión (Q0.00)',
+  'sin-porcentaje': 'No se puede pagar: el contrato no trae un porcentaje legible',
+};
+
+const COLUMNAS_DE_RENTAS = [
+  { titulo: 'Empleado', tipo: 'texto', ancho: 24 },
+  { titulo: 'Contrato', tipo: 'entero', ancho: 10 },
+  { titulo: 'Salió', tipo: 'fecha', ancho: 12 },
+  { titulo: 'Regresó', tipo: 'fecha', ancho: 12 },
+  { titulo: 'Mes', tipo: 'texto', ancho: 10 },
+  { titulo: 'Quincena', tipo: 'entero', ancho: 10 },
+  { titulo: 'Placas', tipo: 'texto', ancho: 12 },
+  { titulo: 'Cliente', tipo: 'texto', ancho: 28 },
+  { titulo: 'Días', tipo: 'entero', ancho: 8 },
+  { titulo: 'Días de atraso', tipo: 'entero', ancho: 10 },
+  { titulo: 'Base', tipo: 'dinero', ancho: 13 },
+  { titulo: '% de comisión', tipo: 'numero', ancho: 11 },
+  { titulo: 'Por pagar', tipo: 'dinero', ancho: 13 },
+  { titulo: 'Estimada (el carro sigue afuera)', tipo: 'dinero', ancho: 16 },
+  { titulo: 'Ya regresó, falta que cierre', tipo: 'dinero', ancho: 16 },
+  { titulo: 'Ya pagada (lo que suma hoy)', tipo: 'dinero', ancho: 16 },
+  { titulo: 'Estado', tipo: 'texto', ancho: 58 },
+  { titulo: 'Pagada el', tipo: 'fecha', ancho: 12 },
+];
+
+const COLUMNAS_DE_PAGOS = [
+  { titulo: 'Empleado', tipo: 'texto', ancho: 24 },
+  { titulo: 'Fecha del pago', tipo: 'fecha', ancho: 13 },
+  { titulo: 'Forma', tipo: 'texto', ancho: 14 },
+  { titulo: 'Monto pagado (el que quedó guardado)', tipo: 'dinero', ancho: 18 },
+  { titulo: 'Estado', tipo: 'texto', ancho: 11 },
+  { titulo: 'Anulado el', tipo: 'fecha', ancho: 12 },
+  { titulo: 'Rentas que cubre', tipo: 'entero', ancho: 10 },
+  { titulo: 'Contratos', tipo: 'texto', ancho: 36 },
+  { titulo: 'Hoy esas rentas suman', tipo: 'dinero', ancho: 16 },
+  { titulo: 'Aviso', tipo: 'texto', ancho: 60 },
+];
+
+const COLUMNAS_DE_RESUMEN = [
+  { titulo: 'Empleado', tipo: 'texto', ancho: 26 },
+  { titulo: 'Código', tipo: 'texto', ancho: 9 },
+  { titulo: '% de hoy', tipo: 'numero', ancho: 9 },
+  { titulo: 'Rentas por pagar', tipo: 'entero', ancho: 11 },
+  { titulo: 'Se le debe', tipo: 'dinero', ancho: 14 },
+  { titulo: 'Estimado (carros afuera)', tipo: 'dinero', ancho: 15 },
+  { titulo: 'Ya regresaron, falta que cierre', tipo: 'dinero', ancho: 16 },
+  { titulo: 'Pagado (pagos sin anular)', tipo: 'dinero', ancho: 15 },
+  { titulo: 'Pagos', tipo: 'entero', ancho: 8 },
+  { titulo: 'Pagos anulados', tipo: 'entero', ancho: 10 },
+  { titulo: 'Aclaración', tipo: 'texto', ancho: 44 },
+];
+
+/** El número de un contrato como número, o vacío: una celda de número nunca lleva un texto. */
+const numeroDeContrato = (c) => {
+  const n = Number(c?.numero);
+  return c?.numero !== null && c?.numero !== undefined && c?.numero !== '' && Number.isFinite(n) ? n : null;
+};
+
+/** Una fecha para una celda de fecha: el número de serie de Excel, vacía si no hay fecha, o el texto tal cual (y un aviso) si no se entiende. */
+function celdaDeFecha(iso, donde, avisos) {
+  const texto = String(iso ?? '').trim();
+  if (!texto) return null;
+  const serial = serialDeFecha(texto);
+  if (serial !== null) return serial;
+  avisos.push(`${donde}: la fecha «${texto}» no se pudo escribir como fecha y quedó como texto.`);
+  return texto;
+}
+
+/** La renta de una cuenta con el pago vigente que la cubre, si lo hay. */
+function pagoQueCubre(pagosVigentes, id) {
+  return pagosVigentes.find((p) => Array.isArray(p?.contratos) && p.contratos.includes(id)) ?? null;
+}
+
+function filaDeRentaParaExcel(entrada, contrato, estado, pagoVigente, avisos) {
+  const c = comisionDe(contrato);
+  const donde = `Renta ${contrato.numero ?? '(sin número)'} de ${entrada.nombre}`;
+  const regreso = contrato.cierre?.fechaReal;
+  const periodo = quincenaDe(regreso);
+  const legible = estado !== 'sin-porcentaje';
+  const si = (cual) => (estado === cual ? c.monto : null);
+  return [
+    entrada.nombre,
+    numeroDeContrato(contrato),
+    celdaDeFecha(contrato.fechaSalida, donde, avisos),
+    celdaDeFecha(regreso, donde, avisos),
+    periodo ? periodo.mes : null,
+    periodo ? periodo.quincena : null,
+    String(contrato.carroPlacas ?? ''),
+    String(contrato.clienteNombre ?? ''),
+    q(contrato.dias),
+    atrasoDe(contrato),
+    c.base,
+    legible ? c.porcentaje : null,
+    si('por-pagar'),
+    si('estimada'),
+    si('sin-cerrar'),
+    si('pagada'),
+    ESTADOS_EN_EXCEL[estado],
+    estado === 'pagada' ? celdaDeFecha(pagoVigente?.fecha, donde, avisos) : null,
+  ];
+}
+
+/** Las rentas de una cuenta con su situación, en el orden de la pantalla: por pagar, no firmes, pagadas, sin comisión, sin porcentaje. */
+function rentasConSituacion(cuenta) {
+  return [
+    ...cuenta.porPagar.map((c) => [c, 'por-pagar']),
+    ...cuenta.noFirmes.map((c) => [c, estadoDeComision(c)]),
+    ...cuenta.pagados.map((c) => [c, 'pagada']),
+    ...cuenta.sinComision.map((c) => [c, 'sin-comision']),
+    ...cuenta.sinPorcentaje.map((c) => [c, 'sin-porcentaje']),
+  ];
+}
+
+function filaDePagoParaExcel(entrada, pago, avisos) {
+  const donde = `Pago de ${entrada.nombre} del ${pago.fecha ?? '(sin fecha)'}`;
+  const ids = [...new Set((Array.isArray(pago.contratos) ? pago.contratos : []).filter(Boolean))];
+  const numeros = [];
+  let faltan = 0;
+  for (const id of ids) {
+    const renta = entrada.contratos.find((c) => c.id === id);
+    if (renta) numeros.push(numeroDeContrato(renta) ?? '(sin número)');
+    else faltan += 1;
+  }
+  numeros.sort((a, b) => (typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), 'es')));
+  const lista = [...numeros.map(String), ...(faltan ? [`${faltan} ${faltan === 1 ? 'renta que ya no está' : 'rentas que ya no están'} en esta cuenta`] : [])].join(', ');
+  const anulado = pagoAnulado(pago);
+  const cambio = anulado ? null : entrada.cuenta.pagosQueCambiaron.find((x) => x.pago === pago || (pago.id && x.pago?.id === pago.id));
+  return [
+    entrada.nombre,
+    celdaDeFecha(pago.fecha, donde, avisos),
+    etiquetaDeForma(pago.forma),
+    q(pago.monto),
+    anulado ? 'Anulado' : 'Vigente',
+    anulado ? celdaDeFecha(pago.anuladoEn, donde, avisos) : null,
+    ids.length,
+    lista,
+    cambio ? cambio.ahora : null,
+    cambio ? textoDePagoQueCambio(cambio) : null,
+  ];
+}
+
+function filaDeResumenParaExcel(entrada, pagosDeLaCuenta) {
+  const { cuenta, registro } = entrada;
+  const vigentes = pagosDeLaCuenta.filter((p) => !pagoAnulado(p));
+  return [
+    entrada.nombre,
+    String(registro?.codigo ?? ''),
+    registro ? porcentajeAnotado(registro.porcentajeComision) : null,
+    cuenta.porPagar.length,
+    cuenta.totalPorPagar,
+    cuenta.totalEstimado,
+    cuenta.totalPorCerrar,
+    totalesDePagos(vigentes).monto,
+    vigentes.length,
+    pagosDeLaCuenta.length - vigentes.length,
+    etiquetasDeLaCuenta(entrada).map((e) => e.texto).join(', '),
+  ];
+}
+
+/** Cómo se llama el archivo: «Comisiones de Ana López 2026-10-23.xlsx», o «Comisiones de todos 2026-10-23.xlsx». */
+export function nombreDelArchivoDeComisiones(nombre, hoy) {
+  const limpio = String(nombre ?? '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80).trim();
+  return `Comisiones de ${limpio || 'todos'} ${hoy}.xlsx`;
+}
+
+/**
+ * Lo que lleva el archivo, ya armado y sin tocar el libro: las hojas «Resumen», «Rentas» y «Pagos» con sus filas. Función pura: recibe
+ * la vista que ya armó `armarVistaDeComisiones` (`vista.ok` en true) y los pagos leídos, y NO lee el reloj (`hoy` llega de fuera).
+ *
+ * - `clave`: la cuenta de un empleado, o `null` para todas.
+ * - Una renta aparece en la hoja «Rentas» exactamente una vez, y un pago de la cuenta en «Pagos» exactamente una vez, anulado o no.
+ *
+ * LANZA si no recibe una vista buena, una lista de pagos o la fecha de hoy: «no llegó» no es «no se le debe nada».
+ */
+export function modeloDeComisionesEnExcel({
+  vista, clave = null, pagos, hoy,
+} = {}) {
+  if (!vista?.ok || !Array.isArray(vista.entradas)) {
+    throw new TypeError('comisiones: para armar el archivo hace falta una vista buena (vista.ok). Sin ella no se sabe qué se le debe a nadie, y un archivo sin cifras diría «no le debes nada» cuando quizá sí.');
+  }
+  if (!Array.isArray(pagos)) {
+    throw new TypeError('comisiones: «pagos» debe ser una lista. Sin ella no se sabe qué ya se pagó, y un archivo sin pagos haría ver todo como deuda.');
+  }
+  if (!esFechaISO(hoy)) throw new Error('Falta la fecha de hoy (hoy): el archivo dice «cuenta al…» y esa fecha no se adivina.');
+  const entradas = clave === null ? vista.entradas : vista.entradas.filter((e) => e.clave === clave);
+  if (!entradas.length) {
+    throw new ErrorDeBajada(clave === null ? MENSAJE_BAJAR_SIN_CUENTAS : MENSAJE_BAJAR_CUENTA_YA_NO_ESTA);
+  }
+
+  const avisos = [];
+  const filasDeRentas = [];
+  const filasDePagos = [];
+  const filasDeResumen = [];
+  for (const entrada of entradas) {
+    const delEmpleado = pagosDeLaCuentaDeComision(entrada, pagos);
+    const vigentes = delEmpleado.filter((p) => !pagoAnulado(p));
+    for (const [contrato, estado] of rentasConSituacion(entrada.cuenta)) {
+      filasDeRentas.push(filaDeRentaParaExcel(entrada, contrato, estado, pagoQueCubre(vigentes, contrato.id), avisos));
+    }
+    for (const pago of delEmpleado) filasDePagos.push(filaDePagoParaExcel(entrada, pago, avisos));
+    filasDeResumen.push(filaDeResumenParaExcel(entrada, delEmpleado));
+  }
+  // La suma de lo que se le debe a todos la hace el núcleo (la misma de la lista de la pantalla), y solo si hay más de una cuenta.
+  const debe = totalGeneralDeComisiones(entradas.map((e) => e.cuenta));
+  if (entradas.length > 1) {
+    filasDeResumen.push(['Todos', '', null, null, debe, null, null, null, null, null, '']);
+  }
+
+  const quien = clave === null ? null : entradas[0].nombre;
+  const notas = [
+    { texto: `Comisiones de los empleados — ${clave === null ? 'todas las cuentas' : entradas[0].nombre}`, estilo: 'titulo' },
+    { texto: `Cuenta al ${fecha(hoy)}. Es una foto del día en que se bajó este archivo: no se actualiza solo.`, estilo: 'nota' },
+    { texto: 'Una comisión se paga cuando el contrato de la renta ya cerró: el carro regresó, no se debe saldo y la garantía está liberada.', estilo: 'nota' },
+    { texto: 'Hoja «Rentas»: una fila por renta. Solo la columna «Por pagar» es deuda; «Estimada» y «Ya regresó, falta que cierre» todavía no lo son.', estilo: 'nota' },
+    { texto: 'Hoja «Pagos»: cada pago registrado, también los anulados (un pago anulado ya no cubre sus rentas). El monto es el que quedó guardado ese día.', estilo: 'nota' },
+    ...(vista.falloEmpleados
+      ? [{ texto: 'No se pudo leer la lista de empleados: los nombres, códigos y porcentajes de hoy pueden estar desactualizados. Lo que se debe sale de las rentas y los pagos, y no cambia.', estilo: 'aviso' }]
+      : []),
+    ...avisos.map((texto) => ({ texto, estilo: 'aviso' })),
+    { texto: 'Cuídalo como tu Excel: lleva lo que se le debe a cada persona y el nombre de los clientes de cada renta.', estilo: 'nota' },
+  ];
+
+  return {
+    nombre: nombreDelArchivoDeComisiones(quien, hoy),
+    titulo: `Comisiones de ${quien ?? 'todos'}`,
+    asunto: `Cuenta de comisiones al ${hoy}`,
+    hojas: [
+      { nombre: 'Resumen', notas, columnas: COLUMNAS_DE_RESUMEN, filas: filasDeResumen },
+      {
+        nombre: 'Rentas', columnas: COLUMNAS_DE_RENTAS, filas: filasDeRentas, congelar: true, filtro: true,
+      },
+      {
+        nombre: 'Pagos', columnas: COLUMNAS_DE_PAGOS, filas: filasDePagos, congelar: true, filtro: true,
+      },
+    ],
+    cuenta: {
+      empleados: entradas.length, rentas: filasDeRentas.length, pagos: filasDePagos.length, debe,
+    },
+    avisos,
+  };
+}
+
+/** Arma el .xlsx: `{ bytes, nombre, cuenta, avisos }`. */
+export async function armarElExcelDeComisiones({
+  vista, clave = null, pagos, hoy,
+} = {}) {
+  const modelo = modeloDeComisionesEnExcel({
+    vista, clave, pagos, hoy,
+  });
+  const bytes = await escribirLibro({
+    hojas: modelo.hojas, titulo: modelo.titulo, asunto: modelo.asunto, hoy,
+  });
+  return {
+    bytes, nombre: modelo.nombre, cuenta: modelo.cuenta, avisos: modelo.avisos,
+  };
+}
+
+/**
+ * Lee, arma y entrega. En ese orden, y el orden importa:
+ *   - LEE DE NUEVO, de la nube y con la credencial de dinero, igual que registrar un pago: la cuenta que la pantalla tiene en memoria
+ *     es la de cuando se abrió. Un archivo que se guarda como historia no puede salir de una copia vieja.
+ *   - Si CUALQUIER lectura falla, NO se entrega nada y se dice cuál (las mismas frases de la pantalla): un archivo armado con una
+ *     lectura caída diría «no se le debe nada», y nadie audita lo que abre bien.
+ *   - La sesión de dinero se mira antes de leer, y otra vez antes de entregar: si se cerró en medio, lo leído se tira y no sale ningún
+ *     archivo (lo que se leyó es dinero y se suelta con la sesión). Nada de esto se guarda en la memoria del módulo.
+ *
+ * Devuelve `{ nombre, cuenta, avisos }`. Las dependencias se reciben para probar el recorrido sin red ni navegador.
+ */
+export async function bajarLasCuentasEnExcel({
+  clave = null, hoy, leer = leerTodo, armar = armarElExcelDeComisiones, entregar = descargarArchivo, hayCredencial = () => Boolean(sesionDeDinero()),
+} = {}) {
+  if (!esFechaISO(hoy)) throw new Error('Falta la fecha de hoy (hoy): el archivo dice «cuenta al…» y esa fecha no se adivina.');
+  if (!hayCredencial()) throw new ErrorDeBajada(MENSAJE_BAJAR_SIN_SESION);
+  const lectura = await leer();
+  if (!hayCredencial()) throw new ErrorDeBajada(MENSAJE_BAJAR_SIN_SESION);
+  const vista = armarVistaDeComisiones(lectura);
+  if (!vista.ok) throw new ErrorDeBajada(`No se bajó nada. ${frasesDelFallo(vista).join(' ')}`);
+  const libro = await armar({
+    vista, clave, pagos: lectura.pagos.datos, hoy,
+  });
+  if (!hayCredencial()) throw new ErrorDeBajada(MENSAJE_BAJAR_SIN_SESION);
+  entregar(libro.bytes, libro.nombre);
+  return { nombre: libro.nombre, cuenta: libro.cuenta, avisos: libro.avisos };
+}
+
+/** Lo que se le dice cuando el archivo ya salió: cuántas cuentas, rentas y pagos lleva y cuánto se debe, para que lo compare con la pantalla. */
+export function textoDeLoBajado({ nombre, cuenta, avisos }) {
+  const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+  const aviso1 = avisos.length ? ` Revisa el archivo: ${avisos.length === 1 ? 'una fecha' : `${avisos.length} fechas`} no se pudieron escribir como fecha (los avisos están en la hoja «Resumen»).` : '';
+  return `Se bajó «${nombre}» a tu carpeta de descargas: ${plural(cuenta.empleados, 'cuenta', 'cuentas')}, ${plural(cuenta.rentas, 'renta', 'rentas')} y ${plural(cuenta.pagos, 'pago', 'pagos')}. Se debe ${dinero(cuenta.debe)}.${aviso1}`;
+}
+
+// ---------------------------------------------------------------------------
 // HTML (funciones puras: reciben datos y devuelven texto, sin tocar el DOM)
 // ---------------------------------------------------------------------------
 
@@ -346,12 +681,18 @@ const barraRoja = (frases) => (frases.length
   ? `<div class="barra-lectura-fallida" role="alert">${frases.map((f) => `<p>${esc(f)}</p>`).join('')}</div>`
   : '');
 
-/** Lo que se dibuja cuando NO se puede mostrar ninguna cuenta: una barra roja y cómo volver a intentarlo. Ninguna cifra. */
-export function htmlFalloDeComisiones(vista) {
+/** Lo que se le dice cuando una vista no se pudo armar (`vista.ok` en false): una frase por lectura que falló. La pantalla y el archivo de Excel dicen lo mismo. */
+export function frasesDelFallo(vista) {
   const frases = [];
   if (vista.problemas.includes('rentas')) frases.push(MENSAJE_FALLO_RENTAS);
   if (vista.problemas.includes('pagos')) frases.push(MENSAJE_FALLO_PAGOS_DE_COMISION);
   if (vista.problemas.includes('datos')) frases.push(MENSAJE_FALLO_DATOS_DE_COMISION);
+  return frases;
+}
+
+/** Lo que se dibuja cuando NO se puede mostrar ninguna cuenta: una barra roja y cómo volver a intentarlo. Ninguna cifra. */
+export function htmlFalloDeComisiones(vista) {
+  const frases = frasesDelFallo(vista);
   return `
     <div class="carros-contenido">
       <div class="carros-encabezado"><h1>Comisiones</h1></div>
@@ -368,15 +709,25 @@ function htmlDeDias(contrato) {
   return atraso > 0 ? `${esc(base)} <span class="dn-alerta">+ ${atraso} de atraso</span>` : esc(base);
 }
 
-/** Las etiquetas junto al nombre de un empleado en la lista y en la ficha. */
-function htmlEtiquetas(entrada) {
+/**
+ * Lo que se dice junto al nombre de un empleado: `[{ texto, ayuda? }]`. Lo dibujan la lista y la ficha, y lo escribe el archivo de
+ * Excel en su hoja «Resumen»: las mismas palabras, decididas en un solo lugar.
+ */
+export function etiquetasDeLaCuenta(entrada) {
   const baja = entrada.registro && !estaActivo(entrada.registro);
   return [
-    entrada.sinEnlazar ? '<span class="etiqueta-estado" title="El nombre se escribió a mano en el contrato">Sin enlazar</span>' : '',
-    entrada.sinRegistro ? '<span class="etiqueta-estado">No está en la lista de empleados</span>' : '',
-    baja ? '<span class="etiqueta-estado">De baja</span>' : '',
-    entrada.registro && porcentajeAnotado(entrada.registro.porcentajeComision) === 0 ? '<span class="etiqueta-estado">No gana comisión</span>' : '',
-  ].filter(Boolean).join(' ');
+    entrada.sinEnlazar ? { texto: 'Sin enlazar', ayuda: 'El nombre se escribió a mano en el contrato' } : null,
+    entrada.sinRegistro ? { texto: 'No está en la lista de empleados' } : null,
+    baja ? { texto: 'De baja' } : null,
+    entrada.registro && porcentajeAnotado(entrada.registro.porcentajeComision) === 0 ? { texto: 'No gana comisión' } : null,
+  ].filter(Boolean);
+}
+
+/** Las etiquetas junto al nombre de un empleado en la lista y en la ficha. */
+function htmlEtiquetas(entrada) {
+  return etiquetasDeLaCuenta(entrada)
+    .map((e) => `<span class="etiqueta-estado"${e.ayuda ? ` title="${esc(e.ayuda)}"` : ''}>${esc(e.texto)}</span>`)
+    .join(' ');
 }
 
 function filaDeLista(entrada) {
@@ -399,7 +750,7 @@ function filaDeLista(entrada) {
  * La pantalla principal: una fila por empleado, de lo que más se le debe a lo que menos, con el total de todos al pie. Con
  * `vista.ok` en false NO dibuja filas: dibuja el fallo.
  */
-export function htmlListaDeComisiones(vista) {
+export function htmlListaDeComisiones(vista, { mensajeBajar = '' } = {}) {
   if (!vista.ok) return htmlFalloDeComisiones(vista);
   const filas = vista.entradas.length
     ? vista.entradas.map(filaDeLista).join('')
@@ -421,9 +772,12 @@ export function htmlListaDeComisiones(vista) {
         <h1>Comisiones</h1>
         <button type="button" class="btn" data-cm="actualizar">Actualizar</button>
         <a href="#/dinero/empleados" class="btn">Empleados</a>
+        ${vista.entradas.length ? '<button type="button" class="btn" data-cm="bajar" data-alcance="todas">Bajar todas las cuentas en Excel</button>' : ''}
       </div>
       ${vista.falloEmpleados ? barraRoja([MENSAJE_FALLO_EMPLEADOS]) : ''}
+      ${mensajeBajar ? barraRoja([mensajeBajar]) : ''}
       <p class="dn-explica">Solo se paga la comisión de una renta cuyo contrato ya cerró: el carro regresó, no se debe saldo y la garantía está liberada. Es la misma regla con la que se le paga al dueño de un carro ajeno.</p>
+      <p class="dn-explica-chica">${esc(TEXTO_DE_LA_COPIA)}</p>
       <table class="tabla-carros">
         <thead>
           <tr><th>Empleado</th><th>Porcentaje</th><th>Rentas por pagar</th><th class="dn-derecha">Se le debe</th></tr>
@@ -748,9 +1102,12 @@ export function htmlFichaDeComisiones(ctx) {
         <a href="${RUTA_DE_COMISIONES}" class="btn">← Comisiones</a>
         <h1>${esc(entrada.nombre)}</h1>
         ${htmlEtiquetas(entrada)}
+        <button type="button" class="btn" data-cm="bajar" data-alcance="una">Bajar esta cuenta en Excel</button>
       </div>
       ${vista.falloEmpleados ? barraRoja([MENSAJE_FALLO_EMPLEADOS]) : ''}
+      ${ctx.ui?.mensajeBajar ? barraRoja([ctx.ui.mensajeBajar]) : ''}
       ${datos}
+      <p class="dn-explica-chica">${esc(TEXTO_DE_LA_COPIA_DE_UNA)}</p>
       ${htmlPagosQueCambiaron(ctx)}
       ${entrada.sinEnlazar ? htmlEnlace(ctx) : ''}
       ${htmlBloquePorPagar(ctx)}
@@ -822,7 +1179,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
 
   const ui = {
     marcados: new Set(), pagando: false, forma: FORMAS_DE_PAGO[0].valor, fecha: hoy,
-    mensajePago: '', mensajeEnlace: '', enlazarEmpleadoId: '', enlazarPorcentaje: false, enCurso: null, ocupado: false,
+    mensajePago: '', mensajeEnlace: '', mensajeBajar: '', enlazarEmpleadoId: '', enlazarPorcentaje: false, enCurso: null, ocupado: false,
   };
   let vista = null;
   let entrada = null;
@@ -840,7 +1197,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
       return;
     }
     if (claveActual === null) {
-      raiz.innerHTML = htmlListaDeComisiones(vista);
+      raiz.innerHTML = htmlListaDeComisiones(vista, { mensajeBajar: ui.mensajeBajar });
       return;
     }
     entrada = vista.entradas.find((e) => e.clave === claveActual) ?? null;
@@ -1005,6 +1362,28 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     dibujar();
   }
 
+  // ----- Bajar la cuenta en Excel -----
+  async function bajarExcel(alcance) {
+    if (ui.ocupado || !haySesion()) return;
+    ui.ocupado = true;
+    ui.mensajeBajar = '';
+    for (const boton of raiz.querySelectorAll('[data-cm="bajar"]')) { boton.disabled = true; boton.textContent = 'Armando el archivo…'; }
+    try {
+      const r = await bajarLasCuentasEnExcel({ clave: alcance === 'una' ? claveActual : null, hoy: hoyISO() });
+      aviso(textoDeLoBajado(r), 'exito');
+    } catch (error) {
+      // Una frase nuestra se le dice tal cual; cualquier otra cosa (un error de Firebase, de código) nunca.
+      if (error instanceof ErrorDeBajada) ui.mensajeBajar = error.message;
+      else { ui.mensajeBajar = MENSAJE_BAJAR_FALLO; console.error('No se pudo bajar la cuenta en Excel:', error); }
+    } finally {
+      ui.ocupado = false;
+    }
+    // Un fallo se queda escrito en la página (un aviso de cinco segundos se pierde y él creería que se bajó). Si lo que pasó es que
+    // la sesión se cerró, se vuelve a pasar por la puerta, que pide la contraseña.
+    if (ui.mensajeBajar === MENSAJE_BAJAR_SIN_SESION && !haySesion()) return;
+    dibujar();
+  }
+
   // ----- Los eventos, todos desde la raíz -----
   raiz.addEventListener('click', (ev) => {
     const accion = ev.target.closest('[data-cm]');
@@ -1019,6 +1398,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
         case 'guardar-pago': guardarPago(); return;
         case 'enlazar': enlazar(); return;
         case 'anular-pago': anularPago(accion.dataset.id); return;
+        case 'bajar': bajarExcel(accion.dataset.alcance); return;
         case 'periodo':
           // Un clic marca el período entero (reemplaza lo marcado); lo que quedó fuera sigue a la vista, con su total.
           ui.marcados = new Set(idsDelPeriodo(entrada.cuenta, accion.dataset.mes, Number(accion.dataset.quincena)));
