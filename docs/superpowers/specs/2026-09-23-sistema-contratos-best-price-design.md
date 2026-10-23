@@ -303,7 +303,8 @@ las costuras lo dejó como «tercer hueco de §6»); él contestó *«Sí, coné
   `app.js`). Por debajo de 1340 px de ancho pasa a su propia fila, debajo del menú: a 1024 px el título, el menú y «Salir» ya llenan la
   barra, y con la caja al lado «Salir» se salía de la pantalla. Es la barra: se va con el desplazamiento de la página, igual que el menú.
 - **Qué hace.** Al escribir salen, agrupados y con cuántos son, los **clientes** (nombre, apellido, DPI, licencia, teléfono, correo),
-  los **carros** de la flota (placas, marca y línea) y los **contratos** (número, cliente, placas, carro). Cada fila lleva a la ficha de lo
+  los **carros** de la flota (placas, marca y línea) y los **contratos** (número, cliente, placas, carro; **no** quién lo rentó: con el empleado adentro, un cliente que se llama como uno trae
+  cientos de contratos que no son suyos, y «Contratos» sí lo busca). Cada fila lleva a la ficha de lo
   que es —`#/clientes/:id`, `#/carros/:id`, `#/contratos/:id`, las mismas que abren las listas de esas pantallas— y no muestra ningún monto.
   Un contrato de un carro **ajeno** se encuentra por sus placas y solo así: ese carro no tiene ficha (§7). Se enseñan seis filas por
   grupo y el resto se cuenta («y 14 más»). No hay una regla de búsqueda nueva: lo que coincide lo decide `nucleo/busqueda.js`, la misma de
@@ -340,10 +341,11 @@ Se abre con contraseña y se cierra sola por inactividad o al salir del sistema.
 - **Comisiones**, por mes y por empleado, con el detalle de cada contrato y de
   dónde sale cada número. **Casillas para seleccionar** qué contratos se van a
   pagar, con el total de lo seleccionado y el botón de pagar; queda registrada
-  la fecha. Los pagados se separan de los pendientes. **No se baja a Excel ni a PDF**:
-  este diseño lo prometía y ninguna pantalla de comisiones baja un archivo (al final de
-  «Área de dinero»). Solo se paga lo de un contrato cerrado, y un período (quincena o mes)
-  se marca de un clic: ver §5, «Comisión del empleado».
+  la fecha. Los pagados se separan de los pendientes. **Se baja la cuenta en Excel, no en
+  PDF** (23 de octubre de 2026; abajo, «Bajar la cuenta de comisiones en Excel»): un botón en
+  la ficha de cada empleado y otro en la lista, y el archivo es la copia que el dueño guarda,
+  **no** un comprobante para el empleado. Solo se paga lo de un contrato cerrado, y un período
+  (quincena o mes) se marca de un clic: ver §5, «Comisión del empleado».
 - **Dueños de carros ajenos**: lo que se le debe a cada uno, contrato por
   contrato, con las mismas casillas de selección y marcado de pago.
 - **Empleados**: alta, baja y el porcentaje de comisión de cada uno. Se ven
@@ -372,11 +374,71 @@ que se prometió, para que nadie las dé por hechas ni las vuelva a descubrir co
    la lista del mismo nombre de la pantalla principal (arriba). Las demás se miran en el
    archivo, que es una foto del día en que se bajó: para ver el mes en curso hay que bajarlo de
    nuevo (§10).
-2. **«Se baja en Excel y PDF» de las comisiones.** Ninguna pantalla de comisiones baja un
-   archivo, y el diseño deja de prometerlo. Ojo: aquí la razón de arriba **no** alcanza. El
-   respaldo no lleva las comisiones ni sus pagos (§10, «lo que este archivo NO lleva»), así que
-   las comisiones se ven y se pagan **solo en la pantalla**. Si algún día las quiere en un
-   archivo, es trabajo nuevo y se le pregunta entonces.
+2. **«Se baja en Excel y PDF» de las comisiones.** Hasta el 23 de octubre ninguna pantalla de
+   comisiones bajaba un archivo. Ojo: aquí la razón de arriba **no** alcanzaba. El respaldo no
+   lleva las comisiones ni sus pagos (§10, «lo que este archivo NO lleva»), así que las
+   comisiones se veían y se pagaban **solo en la pantalla**, y si el dueño perdía el acceso a
+   Firebase esa historia no existía en nada suyo. Se le preguntó ese día y escogió **«Un botón
+   de bajar en la pantalla»**: se construyó el **Excel** (siguiente apartado). **El PDF no se
+   construyó**, y el respaldo anual **sigue sin llevar las comisiones**: lo que existe es un
+   botón que él aprieta, no una copia que se haga sola.
+
+**Bajar la cuenta de comisiones en Excel** (23 de octubre de 2026; `js/pantallas/comisiones.js`,
+sección «Bajar la cuenta en Excel», y `js/respaldo/libroNuevo.js`).
+
+*Qué es y por qué ese.* Había dos necesidades distintas detrás de «un botón de bajar», y se
+construyó una: **la copia del dueño** (la cuenta entera de un empleado, o la de todos, en un
+archivo que es suyo). **No** se construyó **el comprobante para el empleado** (una hoja que el
+dueño le entrega diciendo qué le pagó). Razones: lo que él dijo es que, perdido el acceso a
+Firebase, la historia no existe en nada suyo, y eso solo lo cierra un archivo con la cuenta
+entera (lo por pagar, lo que todavía no se paga, cada pago y los anulados), no la hoja de un
+pago que se imprime después de hecho y solo si se acuerda de guardarla; paga por quincena y por
+fin de mes y decide él cuándo, así que no hay un momento fijo que dispare un papel y sí un
+archivo que se baja cuando quiere (con el mes y la quincena de cada renta para filtrar en Excel);
+y el comprobante no se puede hacer honesto con lo que hay guardado (abajo). **Lo que sería el
+otro**: un «Imprimir comprobante» en cada pago de «Ya pagado», una hoja con membrete, el nombre
+del empleado, la fecha, la forma, **el monto guardado**, las rentas cubiertas y una línea de
+firma, por el botón Imprimir (ADR-003). Pide dos campos nuevos en el pago de comisión, que irían a
+§7b con su razón: un `numero` (correlativo, como el de un pago a un dueño; sin regla nueva de
+Firestore, porque `contadores/{id}` ya se lee y se escribe con la sesión normal) y un detalle
+guardado renta por renta, para que una reimpresión diga lo que dijo el original (hoy un pago solo
+guarda `monto`, `fecha`, `forma` y `contratos[]`). Y una decisión de él: que los empleados reciban
+papeles (§7b dice que hasta hoy «a un empleado no se le imprime nada»).
+
+*Cómo es.*
+- **Detrás de la contraseña de dinero** (§11), como todo el área: los dos botones están en la lista
+  y en la ficha de comisiones. Lo que lee es dinero: se lee **de nuevo de la nube** en cada clic
+  (nunca la copia que la pantalla tiene en memoria), no se guarda en ninguna variable del módulo,
+  y si la sesión de dinero se cierra mientras se lee o se arma, el archivo no sale.
+- **Una lectura caída no es «no se le debe nada».** Si falla la lectura de las rentas, de los
+  pagos o un pago está dañado, no se baja nada y se dice cuál (las mismas frases de la pantalla,
+  en una barra roja que se queda escrita). Si falla solo la lista de empleados, el archivo baja
+  con el aviso escrito adentro: las cifras no dependen de ella.
+- **Un libro desde cero**, con el zip y las celdas del respaldo (`libroNuevo.js` usa `escribirZip` y
+  `celdaNueva`; ADR-004, opción C, que es para lo que sirve: un archivo para mirar y guardar, no
+  para rentar con él). **Sin fórmulas** (Excel abre en «Vista protegida» y no las calcula): todo es
+  un valor, y las sumas son del núcleo.
+- **Tres hojas.** «Resumen» (una fila por cuenta: código, porcentaje de hoy, rentas por pagar, lo que
+  se le debe, lo estimado, lo que solo espera a cerrar, lo pagado sin contar los anulados, y un
+  renglón «Todos» si son varias), «Rentas» (una fila por renta, **una sola vez cada una**) y «Pagos»
+  (cada pago, también los anulados). Cada cifra sale de lo que ya calculó el núcleo
+  (`comisionDe`, `cuentaDeEmpleado`, `totalesDePagos`, `totalGeneralDeComisiones`, `quincenaDe`).
+- **La deuda en una sola columna.** «Por pagar», «Estimada (el carro sigue afuera)» y «Ya regresó,
+  falta que cierre» son tres columnas de dinero distintas: sumar una columna entera tiene que dar
+  una cifra que signifique algo (es lo mismo que `totalEstimado` y `totalPorCerrar` separados).
+- **Lo pagado es lo que se guardó.** «Monto pagado» es el `monto` del pago, no lo que sus rentas
+  suman hoy; si hoy suman otra cosa, la hoja «Pagos» lo dice aparte con las palabras de la pantalla.
+  La columna «Ya pagada (lo que suma hoy)» de «Rentas» dice en su nombre que es de hoy.
+- **Sobre esa persona, y nada más.** Lleva la renta (contrato, fechas, placas, nombre del cliente,
+  días, base, porcentaje, comisión) y sus pagos. **No lleva** lo que el cliente pagó, su saldo ni su
+  garantía (la pantalla dice por qué una renta no cierra, con cifras del cliente; el archivo solo
+  dice que no ha cerrado), el costo ni el dueño de un carro ajeno, los datos de la tarjeta, la
+  utilidad, ni nada de otro empleado. Una prueba compara las columnas contra una lista exacta para
+  que agregar una (y con ella un dato que no debía salir) falle fuerte.
+- **Junto al botón** se dice qué es el archivo y lo que no: que no se baja solo, que **el respaldo del
+  año no lleva las comisiones** y que el archivo lleva el nombre de los clientes de cada renta.
+- **Ningún campo nuevo en ningún documento, ninguna colección ni regla de Firestore**: el archivo no
+  guarda nada en la nube.
 
 Lo que no cambió: quien quiera ver la utilidad de un contrato o de un carro en pantalla, hoy, no
 puede. Ese hueco ya no es un olvido, es una decisión.
@@ -932,7 +994,10 @@ anulación, `anulado` y `anuladoEn`.
 
 Es la gemela del pago a un dueño y se llama igual donde es el mismo dato. **No lleva
 `numero`**: el de un pago a un dueño es el correlativo del comprobante que se le
-entrega, y a un empleado no se le imprime nada.
+entrega, y a un empleado no se le imprime nada. (Desde el 23 de octubre de 2026 la cuenta
+se puede bajar en Excel, §6; **eso no agregó ningún campo**: el archivo lee estos mismos y no
+guarda nada. Un comprobante impreso para el empleado sí los pediría: `numero` y un detalle
+por renta.)
 - `empleadoId` es `null` en un pago hecho a un grupo de rentas viejas con el nombre
   escrito a mano; el pago sigue siendo de ese empleado si después se enlazan, porque
   se reconoce por las rentas que cubre (`contratos[]`), no por este campo.
@@ -1557,6 +1622,13 @@ alternativas están en `docs/adr/ADR-004-el-respaldo-parcha-su-excel-sin-libreri
   dicho en este documento es un hueco que nadie conoce hasta el día que se necesita el respaldo). Una prueba compara el
   respaldo de un carro con servicios e intervalos contra el de uno sin ellos y exige que sea
   idéntico, para que la lista no pueda decir algo que ya no es verdad.
+- **Las comisiones siguen sin ir en este archivo** (no cambió el 23 de octubre de 2026:
+  `NO_SE_RESPALDA` sigue diciéndolo). Lo que el dueño escogió ese día, entre varios caminos, fue
+  **otro botón, aparte**: en la lista y en la
+  ficha de Comisiones se baja la cuenta de un empleado (o la de todos) en su propio Excel (§6,
+  «Bajar la cuenta de comisiones en Excel»). Ese archivo **no se baja solo** ni lo anota
+  `ajustes/respaldo`: el aviso de «pasó un año» no lo cuenta, y si él no lo baja, las comisiones
+  solo existen en el sistema.
 - **La hora y el lugar de entrada (columnas AF y AG): la hora REAL.** Decisión del dueño del
   16 de octubre de 2026: *«El lugar siempre va a ser en la oficina. La hora es lo que importa
   porque si se pasa de la hora yo decido cuánto le cobro.»* En su hoja esas dos columnas se llenan
