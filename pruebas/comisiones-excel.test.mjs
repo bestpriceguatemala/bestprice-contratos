@@ -781,6 +781,15 @@ test('el archivo no recalcula nada: ni multiplica por el porcentaje, ni decide q
   assert.match(SECCION, /!pagoAnulado\(p\)/);
 });
 
+test('la pantalla del respaldo sigue diciendo que NO lleva las comisiones, y dónde se bajan aparte (para que nadie crea que ya están en el respaldo)', async () => {
+  const { NO_SE_RESPALDA } = await import('../js/respaldo/mapa.js');
+  const linea = NO_SE_RESPALDA.filter((t) => /comisiones de los empleados/i.test(t));
+  assert.equal(linea.length, 1);
+  assert.match(linea[0], /^Las comisiones de los empleados y sus pagos\./);
+  assert.match(linea[0], /Se bajan aparte: Dinero → Comisiones → «Bajar todas las cuentas en Excel» \(no se baja solo\)/);
+  assert.ok(htmlListaDeComisiones(armarVistaDeComisiones(escenario())).includes('Bajar todas las cuentas en Excel'), 'y ese botón existe con ese nombre');
+});
+
 test('el archivo no lee el reloj: `hoy` llega de fuera', () => {
   assert.doesNotMatch(SECCION, /new Date|Date\.now|hoyISO\(/);
 });

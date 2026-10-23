@@ -48,7 +48,7 @@ const porTexto = (a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' });
  */
 export const NO_SE_RESPALDA = [
   'Las reservaciones y el calendario (su Excel no tiene una hoja para ellas).',
-  'Las comisiones de los empleados y sus pagos.',
+  'Las comisiones de los empleados y sus pagos. Se bajan aparte: Dinero → Comisiones → «Bajar todas las cuentas en Excel» (no se baja solo).',
   'Los pagos al dueño de cada carro ajeno (solo queda si cada renta está pagada al dueño o no, y la fecha).',
   'Las fichas de los dueños de carros ajenos (teléfono, NIT y nota): su hoja solo guarda el nombre.',
   'Los abonos de cada pago de las rentas, uno por uno: la hoja guarda la forma de pago y el porcentaje de tarjeta; si fueron varios, el detalle va en COMENTARIOS.',
