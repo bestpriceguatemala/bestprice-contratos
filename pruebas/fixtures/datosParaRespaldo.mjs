@@ -15,10 +15,21 @@
 //   conCobrosSinColumna   -> hora tardía y varios al recibir: dos cobros que la hoja no suma.
 //   pagoMixto             -> efectivo y tarjeta: la hoja solo guarda una forma de pago y un porcentaje.
 //   devueltoDebiendo      -> el carro volvió y quedó un saldo por cobrar.
+//
+// Quién rentó (columna AL «RENTADO POR» y el COMENTARIO del respaldo). Los ocho de arriba llevan al empleado como lo sella «Sacar
+// carro» hoy (`datosDelContratoPara`: id, nombre, código y porcentaje de ese día). Los tres de abajo son los casos que ya existen
+// en sus datos y que el respaldo tiene que distinguir, y se arman aparte para que cada prueba pida el que necesita:
+//
+//   deAntesDeLaLista      -> de antes de la lista de empleados: `rentadoPor` es texto escrito a mano y el contrato NO trae ni la llave
+//                            `empleadoId` ni `empleadoCodigo`.
+//   conEmpleadoSinCodigo  -> un empleado de la lista al que no se le escribió código: `empleadoCodigo` es `null`.
+//   sinQuienLoRento       -> ni nombre ni código (`rentadoPor` vacío): no hay nada que decir de quién fue.
+//   deEmpleadoConCodigo   -> el de un código cualquiera, para probar cómo se escribe cada forma de código.
 import { construirContrato } from '../../js/pantallas/sacarCarro.js';
 import { construirVehiculo } from '../../js/pantallas/carros.js';
 import { construirCliente } from '../../js/nucleo/cliente.js';
 import { construirCierre } from '../../js/nucleo/cierre.js';
+import { construirEmpleado, datosDelContratoPara } from '../../js/nucleo/empleado.js';
 import { agregarPago, contratoParaGuardar, conCostoDelDueno } from '../../js/datos.js';
 import { resumen } from '../../js/nucleo/contrato.js';
 
@@ -71,6 +82,11 @@ export const vehiculos = () => [
   },
 ];
 
+// Los empleados, armados con el constructor de la ficha y sellados en el contrato como lo hace «Sacar carro».
+const empleado = (id, nombre, codigo) => construirEmpleado({ id }, { codigo, nombre, porcentajeComision: 5 });
+const ANA = empleado('e-ana', 'Ana', '6');
+const delEmpleado = (e) => datosDelContratoPara(e);
+
 const cliente = (id, nombres, apellidos) => ({ id, nombres, apellidos });
 const hilux = { id: 'v1', placas: 'P-111AAA', marca: 'Toyota', linea: 'Hilux', color: 'Blanco' };
 const montero = { id: 'v2', placas: 'P-222BBB', marca: 'Mitsubishi', linea: 'Montero', color: 'Plateado' };
@@ -79,7 +95,7 @@ const FRONTERA = {
 };
 
 const salida = (extra) => construirContrato({
-  cliente: cliente('k-lopez', 'María del Carmen', 'López de Pérez'), ajeno: false, carro: hilux, precioDia: 700, forma: 'efectivo', porcentajeTarjeta: 0, rentadoPor: 'Ana', porcentajeComision: 5, ...extra,
+  cliente: cliente('k-lopez', 'María del Carmen', 'López de Pérez'), ajeno: false, carro: hilux, precioDia: 700, forma: 'efectivo', porcentajeTarjeta: 0, ...delEmpleado(ANA), ...extra,
 });
 
 export const rentadoAlDia = () => sellar(salida({
@@ -161,8 +177,7 @@ const ajeno = (id, numero, extra = {}) => {
     forma: 'efectivo',
     porcentajeTarjeta: 0,
     montoPago: 3600,
-    rentadoPor: 'Ana',
-    porcentajeComision: 5,
+    ...delEmpleado(ANA),
     ...extra,
   });
   const recibido = construirCierre(abierto, {
@@ -205,6 +220,34 @@ export const devueltoDebiendo = () => {
     fechaReal: '2026-03-05', horaReal: '10:00', lugarEntrada: 'Oficina', kmEntrada: 5200, combustible: 0, danos: 300, danosDetalle: 'Espejo roto', varios: 0, descuento: 0,
   }), 'c-debe', 108);
 };
+
+/**
+ * Un contrato de antes de la lista de empleados: «¿Quién lo rentó?» era un texto libre. Lo que `construirContrato` arma hoy
+ * (`empleadoId` y `empleadoCodigo` en `null`) tampoco es eso: ese contrato ni siquiera traía las llaves, y aquí se le quitan.
+ */
+export const deAntesDeLaLista = () => {
+  const c = sellar(salida({
+    id: 'c-viejo', numero: 109, fechaSalida: '2026-02-02', dias: 2, montoPago: 1400, kmSalida: 900, rentadoPor: 'juan', empleadoId: undefined, empleadoCodigo: undefined, porcentajeComision: null,
+  }), 'c-viejo', 109);
+  delete c.empleadoId;
+  delete c.empleadoCodigo;
+  return c;
+};
+
+/** Un empleado de la lista que se registró sin código: el contrato selló `empleadoCodigo: null`, no un vacío que parezca un código. */
+export const conEmpleadoSinCodigo = () => sellar(salida({
+  id: 'c-sin-codigo', numero: 110, fechaSalida: '2026-02-09', dias: 2, montoPago: 1400, kmSalida: 1900, ...delEmpleado(empleado('e-luis', 'Luis', '')),
+}), 'c-sin-codigo', 110);
+
+/** Ni nombre ni código: no hay nada que decir de quién lo rentó. */
+export const sinQuienLoRento = () => sellar(salida({
+  id: 'c-sin-nadie', numero: 111, fechaSalida: '2026-02-16', dias: 2, montoPago: 1400, kmSalida: 2900, rentadoPor: '', empleadoId: undefined, empleadoCodigo: undefined, porcentajeComision: null,
+}), 'c-sin-nadie', 111);
+
+/** Un contrato de un empleado con ESE código (tal como lo escribió en su ficha). */
+export const deEmpleadoConCodigo = (codigo, numero = 112) => sellar(salida({
+  id: `c-codigo-${numero}`, numero, fechaSalida: '2026-02-23', dias: 2, montoPago: 1400, kmSalida: 3900, ...delEmpleado(empleado('e-otro', 'Marta', codigo)),
+}), `c-codigo-${numero}`, numero);
 
 /** Un contrato de otro año: no debe entrar al archivo de 2026. */
 export const deOtroAnio = () => sellar(salida({

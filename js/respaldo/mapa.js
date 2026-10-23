@@ -264,7 +264,41 @@ function loQueLaHojaNoSuma(c, pago) {
   };
 }
 
-/** Lo que su hoja no puede mostrar de este contrato, en frases que se leen en COMENTARIOS. Lo que descuadra el total va PRIMERO. */
+/**
+ * Lo que lleva la columna AL «RENTADO POR»: el CÓDIGO del empleado que el contrato selló ese día (`empleadoCodigo`), o NADA.
+ *
+ * Decisión del dueño, 23 de octubre de 2026. Su Excel trabaja por código y su papel pide el código («PREPARADO POR (CODIGO)»), pero esta
+ * columna recibía el nombre (`rentadoPor`). Preguntado si AL debía llevar el código, contestó «Los dos»: el código aquí, y el nombre en el
+ * COMENTARIO del contrato (ver `notasDelContrato`), para que no se pierda.
+ *
+ * Sin código la columna queda VACÍA, y eso incluye los tres modos de «sin código» que ya existen en sus datos: un contrato de antes de la lista de
+ * empleados (`rentadoPor` es texto escrito a mano y ni siquiera trae la llave), un empleado registrado sin código (`null`) y uno vacío o de solo
+ * espacios. NO se rellena con el nombre (una columna cuyas fórmulas esperan un código no puede recibir un nombre), ni con un 0 (que se leería como
+ * el código cero), ni con un código buscado en la lista de empleados de hoy (el de hoy no es necesariamente el que llevó el papel de aquel día;
+ * es lo mismo que decidió la hoja impresa, §8b punto 12). Un dato que falta dibujado como uno que existe es un defecto que este código ya corrigió
+ * más de una vez (§7b: «nunca `0`», «no se sabe, `null`»).
+ *
+ * Cómo se escribe: un código que es un número entero positivo, escrito sin ceros a la izquierda, va como NÚMERO, que es lo que su hoja guarda cuando
+ * él teclea un 6 en la casilla (y lo que ya son el código de cliente y el de carro en la misma fila: un BUSCARV o un `=` contra un número no encuentra
+ * un «6» de texto). Cualquier otro —«W1», «007», «0», «1.5»— va como TEXTO tal cual: convertirlo perdería el «00» de «007», y un código «0» es un
+ * código, no una celda vacía (`aMonto` vacía los ceros).
+ */
+function codigoParaSuHoja(c) {
+  const crudo = c.empleadoCodigo;
+  if (typeof crudo !== 'string' && !(typeof crudo === 'number' && Number.isFinite(crudo))) return null;
+  const texto = String(crudo).trim();
+  if (texto === '') return null;
+  const numero = Number(texto);
+  return Number.isSafeInteger(numero) && numero > 0 && String(numero) === texto ? numero : texto;
+}
+
+/**
+ * Lo que su hoja no puede mostrar de este contrato, en frases que se leen en COMENTARIOS.
+ *
+ * El orden es deliberado: lo que descuadra el total va PRIMERO (es lo que no se puede dejar de ver), después lo que cambia cómo se lee el dinero de
+ * esa renta, y al final quién la rentó. El nombre del empleado es identidad, no una advertencia, y no puede quitarle el primer lugar al «OJO» (una
+ * prueba lo exige).
+ */
 function notasDelContrato(c, pago) {
   const { formas, porcentajes, pagos } = pago;
   const notas = [];
@@ -291,6 +325,10 @@ function notasDelContrato(c, pago) {
   if (saldo > 0) notas.push(`Saldo por cobrar según el sistema: ${textoConQ(saldo)}`);
   if (saldo < 0) notas.push(`A favor del cliente según el sistema: ${textoConQ(-saldo)}`);
   if (garantiaPorLiberar(c)) notas.push(`Garantía de tarjeta sin liberar: ${textoConQ(c.garantiaMonto)}`);
+  // El nombre de ESE día (`rentadoPor`, el que el contrato selló) va aquí porque la columna AL lleva el código (`codigoParaSuHoja`): su Excel
+  // no tiene la lista de empleados, y sin esta frase el archivo no diría quién es el «6». Sin nombre no hay frase.
+  const quien = aTexto(c.rentadoPor);
+  if (quien) notas.push(`Rentado por: ${quien}`);
   return notas;
 }
 
@@ -385,7 +423,8 @@ function armarContrato(c, fila, { codigoDeCliente, clientePorId, codigoDeCarro, 
     AF: { hora: alRegresar?.horaReal },
     AG: aTexto(alRegresar?.lugarEntrada),
     AH: aMonto(horaTardia.alSalir + horaTardia.alRecibir),
-    AL: aTexto(c.rentadoPor),
+    // El CÓDIGO del empleado, no su nombre (que va a COMENTARIOS): ver `codigoParaSuHoja`. Vacía si el contrato no trae código.
+    AL: codigoParaSuHoja(c),
     AM: aMonto(c.seguroMenoresDia),
     AN: aTexto(c.cartaPoderDestino),
     AO: aMonto(c.cartaPoderPrecio),

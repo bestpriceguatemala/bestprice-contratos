@@ -923,7 +923,8 @@ en `js/respaldo/diseno.js`). Lo que no es obvio:
   `cierre.lugarEntrada` (la hora **real**, no la prevista; vacías mientras el carro no haya
   vuelto: §10). `pagos[]` se resume en FORMA DE PAGO (una forma, o MIXTO)
   y en % TARJETA (solo si todo se pagó con tarjeta con un mismo porcentaje).
-  `duenoId`/`pagosDueno` dicen PAGADO AL DUEÑO (SI/NO) y su fecha.
+  `duenoId`/`pagosDueno` dicen PAGADO AL DUEÑO (SI/NO) y su fecha. `empleadoCodigo` va a RENTADO
+  POR (vacía si el contrato no lo trae) y `rentadoPor` a COMENTARIOS, «Rentado por: …» (§10).
 - **Sin campo en el sistema:** PERSONA O EMPRESA y NIT, T. CIRCULACION ORIGINAL y
   AUTENTICA, SEMANA, MES y COMBUSTIBLE X GALON (en CONTRATOS) quedan vacías.
 - **Sin columna en su hoja:** `porcentajeComision`, `garantiaLiberada` y
@@ -1447,6 +1448,30 @@ alternativas están en `docs/adr/ADR-004-el-respaldo-parcha-su-excel-sin-libreri
   no fuera así. Una consecuencia que hay que saber: en las filas que el respaldo escribe AF es la
   hora **real**, y en las que él agregue a mano con su método de siempre seguirá siendo la que
   esperaba; son dos cosas distintas en la misma columna.
+- **Quién rentó (columna AL «RENTADO POR»): el código en la columna y el nombre en COMENTARIOS.**
+  Decisión del dueño del 23 de octubre de 2026. Su Excel trabaja por código y su papel pide el
+  código («PREPARADO POR (CODIGO)», §8b punto 12), pero la columna recibía el nombre
+  (`rentadoPor`): una fórmula suya que sumara o contara por esa columna con el código no se
+  alimentaba. Preguntado si AL debía llevar el código, contestó: *«Los dos.»* Entonces:
+  - **AL lleva `empleadoCodigo`**, lo que el contrato **selló** ese día. Un código que es un
+    número entero positivo y sin ceros a la izquierda va como **número** (es lo que su hoja guarda
+    cuando él teclea un 6, y como son ya el código de cliente y el de carro de la misma fila);
+    cualquier otro («W1», «007», «0») va como texto tal cual, para no perder el «00» ni volver
+    «celda vacía» a un código «0».
+  - **El nombre (`rentadoPor`) va al final del COMENTARIO** del contrato, «Rentado por: Ana»,
+    después de todo lo demás: el «OJO» sigue abriendo, y lo que cambia cómo se lee el dinero de esa
+    renta va antes que quién la rentó. El archivo no lleva la lista de empleados, así que sin esa
+    frase no diría quién es el «6».
+  - **Sin código, AL queda vacía.** Hoy hay tres modos de «sin código» en sus datos: un contrato de
+    antes de la lista de empleados (`rentadoPor` es texto escrito a mano y el contrato ni siquiera
+    trae la llave `empleadoCodigo`), un empleado registrado sin código (`null`) y uno vacío o de solo
+    espacios. En los tres: nunca un cero, nunca un código buscado en la lista de hoy y **nunca el
+    nombre como sustituto** en una columna cuyas fórmulas esperan un código. El nombre sigue
+    saliendo en COMENTARIOS. El archivo no avisa de estos casos: no se pidió.
+  - **Consecuencia que hay que saber:** como todo contrato con nombre lleva ahora esa frase, casi
+    todos los contratos del archivo tienen COMENTARIOS. Antes una celda de COMENTARIOS con algo
+    significaba «hay algo que mirar»; ahora lo que avisa es que **empiece con «OJO»**. Solo un
+    contrato sin nadie que nombrar queda sin comentario.
 - **Los totales son los de su hoja, no los del sistema.** El respaldo no escribe
   ningún total: SUBTOTAL, TOTAL COBRADO y UTILIDAD son sus fórmulas, que siguen en el
   archivo y se calculan al abrirlo. Sus fórmulas suman todo lo que el sistema cobra

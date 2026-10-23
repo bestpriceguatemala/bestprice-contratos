@@ -161,7 +161,7 @@ test('CONTRATOS: un contrato con de todo, columna por columna (el que lleva atra
     [`AC${f}`]: '3/4',
     [`AE${f}`]: 'Aeropuerto',
     [`AG${f}`]: 'Oficina',
-    [`AL${f}`]: 'Ana',
+    [`AL${f}`]: '6', // el CÓDIGO del empleado que selló el contrato (no su nombre, que va a COMENTARIOS): ver «RENTADO POR» más abajo
     [`AM${f}`]: '30',
     [`AN${f}`]: 'El Salvador',
     [`AO${f}`]: '350',
@@ -435,9 +435,121 @@ test('un saldo por cobrar se anota en COMENTARIOS con la cifra del sistema', asy
 });
 
 test('un contrato sin nada que anotar no lleva COMENTARIOS (no se llena la columna de ruido)', async () => {
+  // «Nada que anotar» ya incluye el nombre de quien lo rentó (ver «RENTADO POR»): lo que no lleva comentario es un contrato que ni siquiera
+  // trae a alguien que nombrar.
+  const libro = await abrirLibro((await armar({ contratos: [F.sinQuienLoRento()] })).bytes);
+  assert.equal(libro.texto('CONTRATOS', 'CA6'), null);
+});
+
+// ---------------------------------------------------------------------------
+// AL «RENTADO POR»: el CÓDIGO en la columna y el NOMBRE en COMENTARIOS (decisión del dueño, 23 de octubre de 2026)
+// ---------------------------------------------------------------------------
+//
+// Su Excel trabaja por código y su papel pide el código («PREPARADO POR (CODIGO)»), pero la columna recibía el nombre. Preguntado si AL debía llevar
+// el código, contestó «Los dos»: el código en la columna, para que sus fórmulas reciban lo que esperan, y el nombre en el COMENTARIO del contrato,
+// para que no se pierda nada. Un dato que falta NO se dibuja como uno que existe: sin código la columna queda VACÍA, no con un cero, no con un
+// adivinado y no con el nombre en una columna cuyas fórmulas esperan un código.
+
+/** Un respaldo de estos contratos solos: la primera fila (6) es el de menor número. */
+const librosDe = async (...contratos) => abrirLibro((await armar({ contratos })).bytes);
+/** La celda AL tal como quedó en el XML, o `null` si quedó vacía (la celda de la plantilla sigue ahí, con su estilo, pero sin valor). */
+const celdaAL = (libro, f = 6) => {
+  const m = libro.xml('CONTRATOS').match(new RegExp(`<c r="AL${f}"[^>]*?(?:/>|>([\\s\\S]*?)</c>)`));
+  assert.ok(m, `la celda AL${f} sigue en la hoja`);
+  return m[1] ? m[0] : null;
+};
+
+test('AL lleva el código que el contrato selló, y el NOMBRE de quien lo rentó queda en COMENTARIOS: no se pierde', async () => {
   const { libro } = await respaldo();
-  assert.equal(libro.texto('CONTRATOS', `CA${fila(101)}`), null);
-  assert.equal(libro.texto('CONTRATOS', `CA${fila(104)}`), null);
+  for (const n of [101, 102, 103, 104, 105, 106, 107, 108]) {
+    const f = fila(n);
+    assert.equal(libro.texto('CONTRATOS', `AL${f}`), '6', `contrato ${n}: el código`);
+    assert.match(libro.texto('CONTRATOS', `CA${f}`), /Rentado por: Ana/, `contrato ${n}: el nombre`);
+    assert.doesNotMatch(libro.texto('CONTRATOS', `AL${f}`), /Ana/, `contrato ${n}: el nombre NO está en la columna`);
+  }
+});
+
+test('un contrato de antes de la lista de empleados (nombre a mano, sin la llave del código): AL queda VACÍA y el nombre se conserva en COMENTARIOS', async () => {
+  const viejo = F.deAntesDeLaLista();
+  assert.ok(!('empleadoCodigo' in viejo) && !('empleadoId' in viejo), 'el contrato de prueba ni trae las llaves');
+  assert.equal(viejo.rentadoPor, 'juan');
+  const libro = await librosDe(viejo);
+  assert.equal(celdaAL(libro), null, 'ni un cero, ni el nombre como si fuera un código: la celda ni existe');
+  assert.equal(libro.texto('CONTRATOS', 'AL6'), null);
+  assert.equal(libro.texto('CONTRATOS', 'CA6'), 'Del sistema: Rentado por: juan');
+});
+
+test('un empleado registrado sin código (empleadoCodigo null): AL queda VACÍA, nunca el nombre ni un 0, y el nombre va a COMENTARIOS', async () => {
+  const c = F.conEmpleadoSinCodigo();
+  assert.equal(c.empleadoCodigo, null, 'así lo sella «Sacar carro»');
+  assert.equal(c.rentadoPor, 'Luis');
+  const libro = await librosDe(c);
+  assert.equal(celdaAL(libro), null);
+  assert.equal(libro.texto('CONTRATOS', 'CA6'), 'Del sistema: Rentado por: Luis');
+});
+
+test('un código vacío, de solo espacios, null o undefined, y un valor que no es texto ni número (un booleano, un objeto, NaN), tampoco son un código: AL queda vacía', async () => {
+  const base = F.conEmpleadoSinCodigo();
+  const formas = {
+    vacio: '', soloEspacios: '   ', nulo: null, indefinido: undefined, booleano: true, objeto: {}, lista: [6], noEsNumero: Number.NaN, infinito: Number.POSITIVE_INFINITY,
+  };
+  for (const [forma, valor] of Object.entries(formas)) {
+    const libro = await librosDe({ ...base, empleadoCodigo: valor });
+    assert.equal(celdaAL(libro), null, forma);
+    assert.match(libro.texto('CONTRATOS', 'CA6'), /Rentado por: Luis/, forma);
+  }
+});
+
+test('sin código NUNCA se busca uno en otra parte: ni el nombre, ni el `empleadoId`, ni el porcentaje, ni el número del contrato', async () => {
+  const viejo = F.deAntesDeLaLista();
+  // Todo lo tentador que el contrato trae al lado: si algún día alguien «ayuda» y rellena AL con algo, esto lo dice.
+  const tentador = { ...viejo, empleadoId: 'e-ana', porcentajeComision: 5, rentadoPor: '6', numero: 109 };
+  const libro = await librosDe(tentador);
+  assert.equal(celdaAL(libro), null);
+  assert.equal(libro.texto('CONTRATOS', 'CA6'), 'Del sistema: Rentado por: 6', 'un nombre que parece número sigue siendo el nombre: va a COMENTARIOS');
+});
+
+test('el código se escribe como lo escribiría su hoja: un número entero como NÚMERO, y cualquier otro como TEXTO tal cual (sin perder ceros)', async () => {
+  const como = async (codigo) => {
+    const libro = await librosDe(F.deEmpleadoConCodigo(codigo));
+    return celdaAL(libro);
+  };
+  assert.match(await como('6'), /<c r="AL6" s="\d+"><v>6<\/v><\/c>/, 'el 6 es el número 6, como el 6 que él teclea en su hoja (y como los códigos de cliente y de carro de al lado)');
+  assert.match(await como(' 12 '), /<v>12<\/v>/, 'recortado');
+  assert.match(await como('W1'), /t="inlineStr"[^>]*><is><t[^>]*>W1<\/t>/, 'una letra: texto');
+  assert.match(await como('007'), /t="inlineStr"[^>]*><is><t[^>]*>007<\/t>/, 'con ceros a la izquierda: texto, o se perdería el 00');
+  assert.match(await como('0'), /t="inlineStr"[^>]*><is><t[^>]*>0<\/t>/, 'un código «0» es un código: no se vuelve celda vacía');
+  assert.match(await como('1.5'), /t="inlineStr"[^>]*><is><t[^>]*>1\.5<\/t>/, 'no es un entero: texto');
+});
+
+test('el comentario conserva su orden: el «OJO» abre, y quien lo rentó cierra, después de todo lo que cambia cómo se lee el dinero', async () => {
+  const { libro } = await respaldo();
+  const hora = libro.texto('CONTRATOS', `CA${fila(106)}`);
+  assert.match(hora, /^Del sistema: OJO: /, 'el nombre NO le gana el primer lugar al OJO');
+  assert.ok(hora.endsWith(' | Rentado por: Ana'), hora);
+  const saldo = libro.texto('CONTRATOS', `CA${fila(108)}`);
+  assert.ok(saldo.endsWith(' | Rentado por: Ana'), saldo);
+  assert.ok(saldo.indexOf('Daños:') < saldo.indexOf('Saldo por cobrar') && saldo.indexOf('Saldo por cobrar') < saldo.indexOf('Rentado por'), saldo);
+  // y un contrato que cuadra no gana por eso un «OJO»: solo el nombre
+  assert.equal(libro.texto('CONTRATOS', `CA${fila(101)}`), 'Del sistema: Rentado por: Ana');
+});
+
+test('el nombre que va a COMENTARIOS es el del contrato (el de ESE día), no el de la lista de empleados de hoy', async () => {
+  const c = { ...F.deEmpleadoConCodigo('9'), rentadoPor: 'Marta (como se llamaba entonces)' };
+  const libro = await librosDe(c);
+  assert.equal(libro.texto('CONTRATOS', 'CA6'), 'Del sistema: Rentado por: Marta (como se llamaba entonces)');
+  assert.equal(libro.numero('CONTRATOS', 'AL6'), 9);
+});
+
+test('la sola columna AL cambió: ninguna otra celda del contrato se movió por esto, y sin quién lo rentó ni código no hay ni AL ni comentario', async () => {
+  const sin = await librosDe(F.sinQuienLoRento());
+  assert.equal(celdaAL(sin), null);
+  assert.equal(sin.texto('CONTRATOS', 'CA6'), null);
+  // el mismo contrato, con y sin empleado, difiere SOLO en AL y CA
+  const con = await librosDe({ ...F.sinQuienLoRento(), rentadoPor: 'Ana', empleadoId: 'e-ana', empleadoCodigo: '6' });
+  const columnas = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'AA', 'AB', 'AC', 'AD', 'AE', 'AM', 'AW', 'BS', 'BZ'];
+  assert.deepEqual(con.textos('CONTRATOS', columnas.map((x) => `${x}6`)), sin.textos('CONTRATOS', columnas.map((x) => `${x}6`)));
+  assert.equal(con.numero('CONTRATOS', 'AL6'), 6);
 });
 
 // ---------------------------------------------------------------------------
