@@ -19,6 +19,7 @@ import { pintarDuenos } from './pantallas/duenos.js';
 import { pintarEmpleados } from './pantallas/empleados.js';
 import { pintarComisiones, pintarComisionesDeEmpleado } from './pantallas/comisiones.js';
 import { pintarRespaldo, mostrarElRecordatorioDeRespaldo } from './pantallas/respaldo.js';
+import { conectarElBuscador } from './pantallas/buscador.js';
 import { vigilarVersion } from './version.js';
 import { limpiarCopiaLocalDelCosto } from './datos.js';
 
@@ -80,6 +81,8 @@ const campoClave = document.getElementById('clave');
 const elError = document.getElementById('error-entrada');
 const botonEntrar = forma.querySelector('button[type="submit"]');
 const botonSalir = document.getElementById('salir');
+// La caja de búsqueda de arriba de todo (§6). Se conecta una vez; no lee nada hasta que alguien la toca, que solo puede pasar con sesión.
+const buscador = conectarElBuscador();
 
 const RUTA_INICIAL = '#/flota';
 
@@ -171,6 +174,8 @@ alCambiarSesion((usuario) => {
     // Sea cual sea el motivo por el que el mostrador se quedó sin sesión (Salir, o
     // que Firebase la venciera), el área de dinero se cierra con ella.
     cerrarElDineroOReiniciar();
+    // Lo que la caja leyó (clientes, contratos…) no se queda en memoria para quien entre después en esta misma pestaña.
+    buscador.reiniciar();
     verEntrada();
   }
 }).catch(() => {

@@ -174,9 +174,36 @@ body {
   white-space: nowrap;
 }
 
-.barra #buscador {
-  flex: 1 1 320px;
+/* La caja de búsqueda (js/pantallas/buscador.js): el campo y, pegado debajo, el panel con lo que se encontró. */
+.barra .buscador-caja {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 160px;
   max-width: 420px;
+}
+
+/* El título, el menú y «Salir» ocupan 1013 px (medido a 1024 de ancho, el de una pantalla chica): con la caja al lado no caben, y «Salir»
+   se iba a la derecha, fuera de la pantalla. Por debajo de ese ancho la caja pasa a su propia fila, a todo lo ancho, debajo del menú. */
+@media (max-width: 1340px) {
+  .barra {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 56px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    row-gap: 8px;
+  }
+
+  .barra .buscador-caja {
+    order: 9;
+    flex: 1 1 100%;
+    max-width: none;
+  }
+}
+
+.barra #buscador {
+  width: 100%;
+  box-sizing: border-box;
   font-family: inherit;
   font-size: 13px;
   padding: 8px 12px;
@@ -194,6 +221,88 @@ body {
   outline: none;
   background: var(--blanco);
   color: var(--texto);
+}
+
+.buscador-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--blanco);
+  color: var(--texto);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(7, 58, 122, 0.18);
+  z-index: 60;
+  font-size: 13px;
+}
+
+.buscador-panel[hidden] {
+  display: none;
+}
+
+.bg-grupo + .bg-grupo {
+  border-top: 1px solid var(--borde);
+}
+
+.bg-titulo {
+  margin: 0;
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--gris);
+}
+
+.bg-cuenta {
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.bg-fila {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  color: var(--texto);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.bg-fila:hover,
+.bg-fila.bg-activa {
+  background: var(--fondo);
+}
+
+.bg-fila.bg-activa {
+  box-shadow: inset 3px 0 0 var(--azul);
+}
+
+.bg-principal {
+  font-weight: 600;
+}
+
+.bg-detalle {
+  color: var(--gris);
+  font-size: 12px;
+}
+
+.bg-mas,
+.bg-nada,
+.bg-falta {
+  margin: 0;
+  padding: 8px 12px 10px;
+  color: var(--gris);
+}
+
+.bg-fallo,
+.bg-falta {
+  color: var(--rojo);
+  font-weight: 600;
 }
 
 .barra nav {

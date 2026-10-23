@@ -24,14 +24,16 @@
     <header class="barra">
       <strong>Best Price — Contratos</strong>
       <!--
-        Revisión final: este buscador y el enlace a Ajustes no tienen ninguna
-        pantalla detrás todavía (ni app.js ni router.js los cablean) — un cuadro
-        de búsqueda que se traga lo que se escribe es peor que no tener buscador.
-        Se ocultan hasta que esos planes existan. Dinero ya tiene la suya (la
-        liquidación a dueños): su enlace se ve, y la pantalla pide su propia
-        contraseña.
+        La caja de búsqueda de §6 («Buscador general»): js/pantallas/buscador.js la conecta al arrancar (app.js). Todo lo que ella pinta
+        —la caja y el panel de resultados— lleva `no-imprimir`: la barra ya se esconde al imprimir, pero el contrato se imprime sobre papel
+        preimpreso y un panel abierto encima de la hoja sería lo que el cliente firma; que no dependa de dónde esté puesto.
       -->
-      <input type="search" id="buscador" placeholder="Buscar cliente, placas o número de contrato" hidden>
+      <div class="buscador-caja no-imprimir">
+        <input type="search" id="buscador" class="no-imprimir" placeholder="Buscar cliente, placas o número de contrato"
+          aria-label="Buscar cliente, placas o número de contrato" autocomplete="off" spellcheck="false"
+          role="combobox" aria-expanded="false" aria-controls="buscador-lista" aria-autocomplete="list">
+        <div id="buscador-panel" class="buscador-panel no-imprimir" hidden></div>
+      </div>
       <nav>
         <a href="#/flota">Flota</a>
         <a href="#/reservas">Reservas</a>
@@ -41,6 +43,7 @@
         <a href="#/contratos">Contratos</a>
         <a href="#/dinero">Dinero</a>
         <a href="#/dinero/respaldo">Respaldo</a>
+        <!-- Ajustes sigue oculto: ninguna pantalla lo atiende todavía (ni app.js ni router.js lo cablean). -->
         <a href="#/ajustes" hidden>Ajustes</a>
       </nav>
       <button id="salir" class="btn">Salir</button>

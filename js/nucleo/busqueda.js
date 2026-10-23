@@ -48,6 +48,17 @@ function numeroDeLaHoja(palabra) {
   return numeroSinCeros(palabra);
 }
 
+/**
+ * ¿La consulta ENTERA es el número de este contrato —«14591», o «014591» tal como lo imprime la hoja— y nada más? Sirve para ponerlo
+ * primero entre lo que se encuentra: «459» está dentro de muchos números, pero «14591» es de uno solo.
+ */
+export function esElNumeroDe(contrato, consulta) {
+  const palabras = normalizar(consulta).split(' ').filter(Boolean);
+  if (palabras.length !== 1) return false;
+  const numero = numeroSinCeros(contrato?.numero);
+  return Boolean(numero) && (palabras[0] === numero || numeroDeLaHoja(palabras[0]) === numero);
+}
+
 /** ¿Está esta palabra en el texto (ya normalizado), tal cual o saltándose los espacios de por medio? */
 function palabraEnTexto(texto, sinEspacios, palabra) {
   return texto.includes(palabra) || sinEspacios.includes(palabra);

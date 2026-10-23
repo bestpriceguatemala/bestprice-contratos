@@ -296,6 +296,43 @@ garantía sin liberar, cerrado). Cada contrato se abre completo y se reimprime.
 Una sola caja arriba de todo: nombre, apellido, DPI, licencia, teléfono, placas
 o número de contrato. Sin acentos y en cualquier orden, como la hoja BUSCAR.
 
+**Construido el 23 de octubre de 2026.** Hasta ese día la caja estaba en la página (`index.html`) pero oculta y sin nada detrás (D5 de
+las costuras lo dejó como «tercer hueco de §6»); él contestó *«Sí, conéctala»* y quedó así:
+
+- **Dónde.** En la barra de arriba, en todas las pantallas, con la misma caja (`#buscador`, `pantallas/buscador.js`; se conecta en
+  `app.js`). Por debajo de 1340 px de ancho pasa a su propia fila, debajo del menú: a 1024 px el título, el menú y «Salir» ya llenan la
+  barra, y con la caja al lado «Salir» se salía de la pantalla. Es la barra: se va con el desplazamiento de la página, igual que el menú.
+- **Qué hace.** Al escribir salen, agrupados y con cuántos son, los **clientes** (nombre, apellido, DPI, licencia, teléfono, correo),
+  los **carros** de la flota (placas, marca y línea) y los **contratos** (número, cliente, placas, carro). Cada fila lleva a la ficha de lo
+  que es —`#/clientes/:id`, `#/carros/:id`, `#/contratos/:id`, las mismas que abren las listas de esas pantallas— y no muestra ningún monto.
+  Un contrato de un carro **ajeno** se encuentra por sus placas y solo así: ese carro no tiene ficha (§7). Se enseñan seis filas por
+  grupo y el resto se cuenta («y 14 más»). No hay una regla de búsqueda nueva: lo que coincide lo decide `nucleo/busqueda.js`, la misma de
+  las listas, y lo que se agrega (el orden, las filas, lo que se dice) vive en `nucleo/buscadorGeneral.js`.
+- **Enter solo elige cuando no hay nada que elegir.** Con **una** sola coincidencia, Enter va a ella. Con dos o más —un contrato y un
+  cliente cuyo DPI lleva el mismo número, o un carro y los contratos de ese carro— **no elige por él**: la lista se queda a la vista y se
+  escoge con un clic, o con las flechas y Enter. Una búsqueda que se va callada a una de dos fichas es peor que una que enseña las dos.
+  La única excepción al orden de los grupos es esta: si lo escrito **es** el número de un contrato, los contratos van arriba.
+- **El número de la hoja.** La hoja imprime «014591» y el sistema guarda 14591. Escribir lo que está en el papel encuentra el contrato:
+  una palabra de puros dígitos, con un cero adelante y al menos las **seis** cifras que imprime la hoja, vale como el **número del
+  contrato** —igualdad, no «está dentro»: «014591» no trae el 114591 ni el 145910— y solo para contratos. Un «012» o un «0123» (unas
+  placas P-012ABC, un teléfono, un DPI) no lo es y busca como siempre. Lo hace `filtrarContratos` (`nucleo/busqueda.js`), el único camino
+  para buscar contratos: también «Contratos» pasa por ahí, y una prueba exige que ninguna pantalla arme el texto de un contrato a mano.
+  Vale lo dicho en §8b punto 18: si algún día las dos series de números se separan, esto encuentra el contrato de otro cliente.
+- **Qué lee y cuándo.** Las mismas lecturas de Clientes, Carros y «Sacar carro» (copia local al instante, la nube por detrás), pedidas la
+  primera vez que se toca la caja y otra vez pasados cinco minutos, no con cada tecla ni con cada pantalla: cada lectura de la nube trae la
+  colección entera y cuesta una lectura por documento (D3 de las costuras). Entre una y otra, cada vez que se toca la caja se vuelve a leer
+  la copia de **esta** computadora (sin nube): un contrato que se acaba de guardar aquí se encuentra aunque la nube se haya leído hace
+  cuatro minutos. Un contrato que otra computadora guardó hace dos minutos puede tardar hasta cinco en aparecer, salvo que pase por una
+  pantalla que lea la colección (la flota, clientes, carros).
+- **«No hay» y «no se pudo leer» son dos frases.** Si alguna lista no se pudo leer, la caja nunca dice «Sin resultados»: dice que no hay
+  nada así *en esta computadora* y que no se pudo leer lo que falló, «no se sabe si existe». Mientras la nube todavía contesta y no hay nada
+  que enseñar, dice «Buscando…». Si se encontró algo pero una lista falló, debajo dice que lo que se ve puede estar incompleto. Funciona sin
+  internet con lo que hay en la computadora.
+- **No sale en el papel.** La caja, su panel y lo que las envuelve llevan `no-imprimir`; el contrato se imprime sobre papel preimpreso.
+- **Lo que no alcanza** (decidir si se quiere): las **reservaciones** (§6 no las nombra: un cliente con reservación se encuentra por su
+  ficha), los **dueños de carros** y los **empleados** (viven detrás de la contraseña de dinero y la caja no la pide), y los comprobantes
+  de pago.
+
 ### Área de dinero (con contraseña)
 
 Se abre con contraseña y se cierra sola por inactividad o al salir del sistema.
@@ -1401,8 +1438,8 @@ derecha.)
       números para una sola hoja. Ahí el contador va adelante de las hojas.
 
     **Lo que se vería cuando pase, y por qué no se nota:** desde ese día, buscar en el sistema
-    —en «Contratos», hoy la única pantalla que busca por `numero`; la caja de arriba de todo
-    («Buscador general», §6) no está construida— el número impreso en la hoja de un cliente
+    —en «Contratos» y en la caja de arriba de todo («Buscador general», §6, construida el 23 de
+    octubre de 2026)— el número impreso en la hoja de un cliente
     encuentra **el contrato de otro cliente**, o ninguno. No sale ningún aviso:
     ni el sistema ni nadie sabe que las series se separaron, y cada contrato por su lado se ve
     perfectamente bien. Los contratos anteriores al día del desfase siguen coincidiendo, así que
@@ -1412,10 +1449,12 @@ derecha.)
     deje teclear el número de la hoja (cambia `sacarCarro.js`), o (b) que el contador siga y él
     anote en la hoja el número que el sistema le muestre. Eso ya sería otra decisión suya.
 
-    **Un detalle que ya pasa aunque coincidan** (verificado en el código el 23 de octubre; no se
-    tocó porque no se pidió): la hoja imprime el número con ceros a la izquierda («014591») y el
-    sistema lo guarda como número, `14591`. El buscador no ignora esos ceros: escribir `014591`
-    no encuentra nada, y `14591` sí.
+    **Un detalle que ya pasaba aunque coincidan, corregido el 23 de octubre de 2026:** la hoja
+    imprime el número con ceros a la izquierda («014591») y el sistema lo guarda como número,
+    `14591`, y escribir `014591` no encontraba nada. Ya lo encuentra (`filtrarContratos`,
+    `nucleo/busqueda.js`; ver «Buscador general» en §6): solo cuenta como número de la hoja lo que
+    tiene cero adelante y al menos seis cifras, y se compara por igualdad, de modo que no trae un
+    contrato parecido ni toca la búsqueda de un teléfono, un DPI o unas placas.
 
     Está escrito también donde se va a mirar cuando pase: en `datos.js`
     (`siguienteNumeroContrato`), en `sacarCarro.js` (donde se pide el número) y en

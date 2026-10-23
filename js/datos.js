@@ -232,10 +232,11 @@ async function cargarConSincronia(coleccion, alLlegar, {
 
 /**
  * La flota completa, como `{ datos, fallo }` (ver `resultadoLectura`).
- * `alLlegar` avisa si la sincronía trae cambios o si falló.
+ * `alLlegar` avisa si la sincronía trae cambios o si falló. `deps` (opcional) son las mismas que recibe `cargarTodosLosContratos`: la
+ * nube y la copia local que se usan; la caja de búsqueda las usa para enterarse de cuándo terminó la sincronía de fondo.
  */
-export async function cargarFlota(alLlegar) {
-  return cargarConSincronia('vehiculos', alLlegar);
+export async function cargarFlota(alLlegar, deps) {
+  return cargarConSincronia('vehiculos', alLlegar, deps);
 }
 
 /**
@@ -246,8 +247,8 @@ export async function cargarFlota(alLlegar) {
  * marcar licencias vencidas y saldos pendientes, así que no le sirve la
  * sesión compartida de `buscarClientes` (pensada solo para "Sacar carro").
  */
-export async function cargarClientes(alLlegar) {
-  return cargarConSincronia('clientes', alLlegar);
+export async function cargarClientes(alLlegar, deps) {
+  return cargarConSincronia('clientes', alLlegar, deps);
 }
 
 /**

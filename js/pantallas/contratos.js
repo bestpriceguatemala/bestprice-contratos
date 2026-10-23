@@ -270,7 +270,8 @@ export function textoFalloAlAnular(error) {
 }
 
 const pluralDias = (n) => `${n} día${n === 1 ? '' : 's'}`;
-const ETIQUETAS_ESTADO = { rentado: 'Rentado', devuelto: 'Devuelto', cerrado: 'Cerrado' };
+// Se exporta para que la caja de búsqueda de arriba de todo (pantallas/buscador.js) rotule el estado con las mismas palabras.
+export const ETIQUETAS_ESTADO = { rentado: 'Rentado', devuelto: 'Devuelto', cerrado: 'Cerrado' };
 
 // ---------- Vista: lista ----------
 
