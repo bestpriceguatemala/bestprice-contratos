@@ -188,6 +188,21 @@ test('listas ausentes no revientan', () => {
   assert.equal(buscarEnTodo({ clientes: [juan] }, 'juan').total, 1);
 });
 
+test('el empleado que rentó NO cuenta como nombre de cliente: «ana» y «ana gómez» no traen todo lo que rentó la empleada Ana', () => {
+  // §6 promete nombre, apellido, DPI, licencia, teléfono, placas y número: el empleado no. Con él, cada vez que un cliente se llama como un
+  // empleado, la caja traería cientos de contratos que no son suyos, y «ana gómez» traería los de OTRO Gómez que rentó Ana.
+  const pedro = clienteDe('k5', { nombres: 'Pedro', apellidos: 'Gómez' });
+  const deAna = (numero, cliente, carro) => contratoDe({ numero, cliente, carro, rentadoPor: 'Ana' });
+  const lista = {
+    clientes: [ana, pedro, juan],
+    carros,
+    contratos: [deAna(1, ana, yaris), deAna(2, pedro, hilux), deAna(3, juan, yaris), contratoDe({ numero: 4, cliente: pedro, carro: hilux, rentadoPor: 'Luis' })],
+  };
+  assert.deepEqual(grupo(buscar('ana gomez', lista), 'contratos').filas.map((f) => f.dato.numero), [1], 'solo el de la clienta Ana Gómez');
+  assert.deepEqual(grupo(buscar('ana', lista), 'contratos').filas.map((f) => f.dato.numero), [1], 'solo el de la clienta Ana, no los tres que rentó la empleada');
+  assert.deepEqual(grupo(buscar('gomez', lista), 'contratos').filas.map((f) => f.dato.numero).sort(), [1, 2, 4]);
+});
+
 test('los clientes salen por orden alfabético y los carros por placas', () => {
   const dos = [clienteDe('z', { nombres: 'Zoila', apellidos: 'Díaz' }), clienteDe('a', { nombres: 'Abel', apellidos: 'Díaz' })];
   assert.deepEqual(grupo(buscar('diaz', { clientes: dos, carros: [], contratos: [] }), 'clientes').filas.map((f) => f.id), ['a', 'z']);

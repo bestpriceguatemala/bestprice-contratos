@@ -199,3 +199,12 @@ test('ninguna pantalla busca contratos por su cuenta: todas pasan por filtrarCon
     .filter((f) => readFileSync(f, 'utf8').includes('textoDeContrato'));
   assert.deepEqual(usan, [], 'quien arma el texto de un contrato a mano se salta el número del papel');
 });
+
+test('«Contratos» sigue buscando también por quién rentó (rentadoPor); solo la caja de arriba de todo lo deja fuera', () => {
+  const deAna = contratoDe({ numero: 21, cliente: juan, carro: yaris, rentadoPor: 'Ana' });
+  assert.deepEqual(filtrarContratos([deAna], 'ana').map((c) => c.numero), [21], 'la pantalla Contratos: como siempre');
+  assert.deepEqual(filtrarContratos([deAna], 'ana', { empleado: false }), [], 'la caja: el empleado no es un nombre de cliente');
+  assert.deepEqual(filtrarContratos([deAna], 'juan', { empleado: false }).map((c) => c.numero), [21], 'el cliente sí');
+  assert.ok(textoDeContrato(deAna).includes('Ana'));
+  assert.ok(!textoDeContrato(deAna, { empleado: false }).includes('Ana'));
+});

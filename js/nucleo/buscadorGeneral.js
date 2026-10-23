@@ -7,7 +7,7 @@
 // Tres clases de cosa, cada una con la ficha a la que lleva (las mismas que ya abren las pantallas de Clientes, Carros y Contratos):
 //   - clientes  -> #/clientes/:id    (nombre, apellido, DPI, licencia, teléfono, correo)
 //   - carros    -> #/carros/:id      (placas, marca, línea; solo la flota propia: un carro ajeno no entra a `vehiculos`)
-//   - contratos -> #/contratos/:id   (número —también el de la hoja, «014591»—, cliente, placas, carro)
+//   - contratos -> #/contratos/:id   (número —también el de la hoja, «014591»—, cliente, placas, carro; no quién lo rentó)
 // Un contrato de un carro ajeno se encuentra por sus placas aquí: es la única forma, porque ese carro no tiene ficha.
 //
 // Qué NO alcanza (a propósito, ver el informe del 23 de octubre de 2026): reservaciones (§6 no las nombra), dueños de carros y
@@ -49,7 +49,7 @@ const porPlacas = (a, b) => String(a?.placas || '').localeCompare(String(b?.plac
  * se busca quedaría cortado por el límite de filas.
  */
 function contratosEnOrden(contratos, consulta) {
-  const encontrados = filtrarContratos(contratos, consulta).filter((c) => c?.id);
+  const encontrados = filtrarContratos(contratos, consulta, { empleado: false }).filter((c) => c?.id);
   const exactos = [];
   const demas = [];
   for (const c of encontrados) (esElNumeroDe(c, consulta) ? exactos : demas).push(c);

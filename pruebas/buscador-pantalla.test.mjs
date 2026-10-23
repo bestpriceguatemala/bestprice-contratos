@@ -747,6 +747,14 @@ test('la hoja de estilos esconde .no-imprimir al imprimir (la caja sale por ahí
   assert.match(CSS, /\.buscador-panel\[hidden\]\s*\{\s*display:\s*none/, 'cerrado de verdad, aunque otra regla le ponga display');
 });
 
+test('la hoja de estilos pasa la caja a su propia fila por debajo de 1340 px: a 1024 el menú y «Salir» ya llenan la barra y «Salir» se salía de la pantalla', () => {
+  const bloque = CSS.match(/@media \(max-width: 1340px\)\s*\{[\s\S]*?\n\}\n/)?.[0] ?? '';
+  assert.ok(bloque, 'existe la regla para pantallas de menos de 1340 px');
+  assert.match(bloque, /\.barra\s*\{[^}]*flex-wrap:\s*wrap/, 'la barra deja pasar la caja a otra fila');
+  assert.match(bloque, /\.barra \.buscador-caja\s*\{[^}]*flex:\s*1 1 100%/, 'y la caja ocupa toda esa fila');
+  assert.match(bloque, /\.barra \.buscador-caja\s*\{[^}]*order:\s*9/, 'después de «Salir», no entre el título y el menú');
+});
+
 test('app.js conecta la caja al arrancar y la reinicia al cerrar la sesión', () => {
   assert.match(APP, /import \{ conectarElBuscador \} from '\.\/pantallas\/buscador\.js';/);
   assert.match(APP, /const buscador = conectarElBuscador\(\);/);

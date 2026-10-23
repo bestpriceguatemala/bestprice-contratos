@@ -104,8 +104,8 @@ export function textoDeCliente(c) {
  * El papel imprime «014591», con ceros a la izquierda, y aquí el número es 14591. Eso lo resuelve `filtrarContratos` (abajo), no este
  * texto: por eso todo lo que filtra contratos tiene que pasar por ella y no por `filtrar(…, textoDeContrato)` a secas.
  */
-export function textoDeContrato(c) {
-  return [c?.numero, c?.clienteNombre, c?.carroPlacas, c?.carroDescripcion, c?.rentadoPor]
+export function textoDeContrato(c, { empleado = true } = {}) {
+  return [c?.numero, c?.clienteNombre, c?.carroPlacas, c?.carroDescripcion, empleado ? c?.rentadoPor : null]
     .filter(Boolean).join(' ');
 }
 
@@ -142,7 +142,11 @@ export function filtrar(items, consulta, textoDe, numerosDe) {
 /**
  * Filtra contratos: su texto buscable (`textoDeContrato`) y, además, su número tal como lo imprime la hoja. Es el ÚNICO camino para
  * buscar contratos —«Contratos» y la caja de arriba de todo pasan por aquí—, para que la regla de los ceros viva una sola vez.
+ *
+ * `empleado: false` deja fuera quién rentó (`rentadoPor`). «Contratos» lo busca (se ve en su lista cuántos rentó cada quien), pero la caja
+ * de arriba de todo no: §6 promete nombre, apellido, DPI, licencia, teléfono, placas y número, y con el empleado adentro cada cliente que
+ * se llama como uno trae cientos de contratos que no son suyos, y «ana gómez» trae los de OTRO Gómez que rentó la empleada Ana.
  */
-export function filtrarContratos(contratos, consulta) {
-  return filtrar(contratos, consulta, textoDeContrato, (c) => [c?.numero]);
+export function filtrarContratos(contratos, consulta, { empleado = true } = {}) {
+  return filtrar(contratos, consulta, (c) => textoDeContrato(c, { empleado }), (c) => [c?.numero]);
 }
