@@ -557,6 +557,15 @@ export async function guardarDueno(dueno, deps = {}) {
  * Toma el siguiente número de contrato dentro de una transacción sobre
  * `contadores/contratos`, para que dos mostradores nunca impriman el mismo
  * número — es el número que el cliente firma en papel.
+ *
+ * RIESGO CONOCIDO, decidido por el dueño el 23 de octubre de 2026 (§8b punto 18 del diseño). Sus hojas membretadas
+ * traen su propio número preimpreso en rojo, y el sistema NO le deja teclearlo: este contador manda. Le preguntaron si
+ * el de la hoja coincide con el que ve en el sistema y contestó «Sí coinciden, déjalo así». Coinciden mientras use las
+ * hojas en orden y nada gaste un número de un lado sin gastarlo del otro: una hoja echada a perder, una usada fuera de
+ * orden, un contrato guardado dos veces o un número sacado que no llegó a guardarse separan las dos series para siempre.
+ * Cuando pase NO sale ningún aviso: buscar el número impreso en el papel de un cliente encuentra el contrato de OTRO
+ * cliente, o ninguno. Si estás aquí por eso, no es un defecto de este código. No agregues una casilla ni una guardia sin
+ * preguntarle: dijo que no.
  */
 export async function siguienteNumeroContrato() {
   const { db, fsMod } = await iniciarFirebase();

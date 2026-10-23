@@ -1305,6 +1305,11 @@ en el código.
     contrato porque es el que está en las hojas membretadas». Viene preimpreso en su
     papelería, por eso ni Excel ni el sistema lo imprimen y por eso el sistema le deja
     teclearlo a él al sacar el carro. No hay un campo `numero` en la tabla a propósito.
+    **Corrección del 23 de octubre de 2026 (punto 18): lo de «le deja teclearlo» nunca fue
+    verdad.** El sistema NO le deja teclear el número: lo asigna un contador de la nube. Él
+    contestó que el del contador y el de la hoja coinciden, y que se deje así. **No es un
+    olvido ni un defecto: no agregues la casilla para teclearlo ni «arregles» el contador.**
+    Pero lee el riesgo del punto 18 antes de tocar nada.
 
 **Lo que dijo el 15 de octubre de 2026, con la foto de su hoja membretada en blanco.** (El
 coordinador la describió; el orden de las casillas de la columna derecha del papel, de arriba
@@ -1366,6 +1371,55 @@ derecha.)
     hubiera dejado la renta anterior ya se borró. Deducir lo segundo de lo primero («voy a imprimir,
     luego hay tarjeta») sería volver a dejar en memoria lo que no hay, que es el camino a que la
     tarjeta de un cliente salga en la hoja de otro. Las cuatro defensas del punto 16 no cambian.
+
+18. **El número del papel y el del sistema coinciden, y se queda así (decisión del 23 de
+    octubre de 2026).** El punto 11 dice que él teclea el número porque viene preimpreso en rojo en
+    su hoja. El código hace otra cosa, y así estuvo desde el principio: al apretar «Guardar e
+    imprimir contrato», `sacarCarro.js` le pide el número a un contador de la nube
+    (`siguienteNumeroContrato`, documento `contadores/contratos`, dentro de una transacción para
+    que dos mostradores nunca saquen el mismo) y no hay ninguna casilla donde teclear el de la
+    hoja. Lo halló la revisión del 21 de octubre (D1 de las costuras, `.superpowers/costuras-2026-10-21.md`),
+    con una sola pregunta para él: *¿el número de arriba a la derecha de la hoja es el mismo que ve
+    en el sistema?* Contestó, viendo su hoja («№ 014591»): *«Sí coinciden, déjalo así.»* Usa las
+    hojas en orden y el contador lleva el mismo paso.
+
+    **Qué se decidió.** Nada cambia: manda el contador, el número no se teclea, y **no se construye
+    ninguna guardia ni ningún aviso** (lo dijo él). Quien lea el punto 11 y crea que falta la casilla
+    del número, o que el contador sobra, está leyendo una promesa que nunca se construyó.
+
+    **El riesgo, dicho sin adornos.** Son dos series de números que nadie sincroniza: la que
+    imprime la papelería en las hojas y la que cuenta el sistema. Coinciden **mientras nada las
+    perturbe**, y cualquiera de estas cosas las separa para siempre, porque ninguna de las dos
+    sabe de la otra y nada las vuelve a juntar:
+    - **una hoja echada a perder** (se atascó en la impresora, salió chueca, se manchó): la hoja
+      se gastó y el contador no se enteró, así que desde ahí el contador va uno atrás;
+    - **una hoja usada fuera de orden** (una de otro bloque, o una de más abajo);
+    - **un contrato guardado dos veces, o un número gastado que no llegó a guardarse**: el número
+      se saca al apretar guardar y se gasta aunque el guardado falle o se cierre la pestaña
+      (reintentar en la misma pantalla reutiliza el número; recargar la página y volver a
+      intentarlo pide otro), y un mismo alquiler que termina guardado en dos contratos gasta dos
+      números para una sola hoja. Ahí el contador va adelante de las hojas.
+
+    **Lo que se vería cuando pase, y por qué no se nota:** desde ese día, buscar en el sistema
+    —en «Contratos», hoy la única pantalla que busca por `numero`; la caja de arriba de todo
+    («Buscador general», §6) no está construida— el número impreso en la hoja de un cliente
+    encuentra **el contrato de otro cliente**, o ninguno. No sale ningún aviso:
+    ni el sistema ni nadie sabe que las series se separaron, y cada contrato por su lado se ve
+    perfectamente bien. Los contratos anteriores al día del desfase siguen coincidiendo, así que
+    se puede encontrar el día: entre el último contrato cuya hoja coincide con el sistema y el
+    primero que no, ocurrió una de las tres cosas de arriba. Si pasa y hay que arreglarlo, las dos
+    salidas que se le ofrecieron el 21 de octubre siguen siendo las mismas: (a) que el sistema le
+    deje teclear el número de la hoja (cambia `sacarCarro.js`), o (b) que el contador siga y él
+    anote en la hoja el número que el sistema le muestre. Eso ya sería otra decisión suya.
+
+    **Un detalle que ya pasa aunque coincidan** (verificado en el código el 23 de octubre; no se
+    tocó porque no se pidió): la hoja imprime el número con ceros a la izquierda («014591») y el
+    sistema lo guarda como número, `14591`. El buscador no ignora esos ceros: escribir `014591`
+    no encuentra nada, y `14591` sí.
+
+    Está escrito también donde se va a mirar cuando pase: en `datos.js`
+    (`siguienteNumeroContrato`), en `sacarCarro.js` (donde se pide el número) y en
+    `nucleo/busqueda.js` (`textoDeContrato`, donde se busca por `numero`).
 
 **Lo que el papel permitiría y hoy no se hace (no es para ahora; decisión suya).** El papel tiene
 toda una columna de liquidación (DAÑOS, COMBUSTIBLE, VARIOS, DEDUCIBLE, TOTAL CARGOS, MENOS

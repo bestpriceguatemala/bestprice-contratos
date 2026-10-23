@@ -1959,6 +1959,9 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       // dio por vencida sin saberse si en verdad llegó a guardar, tiene que
       // caer en el mismo documento y no gastar un número nuevo.
       if (!contratoId) contratoId = await nuevoIdContrato();
+      // Este número lo manda el contador de la nube, no el del papel: el dueño dijo que coinciden con el preimpreso de su hoja
+      // y que se quede así (23 de octubre de 2026, §8b punto 18). Si algún día dejan de coincidir no hay aviso; el riesgo
+      // está escrito en `siguienteNumeroContrato` (datos.js).
       if (!numeroContrato) numeroContrato = await siguienteNumeroContrato();
       const base = construirContrato(leerFormulario(numeroContrato));
       // Tarea 9, Regla 1: el anticipo YA PAGADO de la reservación de origen

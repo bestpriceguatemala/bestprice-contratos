@@ -48,7 +48,15 @@ export function textoDeCliente(c) {
     c?.documento, c?.licencia, c?.telefono, c?.telefonoAdicional, c?.correo].filter(Boolean).join(' ');
 }
 
-/** Todo lo buscable de un contrato. */
+/**
+ * Todo lo buscable de un contrato.
+ *
+ * `numero` es el del contador de la nube, que el dueño dijo (23 de octubre de 2026) que coincide con el número rojo preimpreso de sus
+ * hojas. Si algún día deja de coincidir —una hoja echada a perder, una usada fuera de orden, un contrato guardado dos veces— buscar aquí
+ * el número impreso en el papel de un cliente encuentra el contrato de OTRO cliente, o ninguno, sin ningún aviso: ver el riesgo en
+ * `siguienteNumeroContrato` (datos.js) y §8b punto 18 del diseño. Otra diferencia que ya existe: el papel imprime «014591» con ceros a
+ * la izquierda y aquí el número es 14591; escribir los ceros no lo encuentra.
+ */
 export function textoDeContrato(c) {
   return [c?.numero, c?.clienteNombre, c?.carroPlacas, c?.carroDescripcion, c?.rentadoPor]
     .filter(Boolean).join(' ');
