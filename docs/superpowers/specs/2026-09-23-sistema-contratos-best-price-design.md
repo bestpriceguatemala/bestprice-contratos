@@ -281,8 +281,10 @@ vencidos, saldo pendiente y devoluciones tardías anteriores.
 
 Ficha con sus datos, propiedad y dueño, historial de rentas con kilometrajes y
 días trabajados, y el **mantenimiento** de los carros de la flota propia (§12b): cuándo se hizo
-cada servicio, a qué kilometraje y cuánto falta para el siguiente. **Los montos cobrados y la
-utilidad de cada carro solo se ven con la contraseña.**
+cada servicio, a qué kilometraje y cuánto falta para el siguiente. **Esta pantalla no muestra
+montos cobrados ni utilidad por carro.** Este diseño decía que se verían con la contraseña; esa
+pantalla no se construyó ni se va a construir (decisión del 23 de octubre de 2026, al final de
+«Área de dinero»): lo que cada carro ha producido lo da el respaldo.
 
 ### Historial de contratos
 
@@ -301,16 +303,46 @@ Se abre con contraseña y se cierra sola por inactividad o al salir del sistema.
 - **Comisiones**, por mes y por empleado, con el detalle de cada contrato y de
   dónde sale cada número. **Casillas para seleccionar** qué contratos se van a
   pagar, con el total de lo seleccionado y el botón de pagar; queda registrada
-  la fecha. Los pagados se separan de los pendientes. Se baja en Excel y PDF.
-  Solo se paga lo de un contrato cerrado, y un período (quincena o mes) se marca
-  de un clic: ver §5, «Comisión del empleado».
+  la fecha. Los pagados se separan de los pendientes. **No se baja a Excel ni a PDF**:
+  este diseño lo prometía y ninguna pantalla de comisiones baja un archivo (al final de
+  «Área de dinero»). Solo se paga lo de un contrato cerrado, y un período (quincena o mes)
+  se marca de un clic: ver §5, «Comisión del empleado».
 - **Dueños de carros ajenos**: lo que se le debe a cada uno, contrato por
   contrato, con las mismas casillas de selección y marcado de pago.
 - **Empleados**: alta, baja y el porcentaje de comisión de cada uno. Se ven
   desde el mostrador (para elegir quién rentó el carro) pero solo se cambian
   aquí.
-- **El negocio**: cobrado del mes, utilidad, pendientes de cobro y cuánto ha
-  producido cada carro.
+- **El negocio: no se construye.** Este diseño prometía aquí una pantalla con «lo cobrado del
+  mes, la utilidad, lo pendiente de cobro y cuánto ha producido cada carro». El dueño decidió el
+  23 de octubre de 2026 que no la quiere; la decisión y sus razones están abajo.
+
+**Lo que este diseño prometió y no se va a construir (decisión del 23 de octubre de 2026).**
+§6 prometió dos cosas que ninguna pantalla hizo. El 21 de octubre se comprobó en el código
+(no hay ruta ni función que las calcule; las rutas del área de dinero son Comisiones, Dueños,
+Empleados y Respaldo) y se le preguntó al dueño si las seguía queriendo. Quedan escritas con lo
+que se prometió, para que nadie las dé por hechas ni las vuelva a descubrir como un hueco:
+
+1. **La pantalla «El negocio»**: cobrado del mes, utilidad, pendientes de cobro y cuánto ha
+   producido cada carro. Respondió: *«Con el respaldo me basta.»* La razón, dicha por él: sus
+   propias fórmulas de Excel le dan la utilidad cuando baja el respaldo. Es coherente con lo que
+   ya decide §10 («Los totales son los de su hoja, no los del sistema»): el respaldo no escribe
+   ningún total, y SUBTOTAL, TOTAL COBRADO y UTILIDAD son fórmulas de su hoja. En su plantilla
+   esas cifras ya existen **por contrato** (hoja CIERRE), **por carro** (hoja FICHA VEHICULO:
+   rentas, días, kilómetros, cobrado, pagado al dueño y utilidad), **por cliente** (FICHA
+   CLIENTE) y en total de carros propios y subarrendados (hoja VEHICULOS). Lo que su plantilla
+   **no** trae es un total «del mes»: es una suma que él arma sobre CONTRATOS, y este diseño no
+   afirma que ya la tenga. De las cuatro cosas, «pendientes de cobro» sí está en el sistema, en
+   la lista del mismo nombre de la pantalla principal (arriba). Las demás se miran en el
+   archivo, que es una foto del día en que se bajó: para ver el mes en curso hay que bajarlo de
+   nuevo (§10).
+2. **«Se baja en Excel y PDF» de las comisiones.** Ninguna pantalla de comisiones baja un
+   archivo, y el diseño deja de prometerlo. Ojo: aquí la razón de arriba **no** alcanza. El
+   respaldo no lleva las comisiones ni sus pagos (§10, «lo que este archivo NO lleva»), así que
+   las comisiones se ven y se pagan **solo en la pantalla**. Si algún día las quiere en un
+   archivo, es trabajo nuevo y se le pregunta entonces.
+
+Lo que no cambió: quien quiera ver la utilidad de un contrato o de un carro en pantalla, hoy, no
+puede. Ese hueco ya no es un olvido, es una decisión.
 
 ### Ajustes
 
