@@ -128,7 +128,11 @@ export function textoDeCelda(xml, ref, textos = []) {
 
 // ---------- escribir ----------
 
-function celdaNueva(ref, estilo, valor) {
+/**
+ * Una celda escrita: texto en línea (nunca una fórmula), número, o vacía con su estilo. La usa `escribirCeldas` sobre la plantilla y
+ * `libroNuevo.js` para los libros que se arman desde cero: una sola manera de escribir una celda.
+ */
+export function celdaNueva(ref, estilo, valor) {
   const s = estilo ? ` s="${estilo}"` : '';
   if (valor === null || valor === undefined || valor === '') return `<c r="${ref}"${s}/>`;
   if (typeof valor === 'number') {
