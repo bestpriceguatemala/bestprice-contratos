@@ -218,6 +218,17 @@ test('LO PAGADO ES LO QUE SE GUARDÓ: la hoja «Pagos» dice el monto del pago, 
   assert.equal(p1[pos('Aviso')], null);
 });
 
+test('el aviso de «hoy esas rentas suman» sigue saliendo aunque los pagos lleguen copiados (se reconoce por el id, no solo por el objeto)', () => {
+  const lectura = escenario();
+  const vista = armarVistaDeComisiones(lectura);
+  const modelo = modeloDeComisionesEnExcel({
+    vista, clave: 'id:e1', pagos: structuredClone(lectura.pagos.datos), hoy: HOY,
+  });
+  const pagos = hojaDe(modelo, 'Pagos');
+  const pos = (t) => pagos.columnas.findIndex((c) => c.titulo === t);
+  assert.equal(pagos.filas.find((f) => f[pos('Forma')] === 'Cheque')[pos('Hoy esas rentas suman')], 140);
+});
+
 test('un pago ANULADO sale en «Pagos» con su monto, marcado y con la fecha en que se anuló, y no cuenta como pagado', () => {
   const modelo = modeloDe(escenario(), { clave: 'id:e1' });
   const pagos = hojaDe(modelo, 'Pagos');
@@ -244,6 +255,19 @@ test('un pago que cubre una renta que ya no está en la cuenta lo dice, en vez d
   const fila = pagos.filas.find((f) => f[pagos.columnas.findIndex((c) => c.titulo === 'Rentas que cubre')] === 2);
   assert.ok(fila);
   assert.equal(fila[pagos.columnas.findIndex((c) => c.titulo === 'Contratos')], '3, 1 renta que ya no está en esta cuenta');
+});
+
+test('una renta repetida o vacía en la lista de un pago cuenta una sola vez; y la fecha de anulación solo sale en un pago anulado', () => {
+  const lectura = lecturaOk({
+    contratos: [renta({ id: 'a', numero: 5, recibidoEl: '2026-10-05' })],
+    pagos: [{ ...pagoDeComision({ id: 'p', monto: 140, contratos: ['a', 'a', null, ''] }), anuladoEn: '2026-10-09' }],
+  });
+  const pagos = hojaDe(modeloDe(lectura, { clave: 'id:e1' }), 'Pagos');
+  const pos = (t) => pagos.columnas.findIndex((c) => c.titulo === t);
+  assert.equal(pagos.filas[0][pos('Rentas que cubre')], 1);
+  assert.equal(pagos.filas[0][pos('Contratos')], '5');
+  assert.equal(pagos.filas[0][pos('Estado')], 'Vigente');
+  assert.equal(pagos.filas[0][pos('Anulado el')], null, 'un pago que no está anulado no trae fecha de anulación');
 });
 
 test('los contratos de un pago salen por número, de menor a mayor', () => {
@@ -529,10 +553,11 @@ test('si armar lanza, no se entrega nada', async () => {
   assert.deepEqual(sinCredencial(orden), ['leer'], 'se leyó, y nada más: no se entregó');
 });
 
-test('sin la fecha de hoy no se baja nada', async () => {
-  const { deps } = conEspias();
+test('sin la fecha de hoy no se baja nada, y ni siquiera se lee', async () => {
   for (const hoy of [undefined, '', 'hoy', '2026-13-01']) {
+    const { orden, deps } = conEspias();
     await assert.rejects(() => bajarLasCuentasEnExcel({ ...deps, hoy }), /Falta la fecha de hoy/, String(hoy));
+    assert.deepEqual(orden, [], `${hoy}: no se leyó nada`);
   }
 });
 
@@ -603,6 +628,9 @@ test('el .xlsx de la cuenta de Ana tiene tres pestañas y cada celda dice lo que
   // Las pestañas de tabla llevan filtro y la fila de títulos fija.
   assert.match(libro.xml('Rentas'), /<autoFilter ref="A1:R10"\/>/);
   assert.match(libro.xml('Pagos'), /<pane ySplit="1"/);
+  // Las propiedades del archivo dicen de quién es y de qué día.
+  const propiedades = new TextDecoder().decode(libro.partes.get('docProps/core.xml'));
+  assert.match(propiedades, /<dc:title>Comisiones de Ana López<\/dc:title><dc:subject>Cuenta de comisiones al 2026-10-23<\/dc:subject>/);
   // Y el resumen empieza con el título, la fecha de la cuenta y la advertencia de privacidad.
   assert.equal(libro.texto('Resumen', 'A1'), 'Comisiones de los empleados — Ana López');
   assert.match(libro.texto('Resumen', 'A2'), /^Cuenta al 23 oct 2026\./);
@@ -707,6 +735,9 @@ test('el clic: mira la sesión antes, bloquea el doble clic, baja la cuenta abie
   assert.match(clic, /finally \{\s*ui\.ocupado = false;/);
   assert.match(clic, /if \(ui\.mensajeBajar === MENSAJE_BAJAR_SIN_SESION && !haySesion\(\)\) return;\s*dibujar\(\);/);
   assert.match(PANTALLA, /case 'bajar': bajarExcel\(accion\.dataset\.alcance\); return;/);
+  // Lo que falló se dibuja en la lista y en la ficha: la lista recibe el mensaje y la ficha lo lee de `ui`.
+  assert.match(PANTALLA, /raiz\.innerHTML = htmlListaDeComisiones\(vista, \{ mensajeBajar: ui\.mensajeBajar \}\);/);
+  assert.match(PANTALLA, /raiz\.innerHTML = htmlFichaDeComisiones\(\{ entrada, vista, ui, lectura: lector\.actual, hoy \}\);/);
   assert.match(clic, /boton\.disabled = true; boton\.textContent = 'Armando el archivo…'/);
 });
 

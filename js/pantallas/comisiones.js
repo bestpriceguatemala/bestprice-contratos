@@ -447,7 +447,7 @@ function celdaDeFecha(iso, donde, avisos) {
   return texto;
 }
 
-/** La renta de una cuenta con el pago vigente que la cubre, si lo hay. */
+/** El pago vigente que cubre una renta, o `null`: una renta que ningún pago cubre no tiene fecha de pago (y una de un pago anulado tampoco). */
 function pagoQueCubre(pagosVigentes, id) {
   return pagosVigentes.find((p) => Array.isArray(p?.contratos) && p.contratos.includes(id)) ?? null;
 }
@@ -477,7 +477,7 @@ function filaDeRentaParaExcel(entrada, contrato, estado, pagoVigente, avisos) {
     si('sin-cerrar'),
     si('pagada'),
     ESTADOS_EN_EXCEL[estado],
-    estado === 'pagada' ? celdaDeFecha(pagoVigente?.fecha, donde, avisos) : null,
+    celdaDeFecha(pagoVigente?.fecha, donde, avisos),
   ];
 }
 
@@ -505,7 +505,8 @@ function filaDePagoParaExcel(entrada, pago, avisos) {
   numeros.sort((a, b) => (typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), 'es')));
   const lista = [...numeros.map(String), ...(faltan ? [`${faltan} ${faltan === 1 ? 'renta que ya no está' : 'rentas que ya no están'} en esta cuenta`] : [])].join(', ');
   const anulado = pagoAnulado(pago);
-  const cambio = anulado ? null : entrada.cuenta.pagosQueCambiaron.find((x) => x.pago === pago || (pago.id && x.pago?.id === pago.id));
+  // `pagosQueCambiaron` solo trae pagos vigentes; se busca por el mismo objeto o, si la lista se copió, por su id.
+  const cambio = entrada.cuenta.pagosQueCambiaron.find((x) => x.pago === pago || (pago.id && x.pago?.id === pago.id));
   return [
     entrada.nombre,
     celdaDeFecha(pago.fecha, donde, avisos),

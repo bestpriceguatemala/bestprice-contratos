@@ -116,9 +116,25 @@ test('las notas van arriba, una por fila, con su estilo, y la tabla empieza dos 
   assert.match(libro.xml('Rentas'), /<dimension ref="A1:E7"\/>/);
 });
 
-test('un estilo de nota que no existe cae a texto normal, no a un estilo inventado', async () => {
-  const libro = await abrirLibro(await armar([hojaDePrueba({ notas: [{ texto: 'x', estilo: 'rojo-chillon' }] })]));
-  assert.match(libro.xml('Rentas'), /<c r="A1" t="inlineStr">/, 'sin atributo de estilo: el de por omisión');
+test('un estilo de nota que no existe cae a texto normal, no a un estilo inventado (ni a una propiedad que todo objeto trae, como toString)', async () => {
+  for (const estilo of ['rojo-chillon', 'toString', 'constructor', undefined, null]) {
+    const libro = await abrirLibro(await armar([hojaDePrueba({ notas: [{ texto: 'x', estilo }] })]));
+    assert.match(libro.xml('Rentas'), /<c r="A1" t="inlineStr">/, `${estilo}: sin atributo de estilo, el de por omisión`);
+  }
+});
+
+test('un tipo de columna que no es de la lista se niega, aunque sea un nombre que todo objeto trae (toString, constructor)', async () => {
+  for (const tipo of ['toString', 'constructor', '__proto__', undefined]) {
+    await assert.rejects(() => armar([hojaDePrueba({ columnas: [{ titulo: 'x', tipo }], filas: [] })]), /que no existe/, String(tipo));
+  }
+});
+
+test('el ancho de cada columna es el pedido (o 14 si no se pidió), y solo la primera pestaña queda seleccionada al abrir', async () => {
+  const libro = await abrirLibro(await armar([hojaDePrueba(), { ...hojaDePrueba(), nombre: 'Pagos' }, { ...hojaDePrueba(), nombre: 'Otra' }]));
+  assert.match(libro.xml('Rentas'), /<col min="1" max="1" width="24" customWidth="1"\/><col min="2" max="2" width="14" customWidth="1"\/>/);
+  assert.match(libro.xml('Rentas'), /tabSelected="1"/);
+  assert.doesNotMatch(libro.xml('Pagos'), /tabSelected/);
+  assert.doesNotMatch(libro.xml('Otra'), /tabSelected/);
 });
 
 test('congelar deja la fila de títulos fija, y el filtro pone las flechas sobre toda la tabla y declara su nombre oculto', async () => {

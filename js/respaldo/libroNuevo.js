@@ -96,7 +96,7 @@ function comprobarHoja(hoja, vistas) {
   vistas.add(nombre.toLowerCase());
   if (!Array.isArray(hoja.columnas) || !hoja.columnas.length) throw new Error(`La hoja «${nombre}» no tiene columnas.`);
   for (const col of hoja.columnas) {
-    if (!(col?.tipo in ESTILO_DE_TIPO)) throw new Error(`La hoja «${nombre}» trae una columna de tipo «${col?.tipo}», que no existe.`);
+    if (!Object.hasOwn(ESTILO_DE_TIPO, col?.tipo)) throw new Error(`La hoja «${nombre}» trae una columna de tipo «${col?.tipo}», que no existe.`);
   }
   if (!Array.isArray(hoja.filas)) throw new Error(`La hoja «${nombre}» no trae sus filas como una lista.`);
   for (const fila of hoja.filas) {
@@ -119,7 +119,7 @@ function xmlDeHoja(hoja, { seleccionada }) {
   const filas = [];
 
   notas.forEach(({ texto, estilo }, i) => {
-    const clave = estilo in ESTILO ? estilo : 'texto';
+    const clave = Object.hasOwn(ESTILO, estilo) ? estilo : 'texto';
     filas.push(`<row r="${i + 1}">${celdaNueva(`A${i + 1}`, ESTILO[clave], texto)}</row>`);
   });
   filas.push(`<row r="${filaDeTitulos}">${hoja.columnas.map((col, i) => celdaNueva(`${columnaDeNumero(i + 1)}${filaDeTitulos}`, ESTILO.encabezado, col.titulo)).join('')}</row>`);
