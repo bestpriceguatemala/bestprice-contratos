@@ -63,7 +63,7 @@ export function motivoSinComprobante(pago) {
   }
   const estado = estadoDelComprobante(pago);
   if (estado.tipo === 'de-antes') {
-    return `${nombreDelPago(pago)} se registró antes de que existieran los comprobantes de comisión, así que no tiene número ni guardó lo que se pagó `
+    return 'Este pago se registró antes de que existieran los comprobantes de comisión, así que no tiene número ni guardó lo que se pagó '
       + 'renta por renta. Armarlo ahora con las cifras de hoy podría decir algo distinto de lo que se pagó ese día, y por eso no se arma. '
       + 'Los pagos que se registran desde ahora sí lo traen.';
   }
@@ -190,7 +190,7 @@ export function htmlComprobanteDeComision(m) {
   <section class="comp-seccion comp-pagado">
     <h2>Comisiones pagadas</h2>
     <p class="comp-al-dia">Rentas incluidas en este pago: ${m.pagado.filas.length}.</p>
-    <table class="comp-tabla comp-tabla-comision">
+    <table class="comp-tabla">
       <thead>
         <tr>
           <th>Regresó</th>

@@ -799,7 +799,7 @@ test('un pago ANULADO no tiene papel: lanza, dice que está anulado y desde cuá
 test('un pago DE ANTES de los comprobantes no tiene papel: lanza y explica por qué, sin recalcular nada ni ponerle número', () => {
   const viejo = pagoDeComision({ id: 'p0', monto: 280, contratos: ['m1', 'm2'], fecha: '2026-10-10' });
   const motivo = motivoSinComprobante(viejo);
-  assert.match(motivo, /El pago del 10 oct 2026 de Q280\.00 se registró antes de que existieran los comprobantes/);
+  assert.match(motivo, /^Este pago se registró antes de que existieran los comprobantes/);
   assert.match(motivo, /no tiene número/);
   assert.match(motivo, /cifras de hoy/);
   assert.throws(() => armarComprobanteDeComision({ pago: viejo, empleado: LUIS_EN_PAPEL }), { message: motivo });
@@ -1074,4 +1074,29 @@ test('la ficha engancha el botón al recorrido seguro: sesión, relectura, y nad
   assert.match(f, /if \(r\.tipo === 'no-esta'\) \{ aviso\(MENSAJE_COMPROBANTE_COMISION_NO_ESTA, 'error'\); dibujar\(\); return; \}/, 'un pago que ya no está se dice');
   assert.match(f, /alVolver: dibujar/);
   assert.match(codigo, /Pago registrado: \$\{dinero\(r\.pago\.monto\)\}\. Comprobante N\.° \$\{r\.pago\.numero\}\./, 'al registrar se le dice el número');
+});
+
+// ---------------------------------------------------------------------------
+// La hoja de estilos: el papel del empleado se imprime con las reglas del de los dueños
+// ---------------------------------------------------------------------------
+
+test('el papel del empleado usa la misma hoja de impresión: la clase `comprobante`, Carta vertical, y todo lo demás escondido', () => {
+  const css = leer('../css/estilos.css');
+  const html = htmlComprobanteDeComision(armarComprobanteDeComision(papel()));
+  assert.match(html, /^<article class="comprobante"/, 'la hoja es lo que `body:has(.comprobante)` deja imprimir');
+  const impresion = css.slice(css.indexOf('@media print'));
+  assert.match(impresion, /body:has\(\.comprobante\) \*:not\(:has\(\.comprobante\)\):not\(\.comprobante\):not\(\.comprobante \*\)/);
+  for (const pieza of ['.no-imprimir', '.btn', '#avisos']) assert.ok(impresion.includes(pieza), `${pieza} se esconde al imprimir`);
+  // Ninguna clase nueva: todas las que dibuja el papel del empleado son las que ya dibuja el de los dueños (con sus reglas ya probadas
+  // en la hoja de impresión), así que no hay una forma nueva que se haya podido escapar de `@media print`.
+  const clases = (texto) => new Set([...texto.matchAll(/class="([^"]+)"/g)].flatMap((m) => m[1].split(' ')));
+  const lasDelDueno = clases(leer('../js/pantallas/comprobante.js'));
+  for (const clase of clases(html)) assert.ok(lasDelDueno.has(clase), `la clase «${clase}» no es del papel de los dueños: ¿tiene su regla de impresión?`);
+  assert.ok(css.includes('.dn-pago-hecho .dn-sin-papel'), 'y la nota de «sin comprobante» de la ficha tiene su regla');
+});
+
+test('ni el papel ni la ficha llevan estilos en línea: un estilo en línea le gana a la hoja de impresión sin que nadie lo vea', () => {
+  const codigo = sinComentarios(leer('../js/pantallas/comprobanteComision.js'));
+  assert.equal((codigo.match(/style\s*=/g) || []).length, 0);
+  assert.ok(!/\.style\b|cssText|setAttribute\(\s*['"]style/.test(codigo));
 });

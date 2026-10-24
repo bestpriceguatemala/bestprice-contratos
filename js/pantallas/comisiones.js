@@ -417,7 +417,8 @@ export function avisoDelPapelQueNoCambia(cambio) {
 //
 // El respaldo anual NO lleva las comisiones ni sus pagos (§10): viven solo en Firebase, y si él perdiera el acceso esa historia no
 // existiría en nada que sea suyo. Este archivo es la copia que él guarda: la cuenta de un empleado (o la de todos) con lo que se le
-// debe, lo que todavía no se paga y cada pago. NO es un comprobante para el empleado (ver el informe y §6).
+// debe, lo que todavía no se paga y cada pago. NO es el comprobante del empleado: ese es el papel de `comprobanteComision.js` (23 de octubre de
+// 2026), con su número y su detalle guardados en el pago; aquí, en su copia, solo se anota el número de cada papel.
 //
 // Ninguna regla se repite aquí. Cada cifra sale de lo que ya calculó el núcleo —`comisionDe` para cada renta, `cuenta.totalPorPagar`,
 // `totalEstimado`, `totalPorCerrar` y `pagosQueCambiaron` de `cuentaDeEmpleado`, `totalesDePagos` y `totalGeneralDeComisiones` para
@@ -472,6 +473,7 @@ const COLUMNAS_DE_RENTAS = [
 
 const COLUMNAS_DE_PAGOS = [
   { titulo: 'Empleado', tipo: 'texto', ancho: 24 },
+  { titulo: 'Comprobante N°', tipo: 'entero', ancho: 13 },
   { titulo: 'Fecha del pago', tipo: 'fecha', ancho: 13 },
   { titulo: 'Forma', tipo: 'texto', ancho: 14 },
   { titulo: 'Monto pagado (el que quedó guardado)', tipo: 'dinero', ancho: 18 },
@@ -575,6 +577,9 @@ function filaDePagoParaExcel(entrada, pago, avisos) {
   const cambio = entrada.cuenta.pagosQueCambiaron.find((x) => x.pago === pago || (pago.id && x.pago?.id === pago.id));
   return [
     entrada.nombre,
+    // El número del papel que se le entregó al empleado (§7b): su copia lo lleva para poder decir cuál papel es cuál. Vacío en un pago de
+    // antes de los comprobantes —no tuvo número y no se le inventa uno—, o si lo que hay guardado no es un número de comprobante.
+    Number.isInteger(pago.numero) ? pago.numero : null,
     celdaDeFecha(pago.fecha, donde, avisos),
     etiquetaDeForma(pago.forma),
     q(pago.monto),
@@ -660,7 +665,7 @@ export function modeloDeComisionesEnExcel({
     { texto: `Cuenta al ${fecha(hoy)}. Es una foto del día en que se bajó este archivo: no se actualiza solo.`, estilo: 'nota' },
     { texto: 'Una comisión se paga cuando el contrato de la renta ya cerró: el carro regresó, no se debe saldo y la garantía está liberada.', estilo: 'nota' },
     { texto: 'Hoja «Rentas»: una fila por renta. Solo la columna «Por pagar» es deuda; «Estimada» y «Ya regresó, falta que cierre» todavía no lo son.', estilo: 'nota' },
-    { texto: 'Hoja «Pagos»: cada pago registrado, también los anulados (un pago anulado ya no cubre sus rentas). El monto es el que quedó guardado ese día.', estilo: 'nota' },
+    { texto: 'Hoja «Pagos»: cada pago registrado, también los anulados (un pago anulado ya no cubre sus rentas). El monto es el que quedó guardado ese día. «Comprobante N°» es el número del papel que se le entregó al empleado; está vacío en los pagos de antes de que existieran los comprobantes.', estilo: 'nota' },
     ...(vista.falloEmpleados
       ? [{ texto: 'No se pudo leer la lista de empleados: los nombres, códigos y porcentajes de hoy pueden estar desactualizados. Lo que se debe sale de las rentas y los pagos, y no cambia.', estilo: 'aviso' }]
       : []),

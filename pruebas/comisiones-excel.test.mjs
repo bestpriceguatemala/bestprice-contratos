@@ -218,6 +218,18 @@ test('LO PAGADO ES LO QUE SE GUARDÓ: la hoja «Pagos» dice el monto del pago, 
   assert.equal(p1[pos('Aviso')], null);
 });
 
+test('«Comprobante N°»: el número del papel que se le entregó al empleado, vacío en un pago de antes y nunca inventado', () => {
+  const con = (id, extra) => ({ ...pagoDeComision({ id, monto: 140, fecha: '2026-10-02', forma: 'efectivo', contratos: ['por1'] }), ...extra });
+  const hojaConPago = (pago) => hojaDe(modeloDe(lecturaOk({ contratos: rentasDeAna(), pagos: [pago] }), { clave: 'id:e1' }), 'Pagos');
+  const numeroDe = (pago) => hojaConPago(pago).filas.map((f) => f[hojaConPago(pago).columnas.findIndex((c) => c.titulo === 'Comprobante N°')]);
+  assert.deepEqual(numeroDe(con('pn', { numero: 12 })), [12]);
+  assert.deepEqual(numeroDe(con('pv', {})), [null], 'un pago de antes no tiene número, y no se le pone');
+  for (const raro of [0.5, '12', true, null]) assert.deepEqual(numeroDe(con('px', { numero: raro })), [null], `numero: ${String(raro)} no es un número de comprobante`);
+  // Anulado, conserva su número: el empleado tiene ese papel.
+  assert.deepEqual(numeroDe(con('pa', { numero: 7, anulado: true, anuladoEn: '2026-10-03' })), [7]);
+  assert.ok(hojaConPago(con('pn', { numero: 12 })).columnas.some((c) => c.titulo === 'Comprobante N°' && c.tipo === 'entero'), 'es una columna de número entero');
+});
+
 test('el aviso de «hoy esas rentas suman» sigue saliendo aunque los pagos lleguen copiados (se reconoce por el id, no solo por el objeto)', () => {
   const lectura = escenario();
   const vista = armarVistaDeComisiones(lectura);
@@ -361,7 +373,7 @@ test('un pago de otro empleado no se cuela en la hoja «Pagos» de Ana aunque ll
   assert.equal(pagos.filas.length, 3);
   const deLuis = hojaDe(modeloDe(lectura, { clave: 'id:e16' }), 'Pagos');
   assert.equal(deLuis.filas.length, 1);
-  assert.equal(deLuis.filas[0][3], 270);
+  assert.equal(deLuis.filas[0][deLuis.columnas.findIndex((c) => c.titulo === 'Monto pagado (el que quedó guardado)')], 270);
 });
 
 test('NO LLEVA lo del cliente ni lo del carro ajeno: ni sus pagos, ni su saldo, ni su garantía, ni la tarjeta, ni el costo ni el dueño del carro', () => {
@@ -395,7 +407,7 @@ test('las columnas de las tres hojas son exactamente estas: agregar una (y con e
     'Por pagar', 'Estimada (el carro sigue afuera)', 'Ya regresó, falta que cierre', 'Ya pagada (lo que suma hoy)', 'Estado', 'Pagada el',
   ]);
   assert.deepEqual(hojaDe(modelo, 'Pagos').columnas.map((c) => c.titulo), [
-    'Empleado', 'Fecha del pago', 'Forma', 'Monto pagado (el que quedó guardado)', 'Estado', 'Anulado el', 'Rentas que cubre', 'Contratos', 'Hoy esas rentas suman', 'Aviso',
+    'Empleado', 'Comprobante N°', 'Fecha del pago', 'Forma', 'Monto pagado (el que quedó guardado)', 'Estado', 'Anulado el', 'Rentas que cubre', 'Contratos', 'Hoy esas rentas suman', 'Aviso',
   ]);
   assert.deepEqual(hojaDe(modelo, 'Resumen').columnas.map((c) => c.titulo), [
     'Empleado', 'Código', '% de hoy', 'Rentas por pagar', 'Se le debe', 'Estimado (carros afuera)', 'Ya regresaron, falta que cierre', 'Pagado (pagos sin anular)', 'Pagos', 'Pagos anulados', 'Aclaración',
@@ -623,8 +635,9 @@ test('el .xlsx de la cuenta de Ana tiene tres pestañas y cada celda dice lo que
   assert.equal(libro.numero('Rentas', 'K2'), 2800);
   assert.equal(libro.numero('Rentas', 'L2'), 5);
   // Pagos.
-  assert.equal(libro.numero('Pagos', 'D2'), 100);
-  assert.equal(libro.texto('Pagos', 'C2'), 'Cheque');
+  assert.equal(libro.texto('Pagos', 'B1'), 'Comprobante N°');
+  assert.equal(libro.numero('Pagos', 'E2'), 100);
+  assert.equal(libro.texto('Pagos', 'D2'), 'Cheque');
   // Las pestañas de tabla llevan filtro y la fila de títulos fija.
   assert.match(libro.xml('Rentas'), /<autoFilter ref="A1:R10"\/>/);
   assert.match(libro.xml('Pagos'), /<pane ySplit="1"/);

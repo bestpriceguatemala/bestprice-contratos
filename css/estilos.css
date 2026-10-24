@@ -1847,6 +1847,13 @@ body {
   font-size: 13px;
 }
 
+/* Por qué un pago de comisión no tiene comprobante (el de antes de que existieran, o uno dañado): va bajo el encabezado de la tarjeta,
+   con aire, y sin la cifra grande del pago a su lado. */
+.dn-pago-hecho .dn-sin-papel {
+  margin: 8px 0 0;
+  max-width: 70ch;
+}
+
 /*
  * Un pago a un dueño anulado (dinero.js: anularElPago) sigue en «Ya pagado» con su número,
  * porque ese dueño tiene el papel. Se apaga y solo la cifra se tacha: el número del
