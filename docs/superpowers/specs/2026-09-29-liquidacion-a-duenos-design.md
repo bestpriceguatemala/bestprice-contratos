@@ -160,6 +160,18 @@ sea el comprobante. Se imprime en carta, vertical.
 ni la utilidad. El dueño del carro no tiene por qué ver el negocio de Best
 Price; solo lo suyo.
 
+**Su gemelo para los empleados** (23 de octubre de 2026). Cuando se le paga una comisión a un empleado, el
+sistema le imprime un comprobante parecido (`js/pantallas/comprobanteComision.js`; el detalle completo está en
+§6 del diseño general, «El comprobante de pago de comisión»). Toma de este papel la hoja, el membrete (sin NIT), la
+numeración por `contadores` (con **su propia serie**, `comprobantesComision`) y el trato de un pago anulado, y cambia
+solo lo que la diferencia entre un dueño de carro y un empleado exige:
+- **Una reimpresión dice lo que dijo el original, sin excepción.** Aquí el papel de un dueño recalcula «lo pendiente» y
+  avisa en una nota si las rentas cambiaron; el del empleado se arma solo con lo que el pago guardó (`numero` y `detalle[]`)
+  y no recibe rentas, así que no puede cambiar. A cambio, **un pago de antes de que existiera el papel no se imprime**.
+- **Lleva la base y el porcentaje de cada renta** (la comisión se explica sola) y **no lleva «Queda pendiente»**.
+- **Lo que nunca lleva**, como este: lo que el cliente pagó, la garantía, la tarjeta, el costo y el dueño de un carro ajeno
+  y la utilidad. La diferencia es que la **base de su comisión sí es suya**: ya está en su pantalla.
+
 ## 7. Dónde se guardan los datos
 
 ### Lo que cambia a propósito respecto al diseño general

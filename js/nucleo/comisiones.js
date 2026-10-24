@@ -297,8 +297,8 @@ export function estadoDelComprobante(pago) {
   if (!Array.isArray(pago.detalle) || pago.detalle.length === 0) return danado('su detalle no es una lista de rentas');
   const ids = [];
   for (const fila of pago.detalle) {
-    if (fila === null || typeof fila !== 'object' || Array.isArray(fila)) return danado('una fila de su detalle no es una renta');
-    if (typeof fila.contratoId !== 'string' || !fila.contratoId) return danado('una fila de su detalle no dice de qué renta es');
+    if (fila === null || typeof fila !== 'object') return danado('una fila de su detalle no es una renta');
+    if (typeof fila.contratoId !== 'string') return danado('una fila de su detalle no dice de qué renta es');
     for (const campo of ['dias', 'diasAtraso', 'base', 'porcentajeComision', 'monto']) {
       if (typeof fila[campo] !== 'number' || !Number.isFinite(fila[campo])) return danado(`una fila de su detalle no trae «${campo}» como número`);
     }

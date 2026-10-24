@@ -63,3 +63,5 @@ No se agrega ninguna librería de generación de PDF.
 ## Links
 - Diseño de la liquidación §6: `docs/superpowers/specs/2026-09-29-liquidacion-a-duenos-design.md`
 - Diseño general §8 (Impresión): `docs/superpowers/specs/2026-09-23-sistema-contratos-best-price-design.md`
+- El comprobante de pago de comisión del empleado (23 de octubre de 2026) sale por este mismo camino, y es lo que aquí se
+  llamaba «reportes de comisiones»: diseño general §6, «El comprobante de pago de comisión».

@@ -1,6 +1,6 @@
 // Pruebas del comprobante de pago al dueño del carro (comprobante.js, ADR-003).
 //
-// Es el único papel de este sistema que sale de la empresa hacia un tercero, y
+// Es uno de los dos papeles de este sistema que salen de la empresa hacia otra persona (el otro es el del empleado), y
 // el tercero es un PROVEEDOR, no un socio: el dueño del carro ve lo suyo y
 // nada más. Si el papel dijera cuánto cobró Best Price por su carro, o cuánto
 // se llevó el empleado, el dueño sabría el margen sobre su propio carro y el

@@ -81,7 +81,7 @@ export const MENSAJE_FALLO_DATOS_DE_COMISION = 'Hay una renta o un pago guardado
 export const MENSAJE_FALLO_EMPLEADOS = 'No se pudo leer la lista de empleados. Los nombres y porcentajes que ves pueden estar desactualizados o faltar.';
 export const MENSAJE_COMISION_SIN_COMPROBAR = 'No se pudo comprobar si estas rentas ya tienen un pago registrado, y registrar sin saberlo podría pagarlas dos veces. Revisa tu internet e intenta de nuevo.';
 export const MENSAJE_COMISION_SIN_COMPROBAR_RENTAS = 'No se pudo comprobar si estas rentas siguen igual, y registrar sin saberlo podría pagar una comisión que ya cambió. Revisa tu internet e intenta de nuevo.';
-export const MENSAJE_COMISION_CAMBIO = 'Mientras tanto cambió la cuenta de este empleado: alguna de las rentas marcadas ya no se puede pagar o cambió de monto (por ejemplo, ya tiene un pago registrado, o se corrigió su cierre). No se registró nada; la lista ya está al día, revisa y vuelve a marcar.';
+export const MENSAJE_COMISION_CAMBIO = 'Mientras tanto cambió la cuenta de este empleado: alguna de las rentas marcadas ya no se puede pagar o cambió de monto o de datos (por ejemplo, ya tiene un pago registrado, o se corrigió su cierre). No se registró nada; la lista ya está al día, revisa y vuelve a marcar.';
 export const MENSAJE_COMISION_FALLO = 'No se pudo registrar el pago. Revisa tu internet y vuelve a apretar «Guardar pago»: si ya había quedado guardado, no se duplica. '
   + 'Si sigue sin conectar, recarga la página y revisa «Ya pagado» antes de intentarlo otra vez.';
 export const MENSAJE_ANULAR_COMISION_SIN_COMPROBAR = 'No se pudo comprobar si este pago sigue como lo ves, y anularlo sin saberlo podría pisar una anulación que ya se hizo. Revisa tu internet e intenta de nuevo; no se anuló nada.';

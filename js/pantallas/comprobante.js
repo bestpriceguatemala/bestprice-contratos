@@ -1,7 +1,8 @@
 // El comprobante de pago al dueño de un carro subarrendado (§6 del diseño de la
 // liquidación, ADR-003).
 //
-// Es el único papel de este sistema que sale de la empresa hacia un tercero: el
+// Es uno de los dos papeles de este sistema que salen de la empresa hacia otra persona (el otro es
+// el comprobante de comisión del empleado, comprobanteComision.js, que es su gemelo): el
 // dueño del negocio lo manda a la persona a quien le subarrienda el carro, para
 // probar qué le pagó y qué le queda por pagar. Tiene que estar bien y tiene que
 // verse serio, y hay UNA regla que está por encima de todo lo demás:

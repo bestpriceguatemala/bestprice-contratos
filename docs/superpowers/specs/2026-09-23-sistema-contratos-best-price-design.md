@@ -202,6 +202,10 @@ no haber pagado; **nada se marca en silencio** (lo que queda fuera de lo marcado
 sigue a la vista con su total, «Sin marcar: N rentas · Q…»); y el total de lo
 marcado se suma a la vista antes de registrar nada.
 
+**Cada pago se imprime para el empleado** (23 de octubre de 2026): al registrarlo se le da un número de
+comprobante y se guarda lo que se pagó renta por renta, para que el papel que se le entrega y una reimpresión
+digan lo mismo. Qué lleva, qué no y qué pasa con los pagos de antes: §6, «El comprobante de pago de comisión».
+
 ## 6. Pantallas
 
 ### Principal — la flota
@@ -341,11 +345,13 @@ Se abre con contraseña y se cierra sola por inactividad o al salir del sistema.
 - **Comisiones**, por mes y por empleado, con el detalle de cada contrato y de
   dónde sale cada número. **Casillas para seleccionar** qué contratos se van a
   pagar, con el total de lo seleccionado y el botón de pagar; queda registrada
-  la fecha. Los pagados se separan de los pendientes. **Se baja la cuenta en Excel, no en
-  PDF** (23 de octubre de 2026; abajo, «Bajar la cuenta de comisiones en Excel»): un botón en
-  la ficha de cada empleado y otro en la lista, y el archivo es la copia que el dueño guarda,
-  **no** un comprobante para el empleado. Solo se paga lo de un contrato cerrado, y un período
-  (quincena o mes) se marca de un clic: ver §5, «Comisión del empleado».
+  la fecha. Los pagados se separan de los pendientes. **Se baja la cuenta en Excel** (23 de
+  octubre de 2026; abajo, «Bajar la cuenta de comisiones en Excel»): un botón en la ficha de cada
+  empleado y otro en la lista, y el archivo es la copia que el dueño guarda. **Y cada pago trae su
+  comprobante impreso para el empleado** (23 de octubre de 2026; abajo, «El comprobante de pago de
+  comisión»): un papel con membrete, número y firma, por el botón Imprimir. Solo se paga lo de un
+  contrato cerrado, y un período (quincena o mes) se marca de un clic: ver §5, «Comisión del
+  empleado».
 - **Dueños de carros ajenos**: lo que se le debe a cada uno, contrato por
   contrato, con las mismas casillas de selección y marcado de pago.
 - **Empleados**: alta, baja y el porcentaje de comisión de cada uno. Se ven
@@ -383,27 +389,31 @@ que se prometió, para que nadie las dé por hechas ni las vuelva a descubrir co
    construyó**, y el respaldo anual **sigue sin llevar las comisiones**: lo que existe es un
    botón que él aprieta, no una copia que se haga sola.
 
+   **Actualización del 23 y 24 de octubre de 2026: el PDF sí se construyó, pero no como «el Excel en PDF».** Se le preguntó
+   si quería un comprobante impreso para el empleado, como el que ya existe para los dueños de los carros que subarrienda, y
+   contestó: *«Sí, lo quiero.»* Es otra cosa que el Excel (un papel por cada pago, con su número, para quien recibe el
+   dinero) y se construyó aparte: ver «El comprobante de pago de comisión», abajo. Lo de arriba sigue siendo cierto: el respaldo
+   anual **sigue sin llevar las comisiones**, y el papel no reemplaza a la copia del dueño.
+
 **Bajar la cuenta de comisiones en Excel** (23 de octubre de 2026; `js/pantallas/comisiones.js`,
 sección «Bajar la cuenta en Excel», y `js/respaldo/libroNuevo.js`).
 
-*Qué es y por qué ese.* Había dos necesidades distintas detrás de «un botón de bajar», y se
+*Qué es y por qué ese.* Había dos necesidades distintas detrás de «un botón de bajar», y ese día se
 construyó una: **la copia del dueño** (la cuenta entera de un empleado, o la de todos, en un
-archivo que es suyo). **No** se construyó **el comprobante para el empleado** (una hoja que el
-dueño le entrega diciendo qué le pagó). Razones: lo que él dijo es que, perdido el acceso a
+archivo que es suyo). **Ese día no** se construyó **el comprobante para el empleado** (una hoja que el
+dueño le entrega diciendo qué le pagó); se construyó después, cuando él dijo que lo quería (siguiente
+apartado), y lo que sigue explica por qué no se pudo hacer entonces. Razones: lo que él dijo es que, perdido el acceso a
 Firebase, la historia no existe en nada suyo, y eso solo lo cierra un archivo con la cuenta
 entera (lo por pagar, lo que todavía no se paga, cada pago y los anulados), no la hoja de un
 pago que se imprime después de hecho y solo si se acuerda de guardarla; paga por quincena y por
 fin de mes y decide él cuándo, así que no hay un momento fijo que dispare un papel y sí un
 archivo que se baja cuando quiere (con el mes y la quincena de cada renta para filtrar en Excel);
-y el comprobante no se puede hacer honesto con lo que hay guardado (abajo). **Lo que sería el
-otro**: un «Imprimir comprobante» en cada pago de «Ya pagado», una hoja con membrete, el nombre
-del empleado, la fecha, la forma, **el monto guardado**, las rentas cubiertas y una línea de
-firma, por el botón Imprimir (ADR-003). Pide dos campos nuevos en el pago de comisión, que irían a
-§7b con su razón: un `numero` (correlativo, como el de un pago a un dueño; sin regla nueva de
-Firestore, porque `contadores/{id}` ya se lee y se escribe con la sesión normal) y un detalle
-guardado renta por renta, para que una reimpresión diga lo que dijo el original (hoy un pago solo
-guarda `monto`, `fecha`, `forma` y `contratos[]`). Y una decisión de él: que los empleados reciban
-papeles (§7b dice que hasta hoy «a un empleado no se le imprime nada»).
+y el comprobante no se podía hacer honesto con lo que había guardado: un pago solo guardaba `monto`,
+`fecha`, `forma` y `contratos[]`, sin número y sin lo que se pagó renta por renta, así que una
+reimpresión habría tenido que recalcularse con las cifras de HOY y, si un cierre se corregía
+mientras tanto, habría dicho otra cosa que el papel que el empleado tiene en la mano. Pedía dos
+campos nuevos en el pago, y una decisión de él: que los empleados reciban papeles. Las dos
+cosas ya están (siguiente apartado).
 
 *Cómo es.*
 - **Detrás de la contraseña de dinero** (§11), como todo el área: los dos botones están en la lista
@@ -421,7 +431,8 @@ papeles (§7b dice que hasta hoy «a un empleado no se le imprime nada»).
 - **Tres hojas.** «Resumen» (una fila por cuenta: código, porcentaje de hoy, rentas por pagar, lo que
   se le debe, lo estimado, lo que solo espera a cerrar, lo pagado sin contar los anulados, y un
   renglón «Todos» si son varias), «Rentas» (una fila por renta, **una sola vez cada una**) y «Pagos»
-  (cada pago, también los anulados). Cada cifra sale de lo que ya calculó el núcleo
+  (cada pago, también los anulados; desde el 24 de octubre, con la columna «Comprobante N°», el
+  número del papel que se le entregó al empleado, vacía en los pagos de antes de los comprobantes). Cada cifra sale de lo que ya calculó el núcleo
   (`comisionDe`, `cuentaDeEmpleado`, `totalesDePagos`, `totalGeneralDeComisiones`, `quincenaDe`).
 - **La deuda en una sola columna.** «Por pagar», «Estimada (el carro sigue afuera)» y «Ya regresó,
   falta que cierre» son tres columnas de dinero distintas: sumar una columna entera tiene que dar
@@ -437,8 +448,87 @@ papeles (§7b dice que hasta hoy «a un empleado no se le imprime nada»).
   que agregar una (y con ella un dato que no debía salir) falle fuerte.
 - **Junto al botón** se dice qué es el archivo y lo que no: que no se baja solo, que **el respaldo del
   año no lleva las comisiones** y que el archivo lleva el nombre de los clientes de cada renta.
-- **Ningún campo nuevo en ningún documento, ninguna colección ni regla de Firestore**: el archivo no
-  guarda nada en la nube.
+- **El archivo no guarda nada en la nube**: ni campo, ni colección, ni regla de Firestore. (Los dos
+  campos nuevos del pago de comisión son del comprobante, no del Excel.)
+
+**El comprobante de pago de comisión** (decidido el 23 de octubre de 2026, construido el 23 y 24;
+`js/pantallas/comprobanteComision.js`, `js/nucleo/comisiones.js`, ADR-003).
+
+*Qué es.* El papel que el dueño le entrega a un empleado cuando le paga sus comisiones. Es el gemelo
+del comprobante de pago a los dueños de carros (liquidación §6): misma hoja, mismo membrete (el que él
+confirmó línea por línea, **sin NIT**), mismo botón Imprimir (`Cmd + P → Guardar como PDF`, ADR-003, Carta
+vertical). Se abre con **«Ver comprobante»** en cada pago de «Ya pagado» de la ficha del empleado. Lo
+decidió él: *«Sí, lo quiero.»* (23 de octubre).
+
+*La regla que lo distingue: una reimpresión dice lo que dijo el original*, porque el empleado tiene la
+primera copia. Por eso el papel **no se arma con las rentas de hoy**: se arma solo con lo que el pago
+guardó el día que se hizo. `armarComprobanteDeComision` recibe el pago y el nombre del empleado y nada
+más (ni contratos, ni pagos, ni «hoy»), así que si después se corrige un cierre el papel que sale es el mismo
+que salió. Para eso el pago guarda dos campos nuevos (§7b): `numero` y `detalle[]`.
+
+*Qué lleva.* Membrete; el empleado (nombre y código); el número y la fecha del pago; una fila por renta con
+**cuándo regresó, el contrato, las placas, el cliente, los días (con los de atraso), la base de la
+comisión, el porcentaje de ese día y la comisión**; el **total pagado** (el `monto` guardado) y la forma de
+pago; y la línea de firma del empleado. Es lo mismo que ya enseña la fila de «Por pagar» de su cuenta.
+
+*De dónde sale cada dato.* Todo lo que es una cifra, una fecha o un número es **lo guardado en el pago** (`numero`, `fecha`,
+`forma`, `monto`, `detalle[]`). Solo el nombre y el código del empleado son los de su ficha de hoy: no son una cifra, y si se
+corrige una letra el papel lleva la corrección (como el del dueño de un carro lleva el nombre de su ficha).
+
+*Qué NO lleva, y por qué.* El del dueño de un carro excluye lo que el cliente pagó y la utilidad porque
+un proveedor no tiene por qué ver los libros de Best Price. Se razonó igual para un empleado, con una
+diferencia que decide: **la base de su comisión (días × precio − descuento) ya está en su pantalla, así que
+no es un secreto para quien rentó el carro**; lo que NO sale es lo que está del otro lado del mostrador.
+- **Lo que el cliente pagó, su saldo, su garantía y su tarjeta.** Son del cliente y de Best Price. De cada renta
+  se *toma* lo permitido (`filaDeDetalle`) en vez de quitar lo prohibido: un campo nuevo del contrato nunca
+  llega al papel por descuido. Una prueba busca cada cifra y cada palabra de esas en todo lo que sale, sobre
+  rentas con garantía, tarjeta con recargo, daños, descuento, atraso y carro ajeno.
+- **El costo de un carro ajeno y su dueño.** El empleado ve las placas de la renta que hizo (identifican la renta), no cuánto
+  se le paga al dueño de ese carro ni quién es.
+- **La utilidad, el precio por día y el descuento por separado.** Solo la base, que ya es el neto.
+- **Nada de otro empleado**, y ni siquiera de otras rentas del mismo: solo las del pago.
+- **«Queda pendiente» (lo que el del dueño sí lleva).** Sería una cifra «al día de hoy» que una reimpresión no
+  podría repetir, mezclaría lo estimado de las rentas que siguen afuera con lo firme, y sería una promesa de
+  pago sobre una fecha que decide él («yo decido cuándo lo pago», §5). Si algún día quiere que el papel diga lo
+  que falta, es un campo más guardado en el pago y una decisión suya.
+- **Una nota de «las rentas cambiaron» en el papel** (el del dueño la lleva): con el detalle guardado el papel
+  siempre suma su total, así que esa frase sería falsa; y el dueño del negocio se entera en pantalla (abajo).
+
+*Lo que el pago guarda, y por qué* (§7b): `numero` —el correlativo, de `contadores/comprobantesComision`, el
+mismo mecanismo que numera contratos y comprobantes de dueños, **con su propia serie** para no saltar números
+de los dueños— y `detalle[]` —una fila por renta, congelada el día del pago—. **Sin regla nueva de Firestore**:
+`contadores/{id}` ya se lee y se escribe con la sesión normal, y `pagosComision` solo mira que sea la credencial
+de dinero, no los campos (una prueba lo fija). El número se toma **una vez por intención de pagar**, igual que el
+id: un reintento (internet lento, doble clic) cae en el mismo documento con el mismo número.
+
+*Un pago de antes de los comprobantes NO se imprime, y dice por qué.* Los pagos hechos hasta el 23 de octubre
+no tienen número ni detalle. Se podía armar el papel con las rentas de hoy (silenciosamente, o con un aviso), o
+ponerle un número al imprimir; se decidió que **no**: un papel que dijera «esto fue lo que se pagó» sobre algo
+que nadie guardó afirmaría más de lo que se sabe, y un número tomado al imprimir sería de una serie que el
+empleado nunca vio y volvería «nuevo» a un pago viejo. La tarjeta de ese pago sigue llamándose «Pago del …» (no
+«Comprobante N.° …»), no trae el botón, y escribe la razón. **Anular uno de esos pagos tampoco le pone número ni
+detalle** (`guardarPagoComision` distingue crear de reescribir). La salida que existe es la de siempre: anularlo y
+volver a registrarlo con las mismas rentas; el pago nuevo sí trae su papel.
+
+*Un pago anulado* sigue lo que ya decidió el comprobante de los dueños: el papel **se niega** (ya no pagó nada,
+sus rentas volvieron a «por pagar»), el **número se conserva** (el empleado tiene el papel viejo) y la ficha no
+ofrece el botón. El mensaje de anular nombra el comprobante y avisa que ese papel deja de valer.
+
+*Si las rentas de un pago hoy suman otra cosa* (se corrigió un cierre después de pagar), el total sigue siendo lo
+guardado, como en el del dueño, y al dueño del negocio se le dice **en pantalla**, antes de imprimir
+(`no-imprimir`), con las palabras de siempre (`pagosQueCambiaron`): «Lo que se pagó el … fue Q…, y hoy esas rentas
+suman Q…». El papel no cambia.
+
+*De qué copia sale.* Un papel que sale de la empresa no puede salir de la copia que la pantalla tiene en memoria:
+si otra pestaña anuló el pago mientras tanto, se imprimiría «comisiones pagadas» sobre algo que ya no está pagado.
+«Ver comprobante» **vuelve a leer los pagos** y arma el papel del pago tal como está ahora en la nube; si no se pueden
+leer, no se abre nada. Está detrás de la contraseña de dinero (§11), y lo leído se suelta cuando la sesión se cierra.
+Todo lo que no es la hoja lleva `no-imprimir` (el contrato se imprime sobre papel preimpreso; un aviso encima de una
+hoja es lo que alguien firma).
+
+*Lo que se miró.* Se imprimió a PDF desde la pantalla real (una hoja Carta, sin menú ni botones ni avisos), se pagó,
+se imprimió, se corrigió un cierre y se reimprimió (el mismo texto), se anuló con un clic y se intentó imprimir con la
+pantalla vieja (se negó). Ver `.superpowers/comprobante-comision-2026-10-23.md`.
 
 Lo que no cambió: quien quiera ver la utilidad de un contrato o de un carro en pantalla, hoy, no
 puede. Ese hueco ya no es un olvido, es una decisión.
@@ -482,9 +572,10 @@ Colecciones en Firestore:
   Sin copia local: lo que se sella en un contrato tiene que ser el porcentaje de
   ahora, no el de la última vez que esa computadora sincronizó.
 - `pagosComision` — lo que se le ha pagado a cada empleado de comisión: fecha,
-  forma, monto y las rentas que cubre (los campos, en §7b; el «total» que decía esta
-  lista es `monto`, el mismo nombre de todo otro pago). **Solo con la contraseña de
-  dinero**, para leer y para escribir, y sin copia local, igual que `pagosDueno`.
+  forma, monto, las rentas que cubre y, desde el 23 de octubre de 2026, el número de su
+  comprobante y el detalle de lo que se pagó renta por renta (los campos, en §7b; el «total»
+  que decía esta lista es `monto`, el mismo nombre de todo otro pago). **Solo con la contraseña
+  de dinero**, para leer y para escribir, y sin copia local, igual que `pagosDueno`.
 - `duenos` — la ficha de cada dueño de un carro ajeno: nombre, teléfono, NIT y
   una nota (los campos, en §7b). Se lee y se escribe con la sesión normal,
   porque el alta rápida ocurre en el mostrador, con el carro afuera y el cliente
@@ -495,7 +586,10 @@ Colecciones en Firestore:
   escribir, y sin copia local: la copia local se lee sin credencial, y lo que se
   le paga a cada dueño no puede quedar ahí.
 - `ajustes` — configuración y calibración.
-- `contadores` — el correlativo del número de contrato (empieza en 1).
+- `contadores` — los correlativos, uno por documento y todos empiezan en 1: `contratos` (el número de
+  contrato), `vehiculos` (el código de cada carro), `comprobantes` (el comprobante de pago a un dueño de
+  carro) y `comprobantesComision` (el comprobante de pago a un empleado, 23 de octubre de 2026: su propia
+  serie, para no saltar números de la de los dueños). Se leen y se escriben con la sesión normal.
 
 Los carros subarrendados **no entran a `vehiculos`**: sus datos viven dentro del
 contrato, igual que en el Excel.
@@ -989,19 +1083,17 @@ lista viva: la ficha dibuja su formulario desde ahí.
   primer intento (`nuevoIdEmpleado`), como el de un dueño.
 
 **Del pago de comisión** (colección `pagosComision`; agregado el 13 de octubre):
-`empleadoId`, `fecha`, `forma`, `monto`, `contratos[]`, `actualizado`, y los dos de la
-anulación, `anulado` y `anuladoEn`.
+`empleadoId`, `fecha`, `forma`, `monto`, `contratos[]`, `actualizado`, los dos de la
+anulación, `anulado` y `anuladoEn`, y, desde el 23 de octubre de 2026, `numero` y `detalle[]`.
 
-Es la gemela del pago a un dueño y se llama igual donde es el mismo dato. **No lleva
-`numero`**: el de un pago a un dueño es el correlativo del comprobante que se le
-entrega, y a un empleado no se le imprime nada. (Desde el 23 de octubre de 2026 la cuenta
-se puede bajar en Excel, §6; **eso no agregó ningún campo**: el archivo lee estos mismos y no
-guarda nada. Un comprobante impreso para el empleado sí los pediría: `numero` y un detalle
-por renta.)
+Es la gemela del pago a un dueño y se llama igual donde es el mismo dato. **Hasta el 23 de octubre
+no llevaba `numero`** (a un empleado no se le imprimía nada); desde que él pidió el comprobante
+impreso, **lleva `numero` y `detalle[]`**, que son los dos campos nuevos. Los pagos hechos antes
+**no los tienen, ni se les agregan**: ver «Pagos de antes» abajo.
 - `empleadoId` es `null` en un pago hecho a un grupo de rentas viejas con el nombre
   escrito a mano; el pago sigue siendo de ese empleado si después se enlazan, porque
   se reconoce por las rentas que cubre (`contratos[]`), no por este campo.
-- `monto` y `contratos[]` nacen juntos, de la misma lista y en un solo lugar,
+- `monto`, `contratos[]` y `detalle[]` nacen juntos, de la misma lista y en un solo lugar,
   `construirPagoComision`, que toma de `elegirParaPagoDeComision`
   (`nucleo/comisiones.js`) lo que se paga. **Solo entra una renta de un contrato
   CERRADO** (§5, corregido el 14 de octubre de 2026): `estadoContrato(c) ===
@@ -1017,13 +1109,44 @@ por renta.)
 - `anulado` y `anuladoEn` se llaman **igual que en un pago del cliente y en uno a un
   dueño**, y son la misma función (`anularPagoComision` delega en `anularPagoDueno`):
   un segundo modo de anular sería un segundo lugar donde equivocarse. El pago conserva
-  su `monto` y sus `contratos[]` y sigue en «Ya pagado», marcado; sus rentas vuelven a
-  «por pagar» (`pagoAnulado`, `nucleo/liquidacion.js`, es el único lugar que lo decide).
+  su `monto`, sus `contratos[]`, su `numero` y su `detalle[]` (si los tiene) y sigue en «Ya pagado»,
+  marcado; sus rentas vuelven a «por pagar» (`pagoAnulado`, `nucleo/liquidacion.js`, es el único lugar que lo decide).
 - Que una renta esté pagada lo dice **solo** que su id aparezca en el `contratos[]` de
   un pago vigente. El contrato no lleva un campo «pagado», por lo mismo que no lo lleva
   el pago a un dueño. Si después de pagar se corrige un cierre y las rentas de un pago
   ya suman otra cosa que su `monto`, la ficha lo dice con palabras
   (`pagosQueCambiaron`) y no cambia lo que se debe: no se paga ni se descuenta nada solo.
+
+- `numero` (23 de octubre de 2026) es el correlativo del comprobante que se le entrega al empleado. Sale de
+  `siguienteNumeroComprobanteComision()`, una transacción sobre **`contadores/comprobantesComision`**: el
+  mismo mecanismo que el del pago a un dueño (`siguienteNumeroComprobante`, `contadores/comprobantes`), con
+  **su propia serie** —si compartieran, la serie de los dueños, que ya tienen su papel con su número, saltaría
+  números que no son suyos—. **Por qué existe:** un papel sin número no se puede citar ni se distingue de otro. Lo toma
+  `registrarElPagoDeComision` **una vez por intención de pagar**, igual que el `id` (`enCurso`), y **después** de comprobar
+  que nada cambió, para no gastar uno en un pago que no se hace; si el guardado falla queda un hueco en la numeración,
+  que se explica (un repetido no). Es un entero positivo. **Se conserva al anular**: el empleado tiene el papel.
+  **No se toma nunca al reescribir un pago**: anular un pago de antes (que no tiene número) no se lo pone
+  (`guardarPagoComision` con `{ reescritura: true }`). Ojo con el nombre: dentro de `detalle[]`, `numero` es el del
+  **contrato**, no el del comprobante.
+- `detalle[]` (23 de octubre de 2026) es lo que el comprobante dice renta por renta, **congelado el día del pago**: una
+  fila por renta que el pago cubre, con diez datos — `contratoId`, `numero` (del contrato), `fechaReal` (el día que regresó el
+  carro, la de `cierre.fechaReal`), `carroPlacas`, `clienteNombre`, `dias`, `diasAtraso`, `base`, `porcentajeComision` (el
+  sellado en el contrato) y `monto` (la comisión de esa renta). **Por qué existe:** una reimpresión tiene que decir lo que dijo
+  el original, y el empleado tiene la primera copia; sin esto el papel solo se podría recalcular con las rentas de hoy, y si
+  se corrigió un cierre entre una impresión y otra, los dos papeles se contradirían. **Los nombres son los del contrato donde
+  es el mismo dato** (`numero`, `carroPlacas`, `clienteNombre`, `dias`, `porcentajeComision`); `fechaReal` es la del cierre y
+  `diasAtraso`, `base` y `monto` salen de `atrasoDe` y `comisionDe`: no se calcula nada aparte (`filaDeDetalle`,
+  `nucleo/comisiones.js`). **De la renta se toma lo permitido**: no están lo que el cliente pagó, su garantía, su tarjeta, el
+  precio por día, el costo ni el dueño de un carro ajeno. Nace **de la misma elección que `monto` y `contratos[]`**
+  (`elegirParaPagoDeComision`), así que las filas suman el `monto` (que es la suma de sus `monto`) y son de las mismas rentas;
+  `estadoDelComprobante` lo comprueba al guardar y al imprimir, y un pago nuevo que no lo cumple **no se guarda**
+  (`guardarPagoComision`). Al registrar, el detalle que se guarda tiene que ser **el mismo que él vio** renta por renta, no solo
+  la misma suma (dos rentas pueden cambiar en sentidos opuestos y sumar igual): si no, no se registra y se dice (`detallesIguales`).
+- **Pagos de antes.** Un pago sin `numero` ni `detalle[]` (`estadoDelComprobante` lo llama «de-antes») es de antes del 23 de
+  octubre de 2026. **No se les agrega ninguno de los dos**: el detalle de lo que se pagó renta por renta no se guardó, y
+  armarlo con las cifras de hoy sería decir «esto fue lo que se pagó» sobre algo que nadie guardó. Tampoco se les da un
+  número al imprimir ni al anular. No se les imprime papel, y la ficha lo dice. Un pago con solo uno de los dos campos, o con un
+  detalle que no explica el pago, está dañado y tampoco se imprime. Quien lea `pagosComision` tiene que aceptar las dos formas.
 
 **Del respaldo** (documento `ajustes/respaldo`; agregado el 14 de octubre):
 `porAnio`, un mapa de año a la fecha ISO en que se bajó el respaldo de ese año:

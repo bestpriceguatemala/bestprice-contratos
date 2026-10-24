@@ -160,6 +160,19 @@ test('un número que no es un comprobante (0, negativo, con decimales, texto) de
   }
 });
 
+test('un pago con número pero sin ninguna renta (ni cubierta ni en el detalle) y en cero no es un papel: no hay nada que decir', () => {
+  const vacio = pagoSellado({ extra: { contratos: [], detalle: [], monto: 0 } });
+  assert.equal(estadoDelComprobante(vacio).tipo, 'danado');
+  assert.match(estadoDelComprobante(vacio).motivo, /detalle no es una lista de rentas/);
+});
+
+test('el id de una renta es texto: un detalle con ids que no lo son deja el pago dañado aunque coincida con `contratos`', () => {
+  const pago = pagoSellado();
+  const numerico = { ...pago, contratos: [1, 2], detalle: pago.detalle.map((f, i) => ({ ...f, contratoId: i + 1 })) };
+  assert.equal(estadoDelComprobante(numerico).tipo, 'danado');
+  assert.match(estadoDelComprobante(numerico).motivo, /no dice de qué renta es/);
+});
+
 test('un detalle que no es una lista de rentas, o una fila que no es una renta, deja el pago dañado', () => {
   for (const detalle of [[], {}, 'texto', 7, [null], [[]], ['c1'], [{}]]) {
     assert.equal(estadoDelComprobante(pagoSellado({ extra: { detalle } })).tipo, 'danado', JSON.stringify(detalle));
