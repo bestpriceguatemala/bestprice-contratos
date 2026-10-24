@@ -15,8 +15,20 @@ import {
   cuentaDeEmpleado, elegirParaPagoDeComision, filaDeDetalle, estadoDelComprobante, CAMPOS_DEL_DETALLE, detallesIguales,
 } from '../js/nucleo/comisiones.js';
 import { comisionDe } from '../js/nucleo/comision.js';
-import { suma } from '../js/nucleo/dinero.js';
+import { suma, recargoTarjeta, conTarjeta } from '../js/nucleo/dinero.js';
+import { resumen } from '../js/nucleo/contrato.js';
+import { atrasoDe } from '../js/nucleo/contrato.js';
+import { construirCierre } from '../js/nucleo/cierre.js';
+import { datosDelContratoPara } from '../js/nucleo/empleado.js';
+import { sumarDias } from '../js/nucleo/fechas.js';
+import { dinero, fecha } from '../js/ui.js';
+import { construirContrato } from '../js/pantallas/sacarCarro.js';
 import {
+  armarComprobanteDeComision, htmlComprobanteDeComision, pintarComprobanteDeComision, motivoSinComprobante,
+} from '../js/pantallas/comprobanteComision.js';
+import { MEMBRETE } from '../js/pantallas/comprobante.js';
+import {
+  agregarPago, contratoParaGuardar, conCostoDelDueno, costoDelDocumento,
   siguienteNumeroComprobante, siguienteNumeroComprobanteComision, construirPagoComision, pagoComisionParaGuardar, guardarPagoComision,
   cargarPagosComision, nuevoIdPagoComision, anularPagoComision, MENSAJE_COMISION_SIN_COMPROBANTE,
 } from '../js/datos.js';
@@ -25,6 +37,10 @@ import { nubeEnMemoria } from './fixtures/nubeEnMemoria.mjs';
 import { renta, rentaDeAntes, pagoDeComision, EMPLEADOS } from './fixtures/rentasConComision.mjs';
 
 const { luis } = EMPLEADOS;
+
+const leer = (ruta) => readFileSync(new URL(ruta, import.meta.url), 'utf8');
+/** El código sin comentarios, para buscar en lo que de verdad se ejecuta y no en lo que se explica. */
+const sinComentarios = (codigo) => codigo.replace(/\/\*[^]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"`])\/\/[^\n]*$/gm, '$1');
 
 const firme = (id, extra = {}) => renta({ id, recibidoEl: '2026-10-05', ...extra });
 
@@ -472,4 +488,405 @@ test('anular (la pantalla): un pago de antes se reescribe con `reescritura` y si
     assert.equal('numero' in escrito, esperado !== undefined);
     assert.equal('detalle' in escrito, esperado !== undefined);
   }
+});
+
+// ---------------------------------------------------------------------------
+// EL PAPEL (js/pantallas/comprobanteComision.js)
+// ---------------------------------------------------------------------------
+
+/**
+ * Una renta CON TODO LO QUE EL EMPLEADO NO DEBE VER: carro ajeno (costo de Q310 por día y un dueño con nombre), precio de Q850,
+ * pagada con tarjeta (6.5 % de recargo), una garantía de Q4,321 en otra tarjeta, daños, descuento al cliente, un día de atraso y
+ * una observación del mostrador. La comisión sale del 7.5 % de Luis.
+ */
+function conMargen({ id, numero, cliente, placas, fechaSalida, precioDia = 850 }) {
+  const sinCierre = construirContrato({
+    id,
+    numero,
+    cliente,
+    ajeno: true,
+    carro: null,
+    carroAjeno: {
+      placas, tipo: 'Pickup', marca: 'Toyota', color: 'Blanco', modelo: '2021', dueno: 'Mario López Estrada', costoDia: 310,
+    },
+    duenoId: 'd1',
+    fechaSalida,
+    dias: 4,
+    precioDia,
+    tarjetas: [{
+      ultimos4: '3343', vencimiento: '08/28', banco: 'BAC', autorizacion: 'A1', montoAutorizado: 4321,
+    }],
+    forma: 'tarjeta',
+    porcentajeTarjeta: 6.5,
+    montoPago: 3400,
+    observaciones: 'OBSERVACION-DEL-MOSTRADOR',
+    ...datosDelContratoPara(luis),
+  });
+  const devuelto = construirCierre(sinCierre, {
+    fechaReal: sumarDias(sinCierre.devolucionPrevista, 1),
+    horaReal: '10:00', lugarEntrada: 'Oficina', kmEntrada: 0, combustible: 0, danos: 275, varios: 0, descuento: 125,
+  });
+  const saldado = agregarPago(devuelto, {
+    monto: resumen(devuelto).saldo, forma: 'tarjeta', porcentajeTarjeta: 6.5, fecha: devuelto.cierre.fechaReal,
+  });
+  const completo = { ...saldado, garantiaLiberada: true, garantiaLiberadaEn: devuelto.cierre.fechaReal };
+  // Con el costo del dueño del carro DE VUELTA en memoria (ADR-002: así llega al área de dinero, que lo lee de `privado`): el peor caso,
+  // porque si el papel dejara pasar un campo del contrato, este es el que más duele.
+  return conCostoDelDueno(contratoParaGuardar(completo, { id, numero, ahora: 1790000000000 }), costoDelDocumento(completo));
+}
+
+const RICAS = [
+  conMargen({ id: 'm1', numero: 31, cliente: { id: 'k3', nombres: 'Carlos', apellidos: 'Méndez' }, placas: 'P-333CCC', fechaSalida: '2026-09-10' }),
+  conMargen({ id: 'm2', numero: 32, cliente: { id: 'k4', nombres: 'Lucía', apellidos: 'Barrios' }, placas: 'P-555EEE', fechaSalida: '2026-09-20', precioDia: 900 }),
+];
+
+/** El pago N° 12 que paga las dos rentas ricas y una sencilla, sellado como lo sella el registro. */
+function pagoDelPapel(extra = {}) {
+  const contratos = [...RICAS, firme('s1', { numero: 33 })];
+  return {
+    ...construirPagoComision({
+      empleadoId: 'e16', fecha: '2026-10-12', forma: 'transferencia', contratos, pagos: [], idsMarcados: ['m1', 'm2', 's1'],
+    }),
+    id: 'pp1', numero: 12, ...extra,
+  };
+}
+const LUIS_EN_PAPEL = { nombre: 'Luis Mérida', codigo: '16' };
+const papel = (extra = {}) => ({ pago: pagoDelPapel(), empleado: LUIS_EN_PAPEL, ...extra });
+
+test('el escenario del papel es el que dice ser: tres rentas, dos con todo lo que el empleado no debe ver, y su comisión', () => {
+  const pago = pagoDelPapel();
+  assert.deepEqual(pago.contratos.sort(), ['m1', 'm2', 's1']);
+  assert.deepEqual(estadoDelComprobante(pago), { tipo: 'listo' });
+  for (const c of RICAS) {
+    assert.ok(c.ajeno && c.garantiaMonto === 4321 && c.pagos.length === 2, 'ajena, con garantía y dos pagos con tarjeta');
+    assert.ok(c.cierre.danos === 275 && c.cierre.descuento === 125 && atrasoDe(c) === 1);
+    assert.equal(c.porcentajeComision, 7.5);
+  }
+  assert.equal(comisionDe(RICAS[0]).base, (4 + 1) * 850 - 125);
+  assert.equal(pago.monto, suma(...RICAS.map((c) => comisionDe(c).monto), 140));
+});
+
+test('el modelo: una fila por renta del pago, en el orden en que regresaron, con el total y la forma que el pago guardó', () => {
+  const m = armarComprobanteDeComision(papel());
+  assert.equal(m.numero, 12);
+  assert.equal(m.fecha, '2026-10-12');
+  assert.deepEqual(m.empleado, LUIS_EN_PAPEL);
+  assert.deepEqual(m.pagado.filas.map((f) => f.contrato).sort((a, b) => a - b), [31, 32, 33], 'las tres rentas del pago, ni una más');
+  const regresos = m.pagado.filas.map((f) => f.regreso);
+  assert.deepEqual([...regresos].sort(), regresos, 'cronológico');
+  assert.equal(m.pagado.total, pagoDelPapel().monto, 'el total es el monto GUARDADO, no una suma hecha aquí');
+  assert.equal(m.pagado.forma, 'transferencia');
+  const fila = m.pagado.filas.find((f) => f.contrato === 31);
+  assert.deepEqual(fila, {
+    regreso: RICAS[0].cierre.fechaReal, contrato: 31, placas: 'P-333CCC', cliente: 'Carlos Méndez', dias: 4, diasAtraso: 1,
+    base: comisionDe(RICAS[0]).base, porcentaje: 7.5, monto: comisionDe(RICAS[0]).monto,
+  });
+});
+
+test('las filas salen en el mismo orden aunque el pago las haya guardado en otro: por cuándo regresaron y, a igual día, por contrato', () => {
+  const pago = pagoDelPapel();
+  const fila = (extra) => ({ ...pago.detalle[0], ...extra });
+  pago.detalle = [
+    fila({ contratoId: 'z', numero: 9, fechaReal: '2026-10-09', monto: 10 }),
+    fila({ contratoId: 'y', numero: 8, fechaReal: '2026-10-09', monto: 10 }),
+    fila({ contratoId: 'x', numero: 7, fechaReal: '2026-10-05', monto: 10 }),
+  ];
+  pago.contratos = ['z', 'y', 'x'];
+  pago.monto = 30;
+  const filas = armarComprobanteDeComision({ pago, empleado: LUIS_EN_PAPEL }).pagado.filas;
+  assert.deepEqual(filas.map((f) => f.contrato), [7, 8, 9]);
+});
+
+test('el papel dice lo que el diseño manda, en este orden: membrete, empleado, número y fecha, las rentas con su total y su forma, firma', () => {
+  const html = htmlComprobanteDeComision(armarComprobanteDeComision(papel()));
+  const marcas = [
+    MEMBRETE.nombre, 'Comprobante de pago de comisiones', 'Empleado', 'Luis Mérida', 'N° 12', '12 oct 2026',
+    'Comisiones pagadas', '<th>Regresó</th>', '<th>Contrato</th>', '<th>Placas</th>', '<th>Cliente</th>', 'Días', 'Base', 'Comisión',
+    'Total pagado', 'Forma de pago: <strong>Transferencia</strong>', 'Firma del empleado',
+  ];
+  let desde = 0;
+  for (const marca of marcas) {
+    const en = html.indexOf(marca, desde);
+    assert.ok(en >= desde, `«${marca}» tiene que estar, después de lo anterior`);
+    desde = en;
+  }
+  assert.equal((html.match(/<tr>/g) || []).length, 1 + 3 + 1, 'encabezado, tres rentas y el total');
+});
+
+test('cada fila dice cuándo regresó, el contrato, las placas, el cliente, los días con su atraso, la base, el porcentaje y la comisión', () => {
+  const html = htmlComprobanteDeComision(armarComprobanteDeComision(papel()));
+  const k = comisionDe(RICAS[0]);
+  const fila = html.match(/<tr>\s*<td>[^<]*<\/td>\s*<td>31<\/td>[^]*?<\/tr>/)[0];
+  for (const esperado of [fecha(RICAS[0].cierre.fechaReal), '31', 'P-333CCC', 'Carlos Méndez', '4 + 1 de atraso', dinero(k.base), '7.5 %', dinero(k.monto)]) {
+    assert.ok(fila.includes(esperado), `la fila de la renta 31 dice «${esperado}»: ${fila}`);
+  }
+  const sencilla = html.match(/<tr>\s*<td>[^<]*<\/td>\s*<td>33<\/td>[^]*?<\/tr>/)[0];
+  assert.ok(sencilla.includes('<td class="num">4</td>') && !sencilla.includes('atraso'), 'sin atraso, solo los días');
+});
+
+test('UNA REIMPRESIÓN DICE LO QUE DIJO EL ORIGINAL: el papel no se arma con las rentas, así que no hay con qué cambiarlo', () => {
+  const original = htmlComprobanteDeComision(armarComprobanteDeComision(papel()));
+  // Aunque quien llame le pase las rentas corregidas, los pagos de hoy o la fecha de hoy, el papel sale igual: no las lee.
+  const corregidas = RICAS.map((c) => ({ ...c, dias: 9, precioDia: 1, cierre: { ...c.cierre, descuento: 9999, fechaReal: '2027-01-01' } }));
+  const reimpreso = htmlComprobanteDeComision(armarComprobanteDeComision({ ...papel(), contratos: corregidas, pagos: [], hoy: '2027-05-05', costoSinLeer: ['m1'] }));
+  assert.equal(reimpreso, original);
+  // Y es lo guardado lo que manda: cambiar el pago guardado sí cambia el papel (no se está ignorando todo).
+  const otro = pagoDelPapel({ forma: 'cheque' });
+  assert.notEqual(htmlComprobanteDeComision(armarComprobanteDeComision({ pago: otro, empleado: LUIS_EN_PAPEL })), original);
+});
+
+test('el papel no recibe ni contratos ni pagos: el módulo no importa nada que sepa calcular una comisión ni agrupar una cuenta', () => {
+  const codigo = sinComentarios(leer('../js/pantallas/comprobanteComision.js'));
+  assert.ok(!/comisionDe|cuentaDeEmpleado|agruparPorEmpleado|elegirParaPagoDeComision|filaDeDetalle|baseComision|estadoDeComision/.test(codigo), 'no calcula ni elige');
+  assert.ok(!/\bcontratos\b/.test(codigo.replace(/aria-label|pago\.contratos/g, '')), 'nunca nombra «contratos»: no recibe rentas');
+  assert.ok(!/new Date|hoyISO|Date\.now/.test(codigo), 'no lee el reloj: el papel no depende de qué día se imprime');
+  assert.ok(!/[^\w.]suma\(|\.reduce\(|\*\s*\d|\/\s*100/.test(codigo), 'no suma ni multiplica dinero por su cuenta');
+});
+
+test('el modelo solo tiene las llaves permitidas: una llave nueva (cliente pagó, utilidad, costo…) hace fallar esto', () => {
+  const llaves = (valor, ruta = '') => {
+    if (Array.isArray(valor)) return valor.flatMap((v) => llaves(v, `${ruta}[]`));
+    if (valor && typeof valor === 'object') return Object.entries(valor).flatMap(([k, v]) => [`${ruta}.${k}`, ...llaves(v, `${ruta}.${k}`)]);
+    return [];
+  };
+  const permitidas = [
+    '.numero', '.fecha', '.empleado', '.empleado.nombre', '.empleado.codigo',
+    '.pagado', '.pagado.filas', '.pagado.total', '.pagado.forma',
+    ...['regreso', 'contrato', 'placas', 'cliente', 'dias', 'diasAtraso', 'base', 'porcentaje', 'monto'].map((k) => `.pagado.filas[].${k}`),
+  ].sort();
+  assert.deepEqual([...new Set(llaves(armarComprobanteDeComision(papel())))].sort(), permitidas);
+});
+
+// ----- LO QUE EL EMPLEADO NO VE -----
+
+const formasDe = (n) => {
+  const formas = new Set([dinero(n), n.toFixed(2), n.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })]);
+  if (n >= 100) { formas.add(String(n)); formas.add(n.toLocaleString('es-GT', { maximumFractionDigits: 2 })); }
+  return [...formas];
+};
+/**
+ * Lo que aparece de la lista en `texto` como un número ENTERO (no pegado a otras cifras): el 125 del descuento no es una fuga
+ * por estar dentro del 4,125.00 de una base legítima. Los textos (nombres, 3343) se buscan tal cual.
+ */
+const encontrados = (texto, lista) => lista.filter((x) => (/^[\dQ.,-]+$/.test(x)
+  ? new RegExp(`(?<![\\d.,])${x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\d])`).test(texto)
+  : texto.includes(x)));
+
+/** Todo lo que un contrato sabe del negocio y que el empleado no ve en su papel: de lo que el cliente pagó, de lo que se cobró y de lo que cuesta el carro. */
+function numerosProhibidosDe(c) {
+  const r = resumen(c);
+  const pagos = (c.pagos || []).filter((p) => !p.anulado);
+  return [
+    c.garantiaMonto, c.carroAjeno?.costoDia, c.subarriendo?.costoDia, c.cierre?.danos, c.cierre?.descuento,
+    r.subtotal, r.totalSalida, r.totalDevolucion, r.pagado, r.totalCobrado, r.utilidad, r.saldo, r.costoSubarriendo,
+    ...pagos.flatMap((p) => [p.monto, recargoTarjeta(p.monto, p.porcentajeTarjeta), conTarjeta(p.monto, p.porcentajeTarjeta)]),
+  ].filter((n) => Number.isFinite(n) && n !== 0);
+}
+const TEXTOS_PROHIBIDOS = ['Mario López', 'Toyota', 'OBSERVACION-DEL-MOSTRADOR', '3343', 'BAC', '6.5', 'A1'];
+const PALABRAS_PROHIBIDAS = [
+  /utilidad/i, /ganancia/i, /margen/i, /recargo/i, /tarjeta/i, /garant[ií]a/i, /precio/i, /descuento/i, /cobrado/i, /saldo/i,
+  /costo/i, /due[ñn]o/i, /pendiente/i, /estimad/i, /abono/i, /\bNIT\b/,
+];
+
+function salidasDelPapel(extra = {}) {
+  const modelo = armarComprobanteDeComision(papel(extra));
+  const contenedor = { innerHTML: '', querySelector: () => null };
+  pintarComprobanteDeComision(contenedor, papel(extra));
+  return {
+    modelo, html: htmlComprobanteDeComision(modelo), pantalla: contenedor.innerHTML, json: JSON.stringify(modelo),
+  };
+}
+
+test('la prueba de lo prohibido no está vacía, y ninguna cifra prohibida choca con una permitida', () => {
+  const { modelo } = salidasDelPapel();
+  const permitidas = new Set(modelo.pagado.filas.flatMap((f) => [f.base, f.monto, f.dias, f.diasAtraso, f.porcentaje, f.contrato]).concat([modelo.pagado.total, modelo.numero]));
+  for (const c of RICAS) {
+    const prohibidas = numerosProhibidosDe(c);
+    assert.ok(prohibidas.length >= 8, `hay muchas cifras que buscar (${prohibidas.length})`);
+    assert.deepEqual(prohibidas.filter((n) => permitidas.has(n)), [], `lo prohibido de ${c.id} no choca con lo permitido`);
+  }
+});
+
+test('el detector funciona: ve cada cifra prohibida en un papel que la filtra de verdad, y no confunde el 125 con el 4,125.00', () => {
+  const prohibidas = [...new Set(RICAS.flatMap(numerosProhibidosDe))];
+  const papelQueFiltra = [...prohibidas.map((n) => `${dinero(n)} / ${n}`), ...TEXTOS_PROHIBIDOS].join('\n');
+  for (const n of prohibidas) assert.ok(encontrados(papelQueFiltra, formasDe(n)).length > 0, `el detector no vio ${n}`);
+  assert.deepEqual(encontrados(papelQueFiltra, TEXTOS_PROHIBIDOS), TEXTOS_PROHIBIDOS);
+  assert.deepEqual(encontrados('base Q4,125.00 y 1125', formasDe(125)), [], 'una cifra dentro de otra no es la misma cifra');
+  assert.ok(encontrados('descuento de Q125.00.', formasDe(125)).length > 0);
+});
+
+test('NINGUNA cifra del negocio sale en el papel: ni lo que el cliente pagó, ni su garantía, ni el recargo, ni el costo del carro, ni la utilidad', () => {
+  const { html, pantalla, json } = salidasDelPapel();
+  assert.ok(html.includes('P-333CCC') && html.includes('P-555EEE'), 'las rentas ricas SÍ están en el papel');
+  const permitidas = new Set(armarComprobanteDeComision(papel()).pagado.filas.flatMap((f) => [f.base, f.monto]));
+  const buscar = [...new Set(RICAS.flatMap(numerosProhibidosDe))].filter((n) => !permitidas.has(n));
+  // Las que más duelen están de verdad en la búsqueda: garantía, costo del carro ajeno, daños, descuento, lo pagado con recargo.
+  for (const n of [4321, 310, 1550, 275, 125]) assert.ok(buscar.includes(n), `${n} tiene que estar entre lo que se busca`);
+  for (const [donde, texto] of [['el HTML', html], ['la pantalla', pantalla], ['el modelo', json]]) {
+    for (const n of buscar) {
+      assert.deepEqual(encontrados(texto, formasDe(n)), [], `${donde} lleva ${dinero(n)}, una cifra del negocio que el empleado no puede ver`);
+    }
+    assert.deepEqual(encontrados(texto, TEXTOS_PROHIBIDOS), [], `${donde} lleva un dato del mostrador, de la tarjeta o del dueño del carro`);
+  }
+});
+
+test('ni una palabra del negocio: utilidad, tarjeta, garantía, precio, costo, dueño, saldo, pendiente, descuento…', () => {
+  const { html, pantalla } = salidasDelPapel();
+  // Los nombres de las clases del CSS (`comp-dueno`, que el papel de los dueños y este comparten) no se imprimen: se miran las palabras.
+  const palabras = (texto) => texto.replace(/ class="[^"]*"/g, '');
+  for (const palabra of PALABRAS_PROHIBIDAS) {
+    assert.ok(!palabra.test(palabras(html)), `el HTML dice ${palabra}`);
+    assert.ok(!palabra.test(palabras(pantalla)), `la pantalla dice ${palabra}`);
+  }
+});
+
+test('ningún id de contrato llega al papel, ni un contrato entero escondido en un atributo', () => {
+  const { html, pantalla } = salidasDelPapel();
+  for (const id of ['m1', 'm2', 's1', 'pp1']) {
+    assert.ok(!html.includes(`"${id}"`) && !pantalla.includes(`"${id}"`), id);
+  }
+  assert.ok(!/data-contrato|data-id|data-json/i.test(html));
+});
+
+test('un pago con campos de más no los arrastra al papel: solo se toma lo permitido de cada fila', () => {
+  const pago = pagoDelPapel({ utilidad: 646464.64, comisionTotal: 535353.53 });
+  pago.detalle = pago.detalle.map((f) => ({ ...f, clientePago: 747474.74, costoDia: 313131.31, duenoCarro: 'DUENO-SECRETO' }));
+  const { html, json } = salidasDelPapel({ pago });
+  for (const x of ['646464', '535353', '747474', '313131', 'DUENO-SECRETO']) {
+    assert.ok(!html.includes(x) && !json.includes(x), x);
+  }
+});
+
+test('el membrete es el de Best Price tal como lo confirmó el dueño: sin NIT, sin imágenes, con los tres WhatsApp', () => {
+  const html = htmlComprobanteDeComision(armarComprobanteDeComision(papel()));
+  assert.ok(!/\bNIT\b/i.test(html), 'él dijo que no lo quiere en estos papeles');
+  assert.ok(!/<img|url\(|<svg/i.test(html));
+  for (const linea of MEMBRETE.contacto) assert.ok(html.includes(linea.replace(/&/g, '&amp;')), linea);
+  assert.ok(html.includes(MEMBRETE.nombre) && html.includes(MEMBRETE.lema));
+});
+
+test('el texto escrito a mano se escapa: ni el nombre, ni el cliente, ni las placas pueden meter HTML al papel', () => {
+  const pago = pagoDelPapel();
+  pago.detalle = pago.detalle.map((f) => ({ ...f, clienteNombre: 'Ñandú & Hijos <S.A.> "El Rápido"', carroPlacas: '<b>P-1</b>' }));
+  const html = htmlComprobanteDeComision(armarComprobanteDeComision({ pago, empleado: { nombre: 'Ana <script>x()</script>', codigo: '<i>6</i>' } }));
+  assert.ok(!html.includes('<script>') && !html.includes('<b>P-1') && !html.includes('<i>6'));
+  assert.ok(html.includes('Ñandú &amp; Hijos &lt;S.A.&gt; &quot;El Rápido&quot;'));
+  assert.ok(html.includes('Ana &lt;script&gt;'));
+});
+
+test('lo que falta se ve como raya, no como «undefined»: sin código, sin contrato, sin placas', () => {
+  const pago = pagoDelPapel();
+  pago.detalle = pago.detalle.map((f) => ({ ...f, numero: null, carroPlacas: '', clienteNombre: '' }));
+  const html = htmlComprobanteDeComision(armarComprobanteDeComision({ pago, empleado: { nombre: 'Luis Mérida' } }));
+  assert.ok(!/undefined|null|NaN/.test(html));
+  assert.ok(html.includes('<dt>Código</dt><dd>—</dd>'));
+  assert.equal((html.match(/<td>—<\/td>/g) || []).length, 3 * 3, 'las tres filas, y en cada una: contrato, placas y cliente');
+});
+
+// ----- cuándo NO hay papel -----
+
+test('un pago ANULADO no tiene papel: lanza, dice que está anulado y desde cuándo, y el número se conserva en la frase', () => {
+  const anulado = anularPagoComision(pagoDelPapel(), { fecha: '2026-10-15' });
+  assert.throws(() => armarComprobanteDeComision({ pago: anulado, empleado: LUIS_EN_PAPEL }), /El pago N° 12 está anulado desde el 15 oct 2026/);
+  assert.match(motivoSinComprobante(anulado), /ya no cuenta como pagado/);
+});
+
+test('un pago DE ANTES de los comprobantes no tiene papel: lanza y explica por qué, sin recalcular nada ni ponerle número', () => {
+  const viejo = pagoDeComision({ id: 'p0', monto: 280, contratos: ['m1', 'm2'], fecha: '2026-10-10' });
+  const motivo = motivoSinComprobante(viejo);
+  assert.match(motivo, /El pago del 10 oct 2026 de Q280\.00 se registró antes de que existieran los comprobantes/);
+  assert.match(motivo, /no tiene número/);
+  assert.match(motivo, /cifras de hoy/);
+  assert.throws(() => armarComprobanteDeComision({ pago: viejo, empleado: LUIS_EN_PAPEL }), { message: motivo });
+  // Por muchas rentas «de hoy» que se le pasen, no inventa un papel: no las mira.
+  assert.throws(() => armarComprobanteDeComision({ pago: viejo, empleado: LUIS_EN_PAPEL, contratos: RICAS, pagos: [viejo] }), /antes de que existieran/);
+});
+
+test('un pago DAÑADO no tiene papel: dice cuál es el daño', () => {
+  const pago = pagoDelPapel();
+  const sinNumero = { ...pago }; delete sinNumero.numero;
+  assert.match(motivoSinComprobante(sinNumero), /no se puede imprimir: trae el detalle pero no su número/);
+  assert.match(motivoSinComprobante({ ...pago, monto: pago.monto + 1 }), /N° 12 no se puede imprimir: las filas de su detalle no suman lo que se pagó/);
+  assert.throws(() => armarComprobanteDeComision({ pago: { ...pago, detalle: [] }, empleado: LUIS_EN_PAPEL }), /no se puede imprimir/);
+});
+
+test('sin fecha válida o sin un pago, no hay papel; y un pago bueno no tiene motivo para negarse', () => {
+  assert.throws(() => armarComprobanteDeComision({ pago: pagoDelPapel({ fecha: '2026-02-30' }), empleado: LUIS_EN_PAPEL }), /fecha válida/);
+  assert.throws(() => armarComprobanteDeComision({ pago: pagoDelPapel({ fecha: '' }), empleado: LUIS_EN_PAPEL }), /fecha válida/);
+  assert.throws(() => armarComprobanteDeComision({ empleado: LUIS_EN_PAPEL }), /Falta el pago/);
+  assert.throws(() => armarComprobanteDeComision(), /Falta el pago/);
+  assert.equal(motivoSinComprobante(pagoDelPapel()), null);
+});
+
+// ----- la pantalla del papel -----
+
+/** Un contenedor mínimo, sin DOM: lo que `pintarComprobanteDeComision` necesita para dibujar y enganchar botones. */
+function contenedorFalso() {
+  const enganches = {};
+  return {
+    innerHTML: '',
+    enganches,
+    querySelector(selector) {
+      return { addEventListener(evento, fn) { enganches[`${selector}:${evento}`] = fn; } };
+    },
+  };
+}
+
+test('pintarComprobanteDeComision dibuja la hoja y engancha el botón de imprimir al diálogo del navegador', () => {
+  const c = contenedorFalso();
+  let impresiones = 0;
+  const modelo = pintarComprobanteDeComision(c, papel(), { imprimir: () => { impresiones += 1; } });
+  assert.equal(modelo.numero, 12);
+  assert.ok(c.innerHTML.includes('Comisiones pagadas') && c.innerHTML.includes('Guardar como PDF'));
+  c.enganches['[data-accion="imprimir"]:click']();
+  assert.equal(impresiones, 1);
+});
+
+test('la barra de botones y las ayudas llevan la marca que la hoja de impresión esconde; la hoja misma no', () => {
+  const c = contenedorFalso();
+  pintarComprobanteDeComision(c, papel());
+  const barra = c.innerHTML.match(/<div class="comp-barra[^"]*"[^>]*>/);
+  assert.ok(barra && barra[0].includes('no-imprimir'));
+  assert.match(c.innerHTML, /<p class="comp-ayuda no-imprimir">/);
+  const hoja = c.innerHTML.match(/<article class="comprobante[^"]*"/);
+  assert.ok(hoja && !hoja[0].includes('no-imprimir'));
+});
+
+test('si el papel no se puede armar, la pantalla dice por qué y NO dibuja una hoja', () => {
+  for (const pago of [pagoDeComision({ id: 'p0', monto: 280, contratos: ['m1'] }), anularPagoComision(pagoDelPapel(), { fecha: '2026-10-15' })]) {
+    const c = contenedorFalso();
+    assert.equal(pintarComprobanteDeComision(c, papel({ pago })), null);
+    assert.ok(c.innerHTML.includes('barra-lectura-fallida') && c.innerHTML.includes('No se pudo armar el comprobante.'));
+    assert.ok(!c.innerHTML.includes('class="comprobante') && !c.innerHTML.includes('Comisiones pagadas'), 'ninguna hoja a medias');
+  }
+});
+
+test('los avisos para quien manda el papel salen en pantalla, escapados, y NO en el papel', () => {
+  const c = contenedorFalso();
+  pintarComprobanteDeComision(c, papel({ avisos: ['Hoy esas rentas suman Q1.00 <b>y</b>.', '  ', null] }));
+  const aviso = c.innerHTML.match(/<div class="barra-lectura-fallida[^"]*"[^>]*>[^]*?<\/div>/);
+  assert.ok(aviso && aviso[0].includes('no-imprimir') && aviso[0].includes('&lt;b&gt;'));
+  assert.equal((aviso[0].match(/<p>/g) || []).length, 1, 'las frases vacías no hacen un aviso');
+  const limpio = contenedorFalso();
+  pintarComprobanteDeComision(limpio, papel());
+  assert.ok(!limpio.innerHTML.includes('barra-lectura-fallida'));
+  // Y ni el aviso ni la ayuda están dentro de la hoja que se imprime.
+  const hoja = c.innerHTML.slice(c.innerHTML.indexOf('<article'));
+  assert.ok(!hoja.includes('Hoy esas rentas suman') && !hoja.includes('no-imprimir'));
+});
+
+test('el botón de volver solo existe si quien llama dijo a dónde volver', () => {
+  const sin = contenedorFalso();
+  pintarComprobanteDeComision(sin, papel());
+  assert.ok(!sin.innerHTML.includes('data-accion="volver"'));
+  const con = contenedorFalso();
+  let volvio = 0;
+  pintarComprobanteDeComision(con, papel(), { alVolver: () => { volvio += 1; } });
+  con.enganches['[data-accion="volver"]:click']();
+  assert.equal(volvio, 1);
+  const fallo = contenedorFalso();
+  pintarComprobanteDeComision(fallo, papel({ pago: undefined }), { alVolver: () => { volvio += 1; } });
+  fallo.enganches['[data-accion="volver"]:click']();
+  assert.equal(volvio, 2, 'también desde la pantalla de «no se pudo armar»');
 });

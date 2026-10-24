@@ -292,6 +292,7 @@ const ARCHIVOS_QUE_NOMBRAN_EL_PORCENTAJE = [
   'nucleo/comisiones.js',   // lo LEE para la cuenta de cada empleado
   'nucleo/empleado.js',     // la ficha del empleado y lo que el contrato sella de ella
   'pantallas/comisiones.js', // lo LEE; y llama a enlazarContratosAlEmpleado, que escribe con dinero
+  'pantallas/comprobanteComision.js', // lo LEE de la fila que el PAGO guardó (`detalle[]`), para decirlo en el papel del empleado; no escribe ningún contrato ni recibe uno
   'pantallas/empleados.js', // la ficha del empleado (se guarda con dinero)
   'pantallas/sacarCarro.js', // lo SELLA, una sola vez, al CREAR el contrato (construirContrato)
 ];

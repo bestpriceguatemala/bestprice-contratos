@@ -79,16 +79,18 @@ export const MEMBRETE = {
 };
 
 // El texto libre (nombre del dueño, del cliente, placas) nunca entra al HTML sin
-// pasar por aquí: mismo escape que el resto de las pantallas.
-function esc(texto) {
+// pasar por aquí: mismo escape que el resto de las pantallas. (Se exporta, con `RAYA`, `algo`, `textoDeForma` e
+// `imprimirConTitulo`, para el comprobante de comisión del empleado: es su gemelo y no debe tener un segundo escape,
+// una segunda raya ni una segunda forma de poner el nombre del PDF.)
+export function esc(texto) {
   return String(texto ?? '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
 }
 
 /** Lo que se escribe donde no hay dato: una raya, no un hueco que parezca un error. */
-const RAYA = '—';
-const algo = (texto) => (String(texto ?? '').trim() ? esc(String(texto).trim()) : RAYA);
+export const RAYA = '—';
+export const algo = (texto) => (String(texto ?? '').trim() ? esc(String(texto).trim()) : RAYA);
 
 /** Qué se imprime en lugar de la cifra cuando el costo no es confiable, según el motivo. */
 const TEXTO_SIN_COSTO = {
@@ -98,7 +100,7 @@ const TEXTO_SIN_COSTO = {
 
 const FORMAS_DE_PAGO = { efectivo: 'Efectivo', transferencia: 'Transferencia', cheque: 'Cheque' };
 
-function textoDeForma(forma) {
+export function textoDeForma(forma) {
   const limpia = String(forma ?? '').trim();
   if (!limpia) return 'No anotada';
   return FORMAS_DE_PAGO[limpia.toLowerCase()] ?? `${limpia[0].toUpperCase()}${limpia.slice(1)}`;
@@ -649,7 +651,7 @@ function avisosDePantalla(m) {
  * y no como «Best Price — Contratos», que es lo que ADR-003 lista como
  * inconveniente. Fuera de un navegador no hace nada y solo imprime.
  */
-function imprimirConTitulo(titulo, imprimir) {
+export function imprimirConTitulo(titulo, imprimir) {
   if (typeof document === 'undefined' || typeof window === 'undefined') {
     imprimir();
     return;
