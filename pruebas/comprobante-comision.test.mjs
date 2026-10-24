@@ -32,7 +32,11 @@ import {
   siguienteNumeroComprobante, siguienteNumeroComprobanteComision, construirPagoComision, pagoComisionParaGuardar, guardarPagoComision,
   cargarPagosComision, nuevoIdPagoComision, anularPagoComision, MENSAJE_COMISION_SIN_COMPROBANTE,
 } from '../js/datos.js';
-import { registrarElPagoDeComision, anularElPagoDeComision, armarVistaDeComisiones } from '../js/pantallas/comisiones.js';
+import {
+  registrarElPagoDeComision, anularElPagoDeComision, armarVistaDeComisiones, htmlFichaDeComisiones, leerElPagoParaElComprobante,
+  entradaDelPapelDeComision, avisoDelPapelQueNoCambia, textoConfirmarAnularPagoDeComision, textoDePagoQueCambio,
+  MENSAJE_COMPROBANTE_COMISION_SIN_COMPROBAR,
+} from '../js/pantallas/comisiones.js';
 import { nubeEnMemoria } from './fixtures/nubeEnMemoria.mjs';
 import { renta, rentaDeAntes, pagoDeComision, EMPLEADOS } from './fixtures/rentasConComision.mjs';
 
@@ -889,4 +893,185 @@ test('el botón de volver solo existe si quien llama dijo a dónde volver', () =
   pintarComprobanteDeComision(fallo, papel({ pago: undefined }), { alVolver: () => { volvio += 1; } });
   fallo.enganches['[data-accion="volver"]:click']();
   assert.equal(volvio, 2, 'también desde la pantalla de «no se pudo armar»');
+});
+
+// ---------------------------------------------------------------------------
+// LA FICHA: el número, el botón, y lo que se dice cuando no hay papel
+// ---------------------------------------------------------------------------
+
+const ANA_RENTAS = [firme('a1', { numero: 1 }), firme('a2', { numero: 2 }), firme('a3', { numero: 3 })];
+const uiVacia = () => ({
+  marcados: new Set(), pagando: false, forma: 'efectivo', fecha: '2026-10-20', mensajePago: '', mensajeEnlace: '', enlazarEmpleadoId: '', enlazarPorcentaje: false,
+});
+const texto = (html) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+/** El pago N° 12 de Ana por a1 y a2, sellado como lo sella el registro. */
+const pagoDeAna = (extra = {}) => ({
+  ...construirPagoComision({
+    empleadoId: 'e1', fecha: '2026-10-12', forma: 'transferencia', contratos: ANA_RENTAS, pagos: [], idsMarcados: ['a1', 'a2'],
+  }),
+  id: 'pa1', numero: 12, ...extra,
+});
+const PAGO_VIEJO = pagoDeComision({ id: 'pv', monto: 140, contratos: ['a3'], fecha: '2026-10-10', forma: 'efectivo' });
+
+function fichaDeAna({ contratos = ANA_RENTAS, pagos }) {
+  const lectura = lecturaOk({ contratos, pagos });
+  const vista = armarVistaDeComisiones(lectura);
+  const entrada = vista.entradas.find((e) => e.nombre === 'Ana López');
+  return { html: htmlFichaDeComisiones({ entrada, vista, ui: uiVacia(), lectura, hoy: '2026-10-20' }), entrada, vista, lectura };
+}
+const yaPagado = (html) => html.slice(html.indexOf('<h2>Ya pagado</h2>'));
+
+test('«Ya pagado»: un pago con comprobante se llama por su número, y trae «Ver comprobante» y «Anular»', () => {
+  const { html } = fichaDeAna({ pagos: [pagoDeAna()] });
+  const pagado = yaPagado(html);
+  assert.match(texto(pagado), /Comprobante N\.° 12 · 12 oct 2026 · Transferencia/);
+  assert.match(pagado, /data-cm="comprobante" data-id="pa1">Ver comprobante<\/button>/);
+  assert.match(pagado, /data-cm="anular-pago" data-id="pa1"/);
+  assert.ok(!pagado.includes('dn-sin-papel'), 'nada que explicar: sí tiene papel');
+  assert.ok(!/Pago del 12 oct/.test(texto(pagado)));
+});
+
+test('un pago DE ANTES se sigue llamando «Pago del …», NO ofrece comprobante y dice por qué: no se parece a uno nuevo', () => {
+  const { html } = fichaDeAna({ pagos: [PAGO_VIEJO, pagoDeAna()] });
+  const tarjetas = yaPagado(html).split('<article').slice(1);
+  const viejo = tarjetas.find((t) => t.includes('data-id="pv"'));
+  const nuevo = tarjetas.find((t) => t.includes('data-id="pa1"'));
+  assert.match(texto(viejo), /Pago del 10 oct 2026 · Efectivo/);
+  assert.ok(!/Comprobante N\./.test(texto(viejo)), 'sin número que mostrar');
+  assert.ok(!viejo.includes('data-cm="comprobante"'), 'sin botón');
+  assert.match(viejo, /data-cm="anular-pago" data-id="pv"/, 'pero se puede anular, como siempre');
+  assert.match(texto(viejo), /antes de que existieran los comprobantes de comisión/);
+  assert.match(texto(viejo), /no tiene número ni guardó lo que se pagó renta por renta/);
+  assert.match(texto(viejo), /cifras de hoy/);
+  assert.ok(nuevo.includes('data-cm="comprobante"') && !nuevo.includes('dn-sin-papel'));
+});
+
+test('un pago ANULADO conserva su número y su etiqueta, y NO ofrece papel ni dice nada más: ya no pagó nada', () => {
+  const anulado = anularPagoComision(pagoDeAna(), { fecha: '2026-10-15' });
+  const { html } = fichaDeAna({ pagos: [anulado] });
+  const pagado = yaPagado(html);
+  assert.match(texto(pagado), /Comprobante N\.° 12 · 12 oct 2026 · Transferencia Anulado el 15 oct 2026/);
+  assert.match(pagado, /dn-pago-anulado/);
+  assert.ok(!pagado.includes('data-cm="comprobante"') && !pagado.includes('data-cm="anular-pago"') && !pagado.includes('dn-sin-papel'));
+  // Y el viejo anulado tampoco: sigue siendo «Pago del …».
+  const viejoAnulado = fichaDeAna({ pagos: [{ ...PAGO_VIEJO, anulado: true, anuladoEn: '2026-10-11' }] }).html;
+  assert.match(texto(yaPagado(viejoAnulado)), /Pago del 10 oct 2026 · Efectivo Anulado el 11 oct 2026/);
+  assert.ok(!yaPagado(viejoAnulado).includes('dn-sin-papel'), 'a un pago de antes que se anuló tampoco se le explica un papel que ya no tiene sentido');
+});
+
+test('un pago dañado no ofrece papel y dice cuál es el daño', () => {
+  const dañado = pagoDeAna(); delete dañado.detalle;
+  const { html } = fichaDeAna({ pagos: [dañado] });
+  assert.ok(!html.includes('data-cm="comprobante"'));
+  assert.match(texto(yaPagado(html)), /no se puede imprimir: trae su número pero no el detalle/);
+  assert.match(texto(yaPagado(html)), /Pago del 12 oct 2026|Comprobante N\.° 12/, 'tiene un número guardado, y se ve');
+});
+
+test('las rentas de un pago con comprobante se listan COMO LAS GUARDÓ el pago: igual que el papel, aunque se corrija un cierre o la renta ya no esté', () => {
+  const corregida = renta({ id: 'a2', numero: 2, recibidoEl: '2026-10-06' }); // hoy vale Q175, no Q140
+  const sinA1 = [corregida, ANA_RENTAS[2]];
+  const { html } = fichaDeAna({ contratos: sinA1, pagos: [pagoDeAna()] });
+  const rentas = yaPagado(html);
+  assert.ok(rentas.includes('contrato 1 · P-1AAA · Juan Pérez · Q140.00'), 'la a1 sigue ahí aunque ya no esté en la cuenta');
+  assert.ok(rentas.includes('contrato 2 · P-2AAA · Juan Pérez · Q140.00'), 'la a2 dice lo que se pagó, no los Q175 de hoy');
+  assert.ok(!rentas.includes('Q175.00') && !rentas.includes('ya no está en esta cuenta'));
+  // Un pago de antes sí lista las de hoy (no guardó otra cosa) y dice «ya no está» de la que falta.
+  const viejo = fichaDeAna({ pagos: [{ ...PAGO_VIEJO, contratos: ['a3', 'a-que-ya-no-esta'] }] }).html;
+  assert.match(viejo, /Una renta que ya no está en esta cuenta/);
+});
+
+test('si hoy las rentas del pago suman otra cosa, la ficha lo dice como siempre y el aviso del papel lo repite para quien lo manda', () => {
+  const corregida = renta({ id: 'a2', numero: 2, recibidoEl: '2026-10-06' });
+  const pago = pagoDeAna();
+  const { entrada, html } = fichaDeAna({ contratos: [ANA_RENTAS[0], corregida, ANA_RENTAS[2]], pagos: [pago] });
+  const cambio = entrada.cuenta.pagosQueCambiaron.find((x) => x.pago.id === 'pa1');
+  assert.ok(cambio, 'el escenario: el núcleo ve que cambió');
+  assert.match(texto(html), /Lo que se pagó el 12 oct 2026 fue Q280\.00, y hoy esas rentas suman Q315\.00/);
+  const aviso = avisoDelPapelQueNoCambia(cambio);
+  assert.ok(aviso.startsWith(textoDePagoQueCambio(cambio)), 'con las mismas palabras de la ficha');
+  assert.match(aviso, /El papel sigue diciendo lo que se pagó ese día/);
+  const entradaPapel = entradaDelPapelDeComision({ pago, entrada, entradaDeAhora: entrada });
+  assert.deepEqual(entradaPapel.avisos, [aviso]);
+  assert.deepEqual(entradaPapel.empleado, { nombre: 'Ana López', codigo: '1' });
+  // Sin cambio, o sin cuenta de ahora, no hay aviso (y el papel sale igual).
+  const sinCambio = fichaDeAna({ pagos: [pago] }).entrada;
+  assert.deepEqual(entradaDelPapelDeComision({ pago, entrada: sinCambio, entradaDeAhora: sinCambio }).avisos, []);
+  assert.deepEqual(entradaDelPapelDeComision({ pago, entrada: sinCambio }).avisos, []);
+});
+
+test('el aviso es del pago que se imprime: con dos pagos y solo uno que cambió, el otro no lo lleva', () => {
+  const otro = pagoDeAna({ id: 'pa2', numero: 13, contratos: ['a3'], monto: 140, detalle: [filaDeDetalle(ANA_RENTAS[2])] });
+  const corregida = renta({ id: 'a3', numero: 3, recibidoEl: '2026-10-06' });
+  const { entrada } = fichaDeAna({ contratos: [ANA_RENTAS[0], ANA_RENTAS[1], corregida], pagos: [pagoDeAna(), otro] });
+  assert.deepEqual(entrada.cuenta.pagosQueCambiaron.map((x) => x.pago.id), ['pa2']);
+  assert.equal(entradaDelPapelDeComision({ pago: pagoDeAna(), entrada, entradaDeAhora: entrada }).avisos.length, 0);
+  assert.equal(entradaDelPapelDeComision({ pago: otro, entrada, entradaDeAhora: entrada }).avisos.length, 1);
+});
+
+test('EL RECORRIDO: se registra, se imprime, se corrige un cierre, se reimprime — el papel es el mismo, y la ficha avisa que hoy suma otra cosa', async () => {
+  const d = nubeDeMentira({ contratos: ANA_RENTAS });
+  const r = await registrarElPagoDeComision({
+    entrada: anaDe(ANA_RENTAS), idsMarcados: ['a1', 'a2'], forma: 'efectivo', fecha: '2026-10-12', ...d,
+  });
+  assert.equal(r.tipo, 'guardado');
+  const original = armarComprobanteDeComision({ pago: r.pago, empleado: { nombre: 'Ana López', codigo: '1' } });
+  const htmlOriginal = htmlComprobanteDeComision(original);
+  assert.match(htmlOriginal, /N° 21/);
+
+  // Pasan los días y se corrige el cierre de la a2 (regresó un día después): ahora vale Q175.
+  const despues = [ANA_RENTAS[0], renta({ id: 'a2', numero: 2, recibidoEl: '2026-10-06' }), ANA_RENTAS[2]];
+  const leido = await leerElPagoParaElComprobante({ pagoId: r.pago.id, leerPagos: async () => ({ datos: [structuredClone(r.pago)], fallo: false }) });
+  const vista = armarVistaDeComisiones(lecturaOk({ contratos: despues, pagos: leido.pagos }));
+  const entrada = vista.entradas.find((e) => e.nombre === 'Ana López');
+  const entradaPapel = entradaDelPapelDeComision({ pago: leido.pago, entrada, entradaDeAhora: entrada });
+  assert.equal(entradaPapel.avisos.length, 1, 'a él se le dice que hoy suma otra cosa');
+  const reimpreso = htmlComprobanteDeComision(armarComprobanteDeComision(entradaPapel));
+  assert.equal(reimpreso, htmlOriginal, 'al empleado, el papel le sale idéntico');
+  assert.ok(!reimpreso.includes('Q175.00') && !reimpreso.includes('cambiaron'));
+});
+
+test('el papel se abre desde el pago tal como está AHORA en la nube, no desde la copia de la pantalla: se lee de nuevo', async () => {
+  const pago = pagoDeAna();
+  let lecturas = 0;
+  const leerPagos = async () => { lecturas += 1; return { datos: [anularPagoComision(pago, { fecha: '2026-10-15' })], fallo: false }; };
+  const r = await leerElPagoParaElComprobante({ pagoId: 'pa1', leerPagos });
+  assert.equal(lecturas, 1);
+  assert.equal(r.tipo, 'listo');
+  assert.equal(r.pago.anulado, true, 'otra pestaña lo anuló: lo que llega es lo anulado');
+  // ...y entonces el papel se niega, en vez de imprimir «comisiones pagadas» sobre algo que ya no está pagado.
+  const c = contenedorFalso();
+  assert.equal(pintarComprobanteDeComision(c, entradaDelPapelDeComision({ pago: r.pago, entrada: { nombre: 'Ana López' } })), null);
+  assert.match(c.innerHTML, /está anulado desde el 15 oct 2026/);
+});
+
+test('leer el pago para el papel: si ya no está lo dice, y si los pagos no se pueden leer LANZA — sin saberlo no se abre ningún papel', async () => {
+  const sinEse = await leerElPagoParaElComprobante({ pagoId: 'pa1', leerPagos: async () => ({ datos: [PAGO_VIEJO], fallo: false }) });
+  assert.deepEqual(sinEse, { tipo: 'no-esta', pagos: [PAGO_VIEJO] });
+  for (const lectura of [{ datos: null, fallo: true }, { datos: 'x', fallo: false }, { datos: [], fallo: true }]) {
+    await assert.rejects(leerElPagoParaElComprobante({ pagoId: 'pa1', leerPagos: async () => lectura }), { message: MENSAJE_COMPROBANTE_COMISION_SIN_COMPROBAR });
+  }
+});
+
+test('anular: el mensaje nombra el comprobante cuando lo hay, y avisa que el papel del empleado deja de valer; el de un pago de antes no inventa un número', () => {
+  const entrada = { nombre: 'Ana López' };
+  const nuevo = textoConfirmarAnularPagoDeComision(pagoDeAna(), entrada);
+  assert.match(nuevo, /Anular el pago de Q280\.00 a Ana López \(comprobante N\.° 12, del 12 oct 2026, transferencia\)/);
+  assert.match(nuevo, /con su número/);
+  assert.match(nuevo, /el papel que el empleado tiene deja de valer/);
+  const viejo = textoConfirmarAnularPagoDeComision(PAGO_VIEJO, entrada);
+  assert.ok(!/comprobante N/.test(viejo) && !/papel/.test(viejo));
+});
+
+test('la ficha engancha el botón al recorrido seguro: sesión, relectura, y nada guardado en el módulo', () => {
+  const codigo = sinComentarios(leer('../js/pantallas/comisiones.js'));
+  assert.match(codigo, /case 'comprobante': verComprobante\(accion\.dataset\.id\); return;/);
+  const f = codigo.slice(codigo.indexOf('async function verComprobante'), codigo.indexOf('// ----- Enlazar'));
+  assert.match(f, /async function verComprobante\(pagoId\) \{\s*if \(ui\.ocupado \|\| !haySesion\(\) \|\| !entrada\) return;/);
+  assert.match(f, /await leerElPagoParaElComprobante\(\{ pagoId \}\)/, 'lee de nuevo');
+  assert.match(f, /if \(!haySesion\(\) \|\| !lector\.actual\) return;/, 'y mira la sesión otra vez después de leer');
+  assert.match(f, /lector\.actual\.pagos\.datos = r\.pagos/);
+  assert.match(f, /if \(r\.tipo === 'no-esta'\) \{ aviso\(MENSAJE_COMPROBANTE_COMISION_NO_ESTA, 'error'\); dibujar\(\); return; \}/, 'un pago que ya no está se dice');
+  assert.match(f, /alVolver: dibujar/);
+  assert.match(codigo, /Pago registrado: \$\{dinero\(r\.pago\.monto\)\}\. Comprobante N\.° \$\{r\.pago\.numero\}\./, 'al registrar se le dice el número');
 });

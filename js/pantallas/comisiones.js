@@ -34,7 +34,7 @@
 import { comisionDe } from '../nucleo/comision.js';
 import {
   agruparPorEmpleado, cuentaDeEmpleado, elegirParaPagoDeComision, totalGeneralDeComisiones, rentasSinPagar, estadoDeComision,
-  periodosDePago, sinMarcarDeComision, quincenaDe, detallesIguales,
+  periodosDePago, sinMarcarDeComision, quincenaDe, detallesIguales, estadoDelComprobante,
 } from '../nucleo/comisiones.js';
 import { pagoAnulado, totalesDePagos } from '../nucleo/liquidacion.js';
 import { q } from '../nucleo/dinero.js';
@@ -57,6 +57,7 @@ import {
   razonDeNoCierre,
 } from './dinero.js';
 import { descargarArchivo } from './respaldo.js';
+import { pintarComprobanteDeComision, motivoSinComprobante } from './comprobanteComision.js';
 
 // El texto libre (nombres, placas, el nombre escrito a mano) se escapa antes de entrar al HTML, igual que en las demás pantallas.
 function esc(texto) {
@@ -85,6 +86,9 @@ export const MENSAJE_COMISION_FALLO = 'No se pudo registrar el pago. Revisa tu i
   + 'Si sigue sin conectar, recarga la página y revisa «Ya pagado» antes de intentarlo otra vez.';
 export const MENSAJE_ANULAR_COMISION_SIN_COMPROBAR = 'No se pudo comprobar si este pago sigue como lo ves, y anularlo sin saberlo podría pisar una anulación que ya se hizo. Revisa tu internet e intenta de nuevo; no se anuló nada.';
 export const MENSAJE_ANULAR_COMISION_NO_ESTA = 'Este pago ya no está en la lista de pagos. No se anuló nada; la lista ya está al día, revísala.';
+export const MENSAJE_COMPROBANTE_COMISION_SIN_COMPROBAR = 'No se pudo comprobar que este pago siga vigente, y un papel que sale de la empresa no puede salir de una copia vieja. Revisa tu internet e intenta de nuevo; no se abrió el comprobante.';
+export const MENSAJE_COMPROBANTE_COMISION_FALLO = 'No se pudo abrir el comprobante. Recarga la página e intenta de nuevo.';
+export const MENSAJE_COMPROBANTE_COMISION_NO_ESTA = 'Este pago ya no está en la lista de pagos. No se abrió el comprobante; la lista ya está al día, revísala.';
 export const MENSAJE_ANULAR_COMISION_FALLO = 'No se pudo anular el pago. Revisa tu internet y vuelve a intentarlo: si ya había quedado anulado, no se anula dos veces.';
 /** Lo que se dice junto al botón de la lista: qué es el archivo y lo que NO es (el respaldo del año no lleva las comisiones). */
 export const TEXTO_DE_LA_COPIA = 'El Excel es tu copia: lleva todas las cuentas, con lo que se debe, lo que todavía no se paga y cada pago. No se baja solo, y el respaldo del año no lleva las comisiones: si no lo bajas de vez en cuando, esta historia solo existe en el sistema. Lleva el nombre de los clientes de cada renta: guárdalo donde solo entres tú.';
@@ -96,6 +100,7 @@ export const MENSAJE_ENLACE_COMISION_FALLO = 'No se pudieron enlazar las rentas.
 const FRASES_CONOCIDAS = new Set([
   MENSAJE_COMISION_SIN_DINERO, MENSAJE_COMISION_SIN_RENTAS, MENSAJE_COMISION_SIN_MONTO, MENSAJE_COMISION_SIN_ID,
   MENSAJE_COMISION_SIN_COMPROBAR, MENSAJE_COMISION_SIN_COMPROBAR_RENTAS, MENSAJE_ANULAR_COMISION_SIN_COMPROBAR,
+  MENSAJE_COMPROBANTE_COMISION_SIN_COMPROBAR,
   'La nube no respondió a tiempo.',
   MENSAJE_ENLACE_SIN_DINERO,
   'Falta escoger a qué empleado de la lista se enlazan las rentas.',
@@ -329,9 +334,15 @@ export async function registrarElPagoDeComision({
  */
 export function textoConfirmarAnularPagoDeComision(pago, entrada) {
   const rentas = new Set((Array.isArray(pago?.contratos) ? pago.contratos : []).filter(Boolean)).size;
-  return `¿Anular el pago de ${dinero(pago?.monto)} a ${entrada?.nombre ?? 'este empleado'} (del ${fecha(pago?.fecha)}, ${etiquetaDeForma(pago?.forma).toLowerCase()})? `
+  // Un pago con comprobante lo nombra por su número: el empleado tiene ese papel en la mano, y anular el pago equivocado por un
+  // diálogo vago es justo lo que este mensaje existe para evitar. Uno de antes de los comprobantes no tiene número que decir.
+  const delPapel = Number.isInteger(pago?.numero) ? `comprobante N.° ${pago.numero}, ` : '';
+  const delRastro = Number.isInteger(pago?.numero)
+    ? 'El pago queda marcado como anulado, con su número, y no desaparece de «Ya pagado»: el papel que el empleado tiene deja de valer, y ese número no se reutiliza.'
+    : 'El pago queda marcado como anulado y no desaparece de «Ya pagado».';
+  return `¿Anular el pago de ${dinero(pago?.monto)} a ${entrada?.nombre ?? 'este empleado'} (${delPapel}del ${fecha(pago?.fecha)}, ${etiquetaDeForma(pago?.forma).toLowerCase()})? `
     + `Cubre ${rentas} ${palabraRentas(rentas)}. ${rentas === 1 ? 'Esa renta vuelve' : 'Esas rentas vuelven'} a «Por pagar». `
-    + 'El pago queda marcado como anulado y no desaparece de «Ya pagado».';
+    + delRastro;
 }
 
 /**
@@ -355,6 +366,49 @@ export async function anularElPagoDeComision({
   // comprobantes no le pone un número ni un detalle: lo haría parecer un pago nuevo con un papel que nadie vio.
   const anulado = await guardar(anularPagoComision(actual, { fecha: hoy }), { reescritura: true });
   return { tipo: 'anulado', pago: anulado, pagos: frescos.datos.map((p) => (p.id === anulado.id ? anulado : p)) };
+}
+
+// ---------------------------------------------------------------------------
+// El comprobante del empleado (23 de octubre de 2026)
+// ---------------------------------------------------------------------------
+//
+// El papel lo arma comprobanteComision.js solo con lo que el pago guardó. Aquí se decide una cosa: de qué copia del pago sale. Un papel
+// que sale de la empresa no puede salir de la copia que la pantalla tiene en memoria —la de cuando se abrió—: si otra pestaña anuló
+// ese pago mientras tanto, se imprimiría «comisiones pagadas» sobre algo que ya no está pagado. Por eso, como al anular, se vuelve a
+// LEER la lista de pagos antes de abrir el papel, y el papel sale del pago tal como está AHORA en la nube.
+
+/**
+ * Lee los pagos de nuevo y devuelve el que se quiere imprimir: `{ tipo: 'listo', pago, pagos }`, o `{ tipo: 'no-esta', pagos }` si ya no
+ * existe. Si los pagos no se pueden leer LANZA: sin saberlo no se abre ningún papel. Las dependencias se reciben para probarlo sin red.
+ */
+export async function leerElPagoParaElComprobante({ pagoId, leerPagos = cargarPagosComision } = {}) {
+  const frescos = await leerPagos();
+  if (frescos.fallo || !Array.isArray(frescos.datos)) throw new Error(MENSAJE_COMPROBANTE_COMISION_SIN_COMPROBAR);
+  const pago = frescos.datos.find((p) => p?.id && p.id === pagoId);
+  return pago ? { tipo: 'listo', pago, pagos: frescos.datos } : { tipo: 'no-esta', pagos: frescos.datos };
+}
+
+/**
+ * Lo que `pintarComprobanteDeComision` pide: el pago (el recién leído), el empleado tal como lo tiene su cuenta hoy y, si las rentas de
+ * ese pago hoy suman otra cosa que lo que se pagó, el aviso para quien manda el papel. `entradaDeAhora` es la misma cuenta armada con los
+ * pagos recién leídos (o `null` si ya no se puede armar: sin cuenta no hay aviso, pero el papel sale igual, porque no depende de ella).
+ */
+export function entradaDelPapelDeComision({ pago, entrada, entradaDeAhora = null }) {
+  const cambio = entradaDeAhora?.cuenta.pagosQueCambiaron.find((x) => x.pago.id === pago?.id);
+  return {
+    pago,
+    empleado: { nombre: entrada?.nombre, codigo: entrada?.registro?.codigo },
+    avisos: cambio ? [avisoDelPapelQueNoCambia(cambio)] : [],
+  };
+}
+
+/**
+ * La frase que le dice a quien manda el papel que las rentas de este pago hoy suman otra cosa que lo que se pagó (se corrigió un
+ * cierre después de pagar). Sale solo en pantalla, antes de imprimir: el papel NO cambia (es el que el empleado ya tiene), y lo que
+ * hacer con la diferencia lo decide él. Lleva las palabras de siempre de la ficha (`textoDePagoQueCambio`).
+ */
+export function avisoDelPapelQueNoCambia(cambio) {
+  return `${textoDePagoQueCambio(cambio)} El papel sigue diciendo lo que se pagó ese día, igual que el que el empleado ya tiene; la diferencia la decides tú.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1005,31 +1059,60 @@ function htmlBloqueTodaviaNoSePaga(ctx) {
     </section>`;
 }
 
+/** Una renta de un pago, en una línea. La misma línea sale de la renta de hoy o de la fila que el pago guardó: solo cambia de dónde viene. */
+const lineaDeRenta = ({
+  regreso, numero, placas, cliente, monto,
+}) => `<li>${esc(fecha(regreso))} · contrato ${esc(numero ?? '—')} · ${esc(placas || '—')} · ${esc(cliente || '—')} · ${esc(dinero(monto))}</li>`;
+
 function htmlBloqueYaPagado(ctx) {
   const { entrada, lectura } = ctx;
   const pagos = pagosDeLaCuentaDeComision(entrada, lectura.pagos.datos);
   const rentaDe = (id) => entrada.contratos.find((c) => c.id === id);
   const tarjetas = pagos.map((p) => {
-    const rentas = (p.contratos ?? []).map((id) => {
-      const c = rentaDe(id);
-      return c
-        ? `<li>${esc(fecha(c.cierre?.fechaReal))} · contrato ${esc(c.numero ?? '—')} · ${esc(c.carroPlacas || '—')} · ${esc(c.clienteNombre || '—')} · ${esc(dinero(comisionDe(c).monto))}</li>`
-        : '<li class="dn-gris">Una renta que ya no está en esta cuenta.</li>';
-    }).join('');
-    // Un pago anulado NO desaparece: se ve apagado, con «Anulado el …», como un pago anulado del cliente o de un dueño. Sin botones.
+    const estadoPapel = estadoDelComprobante(p);
+    const conPapel = estadoPapel.tipo === 'listo';
+    // Un pago CON comprobante lista sus rentas como las guardó (lo mismo que dice el papel, aunque después se corrija un cierre o la
+    // renta ya no esté en esta cuenta); uno de antes no guardó nada renta por renta, y lista las de hoy, como siempre.
+    const rentas = conPapel
+      ? p.detalle.map((f) => lineaDeRenta({
+        regreso: f.fechaReal, numero: f.numero, placas: f.carroPlacas, cliente: f.clienteNombre, monto: f.monto,
+      })).join('')
+      : (p.contratos ?? []).map((id) => {
+        const c = rentaDe(id);
+        return c
+          ? lineaDeRenta({
+            regreso: c.cierre?.fechaReal, numero: c.numero, placas: c.carroPlacas, cliente: c.clienteNombre, monto: comisionDe(c).monto,
+          })
+          : '<li class="dn-gris">Una renta que ya no está en esta cuenta.</li>';
+      }).join('');
+    // Un pago anulado NO desaparece: se ve apagado, con «Anulado el …», como un pago anulado del cliente o de un dueño. Sin botones:
+    // su comprobante no se vuelve a armar (el número se conserva, el empleado tiene el papel viejo).
     const anulado = pagoAnulado(p);
     const etiquetaAnulado = anulado
       ? `<span class="etiqueta-anulado">Anulado${p.anuladoEn ? ` el ${esc(fecha(p.anuladoEn))}` : ''}</span>`
       : '';
-    const boton = anulado ? '' : `<button type="button" class="btn" data-cm="anular-pago" data-id="${esc(p.id)}">Anular</button>`;
+    const verPapel = conPapel
+      ? `<button type="button" class="btn" data-cm="comprobante" data-id="${esc(p.id)}">Ver comprobante</button>`
+      : '';
+    const boton = anulado ? '' : `${verPapel}<button type="button" class="btn" data-cm="anular-pago" data-id="${esc(p.id)}">Anular</button>`;
+    // El nombre del pago: con papel es su número (lo que el empleado tiene escrito); uno de antes se queda como «Pago del …», para
+    // que no se parezca a uno nuevo.
+    const nombre = Number.isInteger(p.numero)
+      ? `<strong>Comprobante N.° ${esc(p.numero)}</strong> · ${esc(fecha(p.fecha))}`
+      : `<strong>Pago del ${esc(fecha(p.fecha))}</strong>`;
+    // Lo que no tiene papel dice por qué, en vez de un botón que falta sin explicación (el anulado ya lo dice su etiqueta).
+    const sinPapel = !anulado && !conPapel
+      ? `<p class="dn-explica-chica dn-sin-margen dn-sin-papel">${esc(motivoSinComprobante(p))}</p>`
+      : '';
     return `
       <article class="dn-caja dn-pago-hecho${anulado ? ' dn-pago-anulado' : ''}">
         <div class="dn-pago-cabecera">
-          <div><strong>Pago del ${esc(fecha(p.fecha))}</strong> · ${esc(etiquetaDeForma(p.forma))}${etiquetaAnulado}</div>
+          <div>${nombre} · ${esc(etiquetaDeForma(p.forma))}${etiquetaAnulado}</div>
           <div class="dn-pago-monto">
             <strong class="dn-pago-cifra">${esc(dinero(p.monto))}</strong>${boton}
           </div>
         </div>
+        ${sinPapel}
         <ul class="dn-pago-rentas">${rentas}</ul>
       </article>`;
   }).join('');
@@ -1297,12 +1380,36 @@ async function pintarCuentas(contenedor, claveDeFicha) {
         ui.mensajePago = '';
         ui.marcados.clear();
         ui.enCurso = null;
-        aviso(r.tipo === 'ya-guardado' ? 'Ese pago ya estaba registrado.' : `Pago registrado: ${dinero(r.pago.monto)}.`, 'exito');
+        aviso(r.tipo === 'ya-guardado'
+          ? `Ese pago ya estaba registrado (comprobante N.° ${r.pago.numero}).`
+          : `Pago registrado: ${dinero(r.pago.monto)}. Comprobante N.° ${r.pago.numero}.`, 'exito');
       }
       dibujar();
     } catch (error) {
       ui.mensajePago = mensajeSeguroDeComision(error, MENSAJE_COMISION_FALLO);
       dibujar();
+    } finally {
+      ui.ocupado = false;
+    }
+  }
+
+  // ----- El comprobante del empleado -----
+  async function verComprobante(pagoId) {
+    if (ui.ocupado || !haySesion() || !entrada) return;
+    ui.ocupado = true;
+    try {
+      const r = await leerElPagoParaElComprobante({ pagoId });
+      // Si la sesión se cerró mientras se leía, lo leído se tira: es dinero y se suelta con la sesión.
+      if (!haySesion() || !lector.actual) return;
+      lector.actual.pagos.datos = r.pagos;
+      if (r.tipo === 'no-esta') { aviso(MENSAJE_COMPROBANTE_COMISION_NO_ESTA, 'error'); dibujar(); return; }
+      // Lo que cambió en las rentas de este pago desde que se pagó, para decírselo a quien lo manda (el papel no cambia). La cuenta se arma
+      // con los pagos recién leídos.
+      const vistaDeAhora = armarVistaDeComisiones(lector.actual);
+      const deAhora = vistaDeAhora.ok ? vistaDeAhora.entradas.find((e) => e.clave === claveActual) : null;
+      pintarComprobanteDeComision(raiz, entradaDelPapelDeComision({ pago: r.pago, entrada, entradaDeAhora: deAhora }), { alVolver: dibujar });
+    } catch (error) {
+      aviso(mensajeSeguroDeComision(error, MENSAJE_COMPROBANTE_COMISION_FALLO), 'error');
     } finally {
       ui.ocupado = false;
     }
@@ -1411,6 +1518,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
         case 'guardar-pago': guardarPago(); return;
         case 'enlazar': enlazar(); return;
         case 'anular-pago': anularPago(accion.dataset.id); return;
+        case 'comprobante': verComprobante(accion.dataset.id); return;
         case 'bajar': bajarExcel(accion.dataset.alcance); return;
         case 'periodo':
           // Un clic marca el período entero (reemplaza lo marcado); lo que quedó fuera sigue a la vista, con su total.
