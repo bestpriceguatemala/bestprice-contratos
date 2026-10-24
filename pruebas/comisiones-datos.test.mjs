@@ -12,9 +12,9 @@ import {
   cargarEmpleados, guardarEmpleado, nuevoIdEmpleado, empleadoParaGuardar, MENSAJE_EMPLEADO_SIN_DINERO, MENSAJE_ALTA_SIN_ID,
   nuevoIdPagoComision, construirPagoComision, pagoComisionParaGuardar, guardarPagoComision, cargarPagosComision, anularPagoComision,
   enlazarContratosAlEmpleado, MENSAJE_COMISION_SIN_DINERO, MENSAJE_COMISION_SIN_RENTAS, MENSAJE_COMISION_SIN_MONTO,
-  MENSAJE_COMISION_SIN_ID, MENSAJE_ENLACE_SIN_DINERO,
+  MENSAJE_COMISION_SIN_ID, MENSAJE_COMISION_SIN_COMPROBANTE, MENSAJE_ENLACE_SIN_DINERO,
 } from '../js/datos.js';
-import { cuentaDeEmpleado } from '../js/nucleo/comisiones.js';
+import { cuentaDeEmpleado, filaDeDetalle } from '../js/nucleo/comisiones.js';
 import { nubeEnMemoria } from './fixtures/nubeEnMemoria.mjs';
 import { renta, rentaDeAntes, pagoDeComision, EMPLEADOS } from './fixtures/rentasConComision.mjs';
 
@@ -127,7 +127,19 @@ test('construirPagoComision: monto y contratos salen de la MISMA elección, y lo
   const pago = construirPagoComision({
     empleadoId: 'e1', fecha: '2026-10-20', forma: 'efectivo', contratos: firmes(), pagos: [], idsMarcados: ['c1', 'c3', 'w1', 'fantasma'],
   });
-  assert.deepEqual(pago, { empleadoId: 'e1', fecha: '2026-10-20', forma: 'efectivo', monto: 140, contratos: ['c1'] });
+  assert.deepEqual(pago, {
+    empleadoId: 'e1', fecha: '2026-10-20', forma: 'efectivo', monto: 140, contratos: ['c1'], detalle: [filaDeDetalle(firmes()[0])],
+  });
+  assert.ok(!('numero' in pago), 'el número no nace aquí: se pide a la nube, una vez por intención (registrarElPagoDeComision)');
+});
+
+test('construirPagoComision: el detalle sale de la MISMA elección — una fila por renta del pago y su suma es el monto', () => {
+  const pago = construirPagoComision({
+    empleadoId: 'e1', fecha: '2026-10-20', forma: 'efectivo', contratos: firmes(), pagos: [], idsMarcados: ['c1', 'c2', 'c3', 'w1'],
+  });
+  assert.deepEqual(pago.contratos, ['c1', 'c2']);
+  assert.deepEqual(pago.detalle.map((f) => f.contratoId), pago.contratos, 'ni la abierta ni la de 0 % tienen fila');
+  assert.equal(pago.detalle.reduce((t, f) => t + f.monto, 0), pago.monto);
 });
 
 test('construirPagoComision: lo que ya está pagado no vuelve a entrar, y un pago anulado devuelve sus rentas', () => {
@@ -158,22 +170,33 @@ test('construirPagoComision: lanza si los pagos no son una lista — una lectura
   assert.throws(() => construirPagoComision({ contratos: undefined, pagos: [], idsMarcados: ['c1'] }), /«contratos» debe ser una lista/);
 });
 
-const pagoNuevo = (extra = {}) => ({ empleadoId: 'e1', fecha: '2026-10-20', forma: 'efectivo', monto: 140, contratos: ['c1'], ...extra });
+/** Un pago NUEVO, como lo deja `registrarElPagoDeComision`: lo que arma `construirPagoComision` y el número que se tomó para él. */
+const pagoNuevo = (extra = {}) => ({
+  ...construirPagoComision({
+    empleadoId: 'e1', fecha: '2026-10-20', forma: 'efectivo', contratos: firmes(), pagos: [], idsMarcados: ['c1'],
+  }),
+  numero: 7,
+  ...extra,
+});
 
 async function guardarPago(nube, pago, extra = {}) {
   const id = pago.id ?? await nuevoIdPagoComision(conDinero(nube));
   return guardarPagoComision({ ...pago, id }, conDinero(nube, extra));
 }
 
-test('guardarPagoComision: escribe en `pagosComision` con la base de DINERO, sin número de comprobante', async () => {
+test('guardarPagoComision: escribe en `pagosComision` con la base de DINERO, con el número y el detalle que traía', async () => {
   const nube = nubeEnMemoria();
   const guardado = await guardarPago(nube, pagoNuevo());
-  assert.deepEqual(Object.keys(guardado).sort(), ['actualizado', 'contratos', 'empleadoId', 'fecha', 'forma', 'id', 'monto']);
+  assert.deepEqual(Object.keys(guardado).sort(), ['actualizado', 'contratos', 'detalle', 'empleadoId', 'fecha', 'forma', 'id', 'monto', 'numero']);
+  assert.equal(guardado.numero, 7);
+  assert.deepEqual(guardado.detalle, [filaDeDetalle(firmes()[0])]);
   const [escritura, ...otras] = nube.escrituras(`pagosComision/${guardado.id}`);
   assert.equal(otras.length, 0);
   assert.equal(escritura[4], 'dinero');
   assert.deepEqual(nube.leer(`pagosComision/${guardado.id}`), guardado);
-  assert.equal(nube.docs.has('contadores/comprobantes'), false, 'no gasta un número de comprobante: no hay papel');
+  // El número lo toma quien registra, una vez por intención: guardar no gasta ninguno (ni de los dueños ni de los empleados).
+  assert.equal(nube.docs.has('contadores/comprobantes'), false);
+  assert.equal(nube.docs.has('contadores/comprobantesComision'), false);
 });
 
 test('guardarPagoComision: no deja copia local (lo que se le paga a cada empleado no se escribe donde se lee sin contraseña)', async () => {
@@ -251,7 +274,7 @@ test('lo que se guarda y se lee de vuelta sirve para la cuenta: lo ya pagado no 
   const nube = nubeEnMemoria();
   const contratos = firmes();
   const pago = construirPagoComision({ empleadoId: 'e1', fecha: '2026-10-20', forma: 'efectivo', contratos, pagos: [], idsMarcados: ['c1'] });
-  await guardarPago(nube, pago);
+  await guardarPago(nube, { ...pago, numero: 1 });
   const { datos } = await cargarPagosComision(conDinero(nube));
   const cuenta = cuentaDeEmpleado({ contratos: contratos.filter((c) => c.empleadoId === 'e1'), pagos: datos });
   assert.deepEqual(cuenta.pagados.map((c) => c.id), ['c1']);

@@ -13,7 +13,7 @@ import { mezclar, guardarLocal, leerLocal, idsQueSobran, borrarLocales, depurarL
 import { filtrar, textoDeCliente } from './nucleo/busqueda.js';
 import { textoDeDueno } from './nucleo/dueno.js';
 import { problemasDeEmpleado, porcentajeAnotado } from './nucleo/empleado.js';
-import { cuentaDeEmpleado, elegirParaPagoDeComision } from './nucleo/comisiones.js';
+import { cuentaDeEmpleado, elegirParaPagoDeComision, estadoDelComprobante } from './nucleo/comisiones.js';
 import { estadoContrato } from './nucleo/estados.js';
 import {
   cuentaDeDueno, elegirParaPago, descuentoMaximo, totalPagadoDeMas,
@@ -1938,14 +1938,39 @@ export async function nuevoIdPagoDueno({ iniciar = iniciarFirebase, dbDinero = d
  * `iniciar` se puede inyectar solo para probar la transacción sin red.
  */
 export async function siguienteNumeroComprobante({ iniciar = iniciarFirebase } = {}) {
+  return tomarSiguienteDe('comprobantes', { iniciar });
+}
+
+/**
+ * La transacción de un correlativo: lee `contadores/<nombre>`, le suma uno y lo escribe, todo en UNA transacción. Es la de
+ * `siguienteNumeroContrato` y la de `siguienteNumeroComprobante` sin variantes (un solo mecanismo, ya probado contra dos
+ * pestañas a la vez); lo único que cambia entre un correlativo y otro es el documento. Se escribe con la sesión normal: la
+ * regla de `contadores/{id}` es `haySesion()`, y por eso un número de comprobante de comisión no pide ninguna regla nueva.
+ */
+async function tomarSiguienteDe(nombre, { iniciar = iniciarFirebase } = {}) {
   const { db, fsMod } = await iniciar();
-  const ref = fsMod.doc(db, 'contadores', 'comprobantes');
+  const ref = fsMod.doc(db, 'contadores', nombre);
   return conLimiteDeTiempo(fsMod.runTransaction(db, async (tx) => {
     const actual = await tx.get(ref);
     const siguiente = (Number(actual.exists() ? actual.data().ultimo : 0) || 0) + 1;
     tx.set(ref, { ultimo: siguiente });
     return siguiente;
   }));
+}
+
+/**
+ * El siguiente número del comprobante que se le entrega a un EMPLEADO cuando se le paga una comisión (23 de octubre de 2026).
+ * Tiene SU contador, `contadores/comprobantesComision`, y no el de los dueños de carros: si compartieran, la serie de los
+ * dueños —que ya tienen papeles con su número en la mano— saltaría números que no son suyos, y un «N° 7» podría ser de dos
+ * personas distintas. Dos series, dos documentos, el mismo mecanismo.
+ *
+ * Si el guardado falla después de tomar el número, ese número queda sin usar: un hueco en la numeración se explica, un número
+ * repetido no. (La pantalla lo toma UNA vez por intención de pagar, como el id, para no dejar un hueco por cada reintento.)
+ *
+ * `iniciar` se puede inyectar solo para probar la transacción sin red.
+ */
+export async function siguienteNumeroComprobanteComision({ iniciar = iniciarFirebase } = {}) {
+  return tomarSiguienteDe('comprobantesComision', { iniciar });
 }
 
 /**
@@ -2363,6 +2388,16 @@ export const MENSAJE_COMISION_SIN_ID = 'Este pago no tiene su identificador toda
   + 'Pídelo con nuevoIdPagoComision() antes del primer intento y úsalo en todos los reintentos.';
 
 /**
+ * Lo que lee quien (programando) intente guardar un pago de comisión NUEVO sin su número de comprobante o sin el detalle de
+ * lo que paga. Un pago de comisión que se crea hoy trae las dos cosas, o no se guarda: sin ellas el empleado se queda con un
+ * pago al que nadie le puede imprimir un papel que diga lo que dijo el original (el detalle renta por renta no se puede
+ * reconstruir después con las cifras de hoy). Los pagos de ANTES de los comprobantes no las traen y se siguen reescribiendo
+ * (al anularlos) con `{ reescritura: true }`, sin que se les ponga número.
+ */
+export const MENSAJE_COMISION_SIN_COMPROBANTE = 'Este pago no trae su número de comprobante y el detalle de lo que paga, renta por renta. '
+  + 'Un pago nuevo los lleva desde que se hace: sin ellos no se podría imprimir un papel que diga lo mismo que dijo el original.';
+
+/**
  * Un id nuevo para un pago de comisión, sin escribir nada todavía: es `nuevoIdPagoDueno` para estos pagos y por
  * la misma razón (un doble clic, o un reintento después de que el primer intento venció, tiene que caer en el
  * mismo documento y no crear un segundo pago por las mismas rentas). Con la base de DINERO, la misma en la que
@@ -2376,7 +2411,7 @@ export async function nuevoIdPagoComision({ iniciar = iniciarFirebase, dbDinero 
 }
 
 /**
- * Arma el pago de lo que el dueño marcó, y es el ÚNICO lugar donde `monto` y `contratos` nacen: salen de la misma
+ * Arma el pago de lo que el dueño marcó, y es el ÚNICO lugar donde `monto`, `contratos` y `detalle` nacen: salen de la misma
  * elección (`elegirParaPagoDeComision`, sobre la cuenta de `cuentaDeEmpleado`), así que no pueden contradecirse, y
  * lo que él ve sumar mientras marca casillas es exactamente lo que se guarda. Lo que no es pagable (una renta cuyo
  * carro aún no regresa, una ya pagada, una de otra cuenta) no entra, ni con su dinero ni con su id, aunque su casilla
@@ -2393,25 +2428,36 @@ export function construirPagoComision({
   empleadoId, fecha, forma, contratos, pagos, idsMarcados,
 } = {}) {
   const cuenta = cuentaDeEmpleado({ contratos, pagos });
-  const { contratos: ids, monto } = elegirParaPagoDeComision(cuenta, idsMarcados);
-  return { empleadoId: empleadoId ?? null, fecha, forma, monto, contratos: ids };
+  const { contratos: ids, monto, detalle } = elegirParaPagoDeComision(cuenta, idsMarcados);
+  // `detalle` es lo que el comprobante dirá renta por renta, congelado hoy (§7b): nace de la misma elección que `monto` y
+  // `contratos`, así que las filas suman el monto. El `numero` no nace aquí: se pide a la nube (`registrarElPagoDeComision`).
+  return { empleadoId: empleadoId ?? null, fecha, forma, monto, contratos: ids, detalle };
 }
 
 /**
  * Arma el documento que de verdad se guarda para un pago de comisión. Función **pura**, mismo patrón que
- * `pagoDuenoParaGuardar` pero sin número de comprobante (no hay papel que entregar): `id` y `actualizado` los sella
- * esta función; un pago que ya existe conserva su `id`; `monto` pasa por `q()`; `contratos` nunca queda `undefined`.
- * `anulado` y `anuladoEn` viajan con el resto del pago: uno anulado se guarda por este mismo camino y conserva su
- * `monto` y sus `contratos`.
+ * `pagoDuenoParaGuardar`: `id` y `actualizado` los sella esta función; un pago que ya existe conserva su `id`; `monto` pasa por
+ * `q()`; `contratos` nunca queda `undefined`. `anulado` y `anuladoEn` viajan con el resto del pago: uno anulado se guarda por este
+ * mismo camino y conserva su `monto` y sus `contratos`.
+ *
+ * `numero` y `detalle` (23 de octubre de 2026, §7b) viajan tal como llegan y SOLO si llegan: esta función no inventa un número
+ * (lo toma `registrarElPagoDeComision` una vez por intención, de `contadores/comprobantesComision`) ni arma un detalle (lo arma
+ * `construirPagoComision`). Un pago de antes de los comprobantes llega sin ninguno de los dos y se escribe sin ninguno —sin la
+ * llave, no con `undefined`, que Firestore rechaza—: no se le pone un número ni un detalle al reescribirlo, porque eso lo haría
+ * parecer un pago nuevo con un papel que nadie vio.
  */
 export function pagoComisionParaGuardar(pago, { id, ahora = Date.now() } = {}) {
-  return {
+  const sellado = {
     ...pago,
     id: id ?? pago?.id,
     monto: q(pago?.monto),
     contratos: Array.isArray(pago?.contratos) ? [...pago.contratos] : [],
     actualizado: ahora,
   };
+  if (sellado.numero === undefined || sellado.numero === null) delete sellado.numero;
+  if (Array.isArray(pago?.detalle)) sellado.detalle = pago.detalle.map((fila) => ({ ...fila }));
+  else delete sellado.detalle;
+  return sellado;
 }
 
 /**
@@ -2427,20 +2473,27 @@ export function anularPagoComision(pago, opciones) {
 /**
  * Guarda un pago de comisión en la nube, con la credencial de dinero y sin copia local. Se niega ANTES de escribir
  * si no hay sesión de dinero, si el pago no cubre ninguna renta, si sale en Q0.00 o si no trae el `id` que se decide
- * antes del primer intento. Mismo recorrido que `guardarPagoDueno`, sin el número de comprobante.
+ * antes del primer intento. Mismo recorrido que `guardarPagoDueno`.
  *
- * Lo que esto NO cubre: dos pestañas, o dos computadoras, que registran cada una su propio pago (con su propio id) de
- * la misma renta. `registrarElPagoDeComision` (la pantalla) vuelve a leer los pagos justo antes de escribir, que es
+ * UN PAGO NUEVO TRAE SU NÚMERO Y SU DETALLE (`estadoDelComprobante`, 23 de octubre de 2026): se niega si le falta alguno o si el
+ * detalle no explica el pago. A diferencia de `guardarPagoDueno`, esta función NO toma un número cuando falta: tomarlo aquí
+ * le pondría número a cualquier pago de antes de los comprobantes que se reescribe (al anularlo), y un pago que se anula no
+ * es uno que se hace. Quien ANULA pasa `{ reescritura: true }`: el pago se vuelve a escribir como está (con o sin número y
+ * detalle) y solo cambian `anulado`, `anuladoEn` y `actualizado`.
+ *
+ * Lo que esto NO cubre: dos pestañas, o dos computadoras, que registran cada una su propio pago (con su propio id) de la
+ * misma renta. `registrarElPagoDeComision` (la pantalla) vuelve a leer los pagos justo antes de escribir, que es
  * lo que lo acota.
  */
 export async function guardarPagoComision(pago, {
-  iniciar = iniciarFirebase, dbDinero = dbDeDinero, avisar = avisarCopiaLocal,
+  iniciar = iniciarFirebase, dbDinero = dbDeDinero, avisar = avisarCopiaLocal, reescritura = false,
 } = {}) {
   if (!Array.isArray(pago?.contratos) || pago.contratos.length === 0) throw new Error(MENSAJE_COMISION_SIN_RENTAS);
   if (!(q(pago.monto) > 0)) throw new Error(MENSAJE_COMISION_SIN_MONTO);
   const db = dbDinero();
   if (!db) throw new Error(MENSAJE_COMISION_SIN_DINERO);
   if (!pago.id) throw new Error(MENSAJE_COMISION_SIN_ID);
+  if (!reescritura && estadoDelComprobante(pago).tipo !== 'listo') throw new Error(MENSAJE_COMISION_SIN_COMPROBANTE);
   return guardarEnNubeYLocal(
     'pagosComision',
     pago,

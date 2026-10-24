@@ -34,7 +34,7 @@
 import { comisionDe } from '../nucleo/comision.js';
 import {
   agruparPorEmpleado, cuentaDeEmpleado, elegirParaPagoDeComision, totalGeneralDeComisiones, rentasSinPagar, estadoDeComision,
-  periodosDePago, sinMarcarDeComision, quincenaDe,
+  periodosDePago, sinMarcarDeComision, quincenaDe, detallesIguales,
 } from '../nucleo/comisiones.js';
 import { pagoAnulado, totalesDePagos } from '../nucleo/liquidacion.js';
 import { q } from '../nucleo/dinero.js';
@@ -43,7 +43,8 @@ import { atrasoDe } from '../nucleo/contrato.js';
 import { hoyISO, esFechaISO } from '../nucleo/fechas.js';
 import { sesionDeDinero } from '../dinero-sesion.js';
 import {
-  cargarContratosDeLaNube, cargarPagosComision, cargarEmpleados, nuevoIdPagoComision, construirPagoComision, guardarPagoComision,
+  cargarContratosDeLaNube, cargarPagosComision, cargarEmpleados, nuevoIdPagoComision, siguienteNumeroComprobanteComision,
+  construirPagoComision, guardarPagoComision,
   anularPagoComision, enlazarContratosAlEmpleado, MENSAJE_COMISION_SIN_DINERO, MENSAJE_COMISION_SIN_RENTAS,
   MENSAJE_COMISION_SIN_MONTO, MENSAJE_COMISION_SIN_ID, MENSAJE_ENLACE_SIN_DINERO,
 } from '../datos.js';
@@ -254,14 +255,19 @@ export const textoDeLaTasa = (valor) => {
  *    pestaña. Si no se pueden leer, no se registra.
  * 3. Si lo marcado ya no está por pagar, o suma otra cosa que lo que él vio, NO se registra una versión recortada o distinta en
  *    silencio —él vio un monto y se guardaría otro—: se devuelve `cambio`.
- * 4. Arma el pago con `construirPagoComision` sobre lo leído AHORA, pide el id UNA vez (`enCurso`) y guarda.
+ * 4. Arma el pago con `construirPagoComision` sobre lo leído AHORA (con su detalle renta por renta, que es el que saldrá en el
+ *    papel), pide el id y el NÚMERO DE COMPROBANTE una vez cada uno (`enCurso`) y guarda.
+ *
+ * El número se toma DESPUÉS de comprobar que nada cambió, para no gastar uno en un pago que no se hace; y se conserva en
+ * `enCurso` aunque el guardado falle, como el id: el reintento cae en el mismo documento con el mismo número. Si el primer intento
+ * en verdad nunca llegó y el dueño cancela, ese número queda sin usar: un hueco en la numeración se explica, un repetido no.
  *
  * Devuelve `{ tipo, pagos, contratos?, pago? }` con `tipo` en 'guardado', 'ya-guardado' o 'cambio'. Lanza lo que lance cada paso.
  */
 export async function registrarElPagoDeComision({
   entrada, idsMarcados, forma, fecha: fechaDelPago, empleados = { datos: [], fallo: false }, enCurso = {},
   leerPagos = cargarPagosComision, leerContratos = cargarContratosDeLaNube,
-  nuevoId = nuevoIdPagoComision, guardar = guardarPagoComision,
+  nuevoId = nuevoIdPagoComision, nuevoNumero = siguienteNumeroComprobanteComision, guardar = guardarPagoComision,
 }) {
   if (!idsMarcados.length) throw new Error(MENSAJE_COMISION_SIN_RENTAS);
 
@@ -291,16 +297,20 @@ export async function registrarElPagoDeComision({
     idsMarcados,
   });
   // Cada casilla marcada tiene que haber sido una renta por pagar de la cuenta que él vio, y el pago de ahora tiene que
-  // cubrir lo mismo y sumar lo mismo.
+  // cubrir lo mismo, sumar lo mismo y decir lo mismo renta por renta: lo que se guarda (y saldrá en el papel del empleado) es
+  // exactamente lo que había en su pantalla.
   const igual = visto.rentas.length === idsMarcados.length
     && pago.contratos.length === visto.contratos.length
     && visto.contratos.every((id) => pago.contratos.includes(id))
-    && pago.monto === visto.monto;
+    && pago.monto === visto.monto
+    && detallesIguales(pago.detalle, visto.detalle);
   if (!igual) return { tipo: 'cambio', pagos: frescos.datos, contratos: rentas };
 
-  // Una vez por intención de pagar, y se conserva aunque este intento falle.
+  // Una vez por intención de pagar, y se conserva aunque este intento falle. El id primero: si el número falla, el id ya
+  // quedó decidido y el reintento sigue en el mismo documento.
   enCurso.id ??= await nuevoId();
-  const guardado = await guardar({ ...pago, id: enCurso.id });
+  enCurso.numero ??= await nuevoNumero();
+  const guardado = await guardar({ ...pago, id: enCurso.id, numero: enCurso.numero });
   return { tipo: 'guardado', pago: guardado, pagos: [...frescos.datos, guardado], contratos: rentas };
 }
 
@@ -341,7 +351,9 @@ export async function anularElPagoDeComision({
   const actual = frescos.datos.find((p) => p?.id && p.id === pago?.id);
   if (!actual) return { tipo: 'no-esta', pagos: frescos.datos };
   if (pagoAnulado(actual)) return { tipo: 'ya-anulado', pago: actual, pagos: frescos.datos };
-  const anulado = await guardar(anularPagoComision(actual, { fecha: hoy }));
+  // `reescritura`: el pago se vuelve a escribir tal como está en la nube, con o sin número y detalle. Anular un pago de antes de los
+  // comprobantes no le pone un número ni un detalle: lo haría parecer un pago nuevo con un papel que nadie vio.
+  const anulado = await guardar(anularPagoComision(actual, { fecha: hoy }), { reescritura: true });
   return { tipo: 'anulado', pago: anulado, pagos: frescos.datos.map((p) => (p.id === anulado.id ? anulado : p)) };
 }
 

@@ -261,6 +261,20 @@ export function elegirParaPagoDeComision(cuenta, idsMarcados) {
 }
 
 /**
+ * ¿Dicen lo mismo dos detalles? Mismas rentas y, de cada una, los mismos diez datos. No importa el orden en que lleguen. Es la
+ * pregunta de «lo que se va a guardar es lo que él vio»: al registrar, el detalle armado con lo que la nube dice AHORA tiene que
+ * ser el de la fila que había en su pantalla, no solo sumar lo mismo (dos rentas pueden cambiar en sentidos opuestos y seguir
+ * sumando igual, y el papel diría renta por renta algo que él nunca vio).
+ */
+export function detallesIguales(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  const clave = (fila) => JSON.stringify(CAMPOS_DEL_DETALLE.map((campo) => fila?.[campo]));
+  const ordenadas = (detalle) => detalle.map(clave).sort();
+  const [x, y] = [ordenadas(a), ordenadas(b)];
+  return x.every((fila, i) => fila === y[i]);
+}
+
+/**
  * ¿Este pago puede dar un comprobante? Lo dice solo lo que el pago GUARDÓ, nunca las rentas de hoy:
  * - `'listo'`: trae su `numero` y su `detalle[]`, y el detalle explica el pago (una fila por renta que cubre, sin repetir, y las
  *   filas suman el `monto` guardado).

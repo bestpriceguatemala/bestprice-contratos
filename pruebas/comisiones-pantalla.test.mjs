@@ -18,7 +18,7 @@ import {
 import { cerrarElDinero, parchearMarcado, alOlvidarElDinero, razonDeNoCierre } from '../js/pantallas/dinero.js';
 import { MENSAJE_COMISION_SIN_RENTAS, MENSAJE_COMISION_SIN_DINERO } from '../js/datos.js';
 import { comisionDe } from '../js/nucleo/comision.js';
-import { cuentaDeEmpleado, sinMarcarDeComision } from '../js/nucleo/comisiones.js';
+import { cuentaDeEmpleado, sinMarcarDeComision, filaDeDetalle } from '../js/nucleo/comisiones.js';
 import { renta, rentaDeAntes, pagoDeComision, EMPLEADOS } from './fixtures/rentasConComision.mjs';
 
 const { ana, wilder, luis } = EMPLEADOS;
@@ -387,7 +387,7 @@ test('textoDeLaTasa: el cero es «0 %», lo que no se lee es «—»', () => {
 function deps({
   contratos = [firme('a1'), firme('a2')], pagos = [], fallaPagos = false, fallaRentas = false, fallaGuardar = false,
 } = {}) {
-  const estado = { contratos, pagos: [...pagos], guardados: [], leidasPagos: 0, leidasRentas: 0, ids: 0 };
+  const estado = { contratos, pagos: [...pagos], guardados: [], leidasPagos: 0, leidasRentas: 0, ids: 0, numeros: 0 };
   return {
     estado,
     leerPagos: async () => { estado.leidasPagos += 1; return fallaPagos ? { datos: null, fallo: true } : { datos: [...estado.pagos], fallo: false }; },
@@ -397,6 +397,7 @@ function deps({
       return { datos: estado.contratos, fallo: false };
     },
     nuevoId: async () => { estado.ids += 1; return `p-nuevo-${estado.ids}`; },
+    nuevoNumero: async () => { estado.numeros += 1; return 40 + estado.numeros; },
     guardar: async (pago) => {
       if (fallaGuardar) throw new Error('sin internet');
       estado.guardados.push(pago);
@@ -419,7 +420,8 @@ test('registrar: relee los pagos y las rentas, arma el pago con lo de AHORA y lo
   assert.equal(d.estado.leidasRentas, 1);
   const [guardado] = d.estado.guardados;
   assert.deepEqual(guardado, {
-    empleadoId: 'e1', fecha: HOY, forma: 'transferencia', monto: 280, contratos: ['a1', 'a2'], id: 'p-nuevo-1',
+    empleadoId: 'e1', fecha: HOY, forma: 'transferencia', monto: 280, contratos: ['a1', 'a2'], id: 'p-nuevo-1', numero: 41,
+    detalle: [filaDeDetalle(firme('a1')), filaDeDetalle(firme('a2'))],
   });
   assert.deepEqual(r.pagos.map((p) => p.id), ['p-nuevo-1']);
 });
