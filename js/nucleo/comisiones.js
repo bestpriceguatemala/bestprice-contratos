@@ -32,6 +32,7 @@ import { comisionDe } from './comision.js';
 import { porcentajeAnotado } from './empleado.js';
 import { sinIdsRepetidos, pagoAnulado } from './liquidacion.js';
 import { estadoContrato } from './estados.js';
+import { atrasoDe } from './contrato.js';
 import { esFechaISO } from './fechas.js';
 
 // Lo que se lee cuando una renta no trae ningún nombre de empleado. Existe para
@@ -207,20 +208,96 @@ export function rentasSinPagar(cuenta) {
 }
 
 /**
+ * Los datos de una renta tal como el comprobante del empleado los dice: lo que se GUARDA en el pago (`detalle[]`, §7b) el
+ * día que se paga, para que una reimpresión diga lo que dijo el original aunque después se corrija un cierre. Es lo mismo que
+ * la ficha enseña en la fila de «Por pagar» (regresó, contrato, placas, cliente, días, base, %, comisión) y nada más: no hay
+ * aquí lo que el cliente pagó, su saldo, su garantía, su tarjeta, el costo de un carro ajeno ni su dueño, porque de la renta se
+ * TOMA lo permitido en vez de quitar lo prohibido (un campo nuevo del contrato nunca llega al papel por descuido).
+ *
+ * Cada nombre es el del contrato donde es el mismo dato (`numero`, `carroPlacas`, `clienteNombre`, `dias`,
+ * `porcentajeComision`); `fechaReal` es la de `cierre.fechaReal` y `diasAtraso`, base y monto salen de `atrasoDe` y de
+ * `comisionDe`: aquí no se calcula nada.
+ */
+export const CAMPOS_DEL_DETALLE = [
+  'contratoId', 'numero', 'fechaReal', 'carroPlacas', 'clienteNombre', 'dias', 'diasAtraso', 'base', 'porcentajeComision', 'monto',
+];
+
+export function filaDeDetalle(contrato) {
+  const comision = comisionDe(contrato);
+  const numero = Number(contrato?.numero);
+  return {
+    contratoId: String(contrato?.id ?? ''),
+    // `null` y no `undefined`: Firestore rechaza un `undefined` en cualquier nivel.
+    numero: contrato?.numero !== null && contrato?.numero !== undefined && contrato?.numero !== '' && Number.isFinite(numero) ? numero : null,
+    fechaReal: String(contrato?.cierre?.fechaReal ?? ''),
+    carroPlacas: String(contrato?.carroPlacas ?? ''),
+    clienteNombre: String(contrato?.clienteNombre ?? ''),
+    dias: q(contrato?.dias),
+    diasAtraso: atrasoDe(contrato),
+    base: comision.base,
+    porcentajeComision: comision.porcentaje,
+    monto: comision.monto,
+  };
+}
+
+/**
  * Lo que de verdad entra a un pago cuando se marcan casillas: las rentas por pagar marcadas, con los ids que el
- * pago va a cubrir y lo que suma. Es el único lugar que decide qué cubre un pago y cuánto vale: lo que la pantalla
- * enseña antes de registrar, lo que `construirPagoComision` guarda y lo que se compara al registrar salen de aquí,
- * así que no pueden contradecirse. Una casilla que ya no corresponde a nada (se pagó, el carro aún no vuelve, o es
- * de otra cuenta) simplemente no entra: ni con su dinero ni con su id.
+ * pago va a cubrir, el detalle de cada una (`filaDeDetalle`) y lo que suma. Es el único lugar que decide qué cubre un pago y
+ * cuánto vale: lo que la pantalla enseña antes de registrar, lo que `construirPagoComision` guarda y lo que se compara al
+ * registrar salen de aquí, así que no pueden contradecirse. `monto` es la suma del `monto` de cada fila del detalle: el total
+ * y el papel nacen de la misma lista. Una casilla que ya no corresponde a nada (se pagó, el carro aún no vuelve, o es
+ * de otra cuenta) simplemente no entra: ni con su dinero ni con su id ni con su fila.
  */
 export function elegirParaPagoDeComision(cuenta, idsMarcados) {
   const marcados = new Set(idsMarcados ?? []);
   const rentas = (cuenta?.porPagar ?? []).filter((c) => c?.id && marcados.has(c.id));
+  const detalle = rentas.map(filaDeDetalle);
   return {
     rentas,
     contratos: [...new Set(rentas.map((c) => c.id))],
-    monto: suma(...rentas.map((c) => comisionDe(c).monto)),
+    detalle,
+    monto: suma(...detalle.map((fila) => fila.monto)),
   };
+}
+
+/**
+ * ¿Este pago puede dar un comprobante? Lo dice solo lo que el pago GUARDÓ, nunca las rentas de hoy:
+ * - `'listo'`: trae su `numero` y su `detalle[]`, y el detalle explica el pago (una fila por renta que cubre, sin repetir, y las
+ *   filas suman el `monto` guardado).
+ * - `'de-antes'`: no trae ni número ni detalle. Es un pago hecho antes de que existieran los comprobantes; lo que se pagó renta
+ *   por renta no se guardó y NO se reconstruye con las cifras de hoy (un papel que dijera «esto fue lo que se pagó» sobre algo
+ *   que nadie guardó afirmaría más de lo que se sabe).
+ * - `'danado'`: trae uno de los dos pero no el otro, o el detalle no cuadra con el pago. Un papel con filas que no suman su
+ *   total se lee como un error de cuentas, así que no se arma. `motivo` dice cuál.
+ *
+ * Es la única pregunta de «¿tiene papel?»: la ficha decide con ella si ofrece el botón, y el comprobante con ella si se arma.
+ */
+export function estadoDelComprobante(pago) {
+  const hayNumero = pago?.numero !== undefined && pago?.numero !== null;
+  const hayDetalle = pago?.detalle !== undefined && pago?.detalle !== null;
+  if (!hayNumero && !hayDetalle) return { tipo: 'de-antes' };
+  const danado = (motivo) => ({ tipo: 'danado', motivo });
+  if (!hayNumero) return danado('trae el detalle pero no su número');
+  if (!hayDetalle) return danado('trae su número pero no el detalle de lo que se pagó');
+  if (!Number.isInteger(pago.numero) || pago.numero < 1) return danado('su número no es un número de comprobante');
+  if (!Array.isArray(pago.detalle) || pago.detalle.length === 0) return danado('su detalle no es una lista de rentas');
+  const ids = [];
+  for (const fila of pago.detalle) {
+    if (fila === null || typeof fila !== 'object' || Array.isArray(fila)) return danado('una fila de su detalle no es una renta');
+    if (typeof fila.contratoId !== 'string' || !fila.contratoId) return danado('una fila de su detalle no dice de qué renta es');
+    for (const campo of ['dias', 'diasAtraso', 'base', 'porcentajeComision', 'monto']) {
+      if (typeof fila[campo] !== 'number' || !Number.isFinite(fila[campo])) return danado(`una fila de su detalle no trae «${campo}» como número`);
+    }
+    if (!(fila.monto > 0)) return danado('una fila de su detalle no tiene comisión');
+    ids.push(fila.contratoId);
+  }
+  // Una fila por renta, sin repetir: misma cantidad y todas las del pago (una repetida dejaría a otra sin fila).
+  const cubiertas = Array.isArray(pago.contratos) ? [...new Set(pago.contratos.filter(Boolean))] : [];
+  if (ids.length !== cubiertas.length || cubiertas.some((id) => !ids.includes(id))) {
+    return danado('su detalle no es de las mismas rentas que el pago cubre');
+  }
+  if (suma(...pago.detalle.map((fila) => fila.monto)) !== q(pago.monto)) return danado('las filas de su detalle no suman lo que se pagó');
+  return { tipo: 'listo' };
 }
 
 /**

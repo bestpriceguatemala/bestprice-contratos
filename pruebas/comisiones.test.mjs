@@ -49,7 +49,7 @@ test('el carro volvió pero el cliente todavía DEBE: no es pagable, está en «
   assert.equal(cuenta.totalPorPagar, 140, 'la del cliente que debe no suma');
   assert.equal(cuenta.totalEstimado, 0, 'NO es un estimado: el carro volvió y su monto ya es ese');
   assert.equal(cuenta.totalPorCerrar, 140, 'es lo que solo espera a que el contrato cierre');
-  assert.deepEqual(elegirParaPagoDeComision(cuenta, ['c1']), { rentas: [], contratos: [], monto: 0 }, 'ni marcándola a la fuerza');
+  assert.deepEqual(elegirParaPagoDeComision(cuenta, ['c1']), { rentas: [], contratos: [], detalle: [], monto: 0 }, 'ni marcándola a la fuerza');
 });
 
 test('el carro volvió y no se debe nada, pero la GARANTÍA sigue sin liberar: tampoco es pagable', () => {
@@ -101,7 +101,7 @@ test('marcar una renta que no es firme no la mete al pago: ni su dinero ni su id
   const elegido = elegirParaPagoDeComision(cuenta, ['c1', 'c2']);
   assert.deepEqual(elegido.contratos, ['c1']);
   assert.equal(elegido.monto, 140);
-  assert.deepEqual(elegirParaPagoDeComision(cuenta, ['c2']), { rentas: [], contratos: [], monto: 0 });
+  assert.deepEqual(elegirParaPagoDeComision(cuenta, ['c2']), { rentas: [], contratos: [], detalle: [], monto: 0 });
 });
 
 test('el estado de una comisión lo dice una sola función, y se pregunta por `estadoContrato`, no por el campo `estado` guardado', () => {
@@ -131,7 +131,7 @@ test('Wilder al 0 %: sus rentas, firmes o no, nunca producen una comisión por p
   assert.deepEqual(cuenta.sinPorcentaje, [], 'un 0 sellado es un porcentaje, no uno que falta');
   assert.equal(cuenta.totalPorPagar, 0);
   assert.equal(cuenta.totalEstimado, 0);
-  assert.deepEqual(elegirParaPagoDeComision(cuenta, ['w1', 'w2', 'w3']), { rentas: [], contratos: [], monto: 0 });
+  assert.deepEqual(elegirParaPagoDeComision(cuenta, ['w1', 'w2', 'w3']), { rentas: [], contratos: [], detalle: [], monto: 0 });
 });
 
 test('una renta firme con un descuento que se come la base tampoco paga nada, con cualquier porcentaje', () => {
@@ -367,7 +367,7 @@ test('una casilla que ya no corresponde a nada (ya pagada, o que no es de esta c
   const elegido = elegirParaPagoDeComision(cuenta, ['c1', 'c2', 'otra-cuenta']);
   assert.deepEqual(elegido.contratos, ['c2']);
   assert.equal(elegido.monto, 140);
-  assert.deepEqual(elegirParaPagoDeComision(cuenta, undefined), { rentas: [], contratos: [], monto: 0 });
+  assert.deepEqual(elegirParaPagoDeComision(cuenta, undefined), { rentas: [], contratos: [], detalle: [], monto: 0 });
 });
 
 test('el dinero pasa por q(): los centavos no se arrastran', () => {
