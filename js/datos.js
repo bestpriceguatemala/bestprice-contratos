@@ -1074,10 +1074,10 @@ export function puedeLiberarse(contrato) {
 export const CODIGO_SALDO_PENDIENTE = 'saldo-pendiente';
 
 /** Libera la garantía de la tarjeta. Rechaza mientras `puedeLiberarse` diga que hay motivo. */
-export async function liberarGarantia(contrato) {
+export async function liberarGarantia(contrato, deps = {}) {
   const motivo = puedeLiberarse(contrato);
   if (motivo) throw Object.assign(new Error(motivo), { codigo: CODIGO_SALDO_PENDIENTE });
-  return guardarContrato({ ...contrato, garantiaLiberada: true, garantiaLiberadaEn: hoyISO() });
+  return guardarContrato({ ...contrato, garantiaLiberada: true, garantiaLiberadaEn: hoyISO() }, deps);
 }
 
 // ---------- Un alta decide su id antes de guardar (prueba del sistema, 7 oct 2026: H-2) ----------
@@ -1368,8 +1368,8 @@ export async function guardarReserva(reserva, deps = {}) {
  * cancelación tardía o un clic equivocado no puede borrar un contrato que ya
  * existe, y esta función no pone ningún candado que pelee contra esa regla.
  */
-export async function cancelarReserva(reserva) {
-  return guardarReserva({ ...reserva, cancelada: true });
+export async function cancelarReserva(reserva, deps = {}) {
+  return guardarReserva({ ...reserva, cancelada: true }, deps);
 }
 
 // ---------- El área de dinero lee el costo del dueño (ADR-002) ----------
