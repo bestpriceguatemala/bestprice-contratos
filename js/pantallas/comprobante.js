@@ -80,9 +80,9 @@ export const MEMBRETE = {
 };
 
 // El texto libre (nombre del dueño, del cliente, placas) nunca entra al HTML sin
-// pasar por aquí: mismo escape que el resto de las pantallas. (Se exporta, con `RAYA`, `algo`, `textoDeForma` e
-// `imprimirConTitulo`, para el comprobante de comisión del empleado: es su gemelo y no debe tener un segundo escape,
-// una segunda raya ni una segunda forma de poner el nombre del PDF.)
+// pasar por aquí: mismo escape que el resto de las pantallas. (Se exporta, con `RAYA`, `algo`, `textoDeForma`,
+// `imprimirConTitulo` y `htmlDelMembrete`, para el comprobante de comisión del empleado: es su gemelo y no debe tener un
+// segundo escape, una segunda raya, una segunda forma de poner el nombre del PDF ni un segundo membrete.)
 export function esc(texto) {
   return String(texto ?? '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -92,6 +92,42 @@ export function esc(texto) {
 /** Lo que se escribe donde no hay dato: una raya, no un hueco que parezca un error. */
 export const RAYA = '—';
 export const algo = (texto) => (String(texto ?? '').trim() ? esc(String(texto).trim()) : RAYA);
+
+/**
+ * Una línea del membrete como HTML: el texto escapado de siempre, y cada número con guion (un teléfono, 4019-3131, o la
+ * dirección, 15-90) envuelto en `comp-sin-corte`, que en la hoja de impresión dice «no se parte».
+ *
+ * POR QUÉ aquí y no solo en el CSS: el navegador puede cortar un renglón justo después de un guion, así que un teléfono
+ * se parte en dos exactamente cuando falta un poco de ancho —al imprimir salió «5770-» en un renglón y «5278» en el
+ * siguiente— y un número cortado a la mitad es un número que no sirve para llamar. Un CSS que solo agrande el hueco del
+ * membrete lo arregla para Carta de hoy y no para el siguiente ancho (otra escala de impresión, un nombre más largo, una
+ * pantalla chica). Marcar el NÚMERO como indivisible lo arregla a cualquier ancho, y el renglón sigue pudiendo cortarse
+ * donde sí se puede: entre un número y el siguiente.
+ *
+ * El texto no cambia ni una letra (el que el dueño aprobó es `MEMBRETE`): solo se le agrega una etiqueta alrededor de los
+ * números. El trozo marcado son dígitos y guiones, nunca texto escrito a mano, así que no hay nada que escapar en él.
+ */
+export function htmlDeLineaDeContacto(linea) {
+  return String(linea ?? '')
+    .split(/(\d+(?:-\d+)+)/)
+    .map((trozo, i) => (i % 2 ? `<span class="comp-sin-corte">${trozo}</span>` : esc(trozo)))
+    .join('');
+}
+
+/**
+ * El membrete de los dos papeles que salen de la empresa (el de los dueños de un carro y el del empleado). Es UNO solo a
+ * propósito: estaba escrito dos veces, igual, y un arreglo del membrete que se hiciera en uno y se olvidara en el otro
+ * dejaría a un papel con el defecto que el otro ya no tiene.
+ */
+export function htmlDelMembrete() {
+  return `<header class="comp-membrete">
+    <div class="comp-marca">
+      <p class="comp-nombre">${esc(MEMBRETE.nombre)}</p>
+      <p class="comp-lema">${esc(MEMBRETE.lema)}</p>
+    </div>
+    <p class="comp-contacto">${MEMBRETE.contacto.map(htmlDeLineaDeContacto).join('<br>')}</p>
+  </header>`;
+}
 
 /** Qué se imprime en lugar de la cifra cuando el costo no es confiable, según el motivo. */
 const TEXTO_SIN_COSTO = {
@@ -560,13 +596,7 @@ function seccionPendiente(p, hoy) {
 export function htmlComprobante(m) {
   const d = m.dueno;
   return `<article class="comprobante" aria-label="Comprobante de pago N° ${esc(m.numero)}">
-  <header class="comp-membrete">
-    <div class="comp-marca">
-      <p class="comp-nombre">${esc(MEMBRETE.nombre)}</p>
-      <p class="comp-lema">${esc(MEMBRETE.lema)}</p>
-    </div>
-    <p class="comp-contacto">${MEMBRETE.contacto.map(esc).join('<br>')}</p>
-  </header>
+  ${htmlDelMembrete()}
 
   <h1 class="comp-titulo">Comprobante de pago</h1>
 

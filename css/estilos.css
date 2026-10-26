@@ -1314,12 +1314,23 @@ body {
    cualquier computadora. */
 .comp-membrete {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 24px;
+  gap: 8pt 24px;
   padding-bottom: 9pt;
   border-bottom: 3px solid var(--amarillo);
 }
+
+/* El nombre toma el hueco que sobra y es él quien se acomoda (se parte en dos renglones, que sí puede); el bloque de contacto
+   se queda con el ancho de su renglón más largo. Antes los dos se encogían a la vez y el renglón de los WhatsApp perdía unas
+   letras de ancho: ahí se partía el último teléfono. Si ya no caben lado a lado (otra escala de impresión), el contacto baja
+   debajo del nombre, pegado a la derecha, en vez de apretarse. Esto cuida el caso de hoy; que un teléfono NO se parta a
+   ningún ancho lo garantiza `.comp-sin-corte`, más abajo. */
+.comp-marca {
+  flex: 1 1 60mm;
+}
+
 
 .comp-nombre {
   font-size: 21pt;
@@ -1337,11 +1348,22 @@ body {
 }
 
 .comp-contacto {
+  flex: 0 1 auto;
+  margin-left: auto;
   text-align: right;
   font-size: 8.5pt;
   line-height: 1.5;
   color: var(--gris);
 }
+
+/* Un número con guion (un teléfono: 4019-3131; también 15-90 de la dirección) nunca se parte entre dos renglones, a ningún ancho.
+   El navegador corta un renglón justo después de un guion; un teléfono cortado a la mitad no sirve para llamar. El texto lo marca
+   `htmlDeLineaDeContacto` (comprobante.js), y como el CSS solo aplica al contenido marcado, el renglón sí puede partirse entre
+   un número y el siguiente. */
+.comp-sin-corte {
+  white-space: nowrap;
+}
+
 
 .comp-titulo {
   margin: 16pt 0 11pt;

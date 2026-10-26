@@ -29,7 +29,7 @@ import { q } from '../nucleo/dinero.js';
 import { diasEntre, esFechaISO } from '../nucleo/fechas.js';
 import { dinero, fecha } from '../ui.js';
 import {
-  MEMBRETE, esc, algo, RAYA, textoDeForma, imprimirConTitulo,
+  esc, algo, RAYA, textoDeForma, imprimirConTitulo, htmlDelMembrete,
 } from './comprobante.js';
 
 /**
@@ -160,13 +160,7 @@ function filaHtml(f) {
 export function htmlComprobanteDeComision(m) {
   const e = m.empleado;
   return `<article class="comprobante" aria-label="Comprobante de pago de comisiones N° ${esc(m.numero)}">
-  <header class="comp-membrete">
-    <div class="comp-marca">
-      <p class="comp-nombre">${esc(MEMBRETE.nombre)}</p>
-      <p class="comp-lema">${esc(MEMBRETE.lema)}</p>
-    </div>
-    <p class="comp-contacto">${MEMBRETE.contacto.map(esc).join('<br>')}</p>
-  </header>
+  ${htmlDelMembrete()}
 
   <h1 class="comp-titulo">Comprobante de pago de comisiones</h1>
 

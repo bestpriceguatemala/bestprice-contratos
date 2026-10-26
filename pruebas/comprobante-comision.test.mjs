@@ -26,7 +26,8 @@ import { construirContrato } from '../js/pantallas/sacarCarro.js';
 import {
   armarComprobanteDeComision, htmlComprobanteDeComision, pintarComprobanteDeComision, motivoSinComprobante,
 } from '../js/pantallas/comprobanteComision.js';
-import { MEMBRETE } from '../js/pantallas/comprobante.js';
+import { MEMBRETE, htmlDelMembrete } from '../js/pantallas/comprobante.js';
+import { lineasDeContacto } from './fixtures/lineasDeContacto.mjs';
 import {
   agregarPago, contratoParaGuardar, conCostoDelDueno, costoDelDocumento,
   siguienteNumeroComprobante, siguienteNumeroComprobanteComision, construirPagoComision, pagoComisionParaGuardar, guardarPagoComision,
@@ -779,7 +780,9 @@ test('el membrete es el de Best Price tal como lo confirmó el dueño: sin NIT, 
   const html = htmlComprobanteDeComision(armarComprobanteDeComision(papel()));
   assert.ok(!/\bNIT\b/i.test(html), 'él dijo que no lo quiere en estos papeles');
   assert.ok(!/<img|url\(|<svg/i.test(html));
-  for (const linea of MEMBRETE.contacto) assert.ok(html.includes(linea.replace(/&/g, '&amp;')), linea);
+  // Los números van envueltos en una etiqueta (no se parten al imprimir), pero el texto es EXACTAMENTE el que él aprobó.
+  assert.deepEqual(lineasDeContacto(html), MEMBRETE.contacto);
+  assert.ok(html.includes(htmlDelMembrete()), 'es el mismo membrete que el del papel de los dueños, no una copia');
   assert.ok(html.includes(MEMBRETE.nombre) && html.includes(MEMBRETE.lema));
 });
 

@@ -21,8 +21,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  armarComprobante, htmlComprobante, pintarComprobante, MEMBRETE,
+  armarComprobante, htmlComprobante, pintarComprobante, MEMBRETE, htmlDelMembrete, htmlDeLineaDeContacto,
 } from '../js/pantallas/comprobante.js';
+import { reglasDeCss } from './fixtures/reglasCss.mjs';
+import { lineasDeContacto } from './fixtures/lineasDeContacto.mjs';
 import {
   cuentaDeDueno, totalSeleccionado, pagadoDeMas, descuentoDelPago, entregadoDelPago,
 } from '../js/nucleo/liquidacion.js';
@@ -910,6 +912,62 @@ test('el membrete es solo de Best Price y sin imágenes: texto, para abrir al in
   const html = htmlComprobante(armarComprobante(entrada()));
   assert.ok(!/<img|url\(|<svg/i.test(html));
   assert.ok(html.includes(MEMBRETE.nombre));
+});
+
+// ---------------------------------------------------------------------------
+// Los teléfonos del membrete no se parten entre dos renglones (24 de octubre de 2026).
+//
+// Solo se ve al imprimir: al llegar al papel, «WhatsApp: 4019-3131 · 4001-2626 · 5770-5278» se cortaba justo después del guion de
+// «5770-» y «5278» caía en el renglón de abajo. Un teléfono partido no sirve para llamar. El texto lo aprobó el dueño palabra por
+// palabra (MEMBRETE, sin NIT) y NO cambia: lo que cambia es que cada número va marcado como indivisible. Un DOM no ve dónde corta el
+// navegador, así que lo que se puede comprobar desde aquí es que (1) el texto sigue siendo el aprobado, (2) cada número está marcado,
+// entero, y (3) la regla que dice «no se parte» existe CON su declaración.
+// ---------------------------------------------------------------------------
+
+test('el membrete que sale dice EXACTAMENTE lo que el dueño aprobó: las etiquetas solo envuelven números, ni una letra más ni menos, y sin NIT', () => {
+  const html = htmlDelMembrete();
+  assert.deepEqual(lineasDeContacto(html), MEMBRETE.contacto);
+  assert.ok(html.includes(MEMBRETE.nombre) && html.includes(MEMBRETE.lema));
+  assert.ok(!/\bNIT\b/i.test(html), 'él dijo que no lo quiere en estos papeles');
+  assert.ok(!/<img|url\(|<svg/i.test(html));
+});
+
+test('cada número con guion del membrete (los cuatro teléfonos y el 15-90 de la dirección) sale ENTERO dentro de comp-sin-corte, y ninguno queda suelto', () => {
+  const html = htmlDelMembrete();
+  const esperados = MEMBRETE.contacto.flatMap((linea) => linea.match(/\d+(?:-\d+)+/g) ?? []);
+  assert.deepEqual(esperados, ['15-90', '2261-3575', '4019-3131', '4001-2626', '5770-5278'], 'los números que el membrete aprobado trae');
+  const marcados = [...html.matchAll(/<span class="comp-sin-corte">([^<]*)<\/span>/g)].map((m) => m[1]);
+  assert.deepEqual(marcados, esperados, 'cada uno, completo, en el orden en que se leen');
+  const sinMarcados = html.replace(/<span class="comp-sin-corte">[^<]*<\/span>/g, '');
+  assert.ok(!/\d-\d/.test(sinMarcados), 'ningún número con guion queda fuera de una etiqueta: ese es el que se parte');
+});
+
+test('htmlDeLineaDeContacto: marca solo los números con guion, y el texto escrito sigue pasando por el escape', () => {
+  assert.equal(
+    htmlDeLineaDeContacto('Tel. 2261-3575 · a&b <x>'),
+    'Tel. <span class="comp-sin-corte">2261-3575</span> · a&amp;b &lt;x&gt;',
+  );
+  assert.equal(htmlDeLineaDeContacto('WhatsApp: 4019-3131 · 4001-2626'), 'WhatsApp: <span class="comp-sin-corte">4019-3131</span> · <span class="comp-sin-corte">4001-2626</span>');
+  assert.equal(htmlDeLineaDeContacto('1-2-3'), '<span class="comp-sin-corte">1-2-3</span>', 'un número con varios guiones se marca completo');
+  assert.equal(htmlDeLineaDeContacto('bestprice.ventas@gmail.com'), 'bestprice.ventas@gmail.com', 'sin números con guion no hay nada que marcar');
+  assert.equal(htmlDeLineaDeContacto('zona 13 - Colonia'), 'zona 13 - Colonia', 'un guion con espacios no es un número con guion');
+  assert.equal(htmlDeLineaDeContacto(undefined), '');
+});
+
+test('el papel de los dueños lleva el membrete compartido tal cual: es el mismo que el del empleado, no una copia que pueda quedarse atrás', () => {
+  assert.ok(htmlComprobante(armarComprobante(entrada())).includes(htmlDelMembrete()));
+});
+
+test('estilos.css: un número con guion no se parte, y el nombre cede el hueco al contacto (las reglas, con sus declaraciones)', () => {
+  const css = reglasDeCss(readFileSync(new URL('../css/estilos.css', import.meta.url), 'utf8'));
+  // LA garantía, a cualquier ancho: el número marcado es indivisible. El renglón puede cortarse entre un número y el siguiente.
+  assert.ok(css.declara('.comp-sin-corte', 'white-space: nowrap'), '.comp-sin-corte { white-space: nowrap }');
+  // Y lo que hace que en Carta el renglón de los WhatsApp salga en un solo renglón, como lo aprobó: el contacto conserva su ancho y es el
+  // nombre quien se acomoda; si ya no caben lado a lado, el contacto baja en vez de apretarse.
+  assert.ok(css.declara('.comp-membrete', 'flex-wrap: wrap'));
+  assert.ok(css.declara('.comp-marca', 'flex: 1 1 60mm'));
+  assert.ok(css.declara('.comp-contacto', 'flex: 0 1 auto'));
+  assert.ok(css.declara('.comp-contacto', 'margin-left: auto'));
 });
 
 // ---------------------------------------------------------------------------
