@@ -10,6 +10,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { q } from '../js/nucleo/dinero.js';
+import { construirContrato, conAnticipoComoPago } from '../js/pantallas/sacarCarro.js';
+import { totalDeEstaCobranza } from '../js/pantallas/recibirCarro.js';
+import { construirReserva } from '../js/nucleo/reserva.js';
 import { lineasSalida, lineasDevolucion, resumen } from '../js/nucleo/contrato.js';
 import { construirCierre, problemasDelCierre } from '../js/nucleo/cierre.js';
 import { contratoReal, salidaReal, camposDeCierre } from './fixtures/contratoReal.mjs';
@@ -157,4 +160,54 @@ test('el ejemplo del diseño armado con «Sacar carro» y «Recibir carro» da Q
   assert.equal(r.pagado, 4345.6, 'cada pago con su 12 %: 3,528.00 + 817.60');
   assert.equal(r.saldo, 0);
   assert.equal(c.estado, 'cerrado', 'pagó todo y no hay garantía de tarjeta que soltar');
+});
+
+// ---------------------------------------------------------------------------
+// «Sacar carro»: el 12 % de la tarjeta solo viaja con un pago con tarjeta
+// ---------------------------------------------------------------------------
+
+test('un pago en EFECTIVO al sacar el carro se guarda con 0 % aunque el formulario traiga el 12 % puesto', () => {
+  // `forma === 'tarjeta' ? q(porcentajeTarjeta) : 0` -> `q(porcentajeTarjeta)`: el formulario trae el 12 % escrito de
+  // arranque (es el de ajustes), y un pago en efectivo quedaba guardado con 12 %: el sistema creía que el cliente había
+  // pagado 12 % más de lo que entregó, y el saldo salía Q336 de menos en una renta de Q2,800.
+  const base = {
+    id: 'c1', numero: 9, cliente: { id: 'k1', nombres: 'Juan', apellidos: 'Pérez' }, ajeno: false,
+    carro: { id: 'v1', placas: 'P-111AAA', marca: 'Toyota', linea: 'Hilux', color: 'Blanco' },
+    fechaSalida: '2026-10-01', dias: 4, precioDia: 700, montoPago: 2800, porcentajeTarjeta: 12,
+  };
+  const efectivo = construirContrato({ ...base, forma: 'efectivo' });
+  assert.equal(efectivo.pagos[0].porcentajeTarjeta, 0);
+  assert.equal(resumen(efectivo).pagado, 2800);
+  assert.equal(resumen(efectivo).saldo, 0);
+  const sinForma = construirContrato({ ...base, forma: undefined });
+  assert.deepEqual([sinForma.pagos[0].forma, sinForma.pagos[0].porcentajeTarjeta], ['efectivo', 0]);
+  const tarjeta = construirContrato({ ...base, forma: 'tarjeta' });
+  assert.equal(tarjeta.pagos[0].porcentajeTarjeta, 12);
+  assert.equal(resumen(tarjeta).pagado, 3136, 'con tarjeta sí: Q2,800 + 12 %');
+  assert.deepEqual(construirContrato({ ...base, forma: 'efectivo', montoPago: 0 }).pagos, [], 'sin monto no hay pago');
+});
+
+test('el anticipo de una reservación se agrega como pago: en efectivo sin recargo, con tarjeta con el suyo, y pendiente no es un pago', () => {
+  const reserva = (campos) => construirReserva({}, {
+    clienteNombre: 'Juan', fechaSalida: '2026-10-01', dias: 4, precioDia: 700, anticipo: 400, anticipoPagado: true, ...campos,
+  });
+  const c = salidaReal({ fechaSalida: '2026-10-01', dias: 4 });
+  const pagos = (contrato) => contrato.pagos.map((p) => [p.monto, p.forma, p.porcentajeTarjeta, p.fecha]);
+  assert.deepEqual(pagos(conAnticipoComoPago(c, reserva({}), { porcentajeTarjeta: 12 })), [[400, 'efectivo', 0, '2026-10-01']], 'sin decir forma: efectivo, sin 12 %');
+  assert.deepEqual(pagos(conAnticipoComoPago(c, reserva({}), { forma: 'tarjeta', porcentajeTarjeta: 12 })), [[400, 'tarjeta', 12, '2026-10-01']]);
+  assert.deepEqual(conAnticipoComoPago(c, reserva({ anticipoPagado: false }), { forma: 'tarjeta', porcentajeTarjeta: 12 }).pagos, [], 'pendiente: no existe como pago');
+  assert.deepEqual(conAnticipoComoPago(c, reserva({ anticipo: 0 })).pagos, []);
+});
+
+test('lo que cuesta cobrar un abono con tarjeta es SU recargo, no el de todo el saldo', () => {
+  // totalDeEstaCobranza: Q500 al 12 % son Q560.00 (no los Q817.60 de saldar Q730).
+  const c = contratoReal({
+    fechaSalida: '2026-08-20', dias: 4, precioDia: 700, cartaPoderPrecio: 350, recibidoEl: '2026-08-25', cierre: { danos: 200, combustible: 130, descuento: 300 },
+    pagos: [{ monto: 3150, forma: 'tarjeta', porcentajeTarjeta: 12 }],
+  });
+  assert.equal(resumen(c).saldo, 730);
+  assert.deepEqual(totalDeEstaCobranza(c, { monto: 500, forma: 'tarjeta', porcentajeTarjeta: 12, fecha: '2026-08-25' }), { total: 560, recargo: 60 });
+  assert.deepEqual(totalDeEstaCobranza(c, { monto: 500, forma: 'efectivo', porcentajeTarjeta: 0, fecha: '2026-08-25' }), { total: 500, recargo: 0 });
+  assert.deepEqual(totalDeEstaCobranza(c, { monto: 0, forma: 'tarjeta', porcentajeTarjeta: 12 }), { total: 0, recargo: 0 });
+  assert.deepEqual(totalDeEstaCobranza(c, { monto: '', forma: 'tarjeta', porcentajeTarjeta: 12 }), { total: 0, recargo: 0 });
 });
