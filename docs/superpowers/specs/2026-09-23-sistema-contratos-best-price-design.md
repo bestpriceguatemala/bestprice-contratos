@@ -471,6 +471,16 @@ que salió. Para eso el pago guarda dos campos nuevos (§7b): `numero` y `detall
 comisión, el porcentaje de ese día y la comisión**; el **total pagado** (el `monto` guardado) y la forma de
 pago; y la línea de firma del empleado. Es lo mismo que ya enseña la fila de «Por pagar» de su cuenta.
 
+*Cómo sale en el papel* (24 de octubre de 2026; se probó imprimiendo a PDF y mirando las hojas, no solo con pruebas). Dos cosas que
+solo se ven en la hoja y que los dos comprobantes (este y el de los dueños de carros) comparten:
+- **Los teléfonos del membrete no se parten.** El texto del membrete no cambia (`MEMBRETE`, sin NIT); cada número con guion va
+  envuelto en `comp-sin-corte` (`white-space: nowrap`), así que a ningún ancho se corta un teléfono entre dos renglones. El membrete
+  se arma en un solo lugar (`htmlDelMembrete`, comprobante.js) para los dos papeles.
+- **La firma nunca va sola en una hoja de más.** En este papel el total, la forma de pago y la firma son filas de la misma tabla, junto
+  con las últimas tres rentas, dentro de `tbody.comp-cola`, que no se parte: si no caben, pasan enteros a la hoja siguiente. (Una
+  cadena de `break-*: avoid` hacia atrás no basta: solo se cumple en la hoja donde empieza la tabla, no en una que la continúa.) El
+  papel de los dueños, que no lleva la firma dentro de una tabla, usa la cadena. Ver los comentarios de `@media print` en `css/estilos.css`.
+
 *De dónde sale cada dato.* Todo lo que es una cifra, una fecha o un número es **lo guardado en el pago** (`numero`, `fecha`,
 `forma`, `monto`, `detalle[]`). Solo el nombre y el código del empleado son los de su ficha de hoy: no son una cifra, y si se
 corrige una letra el papel lleva la corrección (como el del dueño de un carro lleva el nombre de su ficha).
