@@ -568,8 +568,8 @@ export async function guardarDueno(dueno, deps = {}) {
  * cliente, o ninguno. Si estás aquí por eso, no es un defecto de este código. No agregues una casilla ni una guardia sin
  * preguntarle: dijo que no.
  */
-export async function siguienteNumeroContrato() {
-  const { db, fsMod } = await iniciarFirebase();
+export async function siguienteNumeroContrato({ iniciar = iniciarFirebase } = {}) {
+  const { db, fsMod } = await iniciar();
   const ref = fsMod.doc(db, 'contadores', 'contratos');
   return conLimiteDeTiempo(fsMod.runTransaction(db, async (tx) => {
     const actual = await tx.get(ref);
