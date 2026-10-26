@@ -1,0 +1,131 @@
+// Pruebas que cierran lo que la auditoría de mutaciones del 26 de octubre de 2026 encontró en el dinero.
+//
+// Cada prueba de aquí nació de un mutante que SOBREVIVIÓ: se le metió a propósito un error al código
+// (un `<` por `<=`, un `*` por `/`…) y las 2,589 pruebas de entonces seguían en verde. Aquí cada una
+// falla con ese error puesto y pasa con el código bueno. El informe, con lo que le habría costado al
+// dueño cada uno, está en .superpowers/auditoria-pruebas-2026-10-26.md.
+//
+// Los contratos salen de los constructores de verdad (pruebas/fixtures/contratoReal.mjs), no de objetos
+// escritos a mano.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { q } from '../js/nucleo/dinero.js';
+import { lineasSalida, lineasDevolucion, resumen } from '../js/nucleo/contrato.js';
+import { construirCierre, problemasDelCierre } from '../js/nucleo/cierre.js';
+import { contratoReal, salidaReal, camposDeCierre } from './fixtures/contratoReal.mjs';
+
+const HOY = '2026-10-26';
+
+// ---------------------------------------------------------------------------
+// dinero.js — el redondeo de lo que el texto decimal no puede escalar
+// ---------------------------------------------------------------------------
+
+test('q: un monto enorme o casi cero (su texto lleva exponente) también se redondea a dos decimales', () => {
+  // `${x}e2` solo sirve si el texto del número no trae ya un exponente; con 1e21 o 4e-7 ese texto da NaN
+  // y q() cae a la otra cuenta. Esa otra cuenta no tenía ninguna prueba: un error ahí (×101, ÷100, sin
+  // redondear, hacia abajo) no lo notaba nadie.
+  // Un monto de 1e21 no existe en este negocio, pero la cuenta no debe moverlo más que el error de la coma flotante.
+  const casiIgual = (a, b) => Math.abs(a - b) <= Math.abs(b) * 1e-9;
+  assert.ok(casiIgual(q(1e21), 1e21), 'un monto enorme se queda como está: no se escala por error');
+  assert.ok(casiIgual(q(-1e22), -1e22), 'y su negativo, del mismo lado');
+  assert.equal(q(4e-7), 0, 'menos de medio centavo es cero');
+  assert.equal(q(5e-7) === 0, true, 'también medio centavo escrito en notación científica');
+  // Un negativo diminuto (el residuo de 0.3 - (0.1 + 0.2)) no se va a -Q0.01 por redondear hacia abajo.
+  assert.equal(q(-4e-7) == 0, true, 'un residuo negativo es cero, no -0.01');
+  assert.equal(q(-5.551115123125783e-17) == 0, true);
+});
+
+// ---------------------------------------------------------------------------
+// contrato.js — lo que se le cobra a quien se pasa de los días
+// ---------------------------------------------------------------------------
+
+test('los seguros por día de un atraso de VARIOS días se multiplican por esos días', () => {
+  // Con 1 día de atraso, multiplicar y dividir dan lo mismo (75 × 1 = 75 ÷ 1), y todas las pruebas de
+  // antes usaban 1. Con 3 días, dividir cobraría Q25 en vez de Q225: Q200 de menos por cada renta.
+  const c = contratoReal({
+    dias: 2, precioDia: 700, seguroMenoresDia: 50, seguroPaiDia: 25, recibidoEl: '2026-10-06',
+  });
+  const extra = lineasDevolucion(c).find((l) => l.concepto === 'Seguros extra');
+  assert.equal(extra.monto, 225, '(50 + 25) × 3 días de atraso');
+  assert.equal(extra.detalle, 'por 3 días de atraso');
+  const atraso = lineasDevolucion(c).find((l) => l.concepto === 'Cobro días de atraso');
+  assert.equal(atraso.monto, 2100, '3 días de atraso × Q700');
+  assert.equal(resumen(c).totalDevolucion, 2325);
+});
+
+test('una renta sin días o sin precio por día no escribe una línea «Renta» en Q0.00', () => {
+  // `dias && precio` -> `dias || precio`: con solo uno de los dos aparecería «Renta — 3 días × Q0.00 — Q0.00».
+  const sinPrecio = contratoReal({ dias: 3, precioDia: 0 });
+  assert.equal(lineasSalida(sinPrecio).some((l) => l.concepto === 'Renta'), false, 'sin precio por día no hay renta que cobrar');
+  const sinDias = contratoReal({ dias: 0, precioDia: 700 });
+  assert.equal(lineasSalida(sinDias).some((l) => l.concepto === 'Renta'), false, 'sin días tampoco');
+  const completa = contratoReal({ dias: 3, precioDia: 700 });
+  assert.deepEqual(lineasSalida(completa).map((l) => [l.concepto, l.monto]), [['Renta', 2100]]);
+});
+
+test('el detalle de una línea que viene en null (un contrato de antes) sale vacío, no «null»', () => {
+  // Nada lo probaba: bastaría quitar el `|| ''` de las cuatro líneas para que un contrato guardado con el detalle en
+  // null escribiera «null» en el papel. (`x || ''` y `x ?? ''` dan lo mismo con null, así que cambiar uno por el otro
+  // no es un error: ver el informe.)
+  const base = contratoReal({
+    dias: 2, cartaPoderPrecio: 350, cartaPoderDestino: 'Honduras', variosPrecio: 80, variosDescripcion: 'Silla',
+  });
+  const viejo = { ...base, cartaPoderDestino: null, variosDescripcion: null };
+  const salida = lineasSalida(viejo);
+  assert.equal(salida.find((l) => l.concepto === 'Carta poder').detalle, '');
+  assert.equal(salida.find((l) => l.concepto === 'Varios').detalle, '');
+
+  const cerrado = construirCierre(base, camposDeCierre({
+    recibidoEl: '2026-10-03', danos: 100, danosDetalle: null, varios: 40, variosDetalle: null,
+  }));
+  const devolucion = lineasDevolucion(cerrado);
+  assert.equal(devolucion.find((l) => l.concepto === 'Daños').detalle, '');
+  assert.equal(devolucion.find((l) => l.concepto === 'Varios').detalle, '');
+  // Y cuando sí traen el texto, sale el texto.
+  assert.equal(lineasSalida(base).find((l) => l.concepto === 'Carta poder').detalle, 'Honduras');
+});
+
+// ---------------------------------------------------------------------------
+// cierre.js — lo que impide guardar al recibir el carro
+// ---------------------------------------------------------------------------
+
+test('recibir el carro el MISMO día que salió es válido (una renta de un día que vuelve en la tarde)', () => {
+  // `diasEntre(salida, real) < 0` -> `<= 0`: bloquearía con «No se puede recibir el carro antes de haberlo
+  // entregado» a cada contrato que regresa el día que salió, y no se podría cerrar.
+  const c = salidaReal({ fechaSalida: '2026-10-05', dias: 1 });
+  assert.deepEqual(problemasDelCierre(c, camposDeCierre({ recibidoEl: '2026-10-05', kmEntrada: 120 }), HOY), []);
+  const antes = problemasDelCierre(c, camposDeCierre({ recibidoEl: '2026-10-04', kmEntrada: 120 }), HOY);
+  assert.equal(antes.length, 1);
+  assert.match(antes[0], /No se puede recibir el carro antes de haberlo entregado\. Salida: 5 oct 2026\. Entrada: 4 oct 2026\./);
+});
+
+test('un descuento que deja el cobro EXACTAMENTE en Q0.00 se puede guardar; uno de un centavo más, no', () => {
+  // `subtotal < 0` -> `<= 0` bloquearía la cortesía total (una renta regalada); `< 1` bloquearía
+  // un cobro de Q0.50. Los dos bordes, en las dos direcciones.
+  const c = salidaReal({ dias: 3, precioDia: 700 });
+  const con = (descuento) => problemasDelCierre(c, camposDeCierre({ recibidoEl: '2026-10-04', descuento }), HOY);
+  assert.deepEqual(con(2100), [], 'descuento igual a lo que se cobra: cobro en cero, válido');
+  assert.deepEqual(con(2099.5), [], 'medio quetzal de cobro tampoco es negativo');
+  const pasado = con(2100.01);
+  assert.equal(pasado.length, 1);
+  assert.match(pasado[0], /es demasiado grande: dejaría el cobro en negativo \(-Q0\.01\)\./);
+});
+
+test('sin fecha real (vacía, en blanco o ausente) dice que falta, y no truena', () => {
+  // `!fechaReal || fechaReal.trim() === ''` -> `&&`: con la fecha ausente se llamaría `.trim()` de
+  // undefined; con espacios diría «no es válida» en vez de «falta».
+  const c = salidaReal({ fechaSalida: '2026-10-05', dias: 1 });
+  const falta = ['Falta la fecha en que se recibió el carro.'];
+  for (const fechaReal of [undefined, '', '   ']) {
+    assert.deepEqual(problemasDelCierre(c, { ...camposDeCierre({ recibidoEl: '' }), fechaReal }, HOY), falta, JSON.stringify(fechaReal));
+  }
+});
+
+test('el kilometraje de entrada: 0 es «falta», cualquier otro menor que el de salida es «retrocede»', () => {
+  // `kmEntrada > 0` -> `> 1`: un kilometraje de entrada de 1 se leería como «falta».
+  const c = salidaReal({ fechaSalida: '2026-10-05', dias: 1, kmSalida: 80000 });
+  const con = (kmEntrada) => problemasDelCierre(c, camposDeCierre({ recibidoEl: '2026-10-05', kmEntrada }), HOY);
+  assert.deepEqual(con(0), ['Falta el kilometraje de entrada: el carro salió con 80,000.']);
+  assert.deepEqual(con(1), ['El kilometraje de entrada (1) es menor que el de salida (80,000).']);
+  assert.deepEqual(con(80000), [], 'igual al de salida no retrocede');
+});
