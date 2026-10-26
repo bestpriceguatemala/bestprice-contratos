@@ -635,11 +635,11 @@ test('el papel dice lo que el diseño manda, en este orden: membrete, empleado, 
 test('cada fila dice cuándo regresó, el contrato, las placas, el cliente, los días con su atraso, la base, el porcentaje y la comisión', () => {
   const html = htmlComprobanteDeComision(armarComprobanteDeComision(papel()));
   const k = comisionDe(RICAS[0]);
-  const fila = html.match(/<tr>\s*<td>[^<]*<\/td>\s*<td>31<\/td>[^]*?<\/tr>/)[0];
+  const fila = html.match(/<tr>\s*<td[^>]*>[^<]*<\/td>\s*<td>31<\/td>[^]*?<\/tr>/)[0];
   for (const esperado of [fecha(RICAS[0].cierre.fechaReal), '31', 'P-333CCC', 'Carlos Méndez', '4 + 1 de atraso', dinero(k.base), '7.5 %', dinero(k.monto)]) {
     assert.ok(fila.includes(esperado), `la fila de la renta 31 dice «${esperado}»: ${fila}`);
   }
-  const sencilla = html.match(/<tr>\s*<td>[^<]*<\/td>\s*<td>33<\/td>[^]*?<\/tr>/)[0];
+  const sencilla = html.match(/<tr>\s*<td[^>]*>[^<]*<\/td>\s*<td>33<\/td>[^]*?<\/tr>/)[0];
   assert.ok(sencilla.includes('<td class="num">4</td>') && !sencilla.includes('atraso'), 'sin atraso, solo los días');
 });
 
@@ -802,7 +802,7 @@ test('lo que falta se ve como raya, no como «undefined»: sin código, sin cont
   const html = htmlComprobanteDeComision(armarComprobanteDeComision({ pago, empleado: { nombre: 'Luis Mérida' } }));
   assert.ok(!/undefined|null|NaN/.test(html));
   assert.ok(html.includes('<dt>Código</dt><dd>—</dd>'));
-  assert.equal((html.match(/<td>—<\/td>/g) || []).length, 3 * 3, 'las tres filas, y en cada una: contrato, placas y cliente');
+  assert.equal((html.match(/<td[^>]*>—<\/td>/g) || []).length, 3 * 3, 'las tres filas, y en cada una: contrato, placas y cliente');
 });
 
 // ----- cuándo NO hay papel -----
@@ -1135,7 +1135,7 @@ function papelConRentas(n) {
   };
   return { pago, empleado: LUIS_EN_PAPEL };
 }
-const numerosDeContrato = (trozo) => [...trozo.matchAll(/<tr>\s*<td>[^<]*<\/td>\s*<td>(\d+)<\/td>/g)].map((m) => Number(m[1]));
+const numerosDeContrato = (trozo) => [...trozo.matchAll(/<tr>\s*<td[^>]*>[^<]*<\/td>\s*<td>(\d+)<\/td>/g)].map((m) => Number(m[1]));
 
 test('el total, la forma de pago y la firma son las últimas filas de la tabla, en el mismo bloque que las últimas tres rentas', () => {
   const html = htmlComprobanteDeComision(armarComprobanteDeComision(papelConRentas(10)));
@@ -1154,6 +1154,15 @@ test('el total, la forma de pago y la firma son las últimas filas de la tabla, 
   assert.ok(html.indexOf('</tbody>', html.indexOf('comp-cola')) < html.indexOf('</table>'), 'el bloque cierra dentro de la tabla: la firma no queda fuera de ella');
   assert.ok(html.indexOf('</table>') > html.indexOf('comp-firma-nombre'));
   assert.ok(!/<tfoot|<footer/.test(html), 'ya no hay un total ni una firma sueltos después de la tabla');
+});
+
+test('la fecha y las placas de cada renta no se parten (comp-sin-corte): con un nombre largo la tabla aprieta y cortaba «P-» de «100ABC» y «5 ago» de «2026»; el contrato y el cliente no la llevan', () => {
+  const m = armarComprobanteDeComision(papel());
+  const html = htmlComprobanteDeComision(m);
+  const filas = [...html.matchAll(/<tr>\s*<td class="comp-sin-corte">([^<]*)<\/td>\s*<td>(\d+)<\/td>\s*<td class="comp-sin-corte">([^<]*)<\/td>\s*<td>([^<]*)<\/td>/g)];
+  assert.equal(filas.length, m.pagado.filas.length, 'cada renta del papel');
+  assert.deepEqual(filas.map((f) => f[3]), m.pagado.filas.map((f) => f.placas));
+  assert.deepEqual(filas.map((f) => f[4]), m.pagado.filas.map((f) => f.cliente), 'el cliente es la columna que cede: sin marca');
 });
 
 test('con pocas rentas viajan todas: con dos, el primer cuerpo queda vacío; con tres o cuatro, se parten en tres y el resto', () => {

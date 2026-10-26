@@ -409,9 +409,12 @@ function celdaDeDias(f) {
 
 function filaHtml(f) {
   const falta = f.sinCosto ? `<span class="comp-falta">${TEXTO_SIN_COSTO[f.sinCosto]}</span>` : '';
+  // La fecha y las placas van en `comp-sin-corte` (no se parten): con el nombre largo de un cliente la tabla aprieta las otras columnas y el
+  // navegador cortaba «P-» de «200XYZ» (después del guion) y «5 ago» de «2026». Es el mismo mal que el teléfono partido del membrete, y
+  // la placa es el dato con el que se busca una renta. El nombre del cliente SÍ se parte: es la columna que puede ceder.
   return `<tr>
-        <td>${algo(fecha(f.fecha))}</td>
-        <td>${algo(f.placas)}</td>
+        <td class="comp-sin-corte">${algo(fecha(f.fecha))}</td>
+        <td class="comp-sin-corte">${algo(f.placas)}</td>
         <td>${algo(f.cliente)}</td>
         <td class="num">${esc(celdaDeDias(f))}</td>
         <td class="num">${f.sinCosto ? falta : dinero(f.costoDia)}</td>

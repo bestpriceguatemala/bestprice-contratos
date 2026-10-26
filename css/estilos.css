@@ -1358,7 +1358,8 @@ body {
 /* Un número con guion (un teléfono: 4019-3131; también 15-90 de la dirección) nunca se parte entre dos renglones, a ningún ancho.
    El navegador corta un renglón justo después de un guion; un teléfono cortado a la mitad no sirve para llamar. El texto lo marca
    `htmlDeLineaDeContacto` (comprobante.js), y como el CSS solo aplica al contenido marcado, el renglón sí puede partirse entre
-   un número y el siguiente. */
+   un número y el siguiente. Lo mismo vale para la fecha y las placas de cada renta en las dos tablas (P-200XYZ, 5 ago 2026): con el
+   nombre largo de un cliente la tabla aprieta las demás columnas y cortaba «P-» de «200XYZ»; la columna que cede es la del cliente. */
 .comp-sin-corte {
   white-space: nowrap;
 }

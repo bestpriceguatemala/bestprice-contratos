@@ -958,6 +958,20 @@ test('el papel de los dueños lleva el membrete compartido tal cual: es el mismo
   assert.ok(htmlComprobante(armarComprobante(entrada())).includes(htmlDelMembrete()));
 });
 
+test('la fecha y las placas de cada renta no se parten (comp-sin-corte): con un nombre largo la tabla aprieta y cortaba «P-» de «200XYZ»; el cliente y la frase de una diferencia sí se parten', () => {
+  const m = armarComprobante(entrada({ contratos: CRECIDAS }));
+  const html = htmlComprobante(m);
+  const filas = [...html.matchAll(/<tr>\s*<td class="comp-sin-corte">([^<]*)<\/td>\s*<td class="comp-sin-corte">([^<]*)<\/td>\s*<td>([^<]*)<\/td>/g)];
+  const esperadas = [...m.pagado.filas, ...m.pendiente.filas];
+  assert.ok(esperadas.length >= 5, 'el escenario trae rentas pagadas y por pagar');
+  assert.equal(filas.length, esperadas.length, 'cada renta, en las dos tablas');
+  assert.deepEqual(filas.map((f) => f[2]), esperadas.map((f) => f.placas));
+  assert.deepEqual(filas.map((f) => f[3]), esperadas.map((f) => f.cliente), 'el cliente es la columna que cede: sin marca');
+  // La frase de una diferencia es un texto largo: si no se partiera saldría por la derecha de la hoja.
+  assert.match(html, /<td colspan="5">Diferencia de rentas ya pagadas/);
+  assert.ok(!/comp-sin-corte" colspan/.test(html));
+});
+
 test('estilos.css: un número con guion no se parte, y el nombre cede el hueco al contacto (las reglas, con sus declaraciones)', () => {
   const css = reglasDeCss(readFileSync(new URL('../css/estilos.css', import.meta.url), 'utf8'));
   // LA garantía, a cualquier ancho: el número marcado es indivisible. El renglón puede cortarse entre un número y el siguiente.

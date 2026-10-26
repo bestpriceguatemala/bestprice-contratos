@@ -147,10 +147,12 @@ const celdaDeTasa = (valor) => `${valor} %`;
 const RENTAS_CON_LA_FIRMA = 3;
 
 function filaHtml(f) {
+  // La fecha y las placas no se parten (`comp-sin-corte`): con el nombre largo de un cliente la tabla aprieta las otras columnas y el
+  // navegador cortaba «P-» de «100ABC» y «5 ago» de «2026». El nombre del cliente SÍ se parte: es la columna que puede ceder.
   return `<tr>
-        <td>${algo(fecha(f.regreso))}</td>
+        <td class="comp-sin-corte">${algo(fecha(f.regreso))}</td>
         <td>${f.contrato === null ? RAYA : esc(f.contrato)}</td>
-        <td>${algo(f.placas)}</td>
+        <td class="comp-sin-corte">${algo(f.placas)}</td>
         <td>${algo(f.cliente)}</td>
         <td class="num">${esc(celdaDeDias(f))}</td>
         <td class="num">${dinero(f.base)}</td>
