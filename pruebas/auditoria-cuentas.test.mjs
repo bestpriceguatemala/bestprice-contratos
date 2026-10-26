@@ -16,72 +16,11 @@ import {
 import {
   cuentaDeEmpleado, agruparPorEmpleado, filaDeDetalle, totalGeneralDeComisiones,
 } from '../js/nucleo/comisiones.js';
-import { resumen } from '../js/nucleo/contrato.js';
-import { construirCierre } from '../js/nucleo/cierre.js';
-import { sumarDias } from '../js/nucleo/fechas.js';
-import { construirContrato } from '../js/pantallas/sacarCarro.js';
-import {
-  agregarPago, contratoParaGuardar, conCostoDelDueno, costoDelDocumento, construirPagoDueno, pagoDuenoParaGuardar,
-  construirPagoComision, pagoComisionParaGuardar,
-} from '../js/datos.js';
+import { construirPagoComision, pagoComisionParaGuardar } from '../js/datos.js';
 import { renta, rentaDeAntes, EMPLEADOS } from './fixtures/rentasConComision.mjs';
-
-const AHORA = 1790000000000;
-const CLIENTE = { id: 'k1', nombres: 'Juan', apellidos: 'Pérez' };
-const ids = (lista) => lista.map((c) => c.id);
-
-// ---------------------------------------------------------------------------
-// Los contratos de carro ajeno, en las etapas de su vida (mismo recorrido que pruebas/liquidacion.test.mjs)
-// ---------------------------------------------------------------------------
-
-function salida({
-  id, numero = 1, costoDia = 300, dias = 4, fechaSalida = '2026-09-01', duenoId = undefined, dueno = 'Don Mario',
-}) {
-  return construirContrato({
-    id,
-    numero,
-    cliente: CLIENTE,
-    ajeno: true,
-    carro: null,
-    carroAjeno: {
-      placas: 'P-1AJN', tipo: 'Pickup', marca: 'Ford', color: 'Rojo', modelo: '2019', dueno, costoDia,
-    },
-    duenoId,
-    fechaSalida,
-    dias,
-    precioDia: 700,
-    tarjetas: [],
-    forma: 'efectivo',
-    porcentajeTarjeta: 0,
-    montoPago: dias * 700,
-    rentadoPor: 'Ana',
-    porcentajeComision: 5,
-  });
-}
-const recibido = (c, atraso = 0) => construirCierre(c, {
-  fechaReal: sumarDias(c.devolucionPrevista, atraso), horaReal: '10:00', lugarEntrada: 'Oficina', kmEntrada: 0, combustible: 0, danos: 0, varios: 0, descuento: 0,
-});
-const saldado = (c) => agregarPago(c, {
-  monto: resumen(c).saldo, forma: 'efectivo', porcentajeTarjeta: 0, fecha: c.cierre.fechaReal,
-});
-/** Lo que llega al área de dinero: guardado, y con el costo del dueño vuelto a poner (`conCostoDelDueno`). */
-const guardado = (c) => conCostoDelDueno(contratoParaGuardar(c, { id: c.id, numero: c.numero, ahora: AHORA }), costoDelDocumento(c));
-/** Cerrado con `atraso` días de atraso ya cobrados al cliente. */
-const cerrado = (id, atraso = 0, opciones = {}) => guardado(saldado(recibido(salida({ id, ...opciones }), atraso)));
-/** El carro volvió con `atraso` días y el cliente todavía no paga esos días: devuelto, no cerrado. */
-const devuelto = (id, atraso, opciones = {}) => guardado(recibido(salida({ id, ...opciones }), atraso));
-/** El mismo contrato leído SIN su costo: la lectura de `privado/dinero` falló (`costoSinLeer`). */
-const sinCostoLeido = (id) => contratoParaGuardar(saldado(recibido(salida({ id }))), { id, numero: 1, ahora: AHORA });
-
-/** Un pago a un dueño armado como lo arma la pantalla: `construirPagoDueno` + `pagoDuenoParaGuardar`. */
-function pagoReal({
-  id, numero, contratos, pagos = [], idsMarcados, descuento,
-}) {
-  const armado = construirPagoDueno({
-    duenoId: 'd1', fecha: '2026-09-20', forma: 'transferencia', contratos, pagos, idsMarcados, costoSinLeer: [], descuento,
-  });
-  return pagoDuenoParaGuardar(armado, { id, numero, ahora: AHORA });
-}
+import {
+  AHORA, ids, salida, cerrado, devuelto, sinCostoLeido, pagoReal,
+} from './fixtures/duenoDeCarros.mjs';
 
 // ---------------------------------------------------------------------------
 // liquidacion.js — «cierra» y «de fiar» son de TODAS las rentas del grupo, no de alguna
@@ -103,6 +42,14 @@ test('un pago de dos rentas y una se reabre y crece: la diferencia se ve pero NO
   assert.deepEqual(cuenta.diferencias, [], 'no se puede pagar todavía');
   assert.equal(cuenta.diferenciasSinCerrar.length, 1, 'pero se ve');
   assert.equal(cuenta.totalPorPagar, 0, 'y no suma a lo que se le debe ahora');
+
+  // La contraparte: si las DOS rentas cierran, la diferencia se paga y NO se repite además como «sin cerrar».
+  // (`crecidos.filter((g) => !g.cierra)` -> sin el filtro: la misma deuda aparecía en las dos listas.)
+  const cierran = cuentaDeDueno({ contratos: [cerrado('c1', 2), c2], pagos: [p1] });
+  assert.equal(cierran.diferencias.length, 1);
+  assert.equal(cierran.diferencias[0].diferencia, 600);
+  assert.deepEqual(cierran.diferenciasSinCerrar, []);
+  assert.equal(cierran.totalPorPagar, 600);
 });
 
 test('una diferencia de menos de un quetzal también es deuda y se ve', () => {
