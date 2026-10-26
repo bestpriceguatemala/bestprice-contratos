@@ -30,6 +30,11 @@ function exigirSinIndefinidos(funcion, ruta, datos) {
 
 const sinId = ({ id: _id, ...resto }) => resto;
 
+/** Los operadores de `where` que sabe evaluar la nube de mentira, cada uno como lo evalúa la de verdad. */
+const COMPARACIONES = {
+  '<': (a, b) => a < b, '<=': (a, b) => a <= b, '==': (a, b) => a === b, '>=': (a, b) => a >= b, '>': (a, b) => a > b, '!=': (a, b) => a !== b,
+};
+
 const BORRAR = Symbol('deleteField');
 const esMapa = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -100,18 +105,17 @@ export function nubeEnMemoria({
     },
     // Una consulta con `where`, como la de cargarContratos por rango de fechas.
     where: (campo, operador, valor) => {
-      // Solo los dos operadores que `cumple` sabe evaluar. Antes cualquier otro se evaluaba como «<=» en silencio:
-      // un `'<'` o un `'>'` por error en la consulta pasaba las pruebas y en la nube de verdad dejaba fuera un día.
-      if (!['>=', '<='].includes(operador)) throw new Error(`La nube de mentira no sabe evaluar where(${campo}, '${operador}', …)`);
+      // Cada operador se evalúa como lo hace la nube de verdad, y uno que no se conoce LANZA. Antes cualquier operador que
+      // no fuera «>=» se evaluaba como «<=» en silencio: un `'<'` por error en la consulta (que deja fuera el último día del
+      // mes) pasaba todas las pruebas (auditoría de mutaciones, 26 oct 2026).
+      if (!Object.hasOwn(COMPARACIONES, operador)) throw new Error(`La nube de mentira no sabe evaluar where(${campo}, '${operador}', …)`);
       return { campo, operador, valor };
     },
     query: (col, ...restricciones) => ({ ...col, restricciones }),
     getDocs: async (col) => {
       llamadas.push(['getDocs', col.coleccion, col.db.nombre]);
       if (falla('getDocs', col.coleccion)) throw new Error('sin internet');
-      const cumple = (datos) => (col.restricciones ?? []).every(({ campo, operador, valor }) => (
-        operador === '>=' ? datos[campo] >= valor : datos[campo] <= valor
-      ));
+      const cumple = (datos) => (col.restricciones ?? []).every(({ campo, operador, valor }) => COMPARACIONES[operador](datos[campo], valor));
       // Las reglas: `pagosDueno` y `pagosComision` solo se leen con la credencial de dinero (`empleados` se lee con cualquier sesión).
       if (['pagosDueno', 'pagosComision'].includes(col.coleccion) && !col.db.esDinero) {
         throw Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' });
