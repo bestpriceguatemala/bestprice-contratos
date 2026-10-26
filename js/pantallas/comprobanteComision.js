@@ -140,6 +140,12 @@ function celdaDeDias(f) {
 /** «5 %», «7.5 %»: el porcentaje que la renta tenía sellado ese día, tal como `comisionDe` lo guardó (ya pasó por `q()`; el núcleo comprobó que es un número). */
 const celdaDeTasa = (valor) => `${valor} %`;
 
+/**
+ * Cuántas de las últimas rentas viajan siempre con el total y la firma. Tres: las suficientes para que se lea qué se firma, sin
+ * mandar media hoja a la siguiente. Si el pago tiene menos, viajan todas.
+ */
+const RENTAS_CON_LA_FIRMA = 3;
+
 function filaHtml(f) {
   return `<tr>
         <td>${algo(fecha(f.regreso))}</td>
@@ -159,6 +165,11 @@ function filaHtml(f) {
  */
 export function htmlComprobanteDeComision(m) {
   const e = m.empleado;
+  // Las últimas rentas, el total, la forma de pago y la firma son UN solo bloque (`tbody.comp-cola`, que la hoja de impresión no
+  // parte): así la firma nunca queda sola en una hoja de más, en la primera ni en la décima. Ver el POR QUÉ junto a `.comp-cola` en
+  // css/estilos.css.
+  const filas = m.pagado.filas.map(filaHtml);
+  const alFinal = filas.splice(-RENTAS_CON_LA_FIRMA);
   return `<article class="comprobante" aria-label="Comprobante de pago de comisiones N° ${esc(m.numero)}">
   ${htmlDelMembrete()}
 
@@ -198,23 +209,29 @@ export function htmlComprobanteDeComision(m) {
         </tr>
       </thead>
       <tbody>
-      ${m.pagado.filas.map(filaHtml).join('\n      ')}
+      ${filas.join('\n      ')}
       </tbody>
-      <tfoot>
-        <tr>
+      <tbody class="comp-cola">
+      ${alFinal.join('\n      ')}
+        <tr class="comp-fila-total">
           <th scope="row" colspan="7">Total pagado</th>
           <td class="num">${dinero(m.pagado.total)}</td>
         </tr>
-      </tfoot>
+        <tr class="comp-fila-suelta">
+          <td colspan="8"><p class="comp-forma">Forma de pago: <strong>${esc(textoDeForma(m.pagado.forma))}</strong></p></td>
+        </tr>
+        <tr class="comp-fila-suelta">
+          <td colspan="8">
+            <div class="comp-firma">
+              <div class="comp-firma-linea"></div>
+              <p>Firma del empleado</p>
+              <p class="comp-firma-nombre">${algo(e.nombre)}</p>
+            </div>
+          </td>
+        </tr>
+      </tbody>
     </table>
-    <p class="comp-forma">Forma de pago: <strong>${esc(textoDeForma(m.pagado.forma))}</strong></p>
   </section>
-
-  <footer class="comp-firma">
-    <div class="comp-firma-linea"></div>
-    <p>Firma del empleado</p>
-    <p class="comp-firma-nombre">${algo(e.nombre)}</p>
-  </footer>
 </article>`;
 }
 

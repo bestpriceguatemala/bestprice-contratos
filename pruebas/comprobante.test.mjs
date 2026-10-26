@@ -970,6 +970,25 @@ test('estilos.css: un número con guion no se parte, y el nombre cede el hueco a
   assert.ok(css.declara('.comp-contacto', 'margin-left: auto'));
 });
 
+test('estilos.css: la firma viaja con renglones de verdad: el bloque del papel del empleado y la cadena del papel de los dueños, cada regla con sus declaraciones', () => {
+  const css = reglasDeCss(readFileSync(new URL('../css/estilos.css', import.meta.url), 'utf8'));
+  // Papel del empleado: su total, su forma de pago y su firma son filas de UNA tabla, en un bloque que no se parte (la cadena de «avoid» no
+  // se cumple en una hoja que continúa una tabla; el bloque sí).
+  assert.ok(css.declaraAlImprimir('.comp-cola', 'break-inside: avoid'));
+  // Papel de los dueños: la cadena, de la firma hacia atrás (`avoid` solo prohíbe el corte en ESE borde: hay que prohibirlos todos).
+  assert.ok(css.declaraAlImprimir('.comp-tabla:has(tfoot) tbody tr:nth-last-child(-n + 3)', 'break-after: avoid'), 'las últimas tres rentas');
+  assert.ok(css.declaraAlImprimir('.comp-tabla tfoot tr', 'break-after: avoid'), 'los renglones del total');
+  assert.ok(css.declaraAlImprimir('.comp-seccion > .comp-forma', 'break-before: avoid'), 'la forma de pago');
+  assert.ok(css.declaraAlImprimir('.comprobante > .comp-firma', 'break-before: avoid'), 'la firma');
+  assert.ok(css.declaraAlImprimir('.comp-seccion .comp-al-dia', 'break-after: avoid'), 'la línea que presenta la tabla va con la tabla');
+  // Lo que ya había y que lo de arriba necesita: cada renglón y la firma no se parten, el título va con lo que sigue, y la cuenta del descuento.
+  assert.ok(css.declaraAlImprimir('.comp-tabla tr', 'break-inside: avoid'));
+  assert.ok(css.declaraAlImprimir('.comp-firma', 'break-inside: avoid'));
+  assert.ok(css.declaraAlImprimir('.comp-seccion h2', 'break-after: avoid'));
+  assert.ok(css.declaraAlImprimir('.comp-pie-suma', 'break-after: avoid'));
+  assert.ok(css.declaraAlImprimir('.comp-pie-menos', 'break-after: avoid'));
+});
+
 // ---------------------------------------------------------------------------
 // Una renta ya pagada cuyo monto CRECE después (revisión final, hallazgo 1).
 //

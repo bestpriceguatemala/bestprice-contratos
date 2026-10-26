@@ -1331,7 +1331,6 @@ body {
   flex: 1 1 60mm;
 }
 
-
 .comp-nombre {
   font-size: 21pt;
   font-weight: 700;
@@ -1363,7 +1362,6 @@ body {
 .comp-sin-corte {
   white-space: nowrap;
 }
-
 
 .comp-titulo {
   margin: 16pt 0 11pt;
@@ -1480,7 +1478,9 @@ body {
 }
 
 .comp-tabla tfoot th,
-.comp-tabla tfoot td {
+.comp-tabla tfoot td,
+.comp-tabla .comp-fila-total th,
+.comp-tabla .comp-fila-total td {
   padding-top: 6pt;
   font-size: 10.5pt;
   font-weight: 700;
@@ -1488,8 +1488,16 @@ body {
   border-bottom: none;
 }
 
-.comp-tabla tfoot th {
+.comp-tabla tfoot th,
+.comp-tabla .comp-fila-total th {
   text-align: right;
+}
+
+/* La forma de pago y la firma del papel del empleado van dentro de la tabla, como los últimos renglones del bloque `.comp-cola`
+   (ver abajo, en la hoja de impresión): sin raya ni relleno de celda, para que se vean como si estuvieran sueltas debajo de ella. */
+.comp-tabla .comp-fila-suelta td {
+  padding: 0;
+  border-bottom: none;
 }
 
 /* Cuando a ese dueño ya se le había pagado de más, el pie es una cuenta de tres renglones que se lee de
@@ -1999,6 +2007,48 @@ body {
 
   .comp-seccion h2 {
     break-after: avoid;
+  }
+
+  /* La línea que presenta la tabla («Rentas ya cerradas que aún se le deben, al …», «Rentas incluidas en este pago: N.») va con su
+     tabla, igual que el título va con esa línea: sin esto, al empujar las últimas rentas y la firma a la hoja siguiente (regla de
+     abajo) el título y su línea se quedaban solos al pie de la hoja de arriba, sin la tabla que presentan. */
+  .comp-seccion .comp-al-dia {
+    break-after: avoid;
+  }
+
+  /* La firma nunca va sola en una hoja de más. Tiene que viajar con renglones de verdad (las últimas rentas y el total), y eso se
+     logra de dos maneras, según dónde esté la firma. Las dos nacen de lo mismo, medido imprimiendo (Chrome, Carta):
+
+     «avoid» no trae contenido: solo prohíbe el corte en ESE borde, y el navegador mueve el corte al borde anterior que no esté
+     prohibido. Por eso `break-before: avoid` en la firma sola no cambió nada (el corte se movió un borde, entre la tabla y la «forma
+     de pago», y la hoja de más se quedó con «forma de pago» y la firma). Para que viajen renglones hay que prohibir cada borde de la
+     cadena, de la firma hacia atrás, como ya se hace con `.comp-pie-suma` / `.comp-pie-menos`.
+
+     Pero hay un segundo hallazgo: esa cadena SOLO se cumple en la hoja donde empieza la tabla (o en una tabla que arranca en la
+     hoja). En una hoja que continúa una tabla de la hoja anterior el navegador ya no sabe mover el corte hacia atrás cuando lo que
+     sobra está después de las rentas: deja el total y la forma de pago en la hoja de arriba y la firma sola abajo, aunque todos
+     los bordes estén prohibidos. El papel del empleado es una sola tabla larga, así que ahí no se puede depender de eso: su total,
+     su forma de pago y su firma son filas de la misma tabla, en un bloque (`.comp-cola`) con `break-inside: avoid`. Un bloque que
+     no cabe se pasa ENTERO a la hoja siguiente (con el encabezado de la tabla repetido), en la primera hoja o en la décima, sin
+     tener que mover ningún corte hacia atrás. Si el bloque fuera más alto que una hoja el navegador lo parte de todos modos. */
+  .comp-cola {
+    break-inside: avoid;
+  }
+
+  /* El papel de los dueños no lleva la firma dentro de una tabla (después de la tabla de lo pendiente puede venir una frase en vez de
+     una tabla), así que ahí sí es la cadena: firma <- las últimas tres rentas y el total de lo pendiente (y «Le pagué»: sus últimas tres
+     rentas, el total y la forma de pago). Es lo que ya había para el pie de tres renglones, extendido hasta la firma. Tres rentas:
+     las suficientes para que se lea qué se firma, sin forzar media hoja a la siguiente; `:nth-last-child` cuenta desde el final,
+     así que con dos rentas viajan las dos. Solo para las tablas con `tfoot` (las del papel de los dueños): el bloque `.comp-cola` ya
+     lleva lo suyo. Si la cadena no cabe en una hoja el navegador la rompe de todos modos. */
+  .comp-tabla:has(tfoot) tbody tr:nth-last-child(-n + 3),
+  .comp-tabla tfoot tr {
+    break-after: avoid;
+  }
+
+  .comp-seccion > .comp-forma,
+  .comprobante > .comp-firma {
+    break-before: avoid;
   }
 }
 

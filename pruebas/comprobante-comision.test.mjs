@@ -27,6 +27,7 @@ import {
   armarComprobanteDeComision, htmlComprobanteDeComision, pintarComprobanteDeComision, motivoSinComprobante,
 } from '../js/pantallas/comprobanteComision.js';
 import { MEMBRETE, htmlDelMembrete } from '../js/pantallas/comprobante.js';
+import { reglasDeCss } from './fixtures/reglasCss.mjs';
 import { lineasDeContacto } from './fixtures/lineasDeContacto.mjs';
 import {
   agregarPago, contratoParaGuardar, conCostoDelDueno, costoDelDocumento,
@@ -628,7 +629,7 @@ test('el papel dice lo que el diseño manda, en este orden: membrete, empleado, 
     assert.ok(en >= desde, `«${marca}» tiene que estar, después de lo anterior`);
     desde = en;
   }
-  assert.equal((html.match(/<tr>/g) || []).length, 1 + 3 + 1, 'encabezado, tres rentas y el total');
+  assert.equal((html.match(/<tr[ >]/g) || []).length, 1 + 3 + 1 + 2, 'encabezado, tres rentas, el total y las dos filas de la forma de pago y la firma');
 });
 
 test('cada fila dice cuándo regresó, el contrato, las placas, el cliente, los días con su atraso, la base, el porcentaje y la comisión', () => {
@@ -1103,12 +1104,93 @@ test('el papel del empleado usa la misma hoja de impresión: la clase `comproban
   const impresion = css.slice(css.indexOf('@media print'));
   assert.match(impresion, /body:has\(\.comprobante\) \*:not\(:has\(\.comprobante\)\):not\(\.comprobante\):not\(\.comprobante \*\)/);
   for (const pieza of ['.no-imprimir', '.btn', '#avisos']) assert.ok(impresion.includes(pieza), `${pieza} se esconde al imprimir`);
-  // Ninguna clase nueva: todas las que dibuja el papel del empleado son las que ya dibuja el de los dueños (con sus reglas ya probadas
-  // en la hoja de impresión), así que no hay una forma nueva que se haya podido escapar de `@media print`.
+  // Ninguna clase sin regla: toda clase que dibuja el papel del empleado es del papel de los dueños (con sus reglas ya probadas en la hoja
+  // de impresión) o es una de las tres de su bloque final, y esas tres tienen su regla CON declaraciones (más abajo).
   const clases = (texto) => new Set([...texto.matchAll(/class="([^"]+)"/g)].flatMap((m) => m[1].split(' ')));
   const lasDelDueno = clases(leer('../js/pantallas/comprobante.js'));
-  for (const clase of clases(html)) assert.ok(lasDelDueno.has(clase), `la clase «${clase}» no es del papel de los dueños: ¿tiene su regla de impresión?`);
+  const propias = new Set(['comp-cola', 'comp-fila-total', 'comp-fila-suelta']);
+  for (const clase of clases(html)) assert.ok(lasDelDueno.has(clase) || propias.has(clase), `la clase «${clase}» no es del papel de los dueños ni está en la lista de las propias: ¿tiene su regla de impresión?`);
+  for (const clase of propias) assert.ok(clases(html).has(clase), `«${clase}» se dibuja`);
   assert.ok(css.includes('.dn-pago-hecho .dn-sin-papel'), 'y la nota de «sin comprobante» de la ficha tiene su regla');
+});
+
+// ---------------------------------------------------------------------------
+// La firma nunca va sola en una hoja de más (24 de octubre de 2026)
+//
+// Con unas 14 rentas o más (y otra vez cerca de las 44) el total, la forma de pago y la firma no cabían en la hoja y la firma caía sola
+// en una hoja de más. `break-before: avoid` no lo arregló (solo mueve el corte un borde hacia atrás) y una cadena de `avoid` tampoco sirve
+// en una hoja que continúa una tabla: el navegador no mueve el corte hacia atrás ahí. Lo que sí se cumple en todas las hojas es un
+// bloque que no se parte: el total, la forma de pago y la firma son filas de la MISMA tabla, junto con las últimas tres rentas, dentro
+// de `tbody.comp-cola`. Desde Node no se ve el papel; sí se ve que el bloque esté armado así, y que su regla exista con su declaración.
+// ---------------------------------------------------------------------------
+
+/** El papel de un pago de `n` rentas (todas del mismo día, así que salen en orden de contrato). */
+function papelConRentas(n) {
+  const contratos = Array.from({ length: n }, (_, i) => firme(`r${i}`, { numero: 100 + i }));
+  const pago = {
+    ...construirPagoComision({
+      empleadoId: 'e1', fecha: '2026-10-20', forma: 'efectivo', contratos, pagos: [], idsMarcados: contratos.map((c) => c.id),
+    }),
+    id: 'pn', numero: 3,
+  };
+  return { pago, empleado: LUIS_EN_PAPEL };
+}
+const numerosDeContrato = (trozo) => [...trozo.matchAll(/<tr>\s*<td>[^<]*<\/td>\s*<td>(\d+)<\/td>/g)].map((m) => Number(m[1]));
+
+test('el total, la forma de pago y la firma son las últimas filas de la tabla, en el mismo bloque que las últimas tres rentas', () => {
+  const html = htmlComprobanteDeComision(armarComprobanteDeComision(papelConRentas(10)));
+  const [antes, desdeLaCola] = html.split('<tbody class="comp-cola">');
+  const cola = desdeLaCola.slice(0, desdeLaCola.indexOf('</tbody>'));
+  assert.deepEqual(numerosDeContrato(antes), [100, 101, 102, 103, 104, 105, 106], 'las primeras siete, antes del bloque');
+  assert.deepEqual(numerosDeContrato(cola), [107, 108, 109], 'las ÚLTIMAS tres viajan con el total y la firma');
+  const marcas = ['comp-fila-total', 'Total pagado', 'comp-fila-suelta', 'Forma de pago', 'comp-fila-suelta', 'comp-firma-linea', 'Firma del empleado', 'comp-firma-nombre'];
+  let desde = 0;
+  for (const marca of marcas) {
+    const en = cola.indexOf(marca, desde);
+    assert.ok(en >= desde, `«${marca}» está dentro del bloque, en orden`);
+    desde = en;
+  }
+  assert.equal(html.split('<tbody').length - 1, 2, 'dos cuerpos: las rentas y el bloque final');
+  assert.ok(html.indexOf('</tbody>', html.indexOf('comp-cola')) < html.indexOf('</table>'), 'el bloque cierra dentro de la tabla: la firma no queda fuera de ella');
+  assert.ok(html.indexOf('</table>') > html.indexOf('comp-firma-nombre'));
+  assert.ok(!/<tfoot|<footer/.test(html), 'ya no hay un total ni una firma sueltos después de la tabla');
+});
+
+test('con pocas rentas viajan todas: con dos, el primer cuerpo queda vacío; con tres o cuatro, se parten en tres y el resto', () => {
+  const de = (n) => htmlComprobanteDeComision(armarComprobanteDeComision(papelConRentas(n)));
+  const cuantas = (html) => {
+    const [antes, resto] = html.split('<tbody class="comp-cola">');
+    return [numerosDeContrato(antes).length, numerosDeContrato(resto.slice(0, resto.indexOf('</tbody>'))).length];
+  };
+  assert.deepEqual(cuantas(de(1)), [0, 1]);
+  assert.deepEqual(cuantas(de(2)), [0, 2]);
+  assert.deepEqual(cuantas(de(3)), [0, 3]);
+  assert.deepEqual(cuantas(de(4)), [1, 3]);
+  assert.deepEqual(cuantas(de(44)), [41, 3]);
+});
+
+test('con las filas en otro orden en el pago, las que viajan con la firma siguen siendo las últimas en el papel (por cuándo regresaron)', () => {
+  const { pago, empleado } = papelConRentas(6);
+  pago.detalle = [...pago.detalle].reverse();
+  const html = htmlComprobanteDeComision(armarComprobanteDeComision({ pago, empleado }));
+  const [antes, resto] = html.split('<tbody class="comp-cola">');
+  assert.deepEqual(numerosDeContrato(antes), [100, 101, 102]);
+  assert.deepEqual(numerosDeContrato(resto.slice(0, resto.indexOf('</tbody>'))), [103, 104, 105]);
+});
+
+test('estilos.css: el bloque final del papel del empleado tiene sus reglas con sus declaraciones (no se parte al imprimir; el total y las filas sueltas se ven como siempre)', () => {
+  const css = reglasDeCss(leer('../css/estilos.css'));
+  assert.ok(css.declaraAlImprimir('.comp-cola', 'break-inside: avoid'), 'el bloque no se parte: pasa entero a la hoja siguiente');
+  assert.ok(css.declaraAlImprimir('.comp-tabla tr', 'break-inside: avoid'), 'y cada fila tampoco');
+  // El total se ve como el pie de siempre (negrita, su raya, cifra a la derecha), ahora que es una fila del cuerpo.
+  for (const celda of ['th', 'td']) {
+    assert.ok(css.declara(`.comp-tabla .comp-fila-total ${celda}`, 'font-weight: 700'), `total ${celda}: negrita`);
+    assert.ok(css.declara(`.comp-tabla .comp-fila-total ${celda}`, 'border-top: 1.5px solid var(--navy)'), `total ${celda}: raya`);
+  }
+  assert.ok(css.declara('.comp-tabla .comp-fila-total th', 'text-align: right'));
+  // La forma de pago y la firma, sin la raya ni el relleno de una celda de datos.
+  assert.ok(css.declara('.comp-tabla .comp-fila-suelta td', 'padding: 0'));
+  assert.ok(css.declara('.comp-tabla .comp-fila-suelta td', 'border-bottom: none'));
 });
 
 test('ni el papel ni la ficha llevan estilos en línea: un estilo en línea le gana a la hoja de impresión sin que nadie lo vea', () => {
