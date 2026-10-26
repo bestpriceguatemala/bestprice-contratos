@@ -129,3 +129,32 @@ test('el kilometraje de entrada: 0 es «falta», cualquier otro menor que el de 
   assert.deepEqual(con(1), ['El kilometraje de entrada (1) es menor que el de salida (80,000).']);
   assert.deepEqual(con(80000), [], 'igual al de salida no retrocede');
 });
+
+// ---------------------------------------------------------------------------
+// El ejemplo del diseño (§5), armado con los constructores de verdad
+// ---------------------------------------------------------------------------
+
+test('el ejemplo del diseño armado con «Sacar carro» y «Recibir carro» da Q4,345.60 (con dos pagos, cada uno con su 12 %)', () => {
+  // pruebas/contrato.test.mjs prueba este mismo ejemplo sobre un objeto escrito a mano. Aquí el contrato sale de
+  // `construirContrato`, `construirCierre` y `agregarPago`: si un constructor cambiara el nombre de un campo que el cobro
+  // lee, la prueba del objeto a mano seguiría verde y esta no.
+  const c = contratoReal({
+    fechaSalida: '2026-08-20',
+    dias: 4,
+    precioDia: 700,
+    cartaPoderDestino: 'Honduras',
+    cartaPoderPrecio: 350,
+    recibidoEl: '2026-08-25',
+    cierre: { danos: 200, combustible: 130, descuento: 300 },
+    pagos: [{ monto: 3150, forma: 'tarjeta', porcentajeTarjeta: 12 }, { monto: 730, forma: 'tarjeta', porcentajeTarjeta: 12 }],
+  });
+  assert.equal(c.devolucionPrevista, '2026-08-24');
+  const r = resumen(c);
+  assert.equal(r.diasAtraso, 1);
+  assert.equal(r.totalSalida, 3150, 'renta Q2,800 y carta poder Q350');
+  assert.equal(r.totalDevolucion, 730, 'atraso Q700 + daños Q200 + combustible Q130 - descuento Q300');
+  assert.equal(r.subtotal, 3880);
+  assert.equal(r.pagado, 4345.6, 'cada pago con su 12 %: 3,528.00 + 817.60');
+  assert.equal(r.saldo, 0);
+  assert.equal(c.estado, 'cerrado', 'pagó todo y no hay garantía de tarjeta que soltar');
+});
