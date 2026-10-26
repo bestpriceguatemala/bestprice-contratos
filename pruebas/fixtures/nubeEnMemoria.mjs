@@ -71,6 +71,11 @@ export function nubeEnMemoria({
   const fsMod = {
     collection: (db, nombre) => ({ coleccion: nombre, db }),
     doc: (origen, ...segmentos) => {
+      // Como el SDK de verdad: un segmento vacío o ausente (`doc(db, 'contratos', undefined)`) LANZA. Antes se aceptaba
+      // y salía una ruta «contratos/» con id indefinido, y una llamada rota pasaba las pruebas (auditoría de mutaciones,
+      // 26 oct 2026). Pasar `undefined` como único segmento de una colección sí vale: pide un id nuevo.
+      const malo = segmentos.findIndex((x, i) => !(origen.coleccion && i === 0 && segmentos.length === 1) && (typeof x !== 'string' || x === ''));
+      if (malo !== -1) throw new Error(`Function doc() cannot be called with an empty path: el segmento ${malo + 1} es ${JSON.stringify(segmentos[malo]) ?? 'undefined'}`);
       if (origen.coleccion) {
         const id = segmentos[0] ?? `auto-${(auto += 1)}`;
         return { ruta: `${origen.coleccion}/${id}`, id, db: origen.db };
@@ -89,10 +94,17 @@ export function nubeEnMemoria({
         throw Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' });
       }
       const datos = docs.get(ref.ruta);
-      return { exists: () => datos !== undefined, data: () => structuredClone(datos) };
+      // Como el SDK: la instantánea de un documento trae su `id` (antes no lo traía y `cargarContrato` podía devolver un
+      // contrato con `id: undefined` sin que ninguna prueba se enterara).
+      return { id: ref.id, exists: () => datos !== undefined, data: () => structuredClone(datos) };
     },
     // Una consulta con `where`, como la de cargarContratos por rango de fechas.
-    where: (campo, operador, valor) => ({ campo, operador, valor }),
+    where: (campo, operador, valor) => {
+      // Solo los dos operadores que `cumple` sabe evaluar. Antes cualquier otro se evaluaba como «<=» en silencio:
+      // un `'<'` o un `'>'` por error en la consulta pasaba las pruebas y en la nube de verdad dejaba fuera un día.
+      if (!['>=', '<='].includes(operador)) throw new Error(`La nube de mentira no sabe evaluar where(${campo}, '${operador}', …)`);
+      return { campo, operador, valor };
+    },
     query: (col, ...restricciones) => ({ ...col, restricciones }),
     getDocs: async (col) => {
       llamadas.push(['getDocs', col.coleccion, col.db.nombre]);
@@ -143,7 +155,7 @@ export function nubeEnMemoria({
             leidos.set(ref.ruta, versiones.get(ref.ruta) ?? 0);
             await Promise.resolve();
             const datos = docs.get(ref.ruta);
-            return { exists: () => datos !== undefined, data: () => structuredClone(datos) };
+            return { id: ref.id, exists: () => datos !== undefined, data: () => structuredClone(datos) };
           },
           set: (ref, datos, opciones) => {
             exigirSinIndefinidos('Transaction.set', ref.ruta, datos);

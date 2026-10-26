@@ -258,8 +258,8 @@ export async function cargarClientes(alLlegar, deps) {
  * a golpes — una lectura fallida de la nube nunca se toma por una colección
  * vacía —, y reescribirla aquí sería abrir otra puerta por donde se cuele.
  */
-export async function cargarDuenos(alLlegar) {
-  return cargarConSincronia('duenos', alLlegar);
+export async function cargarDuenos(alLlegar, deps) {
+  return cargarConSincronia('duenos', alLlegar, deps);
 }
 
 /**
@@ -268,8 +268,8 @@ export async function cargarDuenos(alLlegar) {
  * `idsQueSobran` propagando los borrados — sin reinventar nada de eso aquí,
  * `cargarConSincronia` ya hace toda la sincronía.
  */
-export async function cargarReservas(alLlegar) {
-  return cargarConSincronia('reservas', alLlegar);
+export async function cargarReservas(alLlegar, deps) {
+  return cargarConSincronia('reservas', alLlegar, deps);
 }
 
 /**
@@ -422,12 +422,12 @@ export async function cargarContratos({ desde, hasta } = {}, alLlegar, {
  * arriba): una pantalla de cobro no debe decirle al dueño "este contrato no
  * existe" cuando lo que en verdad pasó es que no hubo internet.
  */
-export async function cargarContrato(id) {
+export async function cargarContrato(id, { iniciar = iniciarFirebase, leerCopia = leerLocal } = {}) {
   if (!id) return null;
-  const locales = await leerLocal('contratos');
+  const locales = await leerCopia('contratos');
   const local = locales.find((c) => c.id === id);
   if (local) return local;
-  const { db, fsMod } = await iniciarFirebase();
+  const { db, fsMod } = await iniciar();
   const doc = await conLimiteDeTiempo(fsMod.getDoc(fsMod.doc(db, 'contratos', id)));
   return doc.exists() ? { id: doc.id, ...doc.data() } : null;
 }
@@ -452,9 +452,9 @@ const AJUSTES_POR_DEFECTO = {
  * es un solo documento chico que casi no cambia, y si la nube no responde o
  * el documento todavía no existe, los valores del dueño sirven igual.
  */
-export async function cargarAjustes() {
+export async function cargarAjustes({ iniciar = iniciarFirebase } = {}) {
   try {
-    const { db, fsMod } = await iniciarFirebase();
+    const { db, fsMod } = await iniciar();
     const doc = await conLimiteDeTiempo(fsMod.getDoc(fsMod.doc(db, 'ajustes', 'general')));
     return doc.exists() ? { ...AJUSTES_POR_DEFECTO, ...doc.data() } : AJUSTES_POR_DEFECTO;
   } catch {
