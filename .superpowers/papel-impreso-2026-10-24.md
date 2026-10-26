@@ -1,13 +1,15 @@
 # Papel impreso: teléfonos partidos y firma sola (24 de octubre de 2026)
 
-**Estado: hecho, verificado imprimiendo a PDF y mirando las hojas.** Base: `main` en `0da2ec4`, `npm test` = 2577 pasando. Al terminar: **2587 pasando, 0 fallando** (+10, todas nuevas).
-No toqué `version.txt` ni `js/version.js`. Dos commits, con rutas explícitas (nunca `git add -A`):
+**Estado: hecho, verificado imprimiendo a PDF y mirando las hojas.** Base: `main` en `0da2ec4`, `npm test` = 2577 pasando. Al terminar: **2589 pasando, 0 fallando** (+12, todas nuevas).
+No toqué `version.txt` ni `js/version.js`. Cuatro commits (los tres arreglos y este informe), con rutas explícitas (nunca `git add -A`):
 
 | sha | qué |
 |---|---|
 | `5e243dd` | los teléfonos del membrete ya no se parten (los dos papeles) |
 | `6fb0b10` | la firma ya no queda sola en una hoja de más (los dos papeles) |
-| (este informe y una nota en el diseño §6 van en un tercer commit de solo documentos) | |
+| `96457db` | este informe (primera versión) y una nota en el diseño §6 |
+| `6f2ae16` | la fecha y las placas de cada renta ya no se parten (los dos papeles) |
+| (el commit que actualiza este informe) | |
 
 ## Lo que vi ANTES (PDF de Chrome sobre la pantalla real, Carta, mirado como imagen)
 
@@ -40,12 +42,22 @@ No toqué `version.txt` ni `js/version.js`. Dos commits, con rutas explícitas (
 - `css/estilos.css`: `.comp-sin-corte { white-space: nowrap }` (la garantía a cualquier ancho); `.comp-marca { flex: 1 1 60mm }` y `.comp-contacto { flex: 0 1 auto }` con `flex-wrap` (en Carta el renglón de los WhatsApp sale en **uno solo**, como lo aprobó;
   si ya no caben lado a lado el contacto baja en vez de apretarse); `.comp-cola`, las filas `.comp-fila-total` / `.comp-fila-suelta`; la cadena de `avoid` del papel de los dueños; y `.comp-al-dia { break-after: avoid }`
   (al empujar la tabla y la firma a la hoja siguiente, el título «Queda pendiente» y su línea se quedaban huérfanos al pie: lo vi, lo arreglé y lo volví a mirar).
-- Pruebas (`pruebas/comprobante.test.mjs` +6, `pruebas/comprobante-comision.test.mjs` +4) y dos ayudas en `pruebas/fixtures/`: `reglasCss.mjs` (lee las reglas de `estilos.css`: una regla cuenta **con sus declaraciones** y se sabe si está en `@media print`, como pide el precedente)
+- Pruebas (`pruebas/comprobante.test.mjs` +7, `pruebas/comprobante-comision.test.mjs` +5) y dos ayudas en `pruebas/fixtures/`: `reglasCss.mjs` (lee las reglas de `estilos.css`: una regla cuenta **con sus declaraciones** y se sabe si está en `@media print`, como pide el precedente)
   y `lineasDeContacto.mjs`. Cubren: el texto del membrete es exactamente el aprobado; cada número está marcado entero; el membrete es el mismo en los dos papeles; la estructura del bloque (las últimas 3 rentas, en orden, con el total, la forma y la firma, con 1, 2, 3, 4 y 44 rentas);
-  y cada regla de CSS con su declaración. Mutaciones sobre una copia (12): murieron todas.
+  y cada regla de CSS con su declaración. Mutaciones sobre una copia: **19 y todas mueren** (CSS, marcado, cuántas rentas viajan, membrete compartido). Ojo: mi primer script de mutaciones tenía un error (no corría las pruebas y todo salía «muerta»); lo detecté porque una mutación que no cambia nada también salía «muerta». Lo arreglé, agregué ese control (debe sobrevivir, y sobrevive) y las repetí todas.
 - **Pruebas viejas que ajusté (y por qué no es aflojarlas):** en `comprobante-comision.test.mjs` (1) el conteo de `<tr>` ahora cuenta también el total y las dos filas de forma y firma (`1 + 3 + 1 + 2`); (2) la comprobación del membrete compara las líneas
   **sin etiquetas** contra `MEMBRETE.contacto` con `deepEqual` (antes buscaba cada línea como subcadena, que las etiquetas rompen; ahora es más estricta, y la prueba de «sin NIT» no se tocó); (3) la de «ninguna clase sin regla» admite las tres clases propias del bloque final,
   que tienen su regla con declaraciones en otra prueba.
+
+## Placas y fechas partidas (pedido después, mismo defecto que el teléfono)
+
+- **Antes** (con nombres de cliente largos, como «Carlos Alberto Méndez Barrios»): la tabla aprieta las demás columnas y el navegador corta la placa tras el guion. Contado en el texto del PDF: papel del empleado con 60 rentas, **60 placas** («P-» / «100ABC») y **60 fechas** («5 ago» / «2026») partidas, o sea todas; papel de los dueños con 8 rentas, **8 placas** partidas.
+  Con nombres cortos no se ve, por eso el informe anterior no lo notó.
+- **Qué hice:** el mismo mecanismo, `comp-sin-corte` (`white-space: nowrap`), en la celda de la **fecha** y la de las **placas** de cada renta, en los dos papeles (`<td class="comp-sin-corte">`). El nombre del cliente NO lo lleva (es la columna que cede) ni la frase larga de una diferencia pendiente (si no se partiera saldría por la derecha de la hoja). El número de contrato no lo lleva: no tiene dónde partirse.
+- **Después, mirado como imagen** (papel del empleado con 24 y 60 rentas, papel de los dueños con 8 y 30, nombres largos): **0 placas y 0 fechas partidas** (conteo en el texto del PDF y a la vista).
+- **Qué se comió la columna (lo que vi, sin elegir por él):** la del **cliente** cede: «Carlos Alberto» / «Méndez Barrios» y «María Fernanda» / «González de Estrada» salen en dos renglones (antes la fecha y la placa ocupaban esos dos renglones, así que la fila no crece más que antes).
+  En el papel de los dueños, además, el encabezado «Fecha de salida» pasa a dos renglones («FECHA DE» / «SALIDA») cuando hay un nombre largo, porque la columna de la fecha ya no se ensancha; es solo el rótulo, ningún dato. Con nombres cortos la tabla sale idéntica a antes.
+- Las hojas de más y la firma siguen como antes: barridos con nombres largos, empleado 1–70 rentas y dueños 1–45 con 0 y 2 pendientes: ninguna firma sola. Pruebas nuevas: cada celda de fecha y de placas lleva la marca; el cliente y la frase de una diferencia no (7 mutaciones, todas mueren).
 
 ## Lo que vi DESPUÉS
 
@@ -58,17 +70,15 @@ Barridos automáticos, cada hoja imprimida con el PDF real y leída con su texto
 
 ## Lo que NO pude arreglar / lo que no hice
 
-1. **Hallazgo nuevo, no lo arreglé a propósito:** con nombres de cliente largos («Carlos Alberto Méndez Barrios»), la tabla aprieta las otras columnas y **las placas se parten después del guion** («P-» / «200XYZ») en los dos papeles, y **la fecha** («5 ago» / «2026») en el del empleado. Existía antes de mi cambio (lo vi con el CSS original).
-   Es la misma enfermedad que los teléfonos. Arreglo probable: `white-space: nowrap` en la celda de la fecha y la de las placas. No lo toqué porque mueve cómo se acomoda la tabla del papel de los dueños, que él ya entrega, y no me lo pidieron; es decisión suya.
-2. **Solo Chrome.** Todo lo medido es Chrome (el mismo motor del PDF que él imprime). `break-inside: avoid` en un cuerpo de tabla y `:has()` no los probé en Safari/Firefox; si no los entienden, el papel vuelve a salir como antes (nada peor).
-3. **Costo de la solución:** al pasar el bloque final a la hoja siguiente queda un hueco al pie de la hoja de arriba (hasta ~80 mm). Es lo que se paga por no dejar la firma sola.
-4. **Papel de los dueños, un caso límite sin cubrir:** si la tabla de *lo pendiente* es tan larga que ella misma continúa en otra hoja y el final cae justo en el borde, la cadena de `avoid` puede fallar como en el papel del empleado (el hallazgo 2 de arriba). Con 12 pendientes no apareció; no lo reestructuré porque habría movido la tabla `tfoot` que sus pruebas y su papel ya usan.
-5. No tengo el barrido «antes» de los dueños con 2 y 12 pendientes: la corrida base se colgó y la cancelé. Sí tengo el de 0 pendientes.
-6. No se probó contra Firebase de verdad (nunca me autentiqué contra el proyecto real).
+1. **Solo Chrome.** Todo lo medido es Chrome (el mismo motor del PDF que él imprime). `break-inside: avoid` en un cuerpo de tabla y `:has()` no los probé en Safari/Firefox; si no los entienden, el papel vuelve a salir como antes (nada peor).
+2. **Costo de la solución:** al pasar el bloque final a la hoja siguiente queda un hueco al pie de la hoja de arriba (hasta ~80 mm). Es lo que se paga por no dejar la firma sola.
+3. **Papel de los dueños, un caso límite sin cubrir:** si la tabla de *lo pendiente* es tan larga que ella misma continúa en otra hoja y el final cae justo en el borde, la cadena de `avoid` puede fallar como en el papel del empleado (el hallazgo 2 de arriba). Con 12 pendientes no apareció; no lo reestructuré porque habría movido la tabla `tfoot` que sus pruebas y su papel ya usan.
+4. No tengo el barrido «antes» de los dueños con 2 y 12 pendientes: la corrida base se colgó y la cancelé. Sí tengo el de 0 pendientes.
+5. No se probó contra Firebase de verdad (nunca me autentiqué contra el proyecto real).
 
 ## Arnés (para repetirlo)
 
 Árbol servido por mí en el puerto **4747** (comprobado libre con `lsof` antes), falsos locales de los tres módulos de Firebase (import map inyectado al servir, `index.html` no se tocó), IndexedDB `bestprice-contratos` **v3** sembrada con los constructores reales,
-Chrome sin cabeza propio con perfil propio (puertos de depuración 9355 a 9366) para los PDF; para la pantalla, una pestaña propia abierta por mí en el panel (el panel estaba cerrado, no navegué ninguna ajena). Contraseña del área = el texto inventado del arnés contra la autenticación FALSA.
+Chrome sin cabeza propio con perfil propio (puertos de depuración 9355 a 9369) para los PDF; para la pantalla, una pestaña propia abierta por mí en el panel (el panel estaba cerrado, no navegué ninguna ajena). Contraseña del área = el texto inventado del arnés contra la autenticación FALSA.
 Todo en `/private/tmp/claude-501/-Users-estebanurizar-Desktop-Programas-Claude/3da57dec-1425-4766-8c08-1bb0b2e9cede/scratchpad/papel/` (fuera del repositorio): `servidor.mjs`, `mapa.mjs` (barrido), `anchos.mjs`, `barrido.mjs`, `real-comision.mjs`, `real-dueno.mjs`, `sembrar/lib-papeles.js`, `pdf2png.swift`.
 Al terminar cerré el servidor y los Chrome.
