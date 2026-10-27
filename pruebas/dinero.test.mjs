@@ -56,6 +56,18 @@ test('lo vacío vale cero, no rompe la cuenta', () => {
   assert.equal(q('350'), 350);
 });
 
+// Un negativo diminuto llega escrito en notación exponencial y se cae por el camino
+// de respaldo de `q()`, que antes devolvía `-0`. Se lee «0.00» en pantalla, así que
+// nadie lo notaría; lo que no se puede es dejar que un menos cero viaje como si fuera
+// una cantidad de dinero. `Object.is` es la única forma de distinguirlo: `-0 === 0`.
+test('un negativo diminuto da cero, no menos cero', () => {
+  assert.ok(Object.is(q(-5.55e-17), 0), `q(-5.55e-17) dio ${q(-5.55e-17)}`);
+  assert.ok(Object.is(q(-1e-30), 0));
+  assert.ok(Object.is(q(-0.001), 0), 'el que no pasa por el respaldo, igual');
+  assert.ok(Object.is(q(0), 0));
+  assert.equal(q(-2.5e2), -250, 'un negativo de verdad en exponencial no se toca');
+});
+
 test('suma sin arrastrar errores de centavos', () => {
   assert.equal(suma(0.1, 0.2), 0.3);
   assert.equal(suma(2800, 350, 200, 130), 3480);

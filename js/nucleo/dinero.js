@@ -14,7 +14,15 @@ export function q(n) {
   // hace que 5.015 se redondee para abajo. Se redondea el valor absoluto para
   // que un negativo caiga del mismo lado que su positivo.
   const escalado = Number(`${Math.abs(x)}e2`);
-  if (!Number.isFinite(escalado)) return Math.round(x * 100) / 100;
+  if (!Number.isFinite(escalado)) {
+    // Un negativo diminuto (-5.55e-17) se escribe en notación exponencial, así que
+    // `${Math.abs(x)}e2` no es un número y se cae por aquí. Sin este guardia salía
+    // `-0`: en pantalla se lee «0.00», pero no es una cantidad de dinero, y arrastra
+    // su signo a cualquier comparación o formato que distinga -0 de 0. Es el mismo
+    // cero de abajo, con la misma razón. (Auditoría de mutaciones, 26 oct 2026.)
+    const porLasMalas = Math.round(x * 100) / 100;
+    return porLasMalas === 0 ? 0 : porLasMalas;
+  }
   const redondeado = Math.round(escalado) / 100;
   if (redondeado === 0) return 0;
   return x < 0 ? -redondeado : redondeado;
