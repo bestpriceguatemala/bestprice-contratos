@@ -203,7 +203,7 @@ De 4,394 errores en lo medido a fondo, las 2,589 pruebas dejaron pasar 762 (17.3
 | `js/nucleo/repetidos.js` | 4 | 4 | 0 | 0 | 0 | 0 |
 | **Total** | **4794** | **3738** | **47** | **1009** | **270** | **739** |
 
-Notas: «Mueren por ciclo/tiempo» son errores que dejan el programa en un ciclo infinito (la suite se colgaría; cuenta como detectado pero es evidencia más débil). Las dos filas de pantallas son una **muestra** (400 errores) y no se volvieron a medir tras las pruebas nuevas, salvo uno que se cerró a mano (el 12 % en efectivo). `datos.js` trae 9 pruebas-de-medición extra que no son del arnés base. La suma de «sobreviven» incluye 247 de la muestra de pantallas; sin ella, 762 en lo medido a fondo.
+Notas: «Mueren por ciclo/tiempo» son errores que dejan el programa en un ciclo infinito (la suite se colgaría; cuenta como detectado pero es evidencia más débil). Las dos filas de pantallas son una **muestra** (400 errores) y no se volvieron a medir tras las pruebas nuevas, salvo uno que se cerró a mano (el 12 % en efectivo). La suma de «sobreviven» incluye 247 de la muestra de pantallas; sin ella, 762 en lo medido a fondo.
 
 **Las razones de las familias equivalentes (una frase cada una):**
 - *Un valor ausente contra uno vacío* (`x ?? ''` por `x || ''` y al revés, 147): difieren solo si el valor es `0`, `''` o `false` sin ser nulo; en esos campos el valor es texto, lista, objeto o ausente, nunca un cero ni un `false`.
