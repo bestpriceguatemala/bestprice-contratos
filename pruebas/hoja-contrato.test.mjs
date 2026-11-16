@@ -265,20 +265,20 @@ test('«PREPARADO POR (CODIGO)»: la casilla pide el código del empleado, y la 
   assert.ok(!CAMPOS.some((x) => x.id === 'rentadoPor'), 'el nombre del empleado ya no es un campo del papel');
 });
 
-test('sinQ: solo «LDW Q.» y «PAI Q.» (el papel la trae) y el deducible de abajo (Excel no la imprime); cada uno con su razón', () => {
-  assert.deepEqual(CAMPOS.filter((c) => c.sinQ).map((c) => c.id).sort(), ['deducibleCopia', 'seguro', 'seguroPai']);
+test('ninguna casilla de dinero queda sin Q (16 de noviembre de 2026); LDW y PAI cuentan en su nota lo de su formulario y cómo estaban antes', () => {
+  assert.deepEqual(CAMPOS.filter((c) => c.sinQ).map((c) => c.id), [], 'el dueño: «A todo lo que sea dinero ponle la Q.»');
+  assert.deepEqual(CAMPOS.filter((c) => c.papelTraeLaQ).map((c) => c.id).sort(), ['seguro', 'seguroPai'], 'su formulario trae «LDW Q.» y «PAI Q.»');
   for (const [id, rotulo] of [['seguro', 'LDW'], ['seguroPai', 'PAI']]) {
     const c = campoPorId(id);
-    assert.match(c.nota, /15 de octubre de 2026/, id);
-    assert.match(c.nota, /foto de su hoja en blanco/, id);
+    assert.match(c.nota, /16 de noviembre de 2026/, id);
+    assert.match(c.nota, /«A todo lo que sea dinero ponle la Q\.»/, id);
+    assert.match(c.nota, /15 de octubre de 2026/, `${id}: la decisión de antes queda a la vista`);
     assert.match(c.nota, new RegExp(`«${rotulo} Q\\.»`), id);
-    assert.match(c.nota, /Q\. Q150\.00/, `${id}: dice qué se evita`);
+    assert.match(c.nota, new RegExp(`«${rotulo} Q\\. Q150\\.00»`), `${id}: dice cómo va a leerse`);
   }
-  assert.match(campoPorId('deducibleCopia').nota, /SIN la Q/);
-  // todos son de dinero
-  for (const c of CAMPOS.filter((x) => x.sinQ)) assert.equal(c.tipo, 'dinero', c.id);
-  // y nadie más lo lleva: el resto de los montos, con Q (su papel no la trae)
-  assert.ok(CAMPOS.filter((c) => c.tipo === 'dinero' && !c.sinQ).length >= 10);
+  assert.match(campoPorId('deducibleCopia').nota, /16 de noviembre de 2026/);
+  assert.match(campoPorId('deducibleCopia').nota, /SIN la Q/, 'cuenta cómo estaba');
+  for (const c of CAMPOS.filter((x) => x.papelTraeLaQ)) assert.equal(c.tipo, 'dinero', c.id);
 });
 
 test('contable: los seis montos cuya celda de Excel tiene el formato contable, y ninguno más; cada uno lo dice con su razón', () => {
@@ -293,7 +293,7 @@ test('contable: los seis montos cuya celda de Excel tiene el formato contable, y
   // LDW: el papel ya trae «Q.» y Excel imprime la suya: queda dicho que se mire con el papel enfrente
   assert.match(campoPorId('seguro').nota, /OJO con «LDW Q\.»: Excel SÍ imprime su propia «Q»/);
   assert.match(campoPorId('seguro').nota, /el día de la calibración/);
-  assert.equal(campoPorId('seguro').sinQ, true);
+  assert.ok(!campoPorId('seguro').sinQ);
   // los PAI y los demás, no: pegados
   for (const id of ['seguroPai', 'precioBase', 'deducible', 'seguroCopia', 'cartaPoderPrecio', 'deducibleBajo', 'tarjeta1Monto', 'tarjeta2Monto', 'deducibleCopia']) assert.ok(!campoPorId(id).contable, id);
 });

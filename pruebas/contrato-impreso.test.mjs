@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   armarContratoImpreso, htmlContratoImpreso, htmlHojaDePrueba, pintarContratoImpreso, pintarImpresionDeContrato,
-  pintarCalibracion, HITOS, PASOS_DE_CALIBRAR, MARCAS_DE_ESCALA, QUETZAL_EN_EL_PAPEL, tarjetasDelTraspasoParaElPapel,
+  pintarCalibracion, HITOS, PASOS_DE_CALIBRAR, MARCAS_DE_ESCALA, QUETZAL_EN_EL_PAPEL, tarjetasDelTraspasoParaElPapel, AVISO_DE_LA_Q,
 } from '../js/pantallas/contratoImpreso.js';
 import { dejarTraspaso, tomarTraspaso, olvidarTraspaso } from '../js/pantallas/traspasoDeTarjetas.js';
 import {
@@ -197,9 +197,9 @@ test('el contrato rico llena cada casilla con el dato que le toca', () => {
     licencia: '1234 56789 0101', licenciaEmitidaEn: 'Guatemala', licenciaExpira: '30  06    29',
     conductorNombre: 'ESTEBAN URIZAR', conductorLicencia: '2380 10120 0101',
     // el dinero
-    precioBase: 'Q508.00', seguroTerceros: 'Q120.00', seguro: '72.00', seguroCopia: 'Q72.00',
-    deducible: 'Q55,000.00', deducibleCopia: '55,000.00', deducibleBajo: 'Q250.00',
-    seguroMenores: 'Q10.00', seguroPai: '5.00', variosDescripcion: 'Lavado', variosPrecio: 'Q80.00',
+    precioBase: 'Q508.00', seguroTerceros: 'Q120.00', seguro: 'Q72.00', seguroCopia: 'Q72.00',
+    deducible: 'Q55,000.00', deducibleCopia: 'Q55,000.00', deducibleBajo: 'Q250.00',
+    seguroMenores: 'Q10.00', seguroPai: 'Q5.00', variosDescripcion: 'Lavado', variosPrecio: 'Q80.00',
     cartaPoderDestino: 'EL SALVADOR', cartaPoderPrecio: 'Q350.00',
     // las tarjetas (enmascaradas: el número completo nunca se guardó)
     tarjeta1Numero: '•••• 3343', tarjeta1Vence: '04/30', tarjeta1Banco: 'BAC GUATEMALA', tarjeta1Monto: 'Q15,000.00',
@@ -399,7 +399,7 @@ test('el precio por día sale SIN los seguros, que van aparte: 700 − 72 − 12
   const v = valores();
   assert.equal(v.precioBase, 'Q508.00');
   assert.equal(v.seguroTerceros, 'Q120.00');
-  assert.equal(v.seguro, '72.00', 'LDW: el papel ya trae la Q');
+  assert.equal(v.seguro, 'Q72.00', 'LDW: con la Q, como todo monto (16 de noviembre de 2026)');
   // sin seguros, el precio entero
   const sinSeguros = valores({ contrato: contrato({ seguroDia: 0, seguroTercerosDia: 0 }) });
   assert.equal(sinSeguros.precioBase, 'Q700.00');
@@ -474,39 +474,47 @@ test('el código se recorta y un número se escribe como texto; uno largo se avi
   assert.ok(!armarContratoImpreso(entrada()).avisos.some((a) => /Preparado por/.test(a)));
 });
 
-test('«LDW Q.» y «PAI Q.»: el papel ya trae la Q, así que esos dos montos salen SIN ella y los demás con ella', () => {
+test('TODO monto sale con la Q, también LDW, PAI y el deducible de abajo (16 de noviembre de 2026: «A todo lo que sea dinero ponle la Q.»)', () => {
   const v = valores();
-  assert.equal(v.seguro, '72.00');
-  assert.equal(v.seguroPai, '5.00');
-  for (const id of ['precioBase', 'seguroTerceros', 'deducible', 'deducibleBajo', 'seguroMenores', 'variosPrecio', 'tarjeta1Monto', 'tarjeta2Monto', 'horaTardia', 'combustiblePrecio', 'cartaPoderPrecio', 'seguroCopia']) {
+  assert.equal(v.seguro, 'Q72.00');
+  assert.equal(v.seguroPai, 'Q5.00');
+  assert.equal(v.deducibleCopia, 'Q55,000.00');
+  for (const id of ['precioBase', 'seguroTerceros', 'deducible', 'deducibleBajo', 'seguroMenores', 'variosPrecio', 'tarjeta1Monto', 'tarjeta2Monto', 'horaTardia', 'combustiblePrecio', 'cartaPoderPrecio', 'seguroCopia', 'seguro', 'seguroPai', 'deducibleCopia']) {
     assert.match(v[id], /^Q[\d,]+\.\d\d$/, `${id}: con la Q`);
   }
-  // lo decide la tabla, no un if suelto: se ve en la hoja y en cualquier monto que pase por esos dos campos
-  assert.equal(textoVisible(html(), 'seguro'), '72.00');
-  assert.equal(textoVisible(html(), 'seguroPai'), '5.00');
-  assert.equal(textoVisible(html(), 'seguroTerceros'), 'Q120.00', 'el de terceros, con su Q');
-  assert.equal(valores({ contrato: contrato({ seguroDia: 1234.5 }) }).seguro, '1,234.50');
+  // sin excepción: cada campo de dinero de la tabla que lleva monto sale con la Q (una excepción nueva tendría que escribirse a propósito)
+  const dinero = CAMPOS.filter((c) => c.tipo === 'dinero');
+  assert.ok(dinero.length >= 15);
+  for (const c of dinero) {
+    assert.ok(!c.sinQ, `${c.id}: ya no hay casillas sin Q`);
+    if (v[c.id]) assert.match(v[c.id], /^Q/, c.id);
+  }
+  // se ve en la hoja y en cualquier monto que pase por esos campos
+  assert.equal(textoVisible(html(), 'seguro'), 'Q72.00');
+  assert.equal(textoVisible(html(), 'seguroPai'), 'Q5.00');
+  assert.equal(textoVisible(html(), 'deducibleCopia'), 'Q55,000.00');
+  assert.equal(valores({ contrato: contrato({ seguroDia: 1234.5 }) }).seguro, 'Q1,234.50');
   // una casilla sin monto sigue en blanco
   assert.equal(valores({ contrato: contrato({ seguroDia: 0, seguroPaiDia: 0 }) }).seguro, '');
-  // un monto negativo conserva su signo y pierde solo la Q: '-5.00', no '5.00' ni '-Q5.00'
-  assert.equal(valores({ contrato: contrato({ seguroPaiDia: -5 }) }).seguroPai, '-5.00');
+  // un monto negativo conserva su signo, delante de la Q, igual que en el resto de la pantalla
+  assert.equal(valores({ contrato: contrato({ seguroPaiDia: -5 }) }).seguroPai, '-Q5.00');
 });
 
 test('los montos de formato CONTABLE de Excel se dibujan con la «Q» a un extremo y el número al otro; los demás, con la «Q» pegada', () => {
   const hoja = html();
-  // contables: horaTardia, seguroTerceros, combustiblePrecio (con Q) y seguro (sin Q, que el papel ya la trae)
+  // contables: horaTardia, seguroTerceros, combustiblePrecio y seguro (LDW), todos con su Q
   assert.ok(hoja.includes('data-campo="horaTardia"') && /data-campo="horaTardia"[^>]*><span class="hc-t hc-contable"><i class="hc-q">Q<\/i><b class="hc-n">150\.00<\/b><\/span>/.test(hoja));
   assert.match(hoja, /data-campo="seguroTerceros"[^>]*><span class="hc-t hc-contable"><i class="hc-q">Q<\/i><b class="hc-n">120\.00<\/b><\/span>/);
   assert.match(hoja, /data-campo="combustiblePrecio"[^>]*><span class="hc-t hc-contable"><i class="hc-q">Q<\/i><b class="hc-n">65\.00<\/b><\/span>/);
-  assert.match(hoja, /data-campo="seguro"[^>]*><span class="hc-t hc-contable"><b class="hc-n">72\.00<\/b><\/span>/, 'sin Q: solo el número, al borde derecho');
+  assert.match(hoja, /data-campo="seguro"[^>]*><span class="hc-t hc-contable"><i class="hc-q">Q<\/i><b class="hc-n">72\.00<\/b><\/span>/, 'LDW con su Q, a la izquierda, como Excel');
   // las que no son contables, un solo texto con la Q pegada
   assert.match(hoja, /data-campo="precioBase"[^>]*><span class="hc-t">Q508\.00<\/span>/);
   assert.match(hoja, /data-campo="deducible"[^>]*><span class="hc-t">Q55,000\.00<\/span>/);
   assert.match(hoja, /data-campo="tarjeta1Monto"[^>]*><span class="hc-t">Q15,000\.00<\/span>/);
   assert.match(hoja, /data-campo="cartaPoderPrecio"[^>]*><span class="hc-t">Q350\.00<\/span>/);
-  assert.match(hoja, /data-campo="seguroPai"[^>]*><span class="hc-t">5\.00<\/span>/, 'PAI: pegado en Excel, y sin Q porque el papel la trae');
+  assert.match(hoja, /data-campo="seguroPai"[^>]*><span class="hc-t">Q5\.00<\/span>/, 'PAI: pegado, con su Q');
   assert.match(hoja, /data-campo="seguroCopia"[^>]*><span class="hc-t">Q72\.00<\/span>/);
-  assert.match(hoja, /data-campo="deducibleCopia"[^>]*><span class="hc-t">55,000\.00<\/span>/);
+  assert.match(hoja, /data-campo="deducibleCopia"[^>]*><span class="hc-t">Q55,000\.00<\/span>/);
   // y lo que se LEE no cambia con la separación
   assert.equal(textoVisible(hoja, 'seguroTerceros'), 'Q120.00');
   assert.equal(textoVisible(hoja, 'precioBase'), 'Q508.00');
@@ -536,15 +544,15 @@ test('la Q se imprime: el dueño contestó el 14 de octubre de 2026 que su papel
   for (const id of ['precioBase', 'seguroTerceros', 'seguroCopia', 'deducible', 'tarjeta1Monto', 'horaTardia', 'combustiblePrecio', 'cartaPoderPrecio']) {
     assert.match(v[id], /^Q[\d,]+\.\d\d$/, id);
   }
-  // la copia del deducible de abajo va sin la Q, como la imprime Excel
-  assert.equal(v.deducibleCopia, '55,000.00');
+  // la copia del deducible de abajo también (16 de noviembre de 2026; hasta entonces iba sin Q, como la imprime Excel)
+  assert.equal(v.deducibleCopia, 'Q55,000.00');
 });
 
 test('el dinero sale con dinero(): la Q, los miles y dos decimales; y los centavos se redondean con q()', () => {
   const v = valores({ contrato: contrato({ deducible: 1234.5, seguroDia: 72.005, tarjetas: [{ ...TARJETAS[0], montoAutorizado: 1234567.891 }] }) });
   assert.equal(v.deducible, 'Q1,234.50');
-  assert.equal(v.deducibleCopia, '1,234.50', 'la copia de abajo va sin la Q (así la imprime Excel)');
-  assert.equal(v.seguro, '72.01');
+  assert.equal(v.deducibleCopia, 'Q1,234.50', 'la copia de abajo, con la Q');
+  assert.equal(v.seguro, 'Q72.01');
   assert.equal(v.tarjeta1Monto, 'Q1,234,567.89');
 });
 
@@ -1022,6 +1030,7 @@ function contenedorFalso() {
     querySelectorAll(selector) {
       if (selector === '.hc-tarjeta input') return [...dibujado.matchAll(/<input[^>]*id="(hc-t\d+-(?:numero|cbc))"/g)].map((m) => nodo(`#${m[1]}`));
       if (selector === '.hc-datos input') return [...dibujado.matchAll(/<input[^>]*id="(hc-(?:facturar|lugar|tarifa)-[a-z-]+)"/g)].map((m) => nodo(`#${m[1]}`));
+      if (selector === '.hc-blancos input') return [...dibujado.matchAll(/<input[^>]*id="(hc-blanco-[A-Za-z0-9]+)"/g)].map((m) => nodo(`#${m[1]}`));
       return [];
     },
     vista: () => nodo('[data-pieza="vista"]').innerHTML,
@@ -2127,4 +2136,267 @@ test('ADR-001, de punta a punta con «Sacar carro»: guardar → imprimir llevan
   // Lo único que se toca es la LECTURA de la calibración de la impresora (la clave de localStorage de siempre): ninguna escritura, ni
   // sessionStorage, ni IndexedDB, ni la red, ni la consola.
   assert.deepEqual(apuntes, [['localStorage', 'getItem', JSON.stringify(CLAVE_DE_CALIBRACIONES)]]);
+});
+
+// ---------------------------------------------------------------------------
+// 16 de noviembre de 2026, correcciones del dueño sobre lo que imprime el contrato
+// ---------------------------------------------------------------------------
+
+test('hoja de prueba: LDW y PAI llevan una muestra «Q150.00» dibujada como la dibujará el contrato, y solo esas dos', () => {
+  const prueba = htmlHojaDePrueba();
+  assert.deepEqual([...prueba.matchAll(/data-muestra="([^"]+)"/g)].map((m) => m[1]), ['seguro', 'seguroPai']);
+  // LDW es de formato contable: la Q a la izquierda y el número a la derecha, igual que en el contrato
+  assert.match(prueba, /class="hp-muestra hc-campo[^"]*" data-muestra="seguro"[^>]*><span class="hc-t hc-contable"><i class="hc-q">Q<\/i><b class="hc-n">150\.00<\/b><\/span>/);
+  assert.match(prueba, /class="hp-muestra hc-campo[^"]*" data-muestra="seguroPai"[^>]*><span class="hc-t">Q150\.00<\/span>/);
+  // la muestra cae en el mismo lugar y con la misma letra que el dato del contrato
+  for (const id of ['seguro', 'seguroPai']) {
+    const estilo = (h, atributo) => new RegExp(`${atributo}="${id}" style="([^"]*)"`).exec(h)[1];
+    assert.equal(estilo(prueba, 'data-muestra'), estilo(html(), 'data-campo'), id);
+  }
+  // el contrato mismo no lleva muestras
+  assert.ok(!html().includes('hp-muestra') && !html().includes('data-muestra'));
+});
+
+test('hoja de prueba: el aviso de «Q. Q150.00» va escrito en la hoja que se imprime y en la pantalla de calibrar, a la vista', () => {
+  assert.match(AVISO_DE_LA_Q, /«LDW Q\.» y «PAI Q\.»/);
+  assert.match(AVISO_DE_LA_Q, /«Q\. Q150\.00»/);
+  assert.ok(htmlHojaDePrueba().includes(`<strong>${AVISO_DE_LA_Q.replace(/&/g, '&amp;')}</strong>`));
+  const nav = navegadorFalso();
+  try {
+    const c = contenedorFalso();
+    pintarCalibracion(c, { almacen: almacenEspia() });
+    assert.match(c.innerHTML, /<p class="hc-aviso-q" data-pieza="aviso-q">LDW y PAI: tu formulario ya trae «LDW Q\.» y «PAI Q\.» impresas/);
+    // no es un aviso rojo ni se discute: es un dato para mirar
+    assert.ok(!/barra-lectura-fallida/.test(c.innerHTML.slice(c.innerHTML.indexOf('hc-aviso-q') - 40, c.innerHTML.indexOf('hc-aviso-q') + 400)));
+  } finally {
+    nav.restaurar();
+  }
+});
+
+test('hoja de prueba: el aviso queda en la hoja aunque cambie la calibración o el papel', () => {
+  for (const cal of [CALIBRACION_DE_FABRICA, OFICIO, { dx: 1.5, dy: -2, escala: 0.8 }]) {
+    const prueba = htmlHojaDePrueba(cal);
+    assert.equal((prueba.match(/data-muestra=/g) || []).length, 2);
+    assert.ok(prueba.includes('«Q. Q150.00»'));
+  }
+});
+
+test('todas las casillas de tarjeta se imprimen (número, vence, CBC, banco, autorización, monto, de las dos) y el CÓDIGO del cliente queda vacío', () => {
+  const hoja = html({}, undefined);
+  const conTodo = htmlContratoImpreso(armarContratoImpreso({ ...entrada(), tarjetasEfimeras: [{ numero: NUMERO_COMPLETO, cbc: CBC }, { numero: '5555 5555 5555 1111', cbc: '321' }] }));
+  for (const id of ['tarjeta1Numero', 'tarjeta1Vence', 'tarjeta1Cbc', 'tarjeta1Banco', 'tarjeta1Autorizacion', 'tarjeta1Monto',
+    'tarjeta2Numero', 'tarjeta2Vence', 'tarjeta2Cbc', 'tarjeta2Autorizacion', 'tarjeta2Monto']) {
+    assert.ok(conTodo.includes(`data-campo="${id}"`), `${id} se imprime`);
+    assert.notEqual(campoPorId(id).imprime, false, id);
+  }
+  // el banco de la tarjeta 2 no tiene casilla en la hoja de Excel (solo hay un «BANCO EMISOR», el de la tarjeta 1): no es que se haya quitado, nunca existió
+  assert.ok(!CAMPOS.some((c) => /^tarjeta2Banco/.test(c.id)));
+  // sin teclear número ni CBC, lo guardado sale igual; y el CÓDIGO del cliente no tiene fuente: nunca sale
+  assert.ok(hoja.includes('data-campo="tarjeta1Autorizacion"') && hoja.includes('data-campo="tarjeta2Autorizacion"'));
+  assert.equal(campoPorId('codigoCliente').de, null);
+  assert.ok(!conTodo.includes('data-campo="codigoCliente"'));
+  assert.equal(armarContratoImpreso(entrada()).valores.codigoCliente, '');
+});
+
+// ---------- las nueve casillas de letra blanca se pueden dejar en blanco, en un papel ----------
+
+const LAS_NUEVE = ['kmSalida', 'licenciaExpira', 'conductorNombre', 'seguroMenores', 'seguroPai', 'deducibleBajo', 'variosDescripcion', 'variosPrecio', 'tarjeta2Autorizacion'];
+
+test('por omisión las nueve imprimen, y el modelo cuenta cuáles son, con su dato y si salen', () => {
+  const modelo = armarContratoImpreso(entrada());
+  assert.deepEqual(modelo.casillasOpcionales.map((o) => o.id).sort(), [...LAS_NUEVE].sort());
+  assert.ok(modelo.casillasOpcionales.every((o) => o.imprime === true && o.valor && o.etiqueta));
+  for (const id of LAS_NUEVE) assert.ok(htmlContratoImpreso(modelo).includes(`data-campo="${id}"`), id);
+});
+
+test('dejar una en blanco: esa sale vacía y sin caja, las otras ocho siguen igual, y la pantalla aún sabe qué dato iría', () => {
+  const base = armarContratoImpreso(entrada());
+  for (const id of LAS_NUEVE) {
+    const modelo = armarContratoImpreso({ ...entrada(), enBlanco: [id] });
+    assert.equal(modelo.valores[id], '', id);
+    assert.ok(!htmlContratoImpreso(modelo).includes(`data-campo="${id}"`), id);
+    for (const otra of LAS_NUEVE.filter((x) => x !== id)) assert.equal(modelo.valores[otra], base.valores[otra], `${id} no toca a ${otra}`);
+    const o = modelo.casillasOpcionales.find((x) => x.id === id);
+    assert.equal(o.imprime, false);
+    assert.equal(o.valor, base.valores[id], 'el dato que iría ahí sigue a la vista de la pantalla');
+    // y nada más cambia en el papel: las demás casillas del contrato salen idénticas
+    for (const campo of CAMPOS.filter((c) => c.id !== id)) assert.equal(modelo.valores[campo.id], base.valores[campo.id], campo.id);
+  }
+});
+
+test('las nueve en blanco a la vez, y vacío o no-lista equivale a no pedir nada', () => {
+  const modelo = armarContratoImpreso({ ...entrada(), enBlanco: LAS_NUEVE });
+  for (const id of LAS_NUEVE) assert.equal(modelo.valores[id], '');
+  assert.ok(modelo.casillasOpcionales.every((o) => !o.imprime));
+  const base = armarContratoImpreso(entrada()).valores;
+  for (const raro of [[], undefined, null, 'kmSalida', { 0: 'kmSalida' }, 7]) {
+    assert.deepEqual(armarContratoImpreso({ ...entrada(), enBlanco: raro }).valores, base, String(raro));
+  }
+});
+
+test('solo esas nueve se pueden dejar en blanco: ni la tarjeta, ni el nombre, ni la fecha, ni un nombre que no existe', () => {
+  const base = armarContratoImpreso(entrada()).valores;
+  const modelo = armarContratoImpreso({ ...entrada(), tarjetasEfimeras: [{ numero: NUMERO_COMPLETO, cbc: CBC }], enBlanco: ['tarjeta1Numero', 'tarjeta1Cbc', 'nombre1', 'apellido1', 'fechaSalida', 'carroPlacas', 'empleadoCodigo', 'seguro', 'toString', '__proto__', 'combustibleSalida'] });
+  const conTarjeta = armarContratoImpreso({ ...entrada(), tarjetasEfimeras: [{ numero: NUMERO_COMPLETO, cbc: CBC }] }).valores;
+  assert.deepEqual(modelo.valores, conTarjeta);
+  assert.notEqual(base.nombre1, '');
+});
+
+test('lo que se deja en blanco no es lo que se guarda: el contrato, el cliente y el carro no cambian', () => {
+  const e = congelar(entrada());
+  assert.doesNotThrow(() => armarContratoImpreso({ ...e, enBlanco: LAS_NUEVE }));
+});
+
+test('una casilla en blanco ya no avisa que «se saldría de su casilla»', () => {
+  const largo = { variosDescripcion: 'una descripción larguísima que no cabe en la casilla de varios del papel, ni de lejos, ni aunque la letra sea chica, ni aunque se le apriete' };
+  assert.ok(armarContratoImpreso(entrada({ contrato: contrato(largo) })).avisos.some((a) => /Varios: descripción/.test(a)));
+  assert.ok(!armarContratoImpreso({ ...entrada({ contrato: contrato(largo) }), enBlanco: ['variosDescripcion'] }).avisos.some((a) => /Varios: descripción/.test(a)));
+});
+
+/** Pinta la pantalla con un navegador falso y devuelve lo necesario para apretar cosas. */
+function pantallaDeImprimir({ imprimir = () => {}, almacen = almacenEspia() } = {}) {
+  const nav = navegadorFalso();
+  const c = contenedorFalso();
+  pintarContratoImpreso(c, entrada(), { almacen, imprimir });
+  const marca = (id) => c.nodo(`#hc-blanco-${id}`);
+  const quitar = (id) => { marca(id).checked = false; marca(id).oyentes.change(); };
+  const estado = () => c.nodo('[data-pieza="blancos-estado"]').innerHTML;
+  return { nav, c, marca, quitar, estado, almacen };
+}
+
+test('pantalla: nueve marcas, todas puestas al abrir (imprimir es lo que decidió), y ningún aviso de «en blanco»', () => {
+  const { nav, c, estado } = pantallaDeImprimir();
+  try {
+    const marcas = [...c.innerHTML.matchAll(/<input type="checkbox" id="hc-blanco-(\w+)" data-casilla="\w+" checked>/g)].map((m) => m[1]);
+    assert.deepEqual(marcas.sort(), [...LAS_NUEVE].sort());
+    assert.equal(estado(), '');
+    assert.equal(c.querySelectorAll('.hc-blancos input').length, 9);
+    for (const id of LAS_NUEVE) assert.ok(c.vista().includes(`data-campo="${id}"`), id);
+    // cada una enseña el dato que llevaría
+    assert.match(c.innerHTML, /Kilometraje de salida: <span class="hc-blanco-valor">234343<\/span>/);
+    assert.match(c.innerHTML, /Seguro PAI \(por día\): <span class="hc-blanco-valor">Q5\.00<\/span>/);
+  } finally {
+    nav.restaurar();
+  }
+});
+
+test('pantalla: quitar una marca la saca de la hoja AL INSTANTE y lo dice junto al botón de imprimir, con su nombre', () => {
+  const { nav, c, quitar, estado } = pantallaDeImprimir();
+  try {
+    quitar('kmSalida');
+    assert.ok(!c.vista().includes('data-campo="kmSalida"'));
+    assert.ok(c.vista().includes('data-campo="seguroPai"'));
+    assert.match(estado(), /<strong>En blanco en este papel \(1 de 9\):<\/strong> Kilometraje de salida\./);
+    assert.match(estado(), /class="hc-en-blanco no-imprimir"/, 'no sale en el papel');
+    quitar('seguroPai');
+    assert.match(estado(), /\(2 de 9\):<\/strong> Kilometraje de salida, Seguro PAI \(por día\)\./);
+    // y la vuelve a poner
+    c.nodo('#hc-blanco-kmSalida').checked = true;
+    c.nodo('#hc-blanco-kmSalida').oyentes.change();
+    assert.ok(c.vista().includes('data-campo="kmSalida"'));
+    assert.match(estado(), /\(1 de 9\):<\/strong> Seguro PAI/);
+    c.nodo('#hc-blanco-seguroPai').checked = true;
+    c.nodo('#hc-blanco-seguroPai').oyentes.change();
+    assert.equal(estado(), '');
+  } finally {
+    nav.restaurar();
+  }
+});
+
+test('pantalla: el botón de las nueve deja todas en blanco, y apretado otra vez las vuelve a imprimir; su texto dice lo que hará', () => {
+  const { nav, c, estado } = pantallaDeImprimir();
+  try {
+    const boton = c.nodo('[data-accion="blancos-todas"]');
+    assert.match(c.innerHTML, /data-accion="blancos-todas">Dejar las nueve en blanco<\/button>/);
+    boton.oyentes.click();
+    for (const id of LAS_NUEVE) { assert.equal(c.nodo(`#hc-blanco-${id}`).checked, false, id); assert.ok(!c.vista().includes(`data-campo="${id}"`), id); }
+    assert.match(estado(), /\(9 de 9\)/);
+    assert.equal(boton.textContent, 'Imprimir las nueve');
+    boton.oyentes.click();
+    for (const id of LAS_NUEVE) { assert.equal(c.nodo(`#hc-blanco-${id}`).checked, true, id); assert.ok(c.vista().includes(`data-campo="${id}"`), id); }
+    assert.equal(estado(), '');
+    assert.equal(boton.textContent, 'Dejar las nueve en blanco');
+    // con algunas en blanco y otras no, el botón las deja TODAS en blanco
+    c.nodo('#hc-blanco-kmSalida').checked = false;
+    c.nodo('#hc-blanco-kmSalida').oyentes.change();
+    boton.oyentes.click();
+    assert.match(estado(), /\(9 de 9\)/);
+  } finally {
+    nav.restaurar();
+  }
+});
+
+test('pantalla: lo que se manda al diálogo de imprimir ya lleva lo que se quitó, aunque la marca cambiara sin avisar', () => {
+  let enElDialogo = null;
+  const { nav, c } = pantallaDeImprimir({ imprimir: () => { enElDialogo = c.vista(); } });
+  try {
+    c.nodo('#hc-blanco-deducibleBajo').checked = false; // el navegador la cambió sin disparar `change`
+    c.nodo('[data-accion="imprimir"]').oyentes.click();
+    assert.ok(!enElDialogo.includes('data-campo="deducibleBajo"'));
+    assert.ok(enElDialogo.includes('data-campo="kmSalida"'));
+  } finally {
+    nav.restaurar();
+  }
+});
+
+test('pantalla: al terminar de imprimir (o cancelar) las nueve vuelven a imprimirse; lo quitado con un cliente no se queda para el siguiente', () => {
+  const { nav, c, quitar, estado } = pantallaDeImprimir();
+  try {
+    quitar('kmSalida');
+    quitar('variosPrecio');
+    c.nodo('[data-accion="imprimir"]').oyentes.click();
+    nav.disparar('afterprint');
+    for (const id of LAS_NUEVE) { assert.equal(c.nodo(`#hc-blanco-${id}`).checked, true, id); assert.ok(c.vista().includes(`data-campo="${id}"`), id); }
+    assert.equal(estado(), '');
+  } finally {
+    nav.restaurar();
+  }
+});
+
+test('pantalla: volver a abrir la pantalla (otro contrato, o el mismo otro día) empieza con las nueve marcadas; nada se recuerda', () => {
+  const almacen = almacenEspia();
+  const primera = pantallaDeImprimir({ almacen });
+  try {
+    primera.quitar('kmSalida');
+    primera.quitar('seguroPai');
+    primera.nav.restaurar();
+    const segunda = pantallaDeImprimir({ almacen });
+    try {
+      assert.equal((segunda.c.innerHTML.match(/type="checkbox" id="hc-blanco-\w+" data-casilla="\w+" checked>/g) || []).length, 9);
+      assert.equal(segunda.estado(), '');
+      assert.ok(segunda.c.vista().includes('data-campo="kmSalida"'));
+    } finally {
+      segunda.nav.restaurar();
+    }
+    // y nada se guardó en el almacén del navegador
+    assert.deepEqual(almacen.escrituras, []);
+  } finally {
+    primera.nav.restaurar();
+  }
+});
+
+test('pantalla: lo que se deja en blanco no se guarda en ningún lado (ni el almacén, ni el contrato, ni lo que se manda a la nube)', async () => {
+  const almacen = almacenEspia();
+  const contratoDe = contrato();
+  const copia = JSON.stringify(contratoDe);
+  const nav = navegadorFalso();
+  try {
+    const apuntes = await conEspias(() => {
+      const c = contenedorFalso();
+      pintarContratoImpreso(c, { contrato: contratoDe, cliente: cliente(), carro: CARRO }, { almacen });
+      c.nodo('#hc-blanco-kmSalida').checked = false;
+      c.nodo('#hc-blanco-kmSalida').oyentes.change();
+      c.nodo('[data-accion="blancos-todas"]').oyentes.click();
+    });
+    assert.deepEqual(almacen.escrituras, []);
+    assert.equal(JSON.stringify(contratoDe), copia, 'el contrato no se tocó');
+    assert.ok(!JSON.stringify(apuntes).includes('hc-blanco') && !JSON.stringify(apuntes).includes('kmSalida'), JSON.stringify(apuntes));
+  } finally {
+    nav.restaurar();
+  }
+});
+
+test('hojaContrato: las que se pueden dejar en blanco son exactamente las nueve de letra blanca de Excel', async () => {
+  const { camposQueSePuedenDejarEnBlanco } = await import('../js/nucleo/hojaContrato.js');
+  assert.deepEqual(camposQueSePuedenDejarEnBlanco().map((c) => c.id).sort(), [...LAS_NUEVE].sort());
 });

@@ -57,6 +57,13 @@
   gap: 4px;
 }
 
+/* Las nueve casillas de letra blanca: una marca por casilla, y arriba (junto al botón de imprimir) lo que quedó en blanco. */
+.hc-blancos { margin: 12px 0; display: grid; gap: 4px; }
+.hc-blancos .comp-ayuda { margin: 0 0 4px; }
+.hc-blanco { display: flex; gap: 8px; align-items: baseline; }
+.hc-blanco-valor { color: #555; }
+.hc-en-blanco { margin: 8px 0; padding: 8px 12px; border: 2px solid #000; background: #fff7d6; }
+
 /* ---------- La hoja ---------- */
 
 .hoja-contrato {
@@ -180,6 +187,9 @@
 .hp-caja.hp-no { border-style: dotted; border-color: #888; }
 .hp-caja span { position: absolute; left: 0.3mm; top: 0.1mm; max-width: calc(100% - 0.6mm); overflow: hidden; white-space: nowrap; font: 4.5pt Arial, Helvetica, sans-serif; line-height: 1; color: #444; }
 
+/* La muestra de dinero de las casillas cuyo formulario ya trae la Q («LDW Q.», «PAI Q.»): en negrita para que se vea al ponerla contra la luz. */
+.hp-muestra { font-weight: bold; }
+
 /* Las cuatro casillas con que se compara: en grueso y con su número en un círculo. */
 .hp-caja.hp-hito-caja { border: 0.5mm solid #000; }
 
@@ -213,6 +223,7 @@
 .hc-pasos { margin: 0 0 12px; padding-left: 22px; line-height: 1.45; }
 .hc-pasos li { margin-bottom: 6px; }
 .hc-lectura { margin: 10px 0 4px; font-weight: bold; }
+.hc-aviso-q { margin: 10px 0 4px; padding: 8px 10px; border: 2px solid #000; font-weight: bold; }
 .hc-calibracion kbd {
   display: inline-block;
   min-width: 1.6em;

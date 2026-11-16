@@ -45,7 +45,7 @@ import { q } from '../nucleo/dinero.js';
 import {
   CAMPOS, ESCALA_EXCEL, ORIGEN_MM, PAPEL, HOJA_MM, cajaDeRango, campoPorId, fechaParaPapel, textoSeSale,
   transformacionCss, textoDeCalibracion, aplicarTecla, calibracionActiva, guardarCalibracion,
-  leerCalibraciones, CALIBRACION_DE_FABRICA, calibracionValida, camposQueSeImprimen, TARIFAS_DEL_PAPEL, PASOS, camposFueraDelPapel, papelDe, PAPELES,
+  leerCalibraciones, CALIBRACION_DE_FABRICA, calibracionValida, camposQueSeImprimen, camposQueSePuedenDejarEnBlanco, TARIFAS_DEL_PAPEL, PASOS, camposFueraDelPapel, papelDe, PAPELES,
 } from '../nucleo/hojaContrato.js';
 import { dinero } from '../ui.js';
 import { cargarContrato, cargarClientes, cargarFlota } from '../datos.js';
@@ -215,9 +215,13 @@ const ORIGEN_DE_FECHA = {
  * - `datosDelPapel`: lo que el papel lleva y el sistema no guarda, tecleado o corregido al imprimir y tampoco guardado:
  *   `{ facturarNombre, facturarNit, lugarEntrada, horaTardia, combustiblePrecio }`. Todo opcional: sin facturar no hay
  *   a quién; el lugar de entrada es el de salida; las dos tarifas son las de `TARIFAS_DEL_PAPEL`.
+ * - `enBlanco`: los id de las casillas que, EN ESTE PAPEL, se dejan en blanco (16 de noviembre de 2026). Solo cuentan las nueve de «letra blanca de Excel»
+ *   (`camposQueSePuedenDejarEnBlanco`); cualquier otro id se ignora, porque un dato de tarjeta o el nombre no se borran por aquí. No toca el contrato:
+ *   es de este papel, no de la renta. Sin él, las nueve se imprimen, que es lo que él decidió.
+ *   El modelo devuelve `casillasOpcionales`: las nueve, con el dato que tendrían y si se imprimen, para que la pantalla las muestre.
  */
 export function armarContratoImpreso({
-  contrato, cliente, carro = null, tarjetasEfimeras = [], datosDelPapel = {},
+  contrato, cliente, carro = null, tarjetasEfimeras = [], datosDelPapel = {}, enBlanco = [],
 } = {}) {
   if (!contrato || typeof contrato !== 'object' || !contrato.id) {
     throw new Error('Falta el contrato guardado que se va a imprimir.');
@@ -242,6 +246,9 @@ export function armarContratoImpreso({
     contrato, cliente, carro, tarjetas, ajeno, papel,
   };
   const valores = {};
+  // Solo las nueve de letra blanca entran en la cuenta de más abajo (`campo.blancaEnExcel`): un id que no sea de ellas no hace nada.
+  const aBlanco = new Set(Array.isArray(enBlanco) ? enBlanco : []);
+  const casillasOpcionales = [];
   // `avisos` son cosas que pueden salir mal en el papel (una fecha inválida, un texto que se sale, una tarjeta que no coincide);
   // `notas` son lo normal que conviene saber (la tarjeta de una reimpresión sale enmascarada). Las primeras van en rojo.
   const avisos = [];
@@ -257,6 +264,13 @@ export function armarContratoImpreso({
     } else {
       // Sin fuente en el sistema (`de: null`): en blanco, y la hoja de prueba lo dice.
       valores[campo.id] = '';
+    }
+    if (campo.blancaEnExcel) {
+      // Se arma el dato completo y DESPUÉS se deja en blanco si él lo pidió: así la pantalla sigue mostrando qué dato iría ahí.
+      casillasOpcionales.push({
+        id: campo.id, etiqueta: campo.etiqueta, valor: valores[campo.id], imprime: !aBlanco.has(campo.id),
+      });
+      if (aBlanco.has(campo.id)) valores[campo.id] = '';
     }
   }
 
@@ -301,6 +315,7 @@ export function armarContratoImpreso({
     numero: contrato.numero ?? null,
     valores,
     tarjetas: tarjetas.map((t) => ({ completa: t.completa })),
+    casillasOpcionales,
     avisos,
     notas,
   };
@@ -442,6 +457,17 @@ export const PASOS_DE_CALIBRAR = [
 ];
 
 /**
+ * Lo que el dueño ve en la hoja de prueba sobre LDW y PAI (16 de noviembre de 2026). Su formulario ya trae «LDW Q.» y «PAI Q.» impresas y él pidió que
+ * todo monto lleve la Q («A todo lo que sea dinero ponle la Q.»): esas dos casillas van a leerse «Q. Q150.00». Se le dijo y decidió dos veces; el
+ * sistema hace lo que pidió. Esta hoja es donde él mide con su formulario enfrente, así que aquí se ve con sus propios ojos, sin discutirlo: las dos
+ * casillas llevan una muestra «Q150.00» dibujada por el mismo código que dibuja el contrato.
+ */
+export const AVISO_DE_LA_Q = 'LDW y PAI: tu formulario ya trae «LDW Q.» y «PAI Q.» impresas, y el contrato imprime la Q de todo monto, como pediste: ahí vas a leer «Q. Q150.00». Esas dos casillas llevan una muestra «Q150.00» en la hoja de prueba.';
+
+/** La muestra de dinero de esas casillas: el mismo `monto()` del contrato, no un texto escrito aparte. */
+const MUESTRA_DE_DINERO = monto(150);
+
+/**
  * Cómo se llama una casilla en la hoja de prueba: con las palabras del dueño («Placas», «Fecha de salida»), no con el nombre que
  * le damos en el código. Un texto fijo de Excel se muestra con su propio texto.
  */
@@ -471,13 +497,15 @@ export function htmlHojaDePrueba(cal = CALIBRACION_DE_FABRICA, { impresora = nul
     const clase = `hp-caja${imprime ? '' : ' hp-no'}${h ? ' hp-hito-caja' : ''}${c.derivada ? ' hp-derivada' : ''}`;
     return `<div class="${clase}" data-campo="${esc(c.id)}" style="${estiloDeCaja(c).replace(/font-size:[^;]+;/, '')}"><span>${esc(nombreEnLaPrueba(c))}</span></div>`;
   }).join('\n    ');
+  // Las casillas cuyo formulario ya trae la Q: la muestra se dibuja con `campoHtml`, o sea EXACTAMENTE como saldrá en el contrato (la Q a la izquierda, el número a la derecha).
+  const muestras = CAMPOS.filter((c) => c.papelTraeLaQ).map((c) => campoHtml(c, MUESTRA_DE_DINERO).replace('class="', 'class="hp-muestra ').replace('data-campo=', 'data-muestra=')).join('\n    ');
   const insignias = HITOS.map((h) => {
     const caja = cajaDeRango(campoPorId(h.id).rango);
     return `<b class="hp-hito" data-hito="${h.n}" style="left:${mm(ORIGEN_MM.x + caja.x)};top:${mm(ORIGEN_MM.y + caja.y)}">${h.n}</b>`;
   }).join('');
   const esquina = (x, y, clase) => `<i class="hp-cruz ${clase}" style="left:${mm(ORIGEN_MM.x + x)};top:${mm(ORIGEN_MM.y + y)}"></i>`;
   const marco = `<div class="hp-marco" style="left:${mm(ORIGEN_MM.x)};top:${mm(ORIGEN_MM.y)};width:${mm(HOJA_MM.ancho)};height:${mm(HOJA_MM.alto)}"></div>`;
-  const rotulo = `<strong>HOJA DE PRUEBA</strong> (no es el contrato)${impresora ? ` · impresora «${esc(impresora)}»` : ''} · papel ${esc(papel.nombre)} · ${esc(textoDeCalibracion(cal))}<br>Cada rectángulo marca dónde se escribirá un dato. Los cuatro con número y borde grueso son con los que se compara. Las reglas de los bordes están en milímetros. La casilla de raya de trazos largos («derivada») no se midió en Excel: mírala con más atención.`;
+  const rotulo = `<strong>HOJA DE PRUEBA</strong> (no es el contrato)${impresora ? ` · impresora «${esc(impresora)}»` : ''} · papel ${esc(papel.nombre)} · ${esc(textoDeCalibracion(cal))}<br>Cada rectángulo marca dónde se escribirá un dato. Los cuatro con número y borde grueso son con los que se compara. Las reglas de los bordes están en milímetros. La casilla de raya de trazos largos («derivada») no se midió en Excel: mírala con más atención.<br><strong>${esc(AVISO_DE_LA_Q)}</strong>`;
   const pasos = PASOS_DE_CALIBRAR.map((p, i) => `<li><b>${i + 1}.</b> ${esc(p.corto)}</li>`).join('');
   return `<article class="hoja-contrato hoja-de-prueba" aria-label="Hoja de prueba" style="width:${papel.anchoMm}mm;height:${papel.altoMm}mm">
   <div class="hp-regla">${reglaHtml(papel)}</div>
@@ -487,6 +515,7 @@ export function htmlHojaDePrueba(cal = CALIBRACION_DE_FABRICA, { impresora = nul
     ${marco}
     ${esquina(0, 0, 'hp-nw')}${esquina(HOJA_MM.ancho, 0, 'hp-ne')}${esquina(0, HOJA_MM.alto, 'hp-sw')}${esquina(HOJA_MM.ancho, HOJA_MM.alto, 'hp-se')}
     ${cajas}
+    ${muestras}
     ${insignias}
   </div>
 </article>`;
@@ -662,6 +691,31 @@ function cajasDelPapel(contrato) {
 }
 
 /**
+ * Las nueve casillas de «letra blanca de Excel», cada una con su marca de «se imprime» (16 de noviembre de 2026: «Las 9 celdas sí imprímelas. Pero dame la
+ * opción de ponerlas en blanco cuando necesite.»). Todas marcadas al abrir: imprimir es lo que decidió, y dejar una en blanco es lo que hace a propósito
+ * en ESE papel. Nada de esto se guarda (ni en el contrato ni en el navegador): se vuelve a empezar con las nueve marcadas en cada contrato y al terminar
+ * de imprimir, para que lo que se quitó con un cliente no se quede quitado en el siguiente sin que nadie se acuerde. Cada casilla enseña el dato que
+ * llevaría, para que él decida sin buscarlo en otra pantalla; una sin dato lo dice y no hay nada que quitar.
+ */
+const ID_BLANCO = (id) => `hc-blanco-${id}`;
+function cajasDeCasillasOpcionales(opcionales) {
+  const una = (o) => `<label class="hc-blanco"><input type="checkbox" id="${ID_BLANCO(o.id)}" data-casilla="${esc(o.id)}" checked> ${esc(o.etiqueta)}: <span class="hc-blanco-valor">${o.valor ? esc(o.valor) : '(sin dato: sale vacía de todos modos)'}</span></label>`;
+  return `<section class="hc-blancos no-imprimir" aria-label="Casillas que se pueden dejar en blanco">
+    <p class="comp-ayuda">Estas nueve casillas se imprimen. Quita la marca de las que quieras dejar en BLANCO en este papel: solo vale para este papel, no se guarda, y el siguiente contrato las vuelve a imprimir todas.</p>
+    ${opcionales.map(una).join('\n    ')}
+    <p><button type="button" class="btn" data-accion="blancos-todas">Dejar las nueve en blanco</button></p>
+  </section>`;
+}
+
+/** Lo que se dice, junto al botón de imprimir, cuando hay casillas que NO saldrán: tiene que verse ANTES de imprimir, no descubrirse en el papel. */
+function textoDeLasQueQuedanEnBlanco(opcionales) {
+  const fuera = opcionales.filter((o) => !o.imprime);
+  if (!fuera.length) return '';
+  const nombres = fuera.map((o) => o.etiqueta).join(', ');
+  return `<p class="hc-en-blanco no-imprimir" role="status"><strong>En blanco en este papel (${fuera.length} de ${opcionales.length}):</strong> ${esc(nombres)}. Vuelven a imprimirse en el próximo contrato.</p>`;
+}
+
+/**
  * Dibuja el contrato impreso en `contenedor`. Devuelve el modelo, o `null` si no se pudo armar.
  *
  * Si `armarContratoImpreso` lanza NO se dibuja una hoja: se dibuja una barra roja que dice por qué (como el comprobante).
@@ -700,11 +754,13 @@ export function pintarContratoImpreso(contenedor, entrada, {
     <button type="button" class="btn btn-primario" data-accion="imprimir">Imprimir contrato</button>
     <a class="btn" href="#/impresion/calibrar" data-accion="calibrar">Calibrar impresora</a>
   </div>
+  <div data-pieza="blancos-estado"></div>
   <p class="comp-ayuda no-imprimir" data-pieza="impresora">${textoDeImpresora(impresora)}</p>
   <p class="comp-ayuda no-imprimir">${esc(ayudaDeImprimir(papelDe(impresora.cal)))}</p>
   ${cajasDeTarjetas(entrada.contrato)}
   <div data-pieza="traspaso"></div>
   ${cajasDelPapel(entrada.contrato)}
+  ${cajasDeCasillasOpcionales(modelo.casillasOpcionales)}
   <div data-pieza="notas"></div>
   <div data-pieza="avisos"></div>
   <div class="${papelDe(impresora.cal).clave === 'oficio' ? 'hc-vista hc-vista-oficio' : 'hc-vista'}" data-pieza="vista"></div>
@@ -733,13 +789,22 @@ export function pintarContratoImpreso(contenedor, entrada, {
       cbc: el(`#hc-t${i}-cbc`)?.value ?? '',
     }));
     const datosDelPapel = Object.fromEntries(DATOS_DEL_PAPEL.map((d) => [d.clave, el(`#${d.id}`)?.value]));
+    // Una casilla sin su marca se deja en blanco; si la marca no se puede leer, se imprime (el camino que él decidió).
+    const enBlanco = camposQueSePuedenDejarEnBlanco().filter((c) => el(`#${ID_BLANCO(c.id)}`)?.checked === false).map((c) => c.id);
     try {
-      modelo = armarContratoImpreso({ ...entrada, tarjetasEfimeras, datosDelPapel });
+      modelo = armarContratoImpreso({
+        ...entrada, tarjetasEfimeras, datosDelPapel, enBlanco,
+      });
     } catch (error) {
       el('[data-pieza="vista"]').innerHTML = '';
+      el('[data-pieza="blancos-estado"]').innerHTML = '';
       el('[data-pieza="avisos"]').innerHTML = `<div class="barra-lectura-fallida no-imprimir" role="alert"><p>${esc(error.message)}</p></div>`;
       return;
     }
+    el('[data-pieza="blancos-estado"]').innerHTML = textoDeLasQueQuedanEnBlanco(modelo.casillasOpcionales);
+    const todasEnBlanco = modelo.casillasOpcionales.every((o) => !o.imprime);
+    const botonTodas = el('[data-accion="blancos-todas"]');
+    if (botonTodas) botonTodas.textContent = todasEnBlanco ? 'Imprimir las nueve' : 'Dejar las nueve en blanco';
     el('[data-pieza="vista"]').innerHTML = htmlContratoImpreso(modelo, impresora.cal);
     pintarAvisos();
   }
@@ -748,6 +813,8 @@ export function pintarContratoImpreso(contenedor, entrada, {
   function restablecerDatosDelPapel() {
     const inicial = inicialesDelPapel(entrada.contrato);
     DATOS_DEL_PAPEL.forEach((d) => { const caja = el(`#${d.id}`); if (caja) caja.value = inicial[d.clave]; });
+    // y las nueve casillas de letra blanca, otra vez todas marcadas: dejar una en blanco vale para UN papel
+    camposQueSePuedenDejarEnBlanco().forEach((c) => { const marca = el(`#${ID_BLANCO(c.id)}`); if (marca) marca.checked = true; });
   }
 
   /**
@@ -782,6 +849,13 @@ export function pintarContratoImpreso(contenedor, entrada, {
 
   contenedor.querySelectorAll('.hc-tarjeta input').forEach((caja) => caja.addEventListener('input', redibujar));
   contenedor.querySelectorAll('.hc-datos input').forEach((caja) => caja.addEventListener('input', redibujar));
+  contenedor.querySelectorAll('.hc-blancos input').forEach((marca) => marca.addEventListener('change', redibujar));
+  // Un solo botón para las nueve: si todas se imprimen las deja todas en blanco, y si todas están en blanco las vuelve a imprimir.
+  contenedor.querySelector('[data-accion="blancos-todas"]')?.addEventListener('click', () => {
+    const todasEnBlanco = modelo.casillasOpcionales.every((o) => !o.imprime);
+    camposQueSePuedenDejarEnBlanco().forEach((c) => { const marca = el(`#${ID_BLANCO(c.id)}`); if (marca) marca.checked = todasEnBlanco; });
+    redibujar();
+  });
   restablecerDatosDelPapel();
   precargarDelTraspaso(tarjetasDelTraspaso);
   redibujar();
@@ -892,6 +966,7 @@ export function pintarCalibracion(contenedor, {
       <input type="text" id="hc-nombre" list="hc-nombres" value="${esc(nombre)}" placeholder="Oficina" autocomplete="off">
       <datalist id="hc-nombres">${Object.keys(guardadas.impresoras).map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
     </label>
+    <p class="hc-aviso-q" data-pieza="aviso-q">${esc(AVISO_DE_LA_Q)}</p>
     <p class="hc-lectura" data-pieza="lectura"></p>
     <p class="comp-ayuda"><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> mueven toda la hoja ${esc(TOQUE_MM)} mm · con <kbd>Shift</kbd> ${esc(aTexto(PASOS.fino.mm))} mm · con <kbd>Ctrl</kbd> o <kbd>Cmd</kbd> ${esc(aTexto(PASOS.grueso.mm))} mm · <kbd>+</kbd> y <kbd>−</kbd> la agrandan o la achican.</p>
   </div>
