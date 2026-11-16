@@ -713,8 +713,12 @@ arriba (`tarjetas[]`). En un contrato que se arma hoy ninguno falta, salvo
   secas, sin «Salida» al final**, aunque el de regreso sí lleva apellido,
   `cierre.lugarEntrada`: quien lo busque con el nombre largo no lo va a encontrar,
   y no debe inventarlo.
-- `combustibleSalida` es el nivel del tanque al salir, que se escoge de una lista
-  (`Lleno`, `3/4`, `1/2`, `1/4`, `Vacío`) y queda vacío si no se escogió. **No es
+- `combustibleSalida` es el nivel del tanque al salir, **texto libre que él escribe**
+  (desde el 16 de noviembre de 2026; antes se escogía de una lista y los contratos viejos
+  traen `Lleno`, `3/4`, `1/2`, `1/4` o `Vacío`) y queda vacío si no se escribió. Se guarda
+  tal cual, sin traducir, y se imprime tal cual (§8b, punto 19): quien lo lea (la ficha, «Recibir
+  carro», el respaldo, el papel) tiene que escaparlo y no esperar una de esas cinco palabras.
+  **No es
   el `combustible` del cierre**: ese es un monto de dinero que se escribe a mano
   al recibir el carro, porque el sistema no calcula nada por nivel de tanque. Uno
   es lo que había en el tanque; el otro, lo que se cobra.
@@ -1525,7 +1529,7 @@ en el código.
    heredada sin preguntar; el contrato no guarda una hora de entrada prevista.
 8. **La «Q»: su papel no la trae.** Por eso los montos se imprimen con ella
    (`QUETZAL_EN_EL_PAPEL`, una línea si algún día cambia de papelería).
-9. **El nivel del tanque no se imprime: «Yo lo escribo mejor».** `combustibleSalida` queda
+9. **(CORREGIDO el 16 de noviembre: era un malentendido, ver el punto 19.) El nivel del tanque no se imprime: «Yo lo escribo mejor».** `combustibleSalida` queda
    fuera (`imprime: false` en la tabla): el sistema guarda «Lleno, 3/4…», el papel dice
    «FULL», y traducir entre los dos vocabularios habría sido una tabla de conversión que se
    desactualiza sola el día que él agregue una opción. La tarifa por galón (Q65) sí sale.
@@ -1560,7 +1564,7 @@ derecha.)
     **blanco** y él la escribe a mano, como el resto del papel. Nunca el nombre y nunca un código
     buscado en la lista de empleados de hoy: el papel de aquel día llevaba el código de aquel día.
     Al lado hay otra casilla, «COMPUTADO POR (CODIGO)», que ni Excel ni el sistema llenan; se deja así.
-13. **«LDW Q.» y «PAI Q.» traen la Q impresa en el papel.** Su «el papel no la trae» (punto 8) vale
+13. **(REEMPLAZADO el 16 de noviembre por el punto 20: ahora llevan la Q.) «LDW Q.» y «PAI Q.» traen la Q impresa en el papel.** Su «el papel no la trae» (punto 8) vale
     para el resto de los montos. Esas dos casillas dicen la Q con punto, así que `seguro` y
     `seguroPai` salen **sin** la Q, para que no se lea «Q. Q150.00». No es un `if` en el dibujo: es la
     marca `sinQ` en la tabla `CAMPOS`, con su razón y su fecha, porque es un dato del papel y no una
@@ -1888,6 +1892,30 @@ Queda afuera a propósito, para que sea simple y rápido:
 El 24 de septiembre de 2026, con el plan 1 casi terminado, el dueño pidió tres
 cosas más. Quedan aquí para que el diseño no mienta sobre lo que el sistema va
 a ser:
+
+
+19. **El combustible de salida SÍ se imprime; lo que no quería era la lista de opciones (16 de noviembre de 2026).** El punto 9 (14 de
+    octubre) leyó «Yo lo escribo mejor» como «déjalo fuera del papel». Era un malentendido: hablaba del FORMULARIO. Dijo: *«El combustible
+    de salida sí lo tienes que imprimir. Lo que yo quería era escribirlo en vez de que me desgloses en esa pestaña de opciones que me
+    diste.»* Ahora `combustibleSalida` se imprime (sin `imprime: false`; la nota del campo deja a la vista la lectura equivocada) y en
+    «Sacar carro» es una casilla de texto, como la hora. Se guarda y se imprime tal cual, sin traducir. Los contratos viejos con «Lleno»,
+    «3/4»… siguen viéndose e imprimiéndose igual. Nada calcula con el campo (el cobro del combustible al recibir es `cierre.combustible`,
+    un monto aparte). Una frase más ancha que la casilla del papel (13 mm) dispara el aviso de siempre «se saldría de su casilla».
+20. **Todo monto lleva la Q, también LDW, PAI y el deducible de abajo (16 de noviembre de 2026).** Dijo: *«A todo lo que sea dinero
+    ponle la Q.»* Se quitó `sinQ` de las tres. Su formulario ya trae «LDW Q.» y «PAI Q.» (foto del 15 de octubre), así que esas dos
+    casillas leerán «Q. Q150.00» en el papel; se le dijo dos veces y decidió dos veces, y está construido como lo pidió. Lo que sí se hizo
+    es que la hoja de prueba (donde él es el instrumento) lo muestre: esas dos casillas llevan la marca `papelTraeLaQ` y una muestra
+    «Q150.00» dibujada por el mismo código que dibuja el contrato, con un aviso escrito en la hoja y en la pantalla de calibrar.
+21. **Las nueve casillas «blancas» se pueden dejar en blanco en un papel (16 de noviembre de 2026).** Dijo: *«Las 9 celdas sí imprímelas.
+    Pero dame la opción de ponerlas en blanco cuando necesite.»* Imprimir sigue siendo lo normal (punto 4). En la pantalla de imprimir hay
+    nueve marcas, una por casilla, todas puestas; un botón para dejar las nueve (o volver a ponerlas); y, arriba junto a «Imprimir
+    contrato», un renglón que dice cuáles quedaron en blanco. Por casilla y no un solo interruptor, porque la razón de quitar una
+    (el kilometraje) rara vez es la de quitar otra. **No se guarda** (ni en el contrato, ni en la copia local, ni en el navegador): es
+    del papel de ese momento, no de la renta, y recordarlo dejaría casillas vacías en el contrato de otro cliente sin que nadie lo
+    viera. Vuelve a empezar con las nueve marcadas al terminar de imprimir (imprima o cancele) y al salir de la pantalla. Solo valen las
+    nueve de letra blanca (`camposQueSePuedenDejarEnBlanco`); una tarjeta o un nombre no se borran por aquí. Confirmado sin tocar: el
+    CÓDIGO del cliente sigue vacío y todos los datos de tarjeta se imprimen (el banco solo de la tarjeta 1: su Excel no tiene casilla de
+    banco para la 2).
 
 ### Reservaciones y calendario
 

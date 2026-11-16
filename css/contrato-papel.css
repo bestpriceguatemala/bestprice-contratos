@@ -147,7 +147,8 @@
   top: 6.5mm;
   width: 188mm;
   margin: 0;
-  font: 7pt/1.3 Arial, Helvetica, sans-serif;
+  /* Cuatro renglones (con el aviso de LDW y PAI) tienen que terminar antes del marco de la hoja, que empieza a 18.5 mm: con 1.3 lo tocaban. */
+  font: 7pt/1.1 Arial, Helvetica, sans-serif;
 }
 
 /* Los pasos, en palabras, abajo de la hoja. No se corren con la calibración: no son de la hoja sino del papel. */
@@ -188,7 +189,7 @@
 .hp-caja span { position: absolute; left: 0.3mm; top: 0.1mm; max-width: calc(100% - 0.6mm); overflow: hidden; white-space: nowrap; font: 4.5pt Arial, Helvetica, sans-serif; line-height: 1; color: #444; }
 
 /* La muestra de dinero de las casillas cuyo formulario ya trae la Q («LDW Q.», «PAI Q.»): en negrita para que se vea al ponerla contra la luz. */
-.hp-muestra { font-weight: bold; }
+.hp-muestra { font-weight: bold; outline: 0.35mm solid #000; outline-offset: -0.35mm; }
 
 /* Las cuatro casillas con que se compara: en grueso y con su número en un círculo. */
 .hp-caja.hp-hito-caja { border: 0.5mm solid #000; }

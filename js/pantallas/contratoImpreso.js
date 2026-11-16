@@ -462,7 +462,7 @@ export const PASOS_DE_CALIBRAR = [
  * sistema hace lo que pidió. Esta hoja es donde él mide con su formulario enfrente, así que aquí se ve con sus propios ojos, sin discutirlo: las dos
  * casillas llevan una muestra «Q150.00» dibujada por el mismo código que dibuja el contrato.
  */
-export const AVISO_DE_LA_Q = 'LDW y PAI: tu formulario ya trae «LDW Q.» y «PAI Q.» impresas, y el contrato imprime la Q de todo monto, como pediste: ahí vas a leer «Q. Q150.00». Esas dos casillas llevan una muestra «Q150.00» en la hoja de prueba.';
+export const AVISO_DE_LA_Q = 'LDW y PAI: tu formulario ya trae «LDW Q.» y «PAI Q.»; el contrato pone su Q: ahí leerás «Q. Q150.00» (muestra en esas dos casillas).';
 
 /** La muestra de dinero de esas casillas: el mismo `monto()` del contrato, no un texto escrito aparte. */
 const MUESTRA_DE_DINERO = monto(150);

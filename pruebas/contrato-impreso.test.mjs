@@ -2165,7 +2165,7 @@ test('hoja de prueba: el aviso de «Q. Q150.00» va escrito en la hoja que se im
   try {
     const c = contenedorFalso();
     pintarCalibracion(c, { almacen: almacenEspia() });
-    assert.match(c.innerHTML, /<p class="hc-aviso-q" data-pieza="aviso-q">LDW y PAI: tu formulario ya trae «LDW Q\.» y «PAI Q\.» impresas/);
+    assert.match(c.innerHTML, /<p class="hc-aviso-q" data-pieza="aviso-q">LDW y PAI: tu formulario ya trae «LDW Q\.» y «PAI Q\.»;/);
     // no es un aviso rojo ni se discute: es un dato para mirar
     assert.ok(!/barra-lectura-fallida/.test(c.innerHTML.slice(c.innerHTML.indexOf('hc-aviso-q') - 40, c.innerHTML.indexOf('hc-aviso-q') + 400)));
   } finally {
