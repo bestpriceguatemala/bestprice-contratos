@@ -43,7 +43,7 @@ import { lineasSalida, conKmSalidaNormalizado } from '../nucleo/contrato.js';
 import { nombresResueltos } from '../nucleo/cliente.js';
 import { q } from '../nucleo/dinero.js';
 import {
-  CAMPOS, ESCALA_EXCEL, ORIGEN_MM, PAPEL, HOJA_MM, cajaDeRango, campoPorId, fechaParaPapel, textoSeSale,
+  CAMPOS, ESCALA_EXCEL, ORIGEN_MM, PAPEL, HOJA_MM, cajaDeRango, campoPorId, fechaParaPapel, acomodoDeTexto,
   transformacionCss, textoDeCalibracion, aplicarTecla, calibracionActiva, guardarCalibracion,
   leerCalibraciones, CALIBRACION_DE_FABRICA, calibracionValida, camposQueSeImprimen, camposQueSePuedenDejarEnBlanco, TARIFAS_DEL_PAPEL, PASOS, camposFueraDelPapel, papelDe, PAPELES,
 } from '../nucleo/hojaContrato.js';
@@ -303,10 +303,18 @@ export function armarContratoImpreso({
       );
     }
   });
+  // Un texto más largo que su casilla NO se avisa por ser largo: decisión del dueño del 16 de noviembre de 2026
+  // («no importa que la palabra FULL se salga un poquito de los cuadros»), y de todos modos la hoja lo acomoda hacia el
+  // lado libre. Se avisa SOLO cuando lo que sobra caería sobre la casilla de otro dato, que es lo que sí arruina el
+  // papel: dos datos encima. Los textos fijos de Excel no cuentan (se salen a propósito, y nadie puede corregirlos).
   for (const campo of camposQueSeImprimen()) {
-    // Los textos fijos no cuentan: son los de Excel, y varios (como «EXPIRA:») se salen de su celda a propósito hacia la de al lado, que está vacía. Nadie puede corregirlos.
-    if (campo.tipo !== 'etiqueta' && textoSeSale(campo, valores[campo.id])) {
-      avisos.push(`«${campo.etiqueta}» es más largo que su casilla del papel y se saldría de ella.`);
+    const { pisa, seCorta } = acomodoDeTexto(campo, valores[campo.id]);
+    if (pisa) {
+      avisos.push(
+        `«${campo.etiqueta}» no cabe en su casilla del papel y se montaría encima de «${campoPorId(pisa)?.etiqueta ?? pisa}». Acórtalo.`,
+      );
+    } else if (seCorta) {
+      avisos.push(`«${campo.etiqueta}» no cabe en su casilla del papel y se pasaría del borde de la hoja: ahí se cortaría. Acórtalo.`);
     }
   }
 
@@ -340,9 +348,12 @@ function estiloDeCaja(campo) {
 // textos fijos de Excel («TARJETA 1  No:», « + iva»): el navegador no debe juntar sus espacios.
 const CON_ESPACIOS = new Set(['fechaLarga', 'fechaDoc', 'etiqueta']);
 
-function claseDeCampo(campo) {
+// Con qué alineación se dibuja: la de su celda de Excel, salvo que el texto no quepa y haya que mandarlo al lado libre
+// (`acomodoDeTexto`, §8 del diseño).
+function claseDeCampo(campo, texto) {
+  const { alinea } = acomodoDeTexto(campo, texto);
   return [
-    'hc-campo', FUENTE_CSS[campo.fuente], ALINEA_CSS[campo.alinea] ?? 'hc-izq', VALINEA_CSS[campo.valinea] ?? 'hc-abajo',
+    'hc-campo', FUENTE_CSS[campo.fuente], ALINEA_CSS[alinea] ?? 'hc-izq', VALINEA_CSS[campo.valinea] ?? 'hc-abajo',
     campo.ajusta ? 'hc-ajusta' : '', CON_ESPACIOS.has(campo.tipo) ? 'hc-pre' : '',
   ].filter(Boolean).join(' ');
 }
@@ -361,7 +372,7 @@ function contenidoDeCampo(campo, texto) {
 }
 
 function campoHtml(campo, texto) {
-  return `<div class="${claseDeCampo(campo)}" data-campo="${esc(campo.id)}" style="${estiloDeCaja(campo)}">${contenidoDeCampo(campo, texto)}</div>`;
+  return `<div class="${claseDeCampo(campo, texto)}" data-campo="${esc(campo.id)}" style="${estiloDeCaja(campo)}">${contenidoDeCampo(campo, texto)}</div>`;
 }
 
 /**

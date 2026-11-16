@@ -296,6 +296,18 @@ const RENGLON = 1.15;
 const RELLENO_MM = 3 * MM_POR_UNIDAD;
 const PT_A_MM = 25.4 / 72;
 
+/** Lo que ocupa un texto en su casilla y el ancho que la casilla le deja, en milímetros. */
+function medidaDeTexto(campo, texto) {
+  const caja = cajaDeRango(campo.rango);
+  const letraMm = campo.pt * ESCALA_EXCEL * PT_A_MM;
+  return {
+    caja,
+    letraMm,
+    largo: String(texto ?? '').length * letraMm * ANCHO_PROMEDIO[campo.fuente],
+    util: caja.ancho - 2 * RELLENO_MM,
+  };
+}
+
 /**
  * ¿El texto se sale de la casilla del campo? Con `ajusta` baja de renglón y se sale si los renglones no caben de
  * alto; sin él, se sale si su largo pasa del ancho. El tamaño de letra es el que se imprime (el de Excel × 0.89).
@@ -303,14 +315,111 @@ const PT_A_MM = 25.4 / 72;
 export function textoSeSale(campo, texto) {
   const t = String(texto ?? '');
   if (!t.trim()) return false;
-  const caja = cajaDeRango(campo.rango);
-  const pt = campo.pt * ESCALA_EXCEL;
-  const letraMm = pt * PT_A_MM;
-  const largo = t.length * letraMm * ANCHO_PROMEDIO[campo.fuente];
-  const util = caja.ancho - 2 * RELLENO_MM;
+  const { caja, letraMm, largo, util } = medidaDeTexto(campo, t);
   if (!campo.ajusta) return largo > util;
   const renglones = Math.ceil(largo / util);
   return renglones * letraMm * RENGLON > caja.alto;
+}
+
+// ---------- Para qué lado se le deja crecer al texto que no cabe ----------
+// Decisión del dueño, 16 de noviembre de 2026: «Encasilla todo bien, no importa que la palabra FULL se salga un poquito
+// de los cuadros». Un texto que no cabe no se recorta ni se encoge (un dato cortado en un contrato es peor que uno
+// largo), pero NO da igual para qué lado se sale. La casilla del combustible mide 12.9 mm y tiene pegada a su izquierda
+// la de la fecha de nacimiento: centrada, «FULL, falta una rayita» se sale por los dos lados y le cae encima. Así que
+// cuando el texto no cabe, la casilla deja de usar la alineación de su celda de Excel y se ancla al lado OCUPADO, para
+// que lo que sobre crezca hacia el lado libre. Si con su propia alineación ya crecía hacia el lado libre, no se mueve;
+// si los dos lados están libres (o los dos ocupados), tampoco: no hay nada mejor que hacer.
+//
+// Lo mismo de un lado y del otro: «ocupado» es la casilla de otro campo que SE IMPRIME y que comparte renglones con
+// esta. Lo que el papel preimpreso tenga ahí no lo sabe nadie más que el papel; esto evita lo único que se puede saber
+// aquí, que es un dato del sistema encima de otro dato del sistema.
+
+/** Dos cajas que se tocan dejan un hueco de centésimas por el redondeo a dos decimales: por debajo de esto es tocarse, no estorbar. */
+const TOCANDOSE_MM = 0.2;
+
+const huecosPorRango = new Map();
+
+/**
+ * Lo que queda LIBRE a cada lado de una casilla antes de topar con la de otro campo que se imprime, en milímetros, y
+ * con qué campo topa (`vecinoIzquierda` / `vecinoDerecha`, null si no hay ninguno: entonces el hueco llega hasta el
+ * borde de la hoja). Solo cuentan las casillas que comparten renglones con esta: una de más arriba o más abajo no
+ * estorba. Se calcula una vez por rango, porque la tabla no cambia mientras el programa corre.
+ */
+export function huecosDeLado(campo) {
+  const clave = String(campo.rango);
+  const guardado = huecosPorRango.get(clave);
+  if (guardado) return guardado;
+  const caja = cajaDeRango(clave);
+  let izquierda = caja.x;
+  let derecha = HOJA_MM.ancho - (caja.x + caja.ancho);
+  let vecinoIzquierda = null;
+  let vecinoDerecha = null;
+  for (const otro of camposQueSeImprimen()) {
+    if (otro.rango === clave) continue;
+    const o = cajaDeRango(otro.rango);
+    const renglonesEnComun = Math.min(caja.y + caja.alto, o.y + o.alto) - Math.max(caja.y, o.y);
+    if (renglonesEnComun <= TOCANDOSE_MM) continue;
+    const porLaIzquierda = caja.x - (o.x + o.ancho);
+    const porLaDerecha = o.x - (caja.x + caja.ancho);
+    if (porLaIzquierda > -TOCANDOSE_MM && porLaIzquierda < izquierda) {
+      izquierda = Math.max(0, porLaIzquierda);
+      vecinoIzquierda = otro.id;
+    }
+    if (porLaDerecha > -TOCANDOSE_MM && porLaDerecha < derecha) {
+      derecha = Math.max(0, porLaDerecha);
+      vecinoDerecha = otro.id;
+    }
+  }
+  const huecos = Object.freeze({
+    izquierda: redondear(izquierda), derecha: redondear(derecha), vecinoIzquierda, vecinoDerecha,
+  });
+  huecosPorRango.set(clave, huecos);
+  return huecos;
+}
+
+/** Hacia dónde crece lo que sobra, con cada alineación: la mitad para cada lado si va centrado. */
+function sobraDeCadaLado(alinea, sobraMm) {
+  if (alinea === 'center') return { izquierda: sobraMm / 2, derecha: sobraMm / 2 };
+  if (alinea === 'right') return { izquierda: sobraMm, derecha: 0 };
+  return { izquierda: 0, derecha: sobraMm };
+}
+
+/**
+ * Con qué alineación se dibuja un texto en su casilla, cuánto ancho le sobra y sobre la casilla de qué campo caería.
+ *   alinea   la de su celda de Excel cuando el texto cabe; la del lado ocupado cuando no cabe y hay un lado libre.
+ *   sobraMm  cuánto más ancho necesitaba el texto (0 si cabe).
+ *   pisa     el id del campo sobre cuya casilla caería lo que sobra, o null si cae en hueco libre.
+ *   seCorta  lo que sobra se pasa del borde de la hoja: en el papel no se sale a ningún lado, se CORTA.
+ * Un texto que solo se sale a un hueco libre no trae ni lo uno ni lo otro: eso es «un poquito» y no es problema de
+ * nadie. Los textos fijos de Excel (`tipo: 'etiqueta'`) y los que bajan de renglón (`ajusta`) nunca se mueven: los
+ * primeros se salen a propósito hacia la celda de al lado, que en Excel está vacía, y así están medidos; los segundos
+ * no crecen de ancho, crecen de alto.
+ */
+export function acomodoDeTexto(campo, texto) {
+  const alinea = campo.alinea ?? 'general';
+  const quieto = { alinea, sobraMm: 0, pisa: null, seCorta: false };
+  const t = String(texto ?? '');
+  if (!t.trim() || campo.ajusta || campo.tipo === 'etiqueta') return quieto;
+  const { largo, util } = medidaDeTexto(campo, t);
+  const sobraMm = redondear(largo - util);
+  if (sobraMm <= 0) return quieto;
+  const huecos = huecosDeLado(campo);
+  const suya = sobraDeCadaLado(alinea, sobraMm);
+  if (suya.izquierda <= huecos.izquierda && suya.derecha <= huecos.derecha) {
+    return { alinea, sobraMm, pisa: null, seCorta: false };
+  }
+  // Se ancla al lado ocupado: lo que sobra crece hacia el lado con más hueco.
+  const haciaLaDerecha = huecos.derecha >= huecos.izquierda;
+  const hueco = haciaLaDerecha ? huecos.derecha : huecos.izquierda;
+  const vecino = haciaLaDerecha ? huecos.vecinoDerecha : huecos.vecinoIzquierda;
+  const noLe = sobraMm > hueco;
+  return {
+    alinea: haciaLaDerecha ? 'left' : 'right',
+    sobraMm,
+    pisa: noLe ? vecino : null,
+    // Sin vecino, el hueco llega hasta el borde de la hoja: pasarse de ahí es salirse de lo que se imprime.
+    seCorta: noLe && vecino === null,
+  };
 }
 
 // ---------- La calibración ----------

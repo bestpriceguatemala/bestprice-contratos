@@ -466,11 +466,16 @@ test('el código es el de aquel día: no se busca en una lista de empleados de h
   assert.equal(conCodigo.valores.empleadoCodigo, '6');
 });
 
-test('el código se recorta y un número se escribe como texto; uno largo se avisa porque se saldría de los 16 mm', () => {
+test('el código se recorta y un número se escribe como texto; uno largo se sale al hueco libre y no se avisa', () => {
   assert.equal(valores({ contrato: { ...contrato(), empleadoCodigo: '  7 ' } }).empleadoCodigo, '7');
   assert.equal(valores({ contrato: { ...contrato(), empleadoCodigo: 12 } }).empleadoCodigo, '12');
+  // Su casilla mide 16 mm, pero no tiene ninguna otra casilla pegada a los lados: lo que sobra cae en hueco libre.
+  // Decisión del dueño del 16 de noviembre de 2026: eso no se avisa («no importa que se salga un poquito»).
   const largo = armarContratoImpreso(entrada({ contrato: { ...contrato(), empleadoCodigo: 'ANA-LOPEZ-2026' } }));
-  assert.ok(largo.avisos.some((a) => /«Preparado por \(código\)» es más largo que su casilla/.test(a)));
+  assert.ok(!largo.avisos.some((a) => /Preparado por/.test(a)), largo.avisos.join('\n'));
+  // Uno absurdo sí se avisa: se pasa del borde de la hoja, y ahí el papel lo corta.
+  const absurdo = armarContratoImpreso(entrada({ contrato: { ...contrato(), empleadoCodigo: 'A'.repeat(200) } }));
+  assert.ok(absurdo.avisos.some((a) => /«Preparado por \(código\)».*se cortaría/.test(a)), absurdo.avisos.join('\n'));
   assert.ok(!armarContratoImpreso(entrada()).avisos.some((a) => /Preparado por/.test(a)));
 });
 
@@ -597,10 +602,17 @@ test('una fecha que no es de calendario sale en blanco y la pantalla lo dice, nu
   assert.ok(!vacia.avisos.some((a) => /nacimiento/.test(a)));
 });
 
-test('un texto más largo que su casilla se avisa; uno que cabe, no', () => {
-  const largo = armarContratoImpreso(entrada({ cliente: cliente({ apellidos: 'De la Cruz y Fernández de Córdoba y Montenegro' }) }));
-  assert.ok(largo.avisos.some((a) => /«Primer apellido» es más largo que su casilla/.test(a)), largo.avisos.join('\n'));
-  assert.ok(!armarContratoImpreso(entrada()).avisos.some((a) => /más largo que su casilla/.test(a)));
+test('un texto que no cabe se avisa solo si cae sobre otra casilla; si cae en hueco libre, no', () => {
+  // El primer apellido tiene 60 mm de hueco a su derecha: un apellido larguísimo se sale hacia ahí y nadie lo avisa.
+  const apellido = armarContratoImpreso(entrada({ cliente: cliente({ apellidos: 'De la Cruz y Fernández de Córdoba y Montenegro' }) }));
+  assert.ok(!apellido.avisos.some((a) => /Primer apellido/.test(a)), apellido.avisos.join('\n'));
+  // La nacionalidad tiene la fecha de nacimiento pegada a su derecha: ahí sí, porque serían dos datos uno encima del otro.
+  const nacion = armarContratoImpreso(entrada({ cliente: cliente({ nacionalidad: 'N'.repeat(30) }) }));
+  assert.ok(
+    nacion.avisos.some((a) => /«Nacionalidad» no cabe en su casilla.*«Fecha de nacimiento»/.test(a)),
+    nacion.avisos.join('\n'),
+  );
+  assert.ok(!armarContratoImpreso(entrada()).avisos.some((a) => /no cabe en su casilla/.test(a)));
 });
 
 test('un contrato en efectivo (sin tarjetas) deja en blanco el bloque de la tarjeta y no avisa de ninguna', () => {

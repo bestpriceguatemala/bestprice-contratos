@@ -1900,7 +1900,8 @@ a ser:
     diste.»* Ahora `combustibleSalida` se imprime (sin `imprime: false`; la nota del campo deja a la vista la lectura equivocada) y en
     «Sacar carro» es una casilla de texto, como la hora. Se guarda y se imprime tal cual, sin traducir. Los contratos viejos con «Lleno»,
     «3/4»… siguen viéndose e imprimiéndose igual. Nada calcula con el campo (el cobro del combustible al recibir es `cierre.combustible`,
-    un monto aparte). Una frase más ancha que la casilla del papel (13 mm) dispara el aviso de siempre «se saldría de su casilla».
+    un monto aparte). Su casilla del papel mide 13 mm (le caben 6 letras: «FULL», «3/4», «LLENO»); lo que pase de ahí se sale hacia el
+    hueco libre de su derecha, sin aviso, por el punto 22.
 20. **Todo monto lleva la Q, también LDW, PAI y el deducible de abajo (16 de noviembre de 2026).** Dijo: *«A todo lo que sea dinero
     ponle la Q.»* Se quitó `sinQ` de las tres. Su formulario ya trae «LDW Q.» y «PAI Q.» (foto del 15 de octubre), así que esas dos
     casillas leerán «Q. Q150.00» en el papel; se le dijo dos veces y decidió dos veces, y está construido como lo pidió. Lo que sí se hizo
@@ -1916,6 +1917,22 @@ a ser:
     nueve de letra blanca (`camposQueSePuedenDejarEnBlanco`); una tarjeta o un nombre no se borran por aquí. Confirmado sin tocar: el
     CÓDIGO del cliente sigue vacío y todos los datos de tarjeta se imprimen (el banco solo de la tarjeta 1: su Excel no tiene casilla de
     banco para la 2).
+22. **Un texto que no cabe se sale hacia el lado libre, y solo se avisa si cae encima de otro dato (16 de noviembre de 2026).** Dijo:
+    *«Encasilla todo bien por favor, no importa que la palabra FULL se salga un poquito de los cuadros.»* Nada se recorta ni se encoge
+    (un dato cortado en un contrato es peor que uno largo), pero **para qué lado se sale sí importa**: la casilla del combustible tiene
+    pegada a su izquierda la de la fecha de nacimiento, y centrada una frase se salía por los dos lados y le caía encima. Ahora, cuando
+    el texto no cabe, la casilla deja de usar la alineación de su celda de Excel y se ancla al lado OCUPADO, para que lo que sobre crezca
+    hacia el libre (`acomodoDeTexto` y `huecosDeLado`, en el núcleo: puras y medidas contra la misma tabla de los 71 campos). Si con su
+    propia alineación ya crecía hacia el lado libre, o si los dos lados están libres (o los dos ocupados), no se mueve. «Ocupado» es la
+    casilla de otro campo que se imprime y que comparte renglones con esta: lo que el papel preimpreso tenga ahí no lo sabe nadie más que
+    el papel, así que esto cuida de lo único que se puede saber aquí, que es un dato del sistema encima de otro dato del sistema. **El
+    aviso cambió con la decisión:** ya NO se avisa que un texto «se saldría de su casilla» (eso es «un poquito», y es decisión suya);
+    se avisa cuando lo que sobra caería sobre la casilla de otro dato, diciendo cuál, y cuando se pasaría del borde de la hoja, donde el
+    papel lo corta. Los textos fijos de Excel («EXPIRA:», « + iva») y los campos que bajan de renglón (`ajusta`) nunca se mueven: los
+    primeros se salen a propósito hacia la celda de al lado, que en Excel está vacía, y así están medidos; los segundos no crecen de
+    ancho. Queda probado además que **ninguna de las 71 casillas se traslapa con otra** (a lo más se tocan en el borde). Lo apretado de
+    verdad, medido: el **municipio** (18 letras) choca a las 19 con el «GUATEMALA» preimpreso —«SAN JUAN SACATEPEQUEZ» son 21— y el
+    **teléfono** (29) choca a las 30 con la autorización de la tarjeta 2; los dos ahora lo avisan antes de imprimir.
 
 ### Reservaciones y calendario
 

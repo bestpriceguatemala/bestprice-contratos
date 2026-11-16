@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   PAPEL, ESCALA_EXCEL, MM_POR_UNIDAD, ORIGEN_MM, ANCHOS, ALTOS, HOJA_UNIDADES, HOJA_MM, CAMPOS,
-  cajaDeRango, campoPorId, camposQueSeImprimen, fechaParaPapel, textoSeSale,
+  cajaDeRango, campoPorId, camposQueSeImprimen, fechaParaPapel, textoSeSale, huecosDeLado, acomodoDeTexto,
   ESCALA_QUE_CABE, CALIBRACION_DE_FABRICA, LIMITES, PASOS, calibracionValida, limitar, aplicarTecla,
   cajaEnPapel, transformacionCss, textoDeCalibracion, TARIFAS_DEL_PAPEL, camposFueraDelPapel, PAPELES, PAPEL_POR_OMISION, papelDe,
   CLAVE_DE_CALIBRACIONES, leerCalibraciones, guardarCalibracion, calibracionActiva,
@@ -578,6 +578,121 @@ test('textoSeSale: Arial Narrow gasta menos ancho que Arial', () => {
 test('textoSeSale: un número o cualquier valor se mira como texto', () => {
   assert.equal(textoSeSale(sinAjuste, 12345), false);
   assert.equal(textoSeSale(sinAjuste, 'A'.repeat(40)), true);
+});
+
+// ---------------------------------------------------------------------------
+// Para qué lado se le deja crecer al texto que no cabe
+// ---------------------------------------------------------------------------
+
+test('ninguna casilla se traslapa con otra: a lo más se tocan en el borde', () => {
+  const cajas = camposQueSeImprimen().map((c) => ({ id: c.id, caja: cajaDeRango(c.rango) }));
+  const traslapes = [];
+  for (let i = 0; i < cajas.length; i++) {
+    for (let j = i + 1; j < cajas.length; j++) {
+      const a = cajas[i].caja;
+      const b = cajas[j].caja;
+      const x = Math.min(a.x + a.ancho, b.x + b.ancho) - Math.max(a.x, b.x);
+      const y = Math.min(a.y + a.alto, b.y + b.alto) - Math.max(a.y, b.y);
+      // 0.02 mm es el redondeo a dos decimales de dos cajas pegadas, no un traslape.
+      if (x > 0.02 && y > 0.02) traslapes.push(`${cajas[i].id} × ${cajas[j].id} (${x.toFixed(2)} × ${y.toFixed(2)} mm)`);
+    }
+  }
+  assert.deepEqual(traslapes, [], 'dos datos caerían uno encima del otro');
+});
+
+test('huecosDeLado: el combustible tiene la fecha de nacimiento pegada a la izquierda y hueco a la derecha', () => {
+  const h = huecosDeLado(campoPorId('combustibleSalida'));
+  assert.equal(h.izquierda, 0);
+  assert.equal(h.vecinoIzquierda, 'fechaNacimiento');
+  assert.ok(h.derecha > 40, `a la derecha tiene ${h.derecha} mm`);
+  assert.equal(h.vecinoDerecha, 'deducibleBajo');
+});
+
+test('huecosDeLado: sin vecino de lado, el hueco llega hasta el borde de la hoja', () => {
+  const h = huecosDeLado(campoPorId('empleadoCodigo'));
+  assert.equal(h.vecinoIzquierda, null);
+  assert.equal(h.vecinoDerecha, null);
+  const caja = cajaDeRango(campoPorId('empleadoCodigo').rango);
+  assert.equal(h.izquierda, Math.round(caja.x * 100) / 100);
+  assert.equal(h.derecha, Math.round((HOJA_MM.ancho - caja.x - caja.ancho) * 100) / 100);
+});
+
+test('huecosDeLado: una casilla de otros renglones no estorba, aunque esté al lado', () => {
+  // apellido1 (B15:H16) y apellido2 (B17:I17) solo se tocan de arriba abajo: no son vecinos de lado.
+  const h = huecosDeLado(campoPorId('apellido1'));
+  assert.notEqual(h.vecinoIzquierda, 'apellido2');
+  assert.notEqual(h.vecinoDerecha, 'apellido2');
+});
+
+test('acomodoDeTexto: lo que cabe se queda con la alineación de su celda de Excel', () => {
+  for (const campo of camposQueSeImprimen()) {
+    const a = acomodoDeTexto(campo, 'X');
+    assert.equal(a.alinea, campo.alinea, campo.id);
+    assert.equal(a.sobraMm, 0, campo.id);
+    assert.equal(a.pisa, null, campo.id);
+    assert.equal(a.seCorta, false, campo.id);
+  }
+});
+
+test('acomodoDeTexto: en blanco no mueve nada', () => {
+  for (const nada of ['', '   ', null, undefined]) {
+    assert.deepEqual(
+      acomodoDeTexto(campoPorId('combustibleSalida'), nada),
+      { alinea: 'center', sobraMm: 0, pisa: null, seCorta: false },
+      JSON.stringify(nada),
+    );
+  }
+});
+
+test('acomodoDeTexto: el combustible largo se ancla a la izquierda para crecer LEJOS de la fecha de nacimiento', () => {
+  const campo = campoPorId('combustibleSalida');
+  // Decisión del dueño del 16 de noviembre de 2026: «no importa que la palabra FULL se salga un poquito de los cuadros».
+  // «FULL» cabe; una frase no, y centrada le caería encima a la fecha de nacimiento, que está pegada a su izquierda.
+  assert.equal(acomodoDeTexto(campo, 'FULL').alinea, 'center');
+  assert.equal(acomodoDeTexto(campo, 'LLENO').alinea, 'center');
+  const frase = acomodoDeTexto(campo, 'FULL, falta una rayita');
+  assert.equal(frase.alinea, 'left');
+  assert.ok(frase.sobraMm > 0);
+  assert.equal(frase.pisa, null, 'lo que sobra cae en hueco libre');
+  assert.equal(frase.seCorta, false);
+});
+
+test('acomodoDeTexto: con hueco a los dos lados se queda centrado, aunque se salga', () => {
+  const a = acomodoDeTexto(campoPorId('empleadoCodigo'), 'ANA-LOPEZ-2026');
+  assert.equal(a.alinea, 'center');
+  assert.ok(a.sobraMm > 0);
+  assert.equal(a.pisa, null);
+  assert.equal(a.seCorta, false);
+});
+
+test('acomodoDeTexto: `pisa` dice sobre qué casilla caería lo que sobra', () => {
+  // La nacionalidad tiene la fecha de nacimiento pegada a su derecha y nada de hueco a la izquierda.
+  const a = acomodoDeTexto(campoPorId('nacionalidad'), 'N'.repeat(30));
+  assert.equal(a.pisa, 'fechaNacimiento');
+  assert.equal(a.seCorta, false);
+  // La hora de salida tiene la fecha de salida pegada a la izquierda.
+  assert.equal(acomodoDeTexto(campoPorId('horaSalida'), '10:30 DE LA MAÑANA').pisa, 'fechaSalida');
+});
+
+test('acomodoDeTexto: `seCorta` cuando lo que sobra se pasa del borde de la hoja y no hay vecino', () => {
+  const a = acomodoDeTexto(campoPorId('empleadoCodigo'), 'A'.repeat(200));
+  assert.equal(a.pisa, null);
+  assert.equal(a.seCorta, true);
+});
+
+test('acomodoDeTexto: los textos fijos de Excel y los que bajan de renglón nunca se mueven', () => {
+  // «EXPIRA:» se sale de su celda a propósito, hacia la de al lado, que en Excel está vacía: así está medido.
+  const etiqueta = campoPorId('etiquetaExpira1');
+  assert.deepEqual(
+    acomodoDeTexto(etiqueta, 'X'.repeat(80)),
+    { alinea: etiqueta.alinea, sobraMm: 0, pisa: null, seCorta: false },
+  );
+  // Un campo con `ajusta` no crece de ancho: baja de renglón.
+  const conAjusteReal = campoPorId('direccion');
+  assert.deepEqual(
+    acomodoDeTexto(conAjusteReal, 'X'.repeat(300)),
+    { alinea: conAjusteReal.alinea, sobraMm: 0, pisa: null, seCorta: false },
+  );
 });
 
 // ---------------------------------------------------------------------------
