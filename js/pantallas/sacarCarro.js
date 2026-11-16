@@ -602,6 +602,9 @@ export function leerFormularioDe({ texto, num, marcado }, estado, numero) {
     dias: num('sc-dias'),
     precioDia: num('sc-precio-dia'),
     kmSalida: num('sc-km-salida'),
+    // Es un campo para escribir, no una lista (16 de noviembre de 2026: «Lo que yo quería era escribirlo en vez de que me desgloses en esa
+    // pestaña de opciones»; la hora hizo lo mismo el 3 de octubre). Se guarda tal cual lo escribió: no se traduce ni se compara contra
+    // «Lleno, 3/4…» porque los contratos viejos traen esas palabras y los nuevos traen lo que él quiera. Nada calcula con él.
     combustibleSalida: texto('sc-combustible-salida'),
     seguroDia: num('sc-seguro-dia'),
     seguroTercerosDia: num('sc-seguro-terceros-dia'),
@@ -1138,16 +1141,7 @@ export function plantilla() {
             ${campo('sc-dias', 'Días', { tipo: 'number', paso: '1', minimo: '1' })}
             ${campo('sc-precio-dia', 'Precio por día', { tipo: 'number', paso: '0.01', minimo: '0' })}
             ${campo('sc-km-salida', 'Kilometraje de salida', { tipo: 'number', paso: '1', minimo: '0' })}
-            <label class="sc-campo">Combustible
-              <select id="sc-combustible-salida">
-                <option value=""></option>
-                <option value="Lleno">Lleno</option>
-                <option value="3/4">3/4</option>
-                <option value="1/2">1/2</option>
-                <option value="1/4">1/4</option>
-                <option value="Vacío">Vacío</option>
-              </select>
-            </label>
+            ${campo('sc-combustible-salida', 'Combustible', { marcador: 'FULL, 3/4, 1/2…', autocompletar: 'off' })}
           </div>
           <p class="sc-nota">Devolución prevista: <strong id="sc-devolucion-prevista">—</strong></p>
         </section>

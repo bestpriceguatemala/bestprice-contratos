@@ -763,9 +763,9 @@ test('la hoja trae todo lo que Excel imprime Y tiene dato, rótulos y letra blan
   // la autorización de la tarjeta 1, cuya posición se derivó
   assert.ok(hoja.includes('data-campo="tarjeta1Autorizacion"'));
   assert.match(hoja, /data-campo="tarjeta1Autorizacion"[^>]*><span class="hc-t">1234<\/span>/);
-  // el nivel del tanque lo escribe él a mano: no sale, aunque el contrato lo tenga
-  assert.ok(!hoja.includes('data-campo="combustibleSalida"'));
-  assert.equal(armarContratoImpreso(entrada()).valores.combustibleSalida, '3/4', 'el modelo lo sabe; la hoja no lo imprime');
+  // el nivel del tanque sí sale (16 de noviembre de 2026: el «Yo lo escribo mejor» era sobre el formulario)
+  assert.match(hoja, /data-campo="combustibleSalida"[^>]*><span class="hc-t">3\/4<\/span>/);
+  assert.equal(armarContratoImpreso(entrada()).valores.combustibleSalida, '3/4');
   // la letra blanca de Excel, que por decisión del dueño ahora se ve
   for (const id of ['kmSalida', 'licenciaExpira', 'conductorNombre', 'deducibleBajo', 'seguroMenores', 'seguroPai', 'variosDescripcion', 'variosPrecio', 'tarjeta2Autorizacion']) {
     assert.ok(hoja.includes(`data-campo="${id}"`), `${id} no salió`);
@@ -919,9 +919,9 @@ test('la casilla derivada se dibuja con raya de trazos largos y se nombra como d
   assert.match(prueba, /La casilla de raya de trazos largos \(«derivada»\) no se midió en Excel: mírala con más atención\./);
   // y lo mismo en los pasos de la pantalla de calibrar
   assert.ok(PASOS_DE_CALIBRAR[1].texto.includes('marcada «derivada, no medida»: es la autorización de la tarjeta 1'));
-  // el nivel del tanque, que no se imprime, va de puntos
-  assert.match(prueba, /<div class="hp-caja hp-no" data-campo="combustibleSalida"/);
-  assert.equal((prueba.match(/hp-no/g) || []).length, 1);
+  // el nivel del tanque ya se imprime: su caja va con raya normal, y ninguna caja va de puntos
+  assert.match(prueba, /<div class="hp-caja" data-campo="combustibleSalida"/);
+  assert.equal((prueba.match(/hp-no/g) || []).length, 0);
 });
 
 test('cuatro casillas con número, una en cada esquina, son con las que se compara', () => {

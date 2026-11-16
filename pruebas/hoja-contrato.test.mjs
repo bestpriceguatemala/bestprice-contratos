@@ -406,29 +406,34 @@ test('campoPorId encuentra un campo y lanza con el id si no existe', () => {
   assert.throws(() => campoPorId('toString'), /No hay un campo/, 'un nombre del prototipo no es un campo');
 });
 
-test('camposQueSeImprimen: se imprime todo salvo el nivel del tanque, y uno con imprime: false se deja fuera', () => {
+test('camposQueSeImprimen: hoy se imprime TODO, y uno con imprime: false se deja fuera (el interruptor sigue en la tabla)', () => {
   const apagados = CAMPOS.filter((c) => c.imprime === false).map((c) => c.id);
-  assert.deepEqual(apagados, ['combustibleSalida'], 'el dueño decidió imprimir todo lo que Excel imprime menos esto');
-  assert.equal(camposQueSeImprimen().length, CAMPOS.length - 1);
+  assert.deepEqual(apagados, [], 'desde el 16 de noviembre de 2026 ningún campo está apagado');
+  assert.equal(camposQueSeImprimen().length, CAMPOS.length);
   const campo = campoPorId('kmSalida');
   try {
     campo.imprime = false;
     const salen = camposQueSeImprimen();
-    assert.equal(salen.length, CAMPOS.length - 2);
+    assert.equal(salen.length, CAMPOS.length - 1);
     assert.ok(!salen.includes(campo));
   } finally {
     delete campo.imprime;
   }
-  assert.equal(camposQueSeImprimen().length, CAMPOS.length - 1);
+  assert.equal(camposQueSeImprimen().length, CAMPOS.length);
 });
 
-test('el nivel del tanque NO se imprime: «Yo lo escribo mejor», 14 de octubre de 2026; la tarifa por galón sí', () => {
+test('el nivel del tanque SÍ se imprime: el «Yo lo escribo mejor» del 14 de octubre era sobre el formulario, y así lo corrigió el 16 de noviembre de 2026', () => {
   const nivel = campoPorId('combustibleSalida');
-  assert.equal(nivel.imprime, false);
+  assert.notEqual(nivel.imprime, false);
+  assert.ok(camposQueSeImprimen().includes(nivel));
+  // la nota deja a la vista el malentendido: lo que se entendió, lo que quiso decir, con sus palabras y sus fechas
+  assert.match(nivel.nota, /16 de noviembre de 2026/);
   assert.match(nivel.nota, /14 de octubre de 2026/);
   assert.match(nivel.nota, /«Yo lo escribo mejor»/);
-  assert.match(nivel.nota, /tabla de conversión que se desactualiza sola/);
-  assert.notEqual(campoPorId('combustiblePrecio').imprime, false, 'no se confunde con el precio por galón');
+  assert.match(nivel.nota, /imprime: false/, 'la lectura equivocada queda a la vista, no se reescribe la historia');
+  assert.match(nivel.nota, /Era un malentendido/);
+  assert.match(nivel.nota, /«El combustible de salida sí lo tienes que imprimir\. Lo que yo quería era escribirlo en vez de que me desgloses en esa pestaña de opciones que me diste\.»/);
+  assert.notEqual(campoPorId('combustiblePrecio').imprime, false, 'y no se confunde con el precio por galón');
 });
 
 test('la hora de entrada repite la de salida por decisión del dueño («Igual que el Excel»), no por una copia heredada', () => {
