@@ -1575,6 +1575,7 @@ async function pintarCuentas(contenedor, claveDeFicha, {
   pagar = registrarElPago,
   anular = anularElPago,
   avisar = aviso,
+  anotarCosto = anotarCostoDelDueno,
 } = {}) {
   const miToken = ++ultimoToken;
   const hoy = ahora();
@@ -1685,7 +1686,7 @@ async function pintarCuentas(contenedor, claveDeFicha, {
     if (!contrato || !campo) return;
     ui.ocupado = true;
     try {
-      const costo = await anotarCostoDelDueno(contrato, montoTecleado(campo.value));
+      const costo = await anotarCosto(contrato, montoTecleado(campo.value));
       const leida = elLector.actual;
       if (!leida) return;
       // Se pone en memoria con el mismo puente que usa la lectura: queda como

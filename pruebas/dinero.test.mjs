@@ -3109,6 +3109,7 @@ async function pantallaDeDinero({
   responder = () => true,
   pagar,
   anular,
+  anotarCosto,
   ruta = clave === null ? '#/dinero' : `#/dinero/cuenta/${encodeURIComponent(clave)}`,
 } = {}) {
   const p = pantallaDeMentira();
@@ -3117,6 +3118,7 @@ async function pantallaDeDinero({
   const pagos = [];
   const anulaciones = [];
   const dichos = [];
+  const costos = [];
   let rutaActual = ruta;
   const aparatos = {
     lector,
@@ -3129,11 +3131,12 @@ async function pantallaDeDinero({
     pagar: pagar ?? (async (args) => { pagos.push(args); return { tipo: 'guardado', pago: { id: 'pg-nuevo', numero: 9 }, pagos: lectura.pagos.datos }; }),
     anular: anular ?? (async (args) => { anulaciones.push(args); return { pagos: lectura.pagos.datos }; }),
     avisar: (texto, tipo) => dichos.push({ texto, tipo }),
+    anotarCosto: anotarCosto ?? (async (contrato, costo) => { costos.push({ id: contrato.id, costo }); return costo; }),
   };
   if (clave === null) await pintarDinero(p.contenedor, aparatos);
   else await pintarCuentaDeDueno(p.contenedor, clave, aparatos);
   return {
-    ...p, lector, preguntas, pagos, anulaciones, dichos, ruta: () => rutaActual,
+    ...p, lector, preguntas, pagos, anulaciones, dichos, costos, ruta: () => rutaActual,
   };
 }
 
@@ -3250,4 +3253,78 @@ test('el cableado: un pago YA ANULADO no vuelve a preguntar ni se anula dos vece
   if (boton) p.lanzar('click', boton);
   assert.deepEqual(p.preguntas, [], 'ni siquiera pregunta');
   assert.deepEqual(p.anulaciones, [], 'y no se anula otra vez');
+});
+
+test('el cableado: el descuento se lee MIENTRAS escribe y lo que entrega cambia al instante', async () => {
+  // Sin esto, él teclea un descuento y la cifra de «Entregas ahora» se queda en la de antes hasta que algo
+  // redibuje: entregaría de más creyendo que descontó. Y la ficha NO se redibuja al teclear a propósito,
+  // porque eso le quitaría el cursor del campo.
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO, lectura: lecturaConPagoDeMas() });
+  p.marcar(LA_RENTA('x2'));
+  p.clic('[data-dn="registrar"]');
+  assert.ok(p.hay('#dn-descuento'), 'a este dueño se le pagó de más, así que el campo está');
+  assert.equal(p.buscar('#dn-entregar').textContent, 'Q600.00', 'sin descuento entrega lo marcado');
+  p.teclear('#dn-descuento', '100');
+  assert.equal(p.buscar('#dn-entregar').textContent, 'Q500.00', 'con Q100 de descuento entrega Q500');
+  p.teclear('#dn-descuento', '600');
+  assert.equal(p.buscar('#dn-entregar').textContent, 'Q0.00', 'el tope se puede usar completo');
+});
+
+test('el cableado: un descuento que no se puede aplicar bloquea el guardado y dice por qué', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO, lectura: lecturaConPagoDeMas() });
+  p.marcar(LA_RENTA('x2'));
+  p.clic('[data-dn="registrar"]');
+  p.teclear('#dn-descuento', '999999');
+  assert.equal(p.buscar('#dn-guardar-pago').disabled, true, 'no se puede guardar');
+  assert.match(p.buscar('#dn-descuento-problema').textContent, /no puede pasar de Q600\.00/);
+  assert.equal(p.buscar('#dn-entregar').textContent, '—', 'y no se enseña ninguna cifra hasta que se arregle');
+  // Y si lo arregla, se puede otra vez.
+  p.teclear('#dn-descuento', '600');
+  assert.equal(p.buscar('#dn-guardar-pago').disabled, false);
+});
+
+test('el cableado: ni apretando «Guardar pago» con un descuento malo se registra nada', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO, lectura: lecturaConPagoDeMas() });
+  p.marcar(LA_RENTA('x2'));
+  p.clic('[data-dn="registrar"]');
+  p.teclear('#dn-descuento', 'abril');
+  p.clic('#dn-guardar-pago');
+  assert.deepEqual(p.pagos, [], 'el botón está apagado, pero si alguien lo aprieta igual, tampoco');
+  assert.match(p.html(), /El descuento tiene que ser un monto de cero o más/);
+});
+
+test('el cableado: anotar el costo de una renta guarda el monto TECLEADO, con sus comas', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  p.clic('[data-dn="anotar-costo"][data-id="m5"]');
+  assert.ok(p.hay('#dn-costo-input'), 'se abre la casilla para escribirlo');
+  p.buscar('#dn-costo-input').value = '1,500';
+  p.clic('[data-dn="guardar-costo"][data-id="m5"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(p.costos, [{ id: 'm5', costo: 1500 }], 'se guarda el NÚMERO, no el texto con coma');
+});
+
+test('el cableado: Escape cierra la casilla del costo sin guardar nada', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  p.clic('[data-dn="anotar-costo"][data-id="m5"]');
+  p.buscar('#dn-costo-input').value = '300';
+  p.tecla('#dn-costo-input', 'Escape');
+  assert.equal(p.hay('#dn-costo-input'), false, 'la casilla se cierra');
+  assert.deepEqual(p.costos, [], 'y no se guardó nada');
+});
+
+test('el cableado: Enter en la casilla del costo lo guarda, sin enviar ningún formulario', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  p.clic('[data-dn="anotar-costo"][data-id="m5"]');
+  p.buscar('#dn-costo-input').value = '300';
+  const ev = p.tecla('#dn-costo-input', 'Enter');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(ev.seEvito, true, 'se corta el Enter: si no, el navegador enviaría el formulario');
+  assert.deepEqual(p.costos, [{ id: 'm5', costo: 300 }]);
+});
+
+test('el cableado: una lectura FALLIDA no dibuja ninguna cifra, dibuja la barra roja', async () => {
+  const p = await pantallaDeDinero({ lectura: lecturaOk({ pagos: { datos: null, fallo: true } }) });
+  assert.doesNotMatch(p.html(), /Q\d/, 'ni una cifra: cualquiera saldría incompleta');
+  assert.match(p.html(), /No se pudieron leer los pagos a dueños/);
+  assert.ok(p.hay('[data-dn="reintentar"]'), 'y se puede volver a leer');
 });
