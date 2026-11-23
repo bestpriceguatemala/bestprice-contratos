@@ -178,6 +178,38 @@ dibuja un nombre.
 
 ---
 
+## 3c. La hora y las fechas
+
+A pedido del dueño («solo ten en cuenta lo de la hora y fechas»). `js/ui.js` estaba dentro del 57 % que
+octubre dejó sin medir, a pesar de que ahí vive `hora24`, que decide a qué hora regresó un carro y por
+tanto cuánto se cobra de atraso.
+
+| Archivo | Errores | Atrapados | Pasan | Atrapa |
+|---|---:|---:|---:|---:|
+| `js/ui.js` | 155 | 116 | 39 | **74.8 %** |
+| `js/nucleo/fechas.js` | 125 | 105 | 20 | **84.0 %** |
+
+**`hora24` sola atrapa el 91 %** de 74 errores: la hora está bien cuidada. Lo que estaba flojo era otra
+cosa, y se cerró:
+
+1. **Una fecha con un mes o un día imposible se volvía OTRA fecha.** Sin el guardia de `aUTC`,
+   `'2026-00-10'` pasaba a `Date.UTC(2026, -1, 10)` y se convertía en **diciembre de 2025**: `sumarDias`
+   devolvía `'2025-12-11'` y `diasEntre` contaba **31 días que no existieron**. Aquí los días son dinero.
+2. **Los nombres de los meses no estaban todos probados.** Vaciar `'feb'` dejaba «14  2026» —una fecha sin
+   mes, en un mensaje que él lee— y ninguna de las 2,772 pruebas se daba cuenta. Pasaba en los dos lugares
+   que tienen la lista a propósito (`fecha` en ui.js y `textoFecha` en el núcleo).
+3. **`montoTecleado` aceptaba notación que nadie teclea como dinero**: `'1e5'` se volvía cien mil quetzales
+   y `'0x10'` dieciséis.
+
+**Y uno que parecía hueco y no lo era:** el guardia de `diasAtraso` se puede borrar sin que nada se ponga
+rojo, pero no porque falte una prueba — `diasEntre` ya devuelve 0 por su cuenta cuando una fecha no se
+entiende. Se comprobó a mano antes de escribir una prueba para un problema que no existía.
+
+**Lo que queda sin vigilar en `ui.js`:** `aviso()` (11 de 11 errores sobreviven), el aviso flotante que
+sale arriba cuando algo se guarda. Toca el DOM y la suite corre en Node sin navegador — está dicho en la
+cabecera del archivo de pruebas desde que se escribió. Es el mismo caso que `pintarCuentas`: trabajo
+pendiente, no imposible, porque el proyecto ya tiene un navegador de mentira.
+
 ## 4. Lo que todavía NO se ha medido
 
 `contar.mjs` dice el tamaño del trabajo entero: **14,769 errores posibles sobre 13,987 líneas ejecutables,
