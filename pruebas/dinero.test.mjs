@@ -18,11 +18,13 @@ import {
   estadoDeCosto, notasDeTotal, resumenDeMarcadas, razonDeNoCierre, pagosDeLaCuenta, registrarElPago,
   parchearMarcado, notasDelTotalGeneral, textoDeComprobantes, diferenciaBloqueada, rentasCortas,
   cerrarElDinero, cerrarElDineroOReiniciar, salirDelSistema, crearVigilante, crearLector, mensajeSeguro,
+  pintarDinero, pintarCuentaDeDueno,
   htmlEntrada, htmlFallo, htmlLista, htmlFicha, htmlMigracion, entradaDelComprobante, problemaDeLaFechaDelPago,
   textoConfirmarAnularPagoDueno, anularElPago, MENSAJE_ANULAR_SIN_COMPROBAR, MENSAJE_ANULAR_NO_ESTA, MENSAJE_ANULAR_FALLO,
   textoDePagadoDeMas, resumenDelDescuento, textoDelProblemaDelDescuento, textoDeDescuentoSinRespaldo,
 } from '../js/pantallas/dinero.js';
 import { armarComprobante } from '../js/pantallas/comprobante.js';
+import { pantallaDeMentira } from './fixtures/pantallaDeMentira.mjs';
 import { htmlListaDeDuenos, htmlFormularioDeDueno } from '../js/pantallas/duenos.js';
 import { construirContrato } from '../js/pantallas/sacarCarro.js';
 import { construirCierre } from '../js/nucleo/cierre.js';
@@ -2367,14 +2369,6 @@ test('problemaDeLaFechaDelPago: un pago no es de mañana; hoy y los días pasado
   assert.equal(problemaDeLaFechaDelPago('2062-11-02'), null);
 });
 
-test('guardarPago() le pregunta a problemaDeLaFechaDelPago antes de gastar un número de comprobante', () => {
-  const fuente = readFileSync(new URL('../js/pantallas/dinero.js', import.meta.url), 'utf8');
-  const cuerpo = fuente.slice(fuente.indexOf('async function guardarPago()'));
-  const pregunta = cuerpo.indexOf('problemaDeLaFechaDelPago(ui.fecha, hoyISO())');
-  const registra = cuerpo.indexOf('registrarElPago(');
-  assert.ok(pregunta > 0, 'se pregunta por la fecha');
-  assert.ok(registra > pregunta, 'y se pregunta ANTES de registrar el pago');
-});
 
 // ===========================================================================
 // H-6: anular un pago a un dueño
@@ -2661,17 +2655,6 @@ test('el comprobante de otro pago de la misma cuenta no se enreda con el anulado
 
 // ---------- El cableado ----------
 
-test('el cableado: «Anular» confirma con el texto de a quién y cuánto ANTES de anular, y anular pasa por anularElPago', () => {
-  const codigo = sinComentarios(PANTALLA);
-  const cuerpo = codigo.slice(codigo.indexOf('async function anularPagoDeDueno('), codigo.indexOf('async function migrar('));
-  const confirma = cuerpo.indexOf('window.confirm(textoConfirmarAnularPagoDueno(pago, entrada))');
-  const anula = cuerpo.indexOf('anularElPago(');
-  assert.ok(confirma > 0, 'pregunta con el texto que nombra al dueño, el monto y las rentas');
-  assert.ok(anula > confirma, 'y pregunta ANTES de anular');
-  assert.match(cuerpo, /hoy: hoyISO\(\)/, 'la fecha de la anulación es la de hoy, leída al hacer clic');
-  assert.match(codigo, /case 'anular-pago': anularPagoDeDueno\(id\); return;/);
-  assert.match(cuerpo, /pagoAnulado\(pago\)/, 'un pago ya anulado no vuelve a preguntar');
-});
 
 test('el cableado: «Ver comprobante» tampoco se abre a la fuerza para un pago anulado', () => {
   const codigo = sinComentarios(PANTALLA);
@@ -3101,4 +3084,170 @@ test('los campos donde él escribe un monto son de TEXTO: si no, la coma no se p
   const conCostoAbierto = fichaDe('Mario López Alvarado', { ui: uiVacia({ anotando: 'm5' }) });
   assert.match(conCostoAbierto, /<input type="text" id="dn-costo-input"[^>]*inputmode="decimal"/, 'el costo por día');
   assert.doesNotMatch(conCostoAbierto, /id="dn-costo-input"[^>]*type="number"/);
+});
+
+// ===========================================================================
+// El CABLEADO de la pantalla de dinero: qué pasa cuando él aprieta algo
+// ===========================================================================
+//
+// Por qué existe este bloque (23 de noviembre de 2026). La medición de mutaciones dio que `pintarCuentas`
+// atrapaba el 5 % de los errores que se le metían: 335 de 354 pasaban sin que nada se pusiera rojo. Es la
+// función más grande del área de dinero y es la que conecta lo que él aprieta con las funciones que
+// deciden el dinero — las de decidir sí estaban vigiladas; el cable que las une, no.
+//
+// No se podía probar: hacía falta un navegador, una sesión de Firebase de verdad y la nube. Ahora
+// `pintarCuentas` recibe sus aparatos (ver su comentario), y aquí se le pone una pantalla de mentira que
+// **solo encuentra lo que la pantalla dibujó de verdad** (`fixtures/pantallaDeMentira.mjs`, con sus diez
+// controles en `pantalla-de-mentira.test.mjs`), el lector DE VERDAD con una lectura de mentira, y espías
+// en lugar de los guardados.
+
+/** Monta la pantalla de dinero con todo de mentira menos ella misma, y devuelve con qué apretarla. */
+async function pantallaDeDinero({
+  lectura = lecturaOk(),
+  clave = null,
+  sesion = true,
+  responder = () => true,
+  pagar,
+  anular,
+  ruta = clave === null ? '#/dinero' : `#/dinero/cuenta/${encodeURIComponent(clave)}`,
+} = {}) {
+  const p = pantallaDeMentira();
+  const lector = crearLector({ leer: async () => lectura });
+  const preguntas = [];
+  const pagos = [];
+  const anulaciones = [];
+  const dichos = [];
+  let rutaActual = ruta;
+  const aparatos = {
+    lector,
+    sesionAbierta: () => sesion,
+    ahora: () => HOY,
+    doc: p.documento,
+    preguntar: (texto) => { preguntas.push(texto); return responder(texto); },
+    rutaDeAhora: () => rutaActual,
+    irA: (r) => { rutaActual = r; },
+    pagar: pagar ?? (async (args) => { pagos.push(args); return { tipo: 'guardado', pago: { id: 'pg-nuevo', numero: 9 }, pagos: lectura.pagos.datos }; }),
+    anular: anular ?? (async (args) => { anulaciones.push(args); return { pagos: lectura.pagos.datos }; }),
+    avisar: (texto, tipo) => dichos.push({ texto, tipo }),
+  };
+  if (clave === null) await pintarDinero(p.contenedor, aparatos);
+  else await pintarCuentaDeDueno(p.contenedor, clave, aparatos);
+  return {
+    ...p, lector, preguntas, pagos, anulaciones, dichos, ruta: () => rutaActual,
+  };
+}
+
+const CLAVE_MARIO = 'id:d1';
+/** El recuadro de marcar de una renta: no tiene id, se distingue por su data-id. */
+const LA_RENTA = (id) => `[data-dn="marcar"][data-id="${id}"]`;
+
+test('el cableado: la pantalla se dibuja con los dueños de la lectura, sin tocar la nube', async () => {
+  const p = await pantallaDeDinero();
+  assert.match(p.html(), /Mario López Alvarado/);
+  assert.match(p.html(), /Lucía Barrios/);
+  assert.ok(p.hay('tr[data-dn-clave]'), 'cada dueño trae su fila con su clave');
+});
+
+test('el cableado: sin sesión de dinero no se dibuja ninguna cifra, se pide la contraseña', async () => {
+  const p = await pantallaDeDinero({ sesion: false });
+  assert.doesNotMatch(p.html(), /Mario López Alvarado/, 'ni un nombre');
+  assert.doesNotMatch(p.html(), /Q\d/, 'ni una cifra');
+  assert.ok(p.hay('#dn-entrada'), 'la puerta, con su campo de contraseña');
+});
+
+test('el cableado: un clic en la fila de un dueño abre SU cuenta, no la de otro', async () => {
+  const p = await pantallaDeDinero();
+  const fila = p.raiz.querySelectorAll('tr[data-dn-clave]')[0];
+  p.lanzar('click', fila);
+  assert.equal(p.ruta(), `#/dinero/cuenta/${encodeURIComponent(fila.dataset.dnClave)}`);
+  assert.notEqual(fila.dataset.dnClave, undefined, 'la fila lleva de quién es');
+});
+
+
+/** Marca una renta y abre el formulario de pago, que es lo que él hace antes de guardar nada. */
+async function conElFormularioDePago(opciones = {}) {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO, ...opciones });
+  p.marcar(LA_RENTA('m1'));
+  p.clic('[data-dn="registrar"]');
+  return p;
+}
+
+test('el cableado: marcar una renta mueve el total de lo marcado, sin redibujar la ficha', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  const total = () => p.buscar('#dn-total-marcado').textContent;
+  assert.equal(p.buscar('#dn-marcadas').textContent, '0', 'arranca sin nada marcado');
+  p.marcar(LA_RENTA('m1'));
+  assert.equal(total(), 'Q1,200.00', 'la renta m1 son 4 días a Q300');
+  p.marcar(LA_RENTA('m2'));
+  assert.equal(total(), 'Q3,000.00', 'y con m2 (6 × 300) suman Q3,000');
+  p.marcar(LA_RENTA('m2'), false);
+  assert.equal(total(), 'Q1,200.00', 'al desmarcar se vuelve a restar');
+});
+
+test('el cableado: el botón de registrar NO se puede apretar sin nada marcado', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  assert.equal(p.buscar('[data-dn="registrar"]').disabled, true, 'sin marcar nada');
+  p.marcar(LA_RENTA('m1'));
+  assert.equal(p.buscar('[data-dn="registrar"]').disabled, false, 'con una renta marcada ya se puede');
+});
+
+test('el cableado: una fecha de pago que todavía no llega NO gasta un número de comprobante', async () => {
+  // Reemplaza a una prueba que leía el TEXTO del código para ver que se preguntaba por la fecha antes de
+  // registrar. Esto lo aprieta de verdad: con «2062» por «2026» el comprobante salía fechado en 2062 y
+  // no había cómo corregirlo (hay que anularlo, y el número queda gastado).
+  const p = await conElFormularioDePago();
+  p.lanzar('change', '#dn-fecha', { value: '2062-01-05' });
+  p.clic('#dn-guardar-pago');
+  assert.deepEqual(p.pagos, [], 'no se registró nada');
+  assert.match(p.html(), /La fecha del pago todavía no llega/, 'y se le dice por qué');
+});
+
+test('el cableado: con todo en orden, «Guardar pago» registra lo marcado, con su forma y su fecha', async () => {
+  const p = await conElFormularioDePago();
+  p.lanzar('change', '#dn-fecha', { value: HOY });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.pagos.length, 1, 'se registró una vez');
+  assert.deepEqual(p.pagos[0].idsMarcados, ['m1'], 'exactamente lo que él marcó');
+  assert.equal(p.pagos[0].fecha, HOY);
+  assert.equal(p.pagos[0].entrada.nombre, 'Mario López Alvarado', 'y a quién se le paga');
+});
+
+test('el cableado: «Anular» pregunta ANTES, y si él dice que no, no se anula nada', async () => {
+  // Reemplaza a otra prueba que leía el texto del código. Anular un pago gasta su número de comprobante:
+  // preguntar primero no es un detalle.
+  const conPago = lecturaOk();
+  const p = await pantallaDeDinero({ clave: 'id:d2', lectura: conPago, responder: () => false });
+  const anularEn = p.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'anular-pago');
+  assert.ok(anularEn, 'la ficha de Lucía trae su pago con su botón de anular');
+  p.lanzar('click', anularEn);
+  assert.equal(p.preguntas.length, 1, 'preguntó');
+  assert.match(p.preguntas[0], /Lucía Barrios/, 'con el nombre de a quién se le anula');
+  assert.deepEqual(p.anulaciones, [], 'y como dijo que no, no se anuló nada');
+});
+
+test('el cableado: «Anular» con un sí anula ESE pago, fechado hoy', async () => {
+  const p = await pantallaDeDinero({ clave: 'id:d2', responder: () => true });
+  const anularEn = p.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'anular-pago');
+  p.lanzar('click', anularEn);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.anulaciones.length, 1);
+  assert.equal(p.anulaciones[0].pago.id, 'pg-lucia', 'el que él apretó');
+  assert.equal(p.anulaciones[0].hoy, HOY, 'la anulación queda fechada, y no se adivina');
+});
+
+
+
+test('el cableado: un pago YA ANULADO no vuelve a preguntar ni se anula dos veces', async () => {
+  // Venía de una prueba que leía el texto del código buscando `pagoAnulado(pago)`. Ahora se aprieta.
+  const anulado = { ...PAGO_A_LUCIA, anuladoEl: HOY, anulado: true };
+  const p = await pantallaDeDinero({
+    clave: 'id:d2',
+    lectura: lecturaOk({ pagos: { datos: [anulado], fallo: false } }),
+    responder: () => true,
+  });
+  const boton = p.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'anular-pago');
+  if (boton) p.lanzar('click', boton);
+  assert.deepEqual(p.preguntas, [], 'ni siquiera pregunta');
+  assert.deepEqual(p.anulaciones, [], 'y no se anula otra vez');
 });

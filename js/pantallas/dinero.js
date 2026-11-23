@@ -1543,24 +1543,47 @@ export function conPuertaDeDinero(pintar) {
 // ---------------------------------------------------------------------------
 
 /** La lista de dueños, `#/dinero`. */
-export function pintarDinero(contenedor) {
-  return pintarCuentas(contenedor, null);
+export function pintarDinero(contenedor, aparatos) {
+  return pintarCuentas(contenedor, null, aparatos);
 }
 
 /** La ficha de un dueño, `#/dinero/cuenta/:clave`. */
-export function pintarCuentaDeDueno(contenedor, clave) {
-  return pintarCuentas(contenedor, clave);
+export function pintarCuentaDeDueno(contenedor, clave, aparatos) {
+  return pintarCuentas(contenedor, clave, aparatos);
 }
 
-async function pintarCuentas(contenedor, claveDeFicha) {
+/**
+ * Los aparatos de fuera de los que depende esta pantalla, cada uno con lo que usa de verdad por omisión.
+ * Se agregaron el 23 de noviembre de 2026 y NO cambian nada del camino normal: el router sigue llamando
+ * `pintarDinero(contenedor)` y todo queda igual.
+ *
+ * Por qué. La medición de mutaciones dio que `pintarCuentas` —el cableado entre lo que él aprieta y las
+ * funciones que deciden el dinero— atrapaba el 5 % de los errores que se le metían: 335 de 354 pasaban
+ * sin que nada se pusiera rojo. No porque nadie quisiera probarlo: no se PODÍA. Hacía falta un navegador,
+ * una sesión de Firebase de verdad y la nube. Con esto, una prueba le pone un lector con datos de
+ * mentira, una pantalla de mentira (`pruebas/fixtures/pantallaDeMentira.mjs`) y espías en lugar de los
+ * guardados, y puede apretar lo mismo que aprieta él.
+ */
+async function pintarCuentas(contenedor, claveDeFicha, {
+  lector: elLector = lector,
+  sesionAbierta = sesionDeDinero,
+  ahora = hoyISO,
+  doc = document,
+  preguntar = (texto) => window.confirm(texto),
+  rutaDeAhora = () => location.hash,
+  irA = (ruta) => { location.hash = ruta; },
+  pagar = registrarElPago,
+  anular = anularElPago,
+  avisar = aviso,
+} = {}) {
   const miToken = ++ultimoToken;
-  const hoy = hoyISO();
-  const vigente = () => miToken === ultimoToken && enElAreaDeDinero(location.hash);
+  const hoy = ahora();
+  const vigente = () => miToken === ultimoToken && enElAreaDeDinero(rutaDeAhora());
 
   // Todo lo que esta pantalla engancha cuelga de esta caja y no del contenedor:
   // el router reutiliza siempre el mismo <main>, y un manejador pegado a él se
   // seguiría disparando en las demás pantallas.
-  const raiz = document.createElement('div');
+  const raiz = doc.createElement('div');
   contenedor.replaceChildren(raiz);
   raizActual = raiz;
 
@@ -1583,8 +1606,8 @@ async function pintarCuentas(contenedor, claveDeFicha) {
 
   function dibujar() {
     // Sin sesión no se dibuja nada: lo leído se soltó al cerrarse.
-    if (!vigente() || !sesionDeDinero()) return;
-    vista = armarVista(lector.actual ?? lecturaFallida ?? {});
+    if (!vigente() || !sesionAbierta()) return;
+    vista = armarVista(elLector.actual ?? lecturaFallida ?? {});
     if (!vista.ok) {
       raiz.innerHTML = htmlFallo(vista);
       return;
@@ -1605,26 +1628,26 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     // el pago de más): el campo ya no está, y su valor no debe seguir mandando a escondidas.
     const marcadasAhora = resumenDeMarcadas(entrada, ui.marcados, vista.costoSinLeer);
     if (!resumenDelDescuento(entrada, marcadasAhora, vista.costoSinLeer, ui.descuento).hay) ui.descuento = '';
-    raiz.innerHTML = htmlFicha({ entrada, vista, ui, lectura: lector.actual, hoy });
+    raiz.innerHTML = htmlFicha({ entrada, vista, ui, lectura: elLector.actual, hoy });
     if (ui.anotando) raiz.querySelector('#dn-costo-input')?.focus();
   }
 
   async function cargarYDibujar({ forzar = false } = {}) {
     raiz.innerHTML = '<p class="pendiente">Leyendo las cuentas de los dueños…</p>';
-    const eraDeAntes = Boolean(lector.actual) && !forzar;
-    const leida = await lector.obtener({ forzar });
+    const eraDeAntes = Boolean(elLector.actual) && !forzar;
+    const leida = await elLector.obtener({ forzar });
     if (!vigente()) return;
-    lecturaFallida = lector.actual ? null : leida;
+    lecturaFallida = elLector.actual ? null : leida;
     // Los contratos y los pagos se reusan al ir de la lista a una ficha, pero la
     // lista de dueños se vuelve a pedir (es local y rápida): si se acaba de
     // corregir un nombre en la pantalla de dueños, aquí debe verse ya.
     if (eraDeAntes) {
-      await lector.refrescarDuenos((alLlegar) => cargarDuenos(alLlegar).catch(() => ({ datos: [], fallo: true })));
-      if (!vigente() || !lector.actual) return;
+      await elLector.refrescarDuenos((alLlegar) => cargarDuenos(alLlegar).catch(() => ({ datos: [], fallo: true })));
+      if (!vigente() || !elLector.actual) return;
     }
     // Si la sesión se cerró mientras se leía (inactividad, o Firebase), se pide la contraseña otra vez.
-    if (!sesionDeDinero()) {
-      dibujarEntrada(contenedor, { alEntrar: () => mostrar(location.hash) });
+    if (!sesionAbierta()) {
+      dibujarEntrada(contenedor, { alEntrar: () => mostrar(rutaDeAhora()) });
       return;
     }
     dibujar();
@@ -1638,9 +1661,9 @@ async function pintarCuentas(contenedor, claveDeFicha) {
    * «revisa tu internet» que no es: se suelta lo leído y se pide la contraseña.
    */
   function haySesion() {
-    if (sesionDeDinero()) return true;
-    lector.olvidar();
-    dibujarEntrada(contenedor, { alEntrar: () => mostrar(location.hash) });
+    if (sesionAbierta()) return true;
+    elLector.olvidar();
+    dibujarEntrada(contenedor, { alEntrar: () => mostrar(rutaDeAhora()) });
     return false;
   }
 
@@ -1657,22 +1680,22 @@ async function pintarCuentas(contenedor, claveDeFicha) {
   // ----- Anotar el costo de una renta sin costo -----
   async function guardarCosto(id) {
     if (ui.ocupado || !haySesion()) return;
-    const contrato = lector.actual?.contratos.datos.find((c) => c.id === id);
+    const contrato = elLector.actual?.contratos.datos.find((c) => c.id === id);
     const campo = raiz.querySelector('#dn-costo-input');
     if (!contrato || !campo) return;
     ui.ocupado = true;
     try {
       const costo = await anotarCostoDelDueno(contrato, montoTecleado(campo.value));
-      const leida = lector.actual;
+      const leida = elLector.actual;
       if (!leida) return;
       // Se pone en memoria con el mismo puente que usa la lectura: queda como
       // quedaría si se volviera a leer, sin volver a pedirle todo a la nube.
       leida.contratos.datos = leida.contratos.datos.map((c) => (c.id === id ? conCostoDelDueno(c, costo) : c));
       ui.anotando = null;
-      aviso(`Costo anotado: ${dinero(costo)} por día.`, 'exito');
+      avisar(`Costo anotado: ${dinero(costo)} por día.`, 'exito');
       dibujar();
     } catch (error) {
-      aviso(mensajeSeguro(error, MENSAJE_COSTO_FALLO), 'error');
+      avisar(mensajeSeguro(error, MENSAJE_COSTO_FALLO), 'error');
     } finally {
       ui.ocupado = false;
     }
@@ -1686,7 +1709,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     ui.fecha = campoFecha?.value || ui.fecha;
     ui.forma = raiz.querySelector('#dn-forma')?.value || ui.forma;
     ui.descuento = raiz.querySelector('#dn-descuento')?.value ?? ui.descuento;
-    const problemaDeFecha = problemaDeLaFechaDelPago(ui.fecha, hoyISO());
+    const problemaDeFecha = problemaDeLaFechaDelPago(ui.fecha, ahora());
     if (problemaDeFecha) { ui.mensajePago = problemaDeFecha; dibujar(); return; }
     // El descuento que se manda es el que el núcleo da por válido, no el texto del campo.
     const descuento = resumenDelDescuento(entrada, marcadas, vista.costoSinLeer, ui.descuento);
@@ -1695,7 +1718,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     const boton = raiz.querySelector('#dn-guardar-pago');
     if (boton) boton.disabled = true;
     try {
-      const r = await registrarElPago({
+      const r = await pagar({
         entrada,
         idsMarcados: marcadas.ids,
         forma: ui.forma,
@@ -1703,11 +1726,11 @@ async function pintarCuentas(contenedor, claveDeFicha) {
         descuento: descuento.descuento,
         enCurso: ui.enCurso ?? (ui.enCurso = {}),
       });
-      if (!lector.actual) return;
-      lector.actual.pagos.datos = r.pagos;
+      if (!elLector.actual) return;
+      elLector.actual.pagos.datos = r.pagos;
       // Los contratos que se leyeron al guardar son ahora la verdad: si una renta
       // cambió mientras tanto, la lista ya la dibuja como está, no como estaba.
-      if (r.contratos) lector.actual.contratos = r.contratos;
+      if (r.contratos) elLector.actual.contratos = r.contratos;
       if (r.tipo === 'cambio') {
         ui.mensajePago = MENSAJE_PAGO_CAMBIO;
         ui.marcados.clear();
@@ -1719,7 +1742,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
         ui.marcados.clear();
         ui.descuento = '';
         ui.enCurso = null;
-        aviso(r.tipo === 'ya-guardado'
+        avisar(r.tipo === 'ya-guardado'
           ? `Ese pago ya estaba registrado (comprobante N.° ${r.pago.numero}).`
           : `Pago registrado. Comprobante N.° ${r.pago.numero}.`, 'exito');
       }
@@ -1742,7 +1765,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     const pregunta = crear
       ? `¿Dar de alta a «${entrada.nombre}» como dueño y enlazarle ${cuantos} ${cuantos === 1 ? 'contrato' : 'contratos'}? Esto no se puede deshacer desde el sistema.`
       : `¿Enlazar ${cuantos} ${cuantos === 1 ? 'contrato' : 'contratos'} de «${entrada.nombre}» al dueño «${nombreDelDueno}»? Esto no se puede deshacer desde el sistema.`;
-    if (!window.confirm(pregunta)) return;
+    if (!preguntar(pregunta)) return;
     ui.ocupado = true;
     ui.mensajeEnlace = '';
     try {
@@ -1750,18 +1773,18 @@ async function pintarCuentas(contenedor, claveDeFicha) {
         const alta = await guardarDueno(await ui.altaDeDueno.paraGuardar(construirDueno({}, { nombre: entrada.nombre }), entrada.clave));
         duenoId = alta.id;
         // El dueño recién creado ya está: si el enlace falla, el siguiente intento lo escoge de la lista.
-        const antes = lector.actual;
+        const antes = elLector.actual;
         if (antes) antes.duenos = { ...antes.duenos, datos: [...(antes.duenos.datos ?? []), alta] };
       }
       await enlazarContratosAlDueno(entrada.contratos.map((c) => c.id), duenoId);
       // Con el enlace hecho el alta terminó: la siguiente vez, otro dueño. Antes de aquí NO se suelta: si el enlace
       // falla y se repite «dar de alta», cae en el mismo dueño y no crea otro.
       ui.altaDeDueno.terminada();
-      const leida = lector.actual;
+      const leida = elLector.actual;
       if (!leida) return;
       const enlazados = new Set(entrada.contratos.map((c) => c.id));
       leida.contratos.datos = leida.contratos.datos.map((c) => (enlazados.has(c.id) ? { ...c, duenoId } : c));
-      aviso('Contratos enlazados.', 'exito');
+      avisar('Contratos enlazados.', 'exito');
       // La cuenta cambia de clave (de `texto:` a `id:`): se actualiza la dirección sin volver a leer.
       claveActual = `id:${duenoId}`;
       history.replaceState(null, '', rutaDeCuenta(claveActual));
@@ -1776,36 +1799,36 @@ async function pintarCuentas(contenedor, claveDeFicha) {
 
   // ----- El comprobante -----
   function verComprobante(pagoId) {
-    const leida = lector.actual;
+    const leida = elLector.actual;
     const pago = leida?.pagos.datos.find((p) => p.id === pagoId);
     if (!pago || pagoAnulado(pago)) return;
     try {
       pintarComprobante(raiz, entradaDelComprobante({ entrada, pago, lectura: leida, hoy }), { alVolver: dibujar });
     } catch (error) {
       console.error(error);
-      aviso(MENSAJE_COMPROBANTE_FALLO, 'error');
+      avisar(MENSAJE_COMPROBANTE_FALLO, 'error');
     }
   }
 
   // ----- Anular un pago a un dueño -----
   async function anularPagoDeDueno(pagoId) {
     if (ui.ocupado || !haySesion()) return;
-    const pago = lector.actual?.pagos.datos.find((p) => p.id === pagoId);
+    const pago = elLector.actual?.pagos.datos.find((p) => p.id === pagoId);
     if (!pago || pagoAnulado(pago) || !entrada) return;
-    if (!window.confirm(textoConfirmarAnularPagoDueno(pago, entrada))) return;
+    if (!preguntar(textoConfirmarAnularPagoDueno(pago, entrada))) return;
     ui.ocupado = true;
     try {
-      const r = await anularElPago({ pago, hoy: hoyISO() });
-      if (!lector.actual) return;
-      lector.actual.pagos.datos = r.pagos;
-      if (r.tipo === 'no-esta') aviso(MENSAJE_ANULAR_NO_ESTA, 'error');
+      const r = await anular({ pago, hoy: ahora() });
+      if (!elLector.actual) return;
+      elLector.actual.pagos.datos = r.pagos;
+      if (r.tipo === 'no-esta') avisar(MENSAJE_ANULAR_NO_ESTA, 'error');
       else {
-        aviso(r.tipo === 'ya-anulado'
+        avisar(r.tipo === 'ya-anulado'
           ? `Ese pago ya estaba anulado (comprobante N.° ${r.pago.numero}).`
           : `Pago anulado. El comprobante N.° ${r.pago.numero} queda en «Ya pagado», marcado como anulado.`, 'exito');
       }
     } catch (error) {
-      aviso(mensajeSeguro(error, MENSAJE_ANULAR_FALLO), 'error');
+      avisar(mensajeSeguro(error, MENSAJE_ANULAR_FALLO), 'error');
     } finally {
       ui.ocupado = false;
     }
@@ -1815,7 +1838,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
   // ----- La migración del costo, una vez y a mano -----
   async function migrar(boton) {
     if (ui.ocupado || !haySesion()) return;
-    if (!window.confirm('¿Mover ahora el costo de los dueños detrás de la contraseña de dinero? Se corre una sola vez y no se puede deshacer desde el sistema.')) return;
+    if (!preguntar('¿Mover ahora el costo de los dueños detrás de la contraseña de dinero? Se corre una sola vez y no se puede deshacer desde el sistema.')) return;
     ui.ocupado = true;
     boton.disabled = true;
     const caja = raiz.querySelector('#dn-migracion');
@@ -1862,7 +1885,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     }
     // Un clic en cualquier parte de una fila de la lista abre esa cuenta (como en clientes).
     const fila = ev.target.closest('tr[data-dn-clave]');
-    if (fila && !ev.target.closest('a')) location.hash = rutaDeCuenta(fila.dataset.dnClave);
+    if (fila && !ev.target.closest('a')) irA(rutaDeCuenta(fila.dataset.dnClave));
   });
 
   raiz.addEventListener('change', (ev) => {
