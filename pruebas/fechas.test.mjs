@@ -150,3 +150,31 @@ test('sumarMeses: cero y negativos funcionan; lo que no es un número entero de 
   assert.equal(sumarMeses('2026-02-30', 3), '', 'un 30 de febrero tampoco');
   assert.equal(sumarMeses('2026-10-16', 100000), '', 'tan lejos que se sale del calendario');
 });
+
+// ---------------------------------------------------------------------------
+// Huecos que encontró la medición de mutaciones del 23 de noviembre de 2026
+// ---------------------------------------------------------------------------
+
+test('los DOCE meses se escriben con su nombre: un mes sin nombre deja la fecha coja', () => {
+  // Sin esto, vaciar 'feb' dejaba `textoFecha('2026-02-14')` en «14  2026» —una fecha sin mes, en un
+  // mensaje que él lee— y ninguna de las 2,772 pruebas se daba cuenta: solo se probaban unos meses.
+  const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  MESES.forEach((nombre, i) => {
+    const iso = `2026-${String(i + 1).padStart(2, '0')}-15`;
+    assert.equal(textoFecha(iso), `15 ${nombre} 2026`, iso);
+  });
+});
+
+test('una fecha con un mes o un día IMPOSIBLE no se vuelve otra fecha: se descarta', () => {
+  // Sin el guardia, '2026-00-10' pasaba a `Date.UTC(2026, -1, 10)` y se volvía DICIEMBRE DE 2025 sin que
+  // nadie lo dijera: `sumarDias` devolvía '2025-12-11' y `diasEntre` contaba 31 días que no existieron.
+  // Aquí los días son dinero, así que una fecha que se convierte sola en otra es un cobro equivocado.
+  for (const imposible of ['2026-00-10', '2026-01-00', '2026-00-00', '0000-01-10']) {
+    assert.equal(sumarDias(imposible, 1), '', `${imposible}: no se puede sumar un día a lo que no es una fecha`);
+    assert.equal(diasEntre(imposible, '2026-01-10'), 0, `${imposible}: no se cuentan días contra una fecha inventada`);
+    assert.equal(diasEntre('2026-01-10', imposible), 0, `${imposible}: ni al revés`);
+    assert.equal(diasAtraso('2026-01-10', imposible), 0, `${imposible}: ni atraso`);
+  }
+  // Y el control: una fecha de verdad sí cuenta.
+  assert.equal(diasEntre('2025-12-10', '2026-01-10'), 31);
+});

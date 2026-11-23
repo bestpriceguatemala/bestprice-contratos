@@ -350,3 +350,24 @@ test('vencimientoTarjeta: leer dos veces lo ya leído da lo mismo', () => {
     assert.equal(vencimientoTarjeta(unaVez), unaVez, escrito);
   }
 });
+
+test('fecha(): los DOCE meses se escriben con su nombre', () => {
+  // Igual que `textoFecha` del núcleo, que duplica este formato a propósito: si uno de los dos pierde un
+  // mes, el otro no lo tapa. Vaciar 'feb' dejaba «14  2026» en pantalla y nadie se daba cuenta.
+  const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  MESES.forEach((nombre, i) => {
+    const iso = `2026-${String(i + 1).padStart(2, '0')}-15`;
+    assert.equal(fecha(iso), `15 ${nombre} 2026`, iso);
+  });
+});
+
+test('montoTecleado: la Q con espacios alrededor, y nada de notación rara', () => {
+  // Sin recortar los extremos, « Q1500 » se quedaba en «Q1500» después de quitarle los espacios de
+  // adentro y ya no se entendía. Y sin revisar la forma, 'Number' aceptaba cosas que nadie teclea como
+  // dinero: '1e5' se volvía cien mil quetzales y '0x10' dieciséis.
+  assert.equal(montoTecleado(' Q1500 '), 1500);
+  assert.equal(montoTecleado('  Q 1,500.00  '), 1500);
+  for (const raro of ['1e5', '1E5', '0x10', '0b11', '1_000', 'Infinity', '-Infinity']) {
+    assert.ok(Number.isNaN(montoTecleado(raro)), `«${raro}» no es como se escribe un monto`);
+  }
+});
