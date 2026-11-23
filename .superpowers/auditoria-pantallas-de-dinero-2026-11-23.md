@@ -96,10 +96,85 @@ Hay que decirlo igual que los hallazgos, o el informe solo cuenta la mitad.
 
 ---
 
-## 3. Las dos pantallas de dinero
+## 3. El arnés estaba descalibrado, y hubo que medir dos veces
 
-(Esta sección se llena cuando termine la corrida: 1,068 errores en `js/pantallas/dinero.js` y 1,040 en
-`js/pantallas/comisiones.js`, 2,108 en total.)
+La primera corrida terminó y **no se dio ese número**. El operador de textos tenía dos defectos que
+jalaban en direcciones contrarias — la peor forma de estar mal, porque el resultado parecía razonable:
+
+1. Metía errores en los textos que viven **dentro de un comentario**. Un comentario no se ejecuta: esos
+   mutantes no se podían matar nunca, eran sobrevivientes garantizados y **bajaban** el puntaje de a gratis
+   (17 en las dos pantallas).
+2. Leía como un texto el **hueco entre dos textos pegados**. En `{ '&': '&amp;', '<': '&lt;' }` tomaba
+   `': '` por un texto y lo vaciaba, lo que deja código roto: esos mueren siempre y **subían** el puntaje
+   (65, casi todos en el escapador de HTML).
+
+Arreglado (los textos salen de `regionesDeCodigo`, que ya distingue un comentario de un texto porque
+recorre el archivo una sola vez), los nueve controles pasaron otra vez y **las dos mediciones se repitieron
+completas**. Lo de abajo es la segunda corrida, sobre el commit `ca4997e`, con las pruebas nuevas del
+descuento ya dentro.
+
+## 3b. Las dos pantallas de dinero, medidas
+
+| Archivo | Errores metidos | Atrapados | Pasan sin que nadie lo note | Atrapa |
+|---|---:|---:|---:|---:|
+| `js/pantallas/dinero.js` | 1,042 | 484 | 558 | **46.4 %** |
+| `js/pantallas/comisiones.js` | 1,008 | 573 | 435 | **56.8 %** |
+| **Las dos** | **2,050** | **1,057** | **993** | **51.6 %** |
+
+Cero anomalías y cero mutantes colgados: cada uno de los 2,050 terminó con un veredicto.
+
+Para comparar: en lo medido a fondo en octubre (el núcleo del dinero, los estados, los papeles) la suite
+atrapaba el **79 %**. En estas dos pantallas atrapa la mitad.
+
+### Dónde están los que pasan
+
+**El 59 % de todos los sobrevivientes (581 de 993) está en las dos funciones que se llaman `pintarCuentas`**
+— el cableado entre lo que él aprieta en la pantalla y las funciones que deciden el dinero:
+
+| Función | Sobreviven / total | Atrapa |
+|---|---:|---:|
+| `pintarCuentas` (dinero) | 335 / 354 | **5 %** |
+| `pintarCuentas` (comisiones) | 246 / 321 | **23 %** |
+| `avisoDelPapelQueNoCambia` (comisiones) | 45 / 134 | 66 % |
+| `dibujarEntrada` (dinero) | 22 / 23 | 4 % |
+| `textoConfirmarAnularPagoDueno` (dinero) | 18 / 31 | 42 % |
+| `armarVistaDeComisiones` | 15 / 46 | 67 % |
+| `modeloDeComisionesEnExcel` | 15 / 55 | 73 % |
+| `instalarLatidos` + `alExpirarPorInactividad` + `olvidarLosDatos` (el candado del área de dinero) | 29 / 35 | 17 % |
+
+Es el mismo retrato que en octubre con «Sacar carro» y «Recibir carro»: **las funciones que DECIDEN están
+vigiladas; el cableado que las conecta con la pantalla, no.** Ese cableado no se puede ejercitar en Node
+sin navegador — pero el proyecto ya tiene un navegador de mentira (`navegadorFalso`, `contenedorFalso`) con
+el que se prueban otras pantallas, así que es trabajo pendiente, no trabajo imposible.
+
+### Lo que se cerró en esta tanda
+
+**El descuento de un pago de más no tenía NI UNA prueba.** `resumenDelDescuento`,
+`textoDelProblemaDelDescuento` y `textoDeDescuentoSinRespaldo` estaban **importadas** en
+`pruebas/dinero.test.mjs` y no las llamaba ninguna prueba: de un vistazo el archivo parecía cubrirlas.
+31 errores sobrevivían ahí. Lo que se podía romper en silencio era dinero:
+
+- que el descuento tecleado se leyera como 0 (él cree que descontó Q500 y entrega los Q600 completos);
+- que un descuento igual al tope se rechazara, o que uno ilegible se aceptara como válido;
+- que un valor ilegible se volviera un descuento de Q1;
+- que la pantalla bloqueara el guardado **sin decir por qué**, con el texto del problema vacío.
+
+Diez pruebas nuevas sobre una cuenta de verdad (una renta pagada con 3 días de atraso y corregida después
+a 0: Q900 de más, con otra de Q600 por pagar). **De los 34 errores que sobrevivían en esa zona, 25 ya
+mueren.** Los 9 que siguen vivos, uno por uno y sin maquillaje:
+
+| Sigue vivo | Por qué |
+|---|---|
+| `texto ?? ''` → `|| ''` (×2) y `marcados ?? new Set()` → `||` | De verdad no cambian nada: el valor nunca es `0`, `false` ni `''`. **Equivalentes.** |
+| `.trim()` borrado | `Number(' 100 ')` ya vale 100 y `Number(' ')` ya vale 0. **Equivalente.** |
+| `ilegible ? 0 : q(pedido)` → `? 1 :` | Ese valor no sale de la función: abajo, `valido ? descuento : 0` lo deja en 0 igual. **Equivalente.** |
+| `deMas > 0` → `deMas > 1` | Borde real de UN quetzal, pero no se pudo armar una cuenta con exactamente Q1 de más con los ayudantes que hay. **Pendiente, dicho.** |
+| `c?.id` → `c.id` | Defensa contra un dato dañado en la lista. Matarlo pide armar una cuenta con una entrada nula a mano. **Pendiente, dicho.** |
+
+**Y el escapador se comía los apóstrofos.** La prueba del nombre con signos raros cubría `<`, `>`, `"` y
+`&`, pero no el apóstrofo; por eso nadie veía que si esa parte se rompía, «D'Angelo» salía en pantalla como
+«DAngelo» — el apóstrofo no se escapaba mal, **desaparecía**. Ya está cubierto en los dos lugares donde se
+dibuja un nombre.
 
 ---
 
