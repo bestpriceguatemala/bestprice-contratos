@@ -25,9 +25,9 @@ node analisis/mutaciones/correr.mjs correr --archivo js/pantallas/dinero.js --tr
 Los índices 685 a 1055 son los **370 errores que caen dentro de `pintarCuentas`** en el archivo de hoy
 (líneas 1567 a 1933). Si el archivo cambia, se vuelven a calcular: generar la lista y filtrar por renglón.
 
-**Iba en 275 de 370 cuando se paró: 63 muertos y 212 vivos.** O sea alrededor del 23 %, contra el **5 %**
-del que se partió. **Es un dato PARCIAL y no sirve como resultado**: el número bueno es el de la corrida
-entera, y hay que volver a correrla. No se publique el 23 % como si fuera el final.
+**Esa corrida alcanzó a terminar: 370 errores, 97 atrapados, 263 pasan, 10 colgados — 26.9 %**, contra el
+**5.4 %** del que se partió. Está escrito en la sección 3d del informe. Los comandos de arriba sirven para
+repetirlo y para medir lo que venga.
 
 ### Una trampa que ya costó una corrida entera
 
@@ -64,19 +64,17 @@ sobre el código de hoy**, no reaplicar errores viejos.
 
 ## Lo que sigue, en orden
 
-1. **Terminar de medir `pintarCuentas`** (arriba está cómo) y escribir el número bueno en
-   `.superpowers/auditoria-pantallas-de-dinero-2026-11-23.md`, sección 3b.
-2. **Seguir cableando `pintarCuentas`**: lo que todavía no tiene prueba es enlazar un dueño
+1. **Seguir cableando `pintarCuentas`**: lo que todavía no tiene prueba es enlazar un dueño
    («enlazar» / «crear-y-enlazar»), la migración del costo, «ver comprobante», y el candado por
    inactividad del área de dinero (`instalarLatidos`, `alExpirarPorInactividad`, `olvidarLosDatos`:
    29 de 35 errores pasaban). Para enlazar y migrar hay que inyectar `guardarDueno`, `enlazarContratos` y
    `migrarCostosDelDueno`, igual que se hizo con los otros.
-3. **`pintarCuentas` de comisiones** (`js/pantallas/comisiones.js`): 246 de 321 errores pasaban, 23 %. La
+2. **`pintarCuentas` de comisiones** (`js/pantallas/comisiones.js`): 246 de 321 errores pasaban, 23 %. La
    pantalla de mentira ya está hecha y sirve igual.
-4. **`avisoDelPapelQueNoCambia`** en comisiones: 45 de 134 pasaban.
-5. **`aviso()` en ui.js**: 11 de 11 errores pasan. Es el mensajito flotante; toca el DOM. Ahora que se
+3. **`avisoDelPapelQueNoCambia`** en comisiones: 45 de 134 pasaban.
+4. **`aviso()` en ui.js**: 11 de 11 errores pasan. Es el mensajito flotante; toca el DOM. Ahora que se
    puede inyectar en la pantalla de dinero, se puede probar aparte.
-6. **Lo que sigue sin medirse del todo**: `contratos.js`, `reservas.js`, `carros.js`, `clientes.js`,
+5. **Lo que sigue sin medirse del todo**: `contratos.js`, `reservas.js`, `carros.js`, `clientes.js`,
    `contratoImpreso.js`, `flota.js`, todo el respaldo a Excel, `app.js`, `auth.js`, `router.js`.
    `contar.mjs` dice el tamaño: 14,769 errores posibles en 60 archivos.
 

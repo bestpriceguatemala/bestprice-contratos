@@ -210,6 +210,45 @@ sale arriba cuando algo se guarda. Toca el DOM y la suite corre en Node sin nave
 cabecera del archivo de pruebas desde que se escribió. Es el mismo caso que `pintarCuentas`: trabajo
 pendiente, no imposible, porque el proyecto ya tiene un navegador de mentira.
 
+## 3d. `pintarCuentas`, el hueco más grande, medido otra vez
+
+El 59 % de todo lo que pasaba sin que nadie lo notara estaba en las dos funciones que pintan la pantalla.
+Se atacó la de dinero. **No estaba rota: no se PODÍA probar** — hacía falta un navegador, una sesión de
+Firebase de verdad y la nube, así que ninguna prueba podía apretar un botón.
+
+| `pintarCuentas` (dinero) | Errores | Atrapados | Pasan | Atrapa |
+|---|---:|---:|---:|---:|
+| Antes (commit `ca4997e`) | 354 | 19 | 335 | **5.4 %** |
+| **Hoy** (commit `8d9fe2a`) | 370 | 97 | 263 | **26.9 %** |
+
+(De los 370 de hoy, 10 se quedaron girando y se cuentan aparte, nunca como muertos.)
+
+**Cinco veces más errores atrapados.** Sigue siendo el peor número del sistema, y eso también se dice: de
+cada cuatro errores que se le meten a esa función, tres siguen pasando. Lo que falta tiene nombre y está
+en la lista de «lo que sigue» del punto de retorno.
+
+### Cómo se midió, y una trampa que costó una corrida entera
+
+Primero se intentó el atajo: volver a aplicar sobre el código de hoy los 335 errores que sobrevivían
+antes. **No sirve.** El refactor que hizo testeable la pantalla renombró cosas (`lector` → `elLector`,
+`window.confirm` → `preguntar`, `hoyISO()` → `ahora()`), así que **215 de los 335 ya no se podían ni
+aplicar** y el cociente que salía no decía nada sobre el archivo. Ese número se tiró sin publicarlo y se
+midió de nuevo, entero, sobre el código de hoy. Es la misma regla de siempre: **un número que salió de un
+instrumento que ya no apunta al mismo sitio no se reporta.**
+
+### El instrumento nuevo, con sus controles
+
+`pruebas/fixtures/pantallaDeMentira.mjs`: un navegador chico cuya regla es que **solo encuentra lo que la
+pantalla dibujó de verdad**. Si un manejador apunta a un id que el HTML ya no trae, la prueba se cae en vez
+de quedarse verde apretando botones imaginarios. Tiene **16 controles** propios, y dos de ellos corrigieron
+a quien lo escribió:
+
+- Faltaba `matches`. El manejador que marca una renta hace `caja.matches?.('[data-dn="marcar"]')`: **sin
+  esa función el `?.` lo deja en undefined y marcar no hace NADA, en silencio.**
+- El control 3 afirmaba que redibujar conserva lo tecleado. **Era mentira**: en el navegador
+  `innerHTML = ...` destruye el campo y se lleva lo escrito. Es justo el error del que la pantalla se cuida
+  al no redibujar mientras él escribe el descuento; guardarlo lo habría tapado.
+
 ## 4. Lo que todavía NO se ha medido
 
 `contar.mjs` dice el tamaño del trabajo entero: **14,769 errores posibles sobre 13,987 líneas ejecutables,
