@@ -3328,3 +3328,53 @@ test('el cableado: una lectura FALLIDA no dibuja ninguna cifra, dibuja la barra 
   assert.match(p.html(), /No se pudieron leer los pagos a dueños/);
   assert.ok(p.hay('[data-dn="reintentar"]'), 'y se puede volver a leer');
 });
+
+test('el cableado: el descuento se manda con el PAGO, y es el que el núcleo dio por bueno', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO, lectura: lecturaConPagoDeMas() });
+  p.marcar(LA_RENTA('x2'));
+  p.clic('[data-dn="registrar"]');
+  p.teclear('#dn-descuento', 'Q100');
+  p.lanzar('change', '#dn-fecha', { value: HOY });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.pagos.length, 1);
+  assert.equal(p.pagos[0].descuento, 100, 'el número, no el texto «Q100» que él tecleó');
+  assert.deepEqual(p.pagos[0].idsMarcados, ['x2']);
+});
+
+test('el cableado: si la cuenta CAMBIÓ mientras tanto, no se cierra el formulario: se le dice y se desmarca', async () => {
+  // El caso feo: él marcó, alguien más corrigió un cierre, y guardar pagaría una renta que ya no es esa.
+  const p = await pantallaDeDinero({
+    clave: CLAVE_MARIO,
+    pagar: async () => ({ tipo: 'cambio', pagos: [], contratos: null }),
+  });
+  p.marcar(LA_RENTA('m1'));
+  p.clic('[data-dn="registrar"]');
+  p.lanzar('change', '#dn-fecha', { value: HOY });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.match(p.html(), /Mientras tanto cambió la cuenta de este dueño/);
+  assert.equal(p.buscar('#dn-total-marcado')?.textContent, 'Q0.00', 'lo marcado se suelta: hay que volver a mirar');
+});
+
+test('el cableado: cancelar el pago borra el descuento tecleado, no se queda para el siguiente', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO, lectura: lecturaConPagoDeMas() });
+  p.marcar(LA_RENTA('x2'));
+  p.clic('[data-dn="registrar"]');
+  p.teclear('#dn-descuento', '500');
+  p.clic('[data-dn="cancelar-pago"]');
+  p.clic('[data-dn="registrar"]');
+  assert.equal(p.buscar('#dn-descuento').value, '', 'el campo arranca limpio');
+  assert.equal(p.buscar('#dn-entregar').textContent, 'Q600.00', 'y entrega todo lo marcado');
+});
+
+test('el cableado: una renta cuyo costo no se pudo leer no se puede marcar para pagar', async () => {
+  // Pagarla sería pagar una cifra que no se conoce.
+  const sinCosto = lecturaOk({ contratos: { datos: TODOS, fallo: false, costoSinLeer: ['m1'] } });
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO, lectura: sinCosto });
+  const caja = p.buscar(LA_RENTA('m1'));
+  assert.ok(caja, 'la renta se sigue viendo');
+  assert.equal(caja.disabled, true, 'pero su recuadro no se puede marcar');
+  p.marcar(LA_RENTA('m2'));
+  assert.equal(p.buscar('#dn-total-marcado').textContent, 'Q1,800.00', 'las demás sí');
+});
