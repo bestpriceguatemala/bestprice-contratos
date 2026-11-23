@@ -398,11 +398,14 @@ test('la clave de una cuenta distingue a un dueño enlazado de un texto que se l
   assert.equal(new Set(vista.entradas.map((e) => e.clave)).size, vista.entradas.length, 'ninguna clave se repite');
 });
 
-test('el nombre de un dueño con signos raros no rompe la página', () => {
-  const raro = { ...REGISTRO_MARIO, nombre: 'Mario <b>"López"</b> & Hijos' };
+test('el nombre de un dueño con signos raros no rompe la página, y no se le COME ninguna letra', () => {
+  // El apóstrofo se agregó el 23 de noviembre de 2026: la prueba cubría < > " y &, y por eso nadie veía
+  // que si el escapador dejaba de tratarlo, «D'Angelo» salía en pantalla como «DAngelo» — el apóstrofo
+  // no se escapaba mal, desaparecía. Un apellido guatemalteco con apóstrofo es de todos los días.
+  const raro = { ...REGISTRO_MARIO, nombre: 'Mario <b>"D\'Angelo"</b> & Hijos' };
   const html = htmlLista(armarVista(lecturaOk({ duenos: { datos: [raro, REGISTRO_LUCIA], fallo: false } })));
   assert.ok(!html.includes('<b>'));
-  assert.ok(html.includes('Mario &lt;b&gt;&quot;López&quot;&lt;/b&gt; &amp; Hijos'));
+  assert.ok(html.includes('Mario &lt;b&gt;&quot;D&#39;Angelo&quot;&lt;/b&gt; &amp; Hijos'), html.slice(0, 400));
 });
 
 // ---------------------------------------------------------------------------
@@ -1828,6 +1831,8 @@ test('el formulario del dueño sale de CAMPOS_DUENO y trae lo que ya tenía; el 
   for (const id of ['nombre', 'telefono', 'nit', 'nota']) assert.ok(html.includes(`id="df-${id}"`), id);
   assert.ok(html.includes('value="5555-1111"') && html.includes('value="1234567-8"'));
   assert.ok(html.includes('Mario &quot;El &lt;Grande&gt;&quot;') && !html.includes('<Grande>'));
+  const conApostrofo = htmlFormularioDeDueno({ ...REGISTRO_MARIO, nombre: "Mario D'Angelo" }, { esNuevo: false });
+  assert.ok(conApostrofo.includes('value="Mario D&#39;Angelo"'), 'el apóstrofo se escapa, no se borra');
   assert.ok(html.includes('type="tel"'));
   assert.ok(html.includes('href="#/dinero/cuenta/id%3Ad1"'), 'desde la ficha se llega a lo que se le debe');
   const nuevo = htmlFormularioDeDueno(null, { esNuevo: true });
@@ -2907,4 +2912,156 @@ test('H-7: el cableado — la ficha le pregunta a pagadoDeMas del núcleo con lo
   assert.match(cuerpo, /pagadoDeMas\(ctx\.entrada\.cuenta, ctx\.vista\.costoSinLeer\)/);
   assert.doesNotMatch(cuerpo, /suma\(|reduce\(|\.monto|diferencia|ahora -|pagado -/, 'ninguna cifra se calcula en la pantalla');
   assert.match(codigo, /\$\{htmlPagadoDeMas\(ctx\)\}/, 'y la ficha la dibuja');
+});
+
+// ---------------------------------------------------------------------------
+// El descuento de un pago de más, y lo que se le dice cuando no se puede aplicar
+// ---------------------------------------------------------------------------
+// Por qué existe este bloque (23 de noviembre de 2026). Midiendo las pruebas con mutaciones salió que
+// `resumenDelDescuento`, `textoDelProblemaDelDescuento` y `textoDeDescuentoSinRespaldo` estaban
+// IMPORTADAS en este archivo y no las llamaba NINGUNA prueba: 31 errores metidos a propósito en ellas
+// sobrevivían sin que nada se pusiera rojo, y el archivo parecía cubrirlas de un vistazo.
+// Lo que se podía romper en silencio era dinero:
+//   - que el descuento tecleado se leyera como 0 (él cree que descontó Q500 y entrega los Q500 completos);
+//   - que un descuento igual al tope se rechazara, o que uno ilegible se aceptara como válido;
+//   - que la pantalla bloqueara el guardado sin decir por qué (el texto del problema vacío).
+// Las cifras de aquí salen de las mismas funciones del núcleo con las que `construirPagoDueno` arma el
+// pago (`descuentoMaximo`, `entregadoDelPago`): lo que se ve es lo que se guarda.
+
+/** Una renta pagada con 3 días de atraso y después corregida a 0: al dueño se le pagaron Q900 de más. */
+const CIERRE_DE_MAS = saldado(recibido(salida({ id: 'x1', numero: 51, placas: 'P-XXX111', costoDia: 300, cliente: ROSA }), 3));
+const PAGO_DE_MAS = pagoDuenoParaGuardar(
+  construirPagoDueno({
+    duenoId: 'd1', fecha: '2026-09-20', forma: 'transferencia', contratos: [alLeer(CIERRE_DE_MAS)], pagos: [], idsMarcados: ['x1'],
+  }),
+  { id: 'pg-x1', numero: 9, ahora: AHORA },
+);
+const X1_CORREGIDA = alLeer(saldado(recibido(CIERRE_DE_MAS, 0)));
+/** Y otra renta cerrada, de Q600, para tener qué marcar en el pago siguiente. */
+const X2_POR_PAGAR = cerrado('x2', { numero: 52, placas: 'P-XXX222', costoDia: 300, dias: 2 });
+
+const lecturaConPagoDeMas = ({ contratos = [X1_CORREGIDA, X2_POR_PAGAR], pagos = [PAGO_DE_MAS], costoSinLeer = [] } = {}) => ({
+  contratos: { datos: contratos, fallo: false, costoSinLeer },
+  pagos: { datos: pagos, fallo: false },
+  duenos: { datos: DUENOS, fallo: false },
+});
+
+/** Mario con los Q900 de más, sus marcadas (la renta de Q600) y el descuento que se pida. */
+function conDescuento(tecleado, { lectura = lecturaConPagoDeMas(), costoSinLeer = [] } = {}) {
+  const entrada = entradaDe(armarVista(lectura), 'Mario López Alvarado');
+  const marcadas = resumenDeMarcadas(entrada, new Set(entrada.cuenta.porPagar.map((c) => c.id)), costoSinLeer);
+  return { entrada, marcadas, r: resumenDelDescuento(entrada, marcadas, costoSinLeer, tecleado) };
+}
+
+test('el control de la cuenta de más: Q900 pagados de más, Q600 marcados, y el tope es lo marcado', () => {
+  const { entrada, marcadas, r } = conDescuento('');
+  assert.equal(totalPagadoDeMas(entrada.cuenta, []), 900);
+  assert.deepEqual(marcadas.ids, ['x2']);
+  assert.equal(marcadas.total, 600);
+  assert.equal(r.deMas, 900);
+  assert.equal(r.maximo, 600, 'no se descuenta más de lo que se está pagando, aunque sobren Q900');
+  assert.equal(r.maximo, descuentoMaximo(entrada.cuenta, [], marcadas.ids), 'el tope es el del núcleo, no uno propio');
+});
+
+test('resumenDelDescuento: sin pago de más NO se ofrece el campo, y no hay descuento que aplicar', () => {
+  // Sin el pago, la renta corregida es una renta por pagar normal: no hay nada pagado de más.
+  const { r } = conDescuento('500', { lectura: lecturaConPagoDeMas({ pagos: [] }) });
+  assert.equal(r.hay, false, 'un campo de descuento sin pago de más solo invitaría a borrar una deuda real');
+  assert.equal(r.deMas, 0);
+  assert.equal(r.descuento, 0, 'ni siquiera el que quedó tecleado de antes: el campo ya no está');
+  assert.equal(r.valido, true);
+  assert.equal(r.problema, null);
+  assert.equal(textoDelProblemaDelDescuento(r), '');
+});
+
+test('resumenDelDescuento: con pago de más se ofrece, y lo tecleado se lee TAL CUAL (no como cero)', () => {
+  const { r } = conDescuento('100');
+  assert.equal(r.hay, true);
+  assert.equal(r.descuento, 100, 'si esto se leyera como 0, él creería haber descontado Q100 y entregaría los Q600 completos');
+  assert.equal(r.valido, true);
+  assert.equal(r.problema, null);
+  assert.equal(r.entregar, 500, 'lo que entrega es lo marcado menos el descuento');
+});
+
+test('resumenDelDescuento: el campo vacío es CERO, no un descuento de uno ni un error', () => {
+  const { r } = conDescuento('');
+  assert.equal(r.hay, true);
+  assert.equal(r.descuento, 0);
+  assert.equal(r.valido, true);
+  assert.equal(r.problema, null);
+  assert.equal(r.entregar, 600, 'sin descuento se entrega todo lo marcado');
+});
+
+test('resumenDelDescuento: un cero TECLEADO es válido (el mensaje promete «de cero o más»)', () => {
+  const { r } = conDescuento('0');
+  assert.equal(r.valido, true, 'cero es un descuento válido: no descontar nada');
+  assert.equal(r.problema, null);
+  assert.equal(r.descuento, 0);
+  assert.equal(r.entregar, 600);
+});
+
+test('resumenDelDescuento: un descuento JUSTO en el tope se acepta; uno solo arriba del tope, no', () => {
+  const justo = conDescuento('600').r;
+  assert.equal(justo.valido, true, 'el tope se puede usar completo, no se queda a un quetzal');
+  assert.equal(justo.descuento, 600);
+  assert.equal(justo.entregar, 0, 'se le descuenta todo lo que se le iba a pagar');
+  const pasado = conDescuento('600.01').r;
+  assert.equal(pasado.valido, false);
+  assert.equal(pasado.problema, 'excede');
+});
+
+test('resumenDelDescuento: lo que no es un monto, o es negativo, es «ilegible» y NO enseña ninguna cifra', () => {
+  for (const malo of ['abc', '-5', '1,500', 'Q100']) {
+    const { r } = conDescuento(malo);
+    assert.equal(r.valido, false, malo);
+    assert.equal(r.problema, 'ilegible', malo);
+    assert.equal(r.descuento, 0, `${malo}: un valor ilegible no se convierte en un descuento de uno`);
+    assert.equal(r.entregar, null, `${malo}: no se enseña ninguna cifra hasta que se arregle`);
+  }
+});
+
+test('resumenDelDescuento: un descuento que pasa del tope es «excede», no se aplica a medias', () => {
+  const { r } = conDescuento('999999');
+  assert.equal(r.valido, false);
+  assert.equal(r.problema, 'excede');
+  assert.equal(r.descuento, 0, 'no se recorta al tope sin decirlo: se rechaza y él decide');
+  assert.equal(r.entregar, null);
+});
+
+test('textoDelProblemaDelDescuento: dice QUÉ pasó, y el de «excede» trae las tres cifras', () => {
+  assert.equal(
+    textoDelProblemaDelDescuento(conDescuento('abc').r),
+    'El descuento tiene que ser un monto de cero o más.',
+  );
+  const excede = textoDelProblemaDelDescuento(conDescuento('999999').r);
+  assert.equal(
+    excede,
+    'El descuento no puede pasar de Q600.00: a este dueño se le pagó de más Q900.00 y las rentas marcadas suman Q600.00.',
+  );
+  assert.equal(textoDelProblemaDelDescuento(conDescuento('100').r), '', 'sin problema, ni una palabra');
+  assert.equal(textoDelProblemaDelDescuento({ problema: null }), '');
+});
+
+test('resumenDeMarcadas: una diferencia con dos rentas se cae completa si a UNA le falta el costo', () => {
+  // Dos rentas pagadas en un mismo comprobante y las dos corregidas después: una sola diferencia con dos
+  // contratos. Si el costo de una no se pudo leer, la diferencia entera queda fuera de lo que se paga: no
+  // se paga media diferencia con una cifra que no se conoce. (`.some` y no `.every`.)
+  const cierreA = saldado(recibido(salida({ id: 'y1', numero: 61, placas: 'P-YYY111', costoDia: 300, cliente: ROSA }), 0));
+  const cierreB = saldado(recibido(salida({ id: 'y2', numero: 62, placas: 'P-YYY222', costoDia: 300, cliente: ROSA }), 0));
+  const pago = pagoDuenoParaGuardar(
+    construirPagoDueno({
+      duenoId: 'd1', fecha: '2026-09-20', forma: 'transferencia', contratos: [alLeer(cierreA), alLeer(cierreB)], pagos: [], idsMarcados: ['y1', 'y2'],
+    }),
+    { id: 'pg-y', numero: 10, ahora: AHORA },
+  );
+  const crecidas = [alLeer(saldado(recibido(cierreA, 2))), alLeer(saldado(recibido(cierreB, 2)))];
+  const conTodo = (costoSinLeer) => {
+    const entrada = entradaDe(armarVista(lecturaConPagoDeMas({ contratos: crecidas, pagos: [pago], costoSinLeer })), 'Mario López Alvarado');
+    const todas = new Set([...entrada.cuenta.porPagar.map((c) => c.id), ...entrada.cuenta.diferencias.map((d) => d.clave)]);
+    return resumenDeMarcadas(entrada, todas, costoSinLeer);
+  };
+  assert.deepEqual(conTodo([]).ids, ['dif:y1+y2'], 'con los dos costos legibles, la diferencia se puede pagar');
+  assert.equal(conTodo([]).total, 1200);
+  assert.deepEqual(conTodo(['y1']).ids, [], 'con UNA sola ilegible, la diferencia entera queda fuera');
+  assert.equal(conTodo(['y1']).total, 0);
 });
