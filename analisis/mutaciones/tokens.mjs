@@ -5,6 +5,12 @@
 
 export function regionesDeCodigo(src) {
   const esCodigo = new Uint8Array(src.length); // 1 = código
+  // Los textos que están en posición de CÓDIGO, con su comilla. Hace falta tenerlos aparte: por dentro un
+  // texto no es código, igual que un comentario, así que «no es código» no alcanza para distinguirlos. Sin
+  // esta lista, el generador metía errores en los textos que viven DENTRO de un comentario —mutantes que no
+  // se ejecutan nunca y por lo tanto no se pueden matar—, y eso bajaba el puntaje de a gratis
+  // (17 de los 2,108 de las dos pantallas de dinero, hallado el 23 de noviembre de 2026).
+  const textos = [];
   let i = 0;
   // pila para plantillas anidadas: cada entrada es la profundidad de llaves dentro de un ${}
   const plantillas = [];
@@ -37,6 +43,7 @@ export function regionesDeCodigo(src) {
     // texto con comilla simple o doble
     if (c === "'" || c === '"') {
       const cierre = c;
+      const inicio = i;
       i++;
       while (i < src.length) {
         if (src[i] === '\\') { i += 2; continue; }
@@ -44,6 +51,7 @@ export function regionesDeCodigo(src) {
         if (src[i] === '\n') break; // texto sin cerrar: no se arrastra el archivo entero
         i++;
       }
+      textos.push({ inicio, fin: i, comilla: cierre });
       continue;
     }
     // plantilla: el texto no es código, lo de dentro de ${} sí
@@ -62,13 +70,14 @@ export function regionesDeCodigo(src) {
             if (e === '/' && f === '/') { while (i < src.length && src[i] !== '\n') i++; continue; }
             if (e === '/' && f === '*') { i += 2; while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) i++; i += 2; continue; }
             if (e === "'" || e === '"') {
-              const cierre2 = e; i++;
+              const cierre2 = e; const inicio2 = i; i++;
               while (i < src.length) {
                 if (src[i] === '\\') { i += 2; continue; }
                 if (src[i] === cierre2) { i++; break; }
                 if (src[i] === '\n') break;
                 i++;
               }
+              textos.push({ inicio: inicio2, fin: i, comilla: cierre2 });
               continue;
             }
             if (e === '`') {
@@ -114,7 +123,7 @@ export function regionesDeCodigo(src) {
     esCodigo[i] = 1;
     i++;
   }
-  return esCodigo;
+  return { esCodigo, textos };
 }
 
 /** El número de renglón (desde 1) de cada posición. */

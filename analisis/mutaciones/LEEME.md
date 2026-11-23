@@ -61,3 +61,20 @@ Nada usa el shell: `spawn` con arreglo de argumentos, así que no hay nada que s
 Que una prueba se ponga roja cuando se rompe una función dice que *si alguien la rompe de las maneras que
 el generador sabe romper, alguien se da cuenta*. **No** dice que la función esté correcta: un error que ya
 está en el código, y que nadie especificó, no lo ve.
+
+## Tropiezos del propio arnés (porque el informe tiene que ser honesto sobre sí mismo)
+
+**23 de noviembre de 2026 — el operador de textos tenía dos defectos, y se cancelaban mal.** Buscaba los
+textos con una expresión regular sobre el archivo (`/'...'/`) en vez de pedírselos al tokenizador:
+
+1. **Metía errores en los textos que viven DENTRO de un comentario.** Un comentario no se ejecuta, así que
+   esos mutantes no se podían matar nunca: eran sobrevivientes garantizados y **bajaban el puntaje de a
+   gratis** (17 en las dos pantallas de dinero).
+2. **Leía como un texto el HUECO ENTRE dos textos pegados.** En
+   `{ '&': '&amp;', '<': '&lt;' }` tomaba `': '` por un texto y lo vaciaba, lo que deja código roto: esos
+   mutantes mueren siempre y **subían el puntaje de a gratis** (65 en las mismas dos pantallas).
+
+Los dos juntos movían el número en direcciones contrarias, que es la peor forma de estar mal: parecía
+plausible. Ahora los textos salen de `regionesDeCodigo`, que ya sabe distinguir un comentario de un texto
+porque recorre el archivo una sola vez; y las mediciones de las dos pantallas se repitieron completas con
+el generador arreglado.

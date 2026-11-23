@@ -40,7 +40,7 @@ const PALABRAS = [
 const letra = (c) => /[A-Za-z0-9_$]/.test(c || '');
 
 export function generar(src, archivo) {
-  const codigo = regionesDeCodigo(src);
+  const { esCodigo: codigo, textos } = regionesDeCodigo(src);
   const reng = renglones(src);
   const lineas = src.split('\n');
   const esImport = new Set();
@@ -158,15 +158,17 @@ export function generar(src, archivo) {
     fuera.push({ archivo, pos: desde, viejo: t, nuevo: '', renglon: k + 1, tipo: 'borrar-orden' });
   });
 
-  // 7. Textos que no están vacíos -> vacíos (solo los de comilla simple, que es lo que usa el proyecto)
-  const reTexto = /'((?:[^'\\\n]|\\.){2,})'/g;
-  while ((m = reTexto.exec(src)) !== null) {
-    const i = m.index;
-    // la comilla de apertura no es código (es texto), pero la posición anterior sí debería serlo
-    if (codigo[i]) continue;      // si el tokenizador la marcó como código, es que algo no cuadra
-    if (esImport.has(reng[i])) continue;
-    if (/^[.#]/.test(m[1])) continue;        // selectores de CSS: cambiarlos es ruido de pintado
-    fuera.push({ archivo, pos: i, viejo: m[0], nuevo: "''", renglon: reng[i], tipo: 'texto' });
+  // 7. Textos que no están vacíos -> vacíos (solo los de comilla simple, que es lo que usa el proyecto).
+  //    Salen de la lista del tokenizador, no de una expresión regular sobre el archivo: así NO se toca un
+  //    texto que vive dentro de un comentario, que no se ejecuta y por lo tanto nunca podría morir.
+  for (const t of textos) {
+    if (t.comilla !== "'") continue;
+    const crudo = src.slice(t.inicio, t.fin);
+    const dentro = crudo.slice(1, -1);
+    if (dentro.length < 2) continue;
+    if (esImport.has(reng[t.inicio])) continue;
+    if (/^[.#]/.test(dentro)) continue;      // selectores de CSS: cambiarlos es ruido de pintado
+    fuera.push({ archivo, pos: t.inicio, viejo: crudo, nuevo: "''", renglon: reng[t.inicio], tipo: 'texto' });
   }
 
   // Sin repetidos (misma posición y mismo cambio)
