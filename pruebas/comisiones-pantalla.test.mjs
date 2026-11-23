@@ -94,7 +94,7 @@ test('una lectura fallida de los EMPLEADOS no impide dibujar lo que se debe: sal
   assert.equal(ana1.sinRegistro, false, 'no se sabe si está en la lista: no se afirma que no');
   assert.doesNotMatch(htmlListaDeComisiones(vista), /No está en la lista de empleados/);
   assert.equal(vista.total, 140);
-  assert.match(texto(htmlListaDeComisiones(vista)), new RegExp(MENSAJE_FALLO_EMPLEADOS.slice(0, 40)));
+  assert.ok(texto(htmlListaDeComisiones(vista)).includes(MENSAJE_FALLO_EMPLEADOS), 'el mensaje COMPLETO');
 });
 
 test('con la lista de empleados LEÍDA, una renta enlazada a alguien que ya no está en ella sí dice «No está en la lista de empleados»', () => {
@@ -360,11 +360,11 @@ test('la lista sin nada dice que no hay rentas ni empleados, no «no le debes na
 test('la lista de una lectura fallida no dibuja NINGUNA cifra: una barra roja y cómo volver a leer', () => {
   const html = htmlListaDeComisiones(armarVistaDeComisiones({ ...lecturaOk({ contratos: [firme('a1')] }), pagos: { datos: null, fallo: true } }));
   assert.match(html, /barra-lectura-fallida/);
-  assert.match(texto(html), new RegExp(MENSAJE_FALLO_PAGOS_DE_COMISION.slice(0, 40)));
+  assert.ok(texto(html).includes(MENSAJE_FALLO_PAGOS_DE_COMISION), 'el mensaje COMPLETO');
   assert.match(html, /data-cm="reintentar"/);
   assert.doesNotMatch(html, /Q\d/, 'ni una cifra');
   assert.doesNotMatch(html, /<table/);
-  assert.match(texto(htmlFalloDeComisiones({ problemas: ['rentas'] })), new RegExp(MENSAJE_FALLO_RENTAS.slice(0, 30)));
+  assert.ok(texto(htmlFalloDeComisiones({ problemas: ['rentas'] })).includes(MENSAJE_FALLO_RENTAS), 'el mensaje COMPLETO');
 });
 
 test('rutaDeComisiones escapa la clave: un nombre con «/» o espacios viaja en una sola pieza de la dirección', () => {

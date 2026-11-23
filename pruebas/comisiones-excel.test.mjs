@@ -518,7 +518,13 @@ test('si falla la lectura de las rentas, de los pagos o de ambos: NO se arma ni 
   }
   const ambas = { ...escenario(), contratos: { datos: null, fallo: true }, pagos: { datos: null, fallo: true } };
   const { orden, deps } = conEspias({ lectura: ambas });
-  await assert.rejects(() => bajarLasCuentasEnExcel(deps), new RegExp(`${MENSAJE_FALLO_RENTAS.slice(0, 30)}[\\s\\S]*${MENSAJE_FALLO_PAGOS_DE_COMISION.slice(0, 30)}`));
+  // Los dos mensajes COMPLETOS, y en ese orden. Antes esto era un RegExp armado con `MENSAJE.slice(0, 30)`:
+  // si el mensaje se quedaba vacío, el patrón quedaba vacío y hacía juego con cualquier cosa (26 oct / 23 nov 2026).
+  await assert.rejects(() => bajarLasCuentasEnExcel(deps), (e) => {
+    const rentas = e.message.indexOf(MENSAJE_FALLO_RENTAS);
+    const pagos = e.message.indexOf(MENSAJE_FALLO_PAGOS_DE_COMISION);
+    return rentas >= 0 && pagos > rentas;
+  });
   assert.deepEqual(sinCredencial(orden), ['leer']);
 });
 
@@ -534,7 +540,7 @@ test('las frases del fallo son las mismas de la pantalla (una sola fuente), y la
   const vista = armarVistaDeComisiones(lecturaFallida('contratos'));
   assert.deepEqual(frasesDelFallo(vista), [MENSAJE_FALLO_RENTAS]);
   const html = htmlFalloDeComisiones(vista);
-  assert.match(html, new RegExp(MENSAJE_FALLO_RENTAS.slice(0, 40)));
+  assert.ok(html.includes(MENSAJE_FALLO_RENTAS), 'el mensaje COMPLETO');
   assert.doesNotMatch(html, /data-cm="bajar"|Excel/);
   assert.doesNotMatch(htmlListaDeComisiones(vista), /data-cm="bajar"|Excel/);
 });
@@ -725,7 +731,7 @@ test('JUNTO AL BOTÓN se dice lo que el archivo es y lo que no: el respaldo del 
 test('un fallo al bajar se queda escrito en la página, en rojo, en la lista y en la ficha; sin fallo no hay barra', () => {
   const vista = armarVistaDeComisiones(escenario());
   const lista = htmlListaDeComisiones(vista, { mensajeBajar: MENSAJE_BAJAR_FALLO });
-  assert.match(lista, new RegExp(`<div class="barra-lectura-fallida" role="alert"><p>${MENSAJE_BAJAR_FALLO.slice(0, 30)}`));
+  assert.ok(lista.includes(`<div class="barra-lectura-fallida" role="alert"><p>${MENSAJE_BAJAR_FALLO}`), 'la barra, y el mensaje COMPLETO adentro');
   assert.doesNotMatch(htmlListaDeComisiones(vista), /No se bajó nada/);
   const enFicha = ficha('Ana López', { ui: { mensajeBajar: MENSAJE_BAJAR_SIN_SESION } });
   assert.match(enFicha, /role="alert"><p>No se bajó nada: la sesión del área de dinero se cerró/);

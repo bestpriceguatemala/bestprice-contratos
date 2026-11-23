@@ -50,7 +50,7 @@ test('una lista que de verdad está vacía invita a agregar el primero', () => {
 test('una lectura FALLIDA no dice «no hay empleados» ni invita a agregar el primero: no se sabe, y repetiría un código', () => {
   const html = htmlListaDeEmpleados([], { fallo: true });
   assert.match(html, /barra-lectura-fallida/);
-  assert.match(texto(html), new RegExp(MENSAJE_FALLO_LISTA.slice(0, 40)));
+  assert.ok(texto(html).includes(MENSAJE_FALLO_LISTA), 'la barra roja lleva el mensaje COMPLETO');
   assert.doesNotMatch(texto(html), /Todavía no hay empleados/);
   assert.doesNotMatch(html, /Agregar el primero/);
   assert.match(html, /data-em="reintentar"/, 'y se puede volver a leer');
