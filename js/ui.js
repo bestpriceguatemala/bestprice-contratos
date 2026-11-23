@@ -20,6 +20,50 @@ export function dinero(n) {
   return `${negativo ? '-' : ''}Q${texto}`;
 }
 
+/**
+ * El monto que escribió una persona, como número, o `NaN` si lo que escribió no es un monto.
+ *
+ * Decisión del dueño, 23 de noviembre de 2026: *«Lo escribo normal y que se pongan las comas solas.»* Para
+ * que el campo pueda MOSTRAR la coma de los miles tiene que ser un campo de texto (un `type="number"` no
+ * admite comas: el navegador las borra), y desde que es de texto la coma llega hasta aquí. Así que esta
+ * función la quita, igual que la quitaba el navegador: medido en Chrome, teclear «1,500» en el campo
+ * viejo se leía «1500» y «Q1500» se leía «1500». Lo que él ya podía escribir sigue valiendo lo mismo.
+ *
+ * Perdona lo que él escribe de verdad: la Q de adelante, los espacios y las comas de los miles. No perdona
+ * letras ni dos puntos decimales: eso no es un monto y decirlo es mejor que adivinar una cifra de dinero.
+ *
+ * **El punto es siempre el punto decimal**, como en toda la pantalla y como en su Excel: «1.500» son uno
+ * punto cinco, no mil quinientos. No se adivina por el número de cifras — «1.500» y «1.50» se escriben casi
+ * igual y significan cosas muy distintas. Lo que protege de ese resbalón es que el campo se formatea solo
+ * al salir: escribe «1.500» y ve «1.50» ahí mismo, antes de guardar nada.
+ *
+ * Un negativo se devuelve tal cual (−5 es −5): si un campo no admite negativos, eso lo decide el campo, y
+ * así puede decir «un monto de cero o más» en vez de «eso no es un número».
+ *
+ * Como `hora24`, esta función es la que decide, y se llama al LEER el formulario, no solo al salir del
+ * campo: lo que se guarda no puede depender de que un evento del navegador haya alcanzado a correr.
+ */
+export function montoTecleado(texto) {
+  const cuerpo = String(texto ?? '').trim().replace(/^[qQ]\s*/, '').replace(/[\s,]/g, '');
+  if (!cuerpo) return NaN;
+  if (!/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(cuerpo)) return NaN;
+  return Number(cuerpo);
+}
+
+/**
+ * El monto como se escribe aquí, para ponerlo DE VUELTA en el campo: 1500 -> '1,500.00'. Sin la Q, que el
+ * campo no lleva adentro. Con los dos decimales que se van a usar de verdad: si escribe «1500.555» ve
+ * «1,500.56», que es lo que se va a cobrar.
+ *
+ * Lo que NO es un monto se devuelve tal como lo escribió. Borrarle lo que tecleó para dejarle el campo en
+ * blanco le esconde el error en vez de enseñárselo: tiene que poder ver qué escribió para corregirlo.
+ */
+export function montoParaElCampo(valor) {
+  const n = montoTecleado(valor);
+  if (!Number.isFinite(n)) return String(valor ?? '');
+  return n.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
 /** Una fecha ISO ('2026-08-25') en el formato que lee el dueño: '25 ago 2026'. */

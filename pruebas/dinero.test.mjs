@@ -3011,13 +3011,32 @@ test('resumenDelDescuento: un descuento JUSTO en el tope se acepta; uno solo arr
 });
 
 test('resumenDelDescuento: lo que no es un monto, o es negativo, es «ilegible» y NO enseña ninguna cifra', () => {
-  for (const malo of ['abc', '-5', '1,500', 'Q100']) {
+  for (const malo of ['abc', '-5', '1..5', '12 34x']) {
     const { r } = conDescuento(malo);
     assert.equal(r.valido, false, malo);
     assert.equal(r.problema, 'ilegible', malo);
     assert.equal(r.descuento, 0, `${malo}: un valor ilegible no se convierte en un descuento de uno`);
     assert.equal(r.entregar, null, `${malo}: no se enseña ninguna cifra hasta que se arregle`);
   }
+});
+
+test('resumenDelDescuento: el monto se escribe NORMAL y la coma de los miles y la Q se perdonan', () => {
+  // Decisión del dueño del 23 de noviembre de 2026: «Lo escribo normal y que se pongan las comas solas».
+  // Desde que el campo es de texto (para poder MOSTRAR la coma), la coma llega hasta aquí: antes la
+  // borraba el navegador. Lo que él ya podía escribir tiene que seguir valiendo lo mismo.
+  for (const escrito of ['500', '500.00', 'Q500', 'Q 500.00', ' 500 ']) {
+    const { r } = conDescuento(escrito);
+    assert.equal(r.descuento, 500, escrito);
+    assert.equal(r.valido, true, escrito);
+  }
+  // Y con coma: «1,500» son mil quinientos, así que pasa del tope de Q600 — «excede», no «ilegible».
+  const conComa = conDescuento('1,500').r;
+  assert.equal(conComa.problema, 'excede', 'la coma se lee: son 1500, no un error de escritura');
+  const tope = conDescuento('Q600.00').r;
+  assert.equal(tope.valido, true);
+  assert.equal(tope.descuento, 600);
+  // El punto es SIEMPRE el punto decimal, como en toda la pantalla: «1.500» son uno punto cinco.
+  assert.equal(conDescuento('1.500').r.descuento, 1.5, 'no se adivina que quiso decir mil quinientos');
 });
 
 test('resumenDelDescuento: un descuento que pasa del tope es «excede», no se aplica a medias', () => {
@@ -3064,4 +3083,22 @@ test('resumenDeMarcadas: una diferencia con dos rentas se cae completa si a UNA 
   assert.equal(conTodo([]).total, 1200);
   assert.deepEqual(conTodo(['y1']).ids, [], 'con UNA sola ilegible, la diferencia entera queda fuera');
   assert.equal(conTodo(['y1']).total, 0);
+});
+
+test('los campos donde él escribe un monto son de TEXTO: si no, la coma no se puede ni mostrar', () => {
+  // Un `type="number"` no admite comas — el navegador las borra — así que el campo nunca podría enseñar
+  // «1,500.00». Esta prueba existe para que nadie los devuelva a `type="number"` creyendo que es más
+  // estricto: la validación del monto no la hace el navegador, la hace `montoTecleado` + `resumenDelDescuento`.
+  const lectura = lecturaConPagoDeMas();
+  const conDescuentoAbierto = fichaDe('Mario López Alvarado', {
+    vista: armarVista(lectura),
+    lectura,
+    ui: uiVacia({ pagando: true, marcados: new Set(['x2']) }),
+  });
+  assert.match(conDescuentoAbierto, /<input type="text" id="dn-descuento"[^>]*inputmode="decimal"/, 'el descuento');
+  assert.doesNotMatch(conDescuentoAbierto, /id="dn-descuento"[^>]*type="number"/);
+
+  const conCostoAbierto = fichaDe('Mario López Alvarado', { ui: uiVacia({ anotando: 'm5' }) });
+  assert.match(conCostoAbierto, /<input type="text" id="dn-costo-input"[^>]*inputmode="decimal"/, 'el costo por día');
+  assert.doesNotMatch(conCostoAbierto, /id="dn-costo-input"[^>]*type="number"/);
 });

@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  dinero, fecha, hora24, enterEnviariaElFormulario, bloquearEnterEnElFormulario, htmlAvisoRepetido,
+  dinero, fecha, hora24, montoTecleado, montoParaElCampo, enterEnviariaElFormulario, bloquearEnterEnElFormulario, htmlAvisoRepetido,
 } from '../js/ui.js';
 
 test('dinero() da separador de miles y dos decimales', () => {
@@ -226,4 +226,79 @@ test('htmlAvisoRepetido: lo escrito en la ficha entra escapado, nunca como HTML'
   });
   assert.doesNotMatch(html, /<img/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt; &amp; &quot;Comillas&quot;/);
+});
+
+// ---------------------------------------------------------------------------
+// El monto que escribe una persona: «lo escribo normal y que se pongan las comas solas»
+// ---------------------------------------------------------------------------
+// Decisión del dueño, 23 de noviembre de 2026. Para que un campo pueda MOSTRAR la coma de los miles tiene
+// que ser de texto (un `type="number"` no admite comas: el navegador las borra), y desde que es de texto la
+// coma llega hasta el lector. Medido en Chrome antes de cambiar nada: en el campo viejo, teclear «1,500» se
+// leía «1500» y «Q1500» se leía «1500». Lo que él ya podía escribir tiene que seguir valiendo lo mismo.
+
+test('montoTecleado: lo que él escribe normal', () => {
+  assert.equal(montoTecleado('1500'), 1500);
+  assert.equal(montoTecleado('1500.50'), 1500.5);
+  assert.equal(montoTecleado('0'), 0);
+  assert.equal(montoTecleado('300'), 300);
+});
+
+test('montoTecleado: perdona la coma de los miles, la Q de adelante y los espacios', () => {
+  assert.equal(montoTecleado('1,500'), 1500, 'lo mismo que hacía el navegador con el campo de número');
+  assert.equal(montoTecleado('1,500.50'), 1500.5);
+  assert.equal(montoTecleado('Q1500'), 1500);
+  assert.equal(montoTecleado('Q 1,500.00'), 1500);
+  assert.equal(montoTecleado('q1,500'), 1500, 'la q minúscula también: es la misma tecla sin mayúscula');
+  assert.equal(montoTecleado(' 1500 '), 1500);
+});
+
+test('montoTecleado: el punto es SIEMPRE el punto decimal, como en toda la pantalla y como en su Excel', () => {
+  // «1.500» y «1.50» se escriben casi igual y significan cosas muy distintas: adivinar por el número de
+  // cifras pondría mil quinientos donde él escribió uno cincuenta. Lo que lo protege es que el campo se
+  // formatea solo al salir, y ve «1.50» ahí mismo.
+  assert.equal(montoTecleado('1.500'), 1.5);
+  assert.equal(montoTecleado('1.50'), 1.5);
+  assert.equal(montoParaElCampo('1.500'), '1.50', 'y se lo enseña antes de guardar nada');
+});
+
+test('montoTecleado: lo que NO es un monto es NaN, no un cero ni una cifra adivinada', () => {
+  for (const malo of ['', '   ', 'abc', '1..5', '1.2.3', '12x', 'Q', '-', '.', 'uno']) {
+    assert.ok(Number.isNaN(montoTecleado(malo)), `«${malo}» no es un monto`);
+  }
+  assert.ok(Number.isNaN(montoTecleado(null)));
+  assert.ok(Number.isNaN(montoTecleado(undefined)));
+});
+
+test('montoTecleado: un negativo se devuelve tal cual; si un campo no los admite, lo decide el campo', () => {
+  // Así el campo puede decir «un monto de cero o más» en vez de «eso no es un número», que no es lo mismo.
+  assert.equal(montoTecleado('-5'), -5);
+  assert.equal(montoTecleado('-1,500.50'), -1500.5);
+  assert.equal(montoTecleado('+300'), 300);
+});
+
+test('montoParaElCampo: pone las comas y los dos decimales que se van a usar de verdad', () => {
+  assert.equal(montoParaElCampo('1500'), '1,500.00');
+  assert.equal(montoParaElCampo('1,500'), '1,500.00');
+  assert.equal(montoParaElCampo('Q1500'), '1,500.00');
+  assert.equal(montoParaElCampo('300'), '300.00');
+  assert.equal(montoParaElCampo('0'), '0.00');
+  assert.equal(montoParaElCampo(1500), '1,500.00', 'también un número, no solo texto');
+  assert.equal(montoParaElCampo('1500.555'), '1,500.56', 'los dos decimales que se van a cobrar');
+  assert.equal(montoParaElCampo('-5'), '-5.00');
+});
+
+test('montoParaElCampo: lo que no es un monto se devuelve TAL COMO lo escribió, no en blanco', () => {
+  // Borrarle lo que tecleó le esconde el error en vez de enseñárselo: tiene que ver qué escribió.
+  assert.equal(montoParaElCampo('abc'), 'abc');
+  assert.equal(montoParaElCampo('1..5'), '1..5');
+  assert.equal(montoParaElCampo(''), '');
+  assert.equal(montoParaElCampo(null), '');
+});
+
+test('montoParaElCampo no cambia lo que ya estaba bien: formatear dos veces da lo mismo', () => {
+  for (const escrito of ['1500', '1,500.00', '0', '300.50', '1,234,567.89']) {
+    const unaVez = montoParaElCampo(escrito);
+    assert.equal(montoParaElCampo(unaVez), unaVez, escrito);
+    assert.equal(montoTecleado(unaVez), montoTecleado(escrito), `${escrito}: y sigue valiendo lo mismo`);
+  }
 });

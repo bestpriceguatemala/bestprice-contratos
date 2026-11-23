@@ -48,7 +48,7 @@ import {
   MENSAJE_COSTO_SIN_DINERO, MENSAJE_COSTO_SIN_VALOR, MENSAJE_COSTO_YA_ANOTADO, MENSAJE_COSTO_SIN_COMPROBAR,
   MENSAJE_MIGRAR_SIN_DINERO,
 } from '../datos.js';
-import { dinero, fecha, aviso } from '../ui.js';
+import { dinero, fecha, aviso, montoTecleado, montoParaElCampo } from '../ui.js';
 import { mostrar } from '../router.js';
 import { pintarComprobante } from './comprobante.js';
 
@@ -591,7 +591,9 @@ export function resumenDelDescuento(entrada, marcadas, costoSinLeer, tecleado = 
     };
   }
   const texto = String(tecleado ?? '').trim();
-  const pedido = texto === '' ? 0 : Number(texto);
+  // `montoTecleado` (ui.js) perdona la coma de los miles y la Q de adelante, que es como él escribe un monto;
+  // el campo vacío es cero, sin descuento (decisión del 23 de noviembre de 2026).
+  const pedido = texto === '' ? 0 : montoTecleado(texto);
   const ilegible = !Number.isFinite(pedido) || pedido < 0;
   const descuento = ilegible ? 0 : q(pedido);
   const valido = !ilegible && descuento <= maximo;
@@ -1001,7 +1003,7 @@ function htmlCostoDia(contrato, costo, ui) {
   // que no se pudo LEER podría ser uno real, y escribir encima lo pisaría.
   if (ui.anotando === contrato.id) {
     return `<span class="dn-costo-edicion">
-      <input type="number" id="dn-costo-input" class="dn-costo-campo" min="0" step="0.01" inputmode="decimal" placeholder="Q por día"
+      <input type="text" id="dn-costo-input" class="dn-costo-campo" inputmode="decimal" autocomplete="off" placeholder="Q por día"
         aria-label="Costo por día que le pagas al dueño">
       <button type="button" class="btn dn-boton-chico" data-dn="guardar-costo" data-id="${esc(contrato.id)}">Guardar</button>
       <button type="button" class="btn dn-boton-chico" data-dn="cancelar-costo">Cancelar</button>
@@ -1084,7 +1086,7 @@ function htmlDescuento(descuento, ui) {
   return `
       <div class="dn-descuento">
         <label class="carro-campo">Descontar lo que ya se le pagó de más
-          <input type="number" id="dn-descuento" class="dn-descuento-campo" min="0" max="${esc(descuento.maximo)}" step="0.01" inputmode="decimal"
+          <input type="text" id="dn-descuento" class="dn-descuento-campo" inputmode="decimal" autocomplete="off"
             placeholder="Q 0.00" value="${esc(ui.descuento ?? '')}">
         </label>
         <p class="dn-explica-chica dn-sin-margen">Se le pagó de más ${esc(dinero(descuento.deMas))}. Puedes descontar hasta ${esc(dinero(descuento.maximo))} de este pago: esa parte no la entregas, y las rentas quedan pagadas igual.</p>
@@ -1367,8 +1369,6 @@ export function parchearMarcado(raiz, resumenMarcado, { pagando = false, descuen
     poner('#dn-descuento-problema', problema);
     const aviso = raiz.querySelector('#dn-descuento-problema');
     if (aviso) aviso.hidden = !problema;
-    const campo = raiz.querySelector('#dn-descuento');
-    if (campo) campo.max = String(descuento.maximo);
   }
 }
 
@@ -1662,7 +1662,7 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     if (!contrato || !campo) return;
     ui.ocupado = true;
     try {
-      const costo = await anotarCostoDelDueno(contrato, campo.value);
+      const costo = await anotarCostoDelDueno(contrato, montoTecleado(campo.value));
       const leida = lector.actual;
       if (!leida) return;
       // Se pone en memoria con el mismo puente que usa la lectura: queda como
@@ -1884,6 +1884,19 @@ async function pintarCuentas(contenedor, claveDeFicha) {
     if (ev.target.id !== 'dn-descuento') return;
     ui.descuento = ev.target.value;
     actualizarMarcado();
+  });
+
+  // Las comas se ponen SOLAS al salir del campo: él lo escribe normal («1500») y ve «1,500.00», con los dos
+  // decimales que se van a usar de verdad. Decisión del 23 de noviembre de 2026. Esto es solo lo que se VE:
+  // lo que se guarda se vuelve a leer con `montoTecleado` al leer el formulario, nunca al salir del campo,
+  // porque un evento del navegador puede no alcanzar a correr (la misma razón que `hora24`).
+  raiz.addEventListener('change', (ev) => {
+    if (ev.target.id !== 'dn-descuento' && ev.target.id !== 'dn-costo-input') return;
+    ev.target.value = montoParaElCampo(ev.target.value);
+    if (ev.target.id === 'dn-descuento') {
+      ui.descuento = ev.target.value;
+      actualizarMarcado();
+    }
   });
 
   raiz.addEventListener('keydown', (ev) => {
