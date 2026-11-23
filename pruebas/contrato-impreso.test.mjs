@@ -2412,3 +2412,26 @@ test('hojaContrato: las que se pueden dejar en blanco son exactamente las nueve 
   const { camposQueSePuedenDejarEnBlanco } = await import('../js/nucleo/hojaContrato.js');
   assert.deepEqual(camposQueSePuedenDejarEnBlanco().map((c) => c.id).sort(), [...LAS_NUEVE].sort());
 });
+
+test('un vencimiento guardado que no se entiende sale EN BLANCO en el papel, y se avisa', () => {
+  // Desde el 23 de noviembre de 2026 «Sacar carro» ya no guarda otra cosa, pero los contratos de antes
+  // pueden traer cualquier texto: era un campo libre. Una fecha inventada en un contrato firmado es peor
+  // que una casilla vacía, así que no se imprime y se dice por qué.
+  const malo = armarContratoImpreso(entrada({ contrato: contrato({ tarjetas: [{ ...TARJETAS[0], vencimiento: 'abril 30' }] }) }));
+  assert.equal(malo.valores.tarjeta1Vence, '');
+  assert.ok(
+    malo.avisos.some((a) => /Tarjeta 1: el vencimiento guardado \(«abril 30»\) no se entiende/.test(a)),
+    malo.avisos.join('\n'),
+  );
+
+  // Uno guardado a la antigua pero legible se acomoda solo: el papel lleva «04/30».
+  const antiguo = armarContratoImpreso(entrada({ contrato: contrato({ tarjetas: [{ ...TARJETAS[0], vencimiento: '0430' }] }) }));
+  assert.equal(antiguo.valores.tarjeta1Vence, '04/30');
+  assert.ok(!antiguo.avisos.some((a) => /vencimiento/.test(a)), antiguo.avisos.join('\n'));
+
+  // Y una tarjeta sin vencimiento anotado no es un error: no se avisa nada.
+  const sinNada = armarContratoImpreso(entrada({ contrato: contrato({ tarjetas: [{ ...TARJETAS[0], vencimiento: '' }] }) }));
+  assert.equal(sinNada.valores.tarjeta1Vence, '');
+  assert.ok(!sinNada.avisos.some((a) => /vencimiento/.test(a)));
+  assert.ok(!armarContratoImpreso(entrada()).avisos.some((a) => /vencimiento/.test(a)), 'ni el contrato normal');
+});

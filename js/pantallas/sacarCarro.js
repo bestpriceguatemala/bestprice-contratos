@@ -37,7 +37,7 @@ import {
   cargarDuenos, guardarDueno, cargarEmpleados, CODIGO_RESERVACION_CAMBIO, altaConIdFijo, nuevoIdCliente, nuevoIdDueno,
 } from '../datos.js';
 import {
-  dinero, fecha, aviso, hora24, htmlAvisoRepetido,
+  dinero, fecha, aviso, hora24, vencimientoTarjeta, htmlAvisoRepetido,
 } from '../ui.js';
 import { textoAvisoSobrecobro } from './recibirCarro.js';
 import { dejarTraspaso, rutaDeImprimir } from './traspasoDeTarjetas.js';
@@ -523,7 +523,10 @@ export function lectorDeCampos(el) {
 export function leerTarjetasDe({ val, texto, num, marcado }) {
   const tarjetas = [{
     ultimos4: ultimos4Digitos(val('sc-t1-numero')),
-    vencimiento: texto('sc-t1-vencimiento'),
+    // Pasa por `vencimientoTarjeta` al LEER, y no solo al salir del campo: lo que se guarda no puede
+    // depender de que un evento del navegador haya alcanzado a correr. Lo que no es un mes y un año se
+    // guarda VACÍO, nunca tal cual: iría derecho al contrato impreso como si fuera una fecha de verdad.
+    vencimiento: vencimientoTarjeta(texto('sc-t1-vencimiento')),
     banco: texto('sc-t1-banco'),
     autorizacion: texto('sc-t1-autorizacion'),
     montoAutorizado: num('sc-t1-monto'),
@@ -531,7 +534,7 @@ export function leerTarjetasDe({ val, texto, num, marcado }) {
   if (marcado('sc-t2-agregar')) {
     tarjetas.push({
       ultimos4: ultimos4Digitos(val('sc-t2-numero')),
-      vencimiento: texto('sc-t2-vencimiento'),
+      vencimiento: vencimientoTarjeta(texto('sc-t2-vencimiento')),
       banco: texto('sc-t2-banco'),
       autorizacion: texto('sc-t2-autorizacion'),
       montoAutorizado: num('sc-t2-monto'),
@@ -1019,6 +1022,37 @@ export function htmlAvisoDeDocumentoEnAlta({
   }));
 }
 
+/** Lo que se le dice cuando lo que escribió en el vencimiento de la tarjeta no es un mes y un año. */
+export const AVISO_DE_VENCIMIENTO = 'Eso no se entiende como un vencimiento. Escribe el mes y el año: «04/30», o «0430». '
+  + 'Tal como está, el contrato saldría sin esa fecha.';
+
+/**
+ * Lo que debe quedar escrito en la casilla del vencimiento y qué aviso va debajo, a partir de lo que él
+ * tecleó. Función pura, para poder probarla sin navegador: la pantalla solo la aplica.
+ *
+ * - Lo que se entiende se deja como va en el papel: «0430» y «4/30» quedan «04/30».
+ * - Lo que NO se entiende se deja TAL COMO lo escribió, con el aviso debajo. Borrárselo le escondería el
+ *   error; y lo que de verdad importa ya está a salvo, porque al guardar se vuelve a leer y eso no se
+ *   guarda (ver `leerTarjetasDe`): al contrato nunca llega una fecha falsa.
+ * - Un campo vacío no es un error: no todas las tarjetas se anotan con su vencimiento.
+ */
+export function vencimientoParaElCampo(escrito) {
+  const texto = String(escrito ?? '').trim();
+  const leido = vencimientoTarjeta(texto);
+  if (leido) return { valor: leido, aviso: '' };
+  return { valor: texto, aviso: texto ? AVISO_DE_VENCIMIENTO : '' };
+}
+
+/** Aplica `vencimientoParaElCampo` a la casilla y enseña u oculta su aviso ámbar. */
+function arreglarVencimiento(campo) {
+  const { valor, aviso: texto } = vencimientoParaElCampo(campo.value);
+  campo.value = valor;
+  const caja = document.getElementById(`${campo.id}-aviso`);
+  if (!caja) return;
+  caja.innerHTML = texto ? htmlAvisoRepetido({ titulo: texto }) : '';
+  caja.hidden = !texto;
+}
+
 /** El campo de CAMPOS_CLIENTE `c`, dibujado con el input id `sc-nc-<id>`. */
 function campoAlta(c) {
   // Debajo del documento va el lugar del aviso de «ya hay un cliente con este documento».
@@ -1171,7 +1205,11 @@ export function plantilla() {
           </p>
           <div class="sc-campos">
             ${campo('sc-t1-numero', 'Número completo', { autocompletar: 'off' })}
-            ${campo('sc-t1-vencimiento', 'Vencimiento (MM/AA)')}
+            ${campo('sc-t1-vencimiento', 'Vencimiento (MM/AA)', {
+              numerico: true,
+              marcador: 'MM/AA',
+              despues: '<div id="sc-t1-vencimiento-aviso" class="rep-aviso" role="status" aria-live="polite" hidden></div>',
+            })}
             ${campo('sc-t1-cbc', 'CBC', { autocompletar: 'off' })}
             ${campo('sc-t1-banco', 'Banco')}
             ${campo('sc-t1-autorizacion', 'Número de autorización')}
@@ -1180,7 +1218,11 @@ export function plantilla() {
           <label class="sc-checkbox"><input type="checkbox" id="sc-t2-agregar"> Agregar segunda tarjeta</label>
           <div id="sc-t2-campos" class="sc-campos" hidden>
             ${campo('sc-t2-numero', 'Número completo', { autocompletar: 'off' })}
-            ${campo('sc-t2-vencimiento', 'Vencimiento (MM/AA)')}
+            ${campo('sc-t2-vencimiento', 'Vencimiento (MM/AA)', {
+              numerico: true,
+              marcador: 'MM/AA',
+              despues: '<div id="sc-t2-vencimiento-aviso" class="rep-aviso" role="status" aria-live="polite" hidden></div>',
+            })}
             ${campo('sc-t2-cbc', 'CBC', { autocompletar: 'off' })}
             ${campo('sc-t2-banco', 'Banco')}
             ${campo('sc-t2-autorizacion', 'Número de autorización')}
@@ -2010,6 +2052,13 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     // válida se borra en vez de dejarse a medias — "9:" en el contrato
     // impreso sería una hora falsa.
     if (ev.target.id === 'sc-hora-salida') ev.target.value = hora24(ev.target.value);
+    // El vencimiento de la tarjeta, igual que la hora: al salir, «0430» o «4/30» quedan «04/30». Lo que NO
+    // es un mes y un año se le deja TAL COMO lo escribió, con un aviso ámbar debajo — borrárselo le
+    // escondería el error, y lo que importa ya está a salvo: al guardar se lee otra vez y eso no se guarda,
+    // así que al contrato no llega una fecha falsa. (Decisión del dueño del 23 de noviembre de 2026.)
+    if (ev.target.id === 'sc-t1-vencimiento' || ev.target.id === 'sc-t2-vencimiento') {
+      arreglarVencimiento(ev.target);
+    }
     if (ev.target.id === 'sc-ajeno') {
       refrescarCarro();
       if (marcado('sc-ajeno')) buscadorDuenos.pedir();

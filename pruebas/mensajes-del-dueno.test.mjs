@@ -42,6 +42,7 @@ const ARCHIVOS_CON_MENSAJES = [
   'js/pantallas/duenos.js',
   'js/pantallas/empleados.js',
   'js/pantallas/respaldo.js',
+  'js/pantallas/sacarCarro.js',
   'js/respaldo/excel.js',
   'js/respaldo/nube.js',
   'js/respaldo/zip.js',

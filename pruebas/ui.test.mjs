@@ -4,7 +4,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  dinero, fecha, hora24, montoTecleado, montoParaElCampo, enterEnviariaElFormulario, bloquearEnterEnElFormulario, htmlAvisoRepetido,
+  dinero, fecha, hora24, montoTecleado, montoParaElCampo, vencimientoTarjeta,
+  enterEnviariaElFormulario, bloquearEnterEnElFormulario, htmlAvisoRepetido,
 } from '../js/ui.js';
 
 test('dinero() da separador de miles y dos decimales', () => {
@@ -300,5 +301,52 @@ test('montoParaElCampo no cambia lo que ya estaba bien: formatear dos veces da l
     const unaVez = montoParaElCampo(escrito);
     assert.equal(montoParaElCampo(unaVez), unaVez, escrito);
     assert.equal(montoTecleado(unaVez), montoTecleado(escrito), `${escrito}: y sigue valiendo lo mismo`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// El vencimiento de la tarjeta: «MM/AA», escrito como se escribe
+// ---------------------------------------------------------------------------
+// Decisión del dueño, 23 de noviembre de 2026. Hasta ese día era texto libre: lo que se tecleara se
+// guardaba y se imprimía en el contrato sin que nada revisara si era una fecha.
+
+test('vencimientoTarjeta: lo deja como va en el papel, se escriba como se escriba', () => {
+  for (const escrito of ['0430', '430', '04/30', '4/30', '04-30', '04 30', '04.30', '04/2030', '4/2030', '042030', '42030']) {
+    assert.equal(vencimientoTarjeta(escrito), '04/30', escrito);
+  }
+  assert.equal(vencimientoTarjeta('1230'), '12/30', 'diciembre, el mes más alto');
+  assert.equal(vencimientoTarjeta('130'), '01/30', 'enero escrito con una sola cifra');
+  assert.equal(vencimientoTarjeta('12/2030'), '12/30');
+});
+
+test('vencimientoTarjeta: el mes tiene que existir y el año tiene que ser de este siglo', () => {
+  // Con un mes 13 el contrato llevaría impresa una fecha que ninguna tarjeta tiene.
+  for (const malo of ['13/30', '00/30', '0/30', '99/30', '04/1930', '04/3030']) {
+    assert.equal(vencimientoTarjeta(malo), '', malo);
+  }
+});
+
+test('vencimientoTarjeta: lo escrito A MEDIAS no se completa, igual que una hora a medias', () => {
+  // «04/» no es abril de nada y «4» solo no dice de qué año. Una fecha a medias impresa en el contrato se
+  // lee como firme, y él nunca la escribió.
+  for (const medias of ['04/', '4', '0', '/30', '']) assert.equal(vencimientoTarjeta(medias), '', medias);
+});
+
+test('vencimientoTarjeta: lo que no es una fecha devuelve vacío, no una fecha adivinada', () => {
+  for (const malo of ['abril 30', 'MM/AA', 'xx/xx', '04/30/2030', '1234567', null, undefined, {}]) {
+    assert.equal(vencimientoTarjeta(malo), '', JSON.stringify(malo));
+  }
+});
+
+test('vencimientoTarjeta: una tarjeta YA VENCIDA es un dato válido, no un error', () => {
+  // Un contrato viejo la tiene, y quien quiera avisarlo lo decide con la fecha ya leída, no borrándola aquí.
+  assert.equal(vencimientoTarjeta('01/20'), '01/20');
+  assert.equal(vencimientoTarjeta('0120'), '01/20');
+});
+
+test('vencimientoTarjeta: leer dos veces lo ya leído da lo mismo', () => {
+  for (const escrito of ['0430', '12/2030', '430']) {
+    const unaVez = vencimientoTarjeta(escrito);
+    assert.equal(vencimientoTarjeta(unaVez), unaVez, escrito);
   }
 });

@@ -12,7 +12,8 @@ import {
   vistaDeBuscador, crearListaDeSesion, duenoDelContrato, lectorDeCampos, leerFormularioDe, plantilla, motivoParaNoGuardar,
   textoCarroPropioNoEncontrado, avisosConSobrecobro, avisoAnticipoDeMas, htmlAvisoDeDocumentoEnAlta,
   filaEmpleado, textoDelEmpleadoEscogido, empleadoParaEnter, cargarEmpleadosActivos,
-  leerTarjetasDe, leerTarjetasEscritasDe, tarjetasParaImprimir, destinoDespuesDeGuardar, irDespuesDeGuardar
+  leerTarjetasDe, leerTarjetasEscritasDe, tarjetasParaImprimir, destinoDespuesDeGuardar, irDespuesDeGuardar,
+  vencimientoParaElCampo, AVISO_DE_VENCIMIENTO
 } from '../js/pantallas/sacarCarro.js';
 import { tomarTraspaso, olvidarTraspaso } from '../js/pantallas/traspasoDeTarjetas.js';
 import { EMPLEADOS } from './fixtures/rentasConComision.mjs';
@@ -1757,4 +1758,39 @@ test('ADR-001 en el código de «Sacar carro»: las cajas del CBC se leen en UN 
   assert.ok(codigo.includes('sigueAqui: sigoVigente()'), 'solo se lleva a imprimir si la pantalla sigue a la vista');
   assert.equal(/localStorage|sessionStorage|indexedDB|console\.|history\./.test(codigo), false, 'esta pantalla no escribe en ningún almacén ni en la consola');
   assert.equal((codigo.match(/location\.hash\s*=/g) ?? []).length, 1, 'una sola salida de la pantalla al guardar: la de irDespuesDeGuardar');
+});
+
+// ---------------------------------------------------------------------------
+// El vencimiento de la tarjeta (23 de noviembre de 2026)
+// ---------------------------------------------------------------------------
+
+test('lo que se GUARDA del vencimiento es «MM/AA», no lo que se haya tecleado', () => {
+  const leidas = leerTarjetasDe(lectorDeTarjetas({ t1: { ...T1, vencimiento: '0430' }, t2: { ...T2, vencimiento: '4/2031' } }));
+  assert.equal(leidas[0].vencimiento, '04/30', 'se lee al GUARDAR, no solo al salir del campo');
+  assert.equal(leidas[1].vencimiento, '04/31');
+});
+
+test('un vencimiento que no se entiende se guarda VACÍO: al contrato no llega una fecha falsa', () => {
+  for (const malo of ['abril 30', '13/30', '04/', 'xx']) {
+    const leidas = leerTarjetasDe(lectorDeTarjetas({ t1: { ...T1, vencimiento: malo } }));
+    assert.equal(leidas[0].vencimiento, '', malo);
+  }
+  // Y lo demás de la tarjeta se guarda igual: un vencimiento malo no se lleva la tarjeta entera.
+  const leidas = leerTarjetasDe(lectorDeTarjetas({ t1: { ...T1, vencimiento: 'abril 30' } }));
+  assert.equal(leidas[0].ultimos4, '3343');
+  assert.equal(leidas[0].banco, 'BAC');
+});
+
+test('vencimientoParaElCampo: lo que se entiende se acomoda; lo que no, se le deja tal cual CON el aviso', () => {
+  assert.deepEqual(vencimientoParaElCampo('0430'), { valor: '04/30', aviso: '' });
+  assert.deepEqual(vencimientoParaElCampo('  4/2030 '), { valor: '04/30', aviso: '' });
+  // Borrarle lo que escribió le escondería el error: lo ve, con el aviso debajo, y lo corrige.
+  assert.deepEqual(vencimientoParaElCampo('abril 30'), { valor: 'abril 30', aviso: AVISO_DE_VENCIMIENTO });
+  assert.deepEqual(vencimientoParaElCampo('13/30'), { valor: '13/30', aviso: AVISO_DE_VENCIMIENTO });
+});
+
+test('vencimientoParaElCampo: un campo vacío NO es un error — no toda tarjeta se anota con su vencimiento', () => {
+  for (const vacio of ['', '   ', null, undefined]) {
+    assert.deepEqual(vencimientoParaElCampo(vacio), { valor: '', aviso: '' }, JSON.stringify(vacio));
+  }
 });

@@ -64,6 +64,43 @@ export function montoParaElCampo(valor) {
   return n.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/**
+ * El vencimiento de una tarjeta como se escribe en el papel: 'MM/AA'. Lo que no sea un mes y un año
+ * devuelve '' — no se adivina.
+ *
+ * Decisión del dueño, 23 de noviembre de 2026. Antes era texto libre: se leía tal cual, se guardaba tal
+ * cual y se imprimía tal cual en el contrato, sin que nada revisara si era una fecha. Ahora perdona cómo
+ * se teclea de verdad: '0430', '430', '4/30', '04-30', '04 30', '04/2030' — todos son abril de 2030.
+ *
+ * El mes tiene que existir (01 a 12): '13/30' no es un vencimiento, y con un mes 13 el contrato llevaría
+ * impresa una fecha que ninguna tarjeta tiene. Un año de cuatro cifras se acorta a dos, y tiene que ser de
+ * este siglo: '04/1930' es un dedazo, no una tarjeta.
+ *
+ * Lo escrito a medias NO se completa, igual que en `hora24`: '04/' no es abril de nada, y '4' solo no dice
+ * de qué año. Una fecha a medias impresa en el contrato se lee como firme y él nunca la escribió.
+ *
+ * No juzga si la tarjeta ya venció: una tarjeta vencida es un dato válido (un contrato viejo la tiene), y
+ * quien quiera avisarlo lo decide con esta fecha ya leída, no borrándola aquí.
+ *
+ * Como `hora24` y `montoTecleado`, es la que decide, y se llama al LEER el formulario, no solo al salir del
+ * campo: lo que se guarda no puede depender de que un evento del navegador haya alcanzado a correr.
+ */
+export function vencimientoTarjeta(texto) {
+  const cuerpo = String(texto ?? '').trim().replace(/[\s./-]/g, '');
+  if (!/^\d{3,6}$/.test(cuerpo)) return '';
+  // De 3 y 5 cifras, la primera es el mes de una sola cifra ('430' = 4/30, '42030' = 4/2030).
+  const corte = cuerpo.length % 2 === 1 ? 1 : 2;
+  const mes = Number(cuerpo.slice(0, corte));
+  const anio = cuerpo.slice(corte);
+  if (!(mes >= 1 && mes <= 12)) return '';
+  if (anio.length === 4) {
+    if (!anio.startsWith('20')) return '';
+    return `${String(mes).padStart(2, '0')}/${anio.slice(2)}`;
+  }
+  if (anio.length !== 2) return '';
+  return `${String(mes).padStart(2, '0')}/${anio}`;
+}
+
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
 /** Una fecha ISO ('2026-08-25') en el formato que lee el dueño: '25 ago 2026'. */

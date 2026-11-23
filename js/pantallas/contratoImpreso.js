@@ -47,7 +47,7 @@ import {
   transformacionCss, textoDeCalibracion, aplicarTecla, calibracionActiva, guardarCalibracion,
   leerCalibraciones, CALIBRACION_DE_FABRICA, calibracionValida, camposQueSeImprimen, camposQueSePuedenDejarEnBlanco, TARIFAS_DEL_PAPEL, PASOS, camposFueraDelPapel, papelDe, PAPELES,
 } from '../nucleo/hojaContrato.js';
-import { dinero } from '../ui.js';
+import { dinero, vencimientoTarjeta } from '../ui.js';
 import { cargarContrato, cargarClientes, cargarFlota } from '../datos.js';
 import { tomarTraspaso } from './traspasoDeTarjetas.js';
 
@@ -95,11 +95,11 @@ function enmascarado(ultimos4) {
  */
 const VALOR = {
   tarjeta1Numero: ({ tarjetas }) => tarjetas[0]?.numero ?? '',
-  tarjeta1Vence: ({ contrato }) => limpio(contrato.tarjetas?.[0]?.vencimiento),
+  tarjeta1Vence: ({ contrato }) => vencimientoTarjeta(contrato.tarjetas?.[0]?.vencimiento),
   tarjeta1Cbc: ({ tarjetas }) => tarjetas[0]?.cbc ?? '',
   tarjeta1Banco: ({ contrato }) => limpio(contrato.tarjetas?.[0]?.banco),
   tarjeta2Numero: ({ tarjetas }) => tarjetas[1]?.numero ?? '',
-  tarjeta2Vence: ({ contrato }) => limpio(contrato.tarjetas?.[1]?.vencimiento),
+  tarjeta2Vence: ({ contrato }) => vencimientoTarjeta(contrato.tarjetas?.[1]?.vencimiento),
   tarjeta2Cbc: ({ tarjetas }) => tarjetas[1]?.cbc ?? '',
   tarjeta1Monto: ({ contrato }) => monto(contrato.tarjetas?.[0]?.montoAutorizado),
   tarjeta2Monto: ({ contrato }) => monto(contrato.tarjetas?.[1]?.montoAutorizado),
@@ -294,6 +294,16 @@ export function armarContratoImpreso({
       avisos.push(
         `Tarjeta ${i + 1}: el número que tecleaste no termina en los últimos 4 dígitos de la tarjeta de este contrato (${enmascarado(guardado)}). `
         + 'Revisa que no sea otra tarjeta o un error de dedo antes de imprimir.',
+      );
+    }
+    // Un vencimiento guardado que no se entiende como mes y año sale EN BLANCO en el papel, y se dice aquí.
+    // Desde el 23 de noviembre de 2026 «Sacar carro» ya no guarda otra cosa, pero los contratos de antes
+    // pueden traer cualquier texto, y una fecha inventada en un contrato firmado es peor que una casilla vacía.
+    const vencimientoGuardado = limpio(guardadas[i]?.vencimiento);
+    if (vencimientoGuardado && !vencimientoTarjeta(vencimientoGuardado)) {
+      avisos.push(
+        `Tarjeta ${i + 1}: el vencimiento guardado («${vencimientoGuardado}») no se entiende como mes y año, `
+        + 'así que esa casilla sale en blanco en el papel. Corrígelo en la renta si lo necesitas impreso.',
       );
     }
     if (!t.completa) {
