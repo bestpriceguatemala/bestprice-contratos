@@ -3705,3 +3705,183 @@ test('después de un fallo se puede volver a intentar: la pantalla no se queda o
   assert.deepEqual(intentos, [450, 450], 'el segundo intento sí corre');
   assert.equal(p.hay('#dn-costo-input'), false, 'y esta vez sí quedó anotado');
 });
+
+// ---------------------------------------------------------------------------
+// Anular un pago: lo que pasa DESPUÉS, según lo que conteste el guardado
+// ---------------------------------------------------------------------------
+// 27 de los 35 errores de `anularPagoDeDueno` pasaban sin que nada se pusiera rojo. Anular gasta el
+// número de comprobante: lo que se le diga después no es un detalle.
+
+/** La ficha de Lucía, que trae su pago, y el botón de anularlo. */
+async function conElPagoDeLucia(opciones = {}) {
+  const p = await pantallaDeDinero({ clave: 'id:d2', responder: () => true, ...opciones });
+  const boton = p.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'anular-pago');
+  return { p, boton };
+}
+
+test('anular un pago: se le dice con el número de comprobante y dónde queda', async () => {
+  const { p, boton } = await conElPagoDeLucia({
+    anular: async () => ({ tipo: 'anulado', pago: { ...PAGO_A_LUCIA, numero: 3 }, pagos: [] }),
+  });
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  const dicho = p.dichos.at(-1);
+  assert.match(dicho.texto, /comprobante N\.° 3 queda en «Ya pagado», marcado como anulado/);
+  assert.equal(dicho.tipo, 'exito');
+});
+
+test('anular un pago que YA ESTABA anulado se dice distinto: no se anuncia como recién hecho', async () => {
+  // Otra computadora lo anuló mientras tanto. Decirle «Pago anulado» le haría creer que lo hizo él ahora.
+  const { p, boton } = await conElPagoDeLucia({
+    anular: async () => ({ tipo: 'ya-anulado', pago: { ...PAGO_A_LUCIA, numero: 3 }, pagos: [] }),
+  });
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.match(p.dichos.at(-1).texto, /Ese pago ya estaba anulado \(comprobante N\.° 3\)/);
+});
+
+test('anular un pago que YA NO ESTÁ en la lista se avisa como error, no como éxito', async () => {
+  const { p, boton } = await conElPagoDeLucia({
+    anular: async () => ({ tipo: 'no-esta', pago: null, pagos: [] }),
+  });
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.dichos.at(-1).tipo, 'error');
+  assert.match(p.dichos.at(-1).texto, /Este pago ya no está en la lista de pagos/);
+  assert.ok(!p.dichos.some((d) => /Pago anulado/.test(d.texto)), 'nunca se dice que se anuló');
+});
+
+test('anular: la lista de pagos queda como la dejó el guardado, no como estaba en pantalla', async () => {
+  const anuladoEnLaNube = { ...PAGO_A_LUCIA, anulado: true, anuladoEl: HOY };
+  const { p, boton } = await conElPagoDeLucia({
+    anular: async () => ({ tipo: 'anulado', pago: anuladoEnLaNube, pagos: [anuladoEnLaNube] }),
+  });
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(p.lector.actual.pagos.datos, [anuladoEnLaNube], 'lo que contestó la nube es la verdad');
+});
+
+test('anular: si el guardado FALLA, se le dice y no se toca la lista de pagos', async () => {
+  const { p, boton } = await conElPagoDeLucia({
+    anular: async () => { throw new Error('se cayó el internet'); },
+  });
+  const antes = p.lector.actual.pagos.datos;
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.dichos.at(-1).tipo, 'error');
+  assert.match(p.dichos.at(-1).texto, /No se pudo anular el pago/);
+  assert.deepEqual(p.lector.actual.pagos.datos, antes, 'la lista se queda como estaba');
+});
+
+test('anular: dos clics seguidos no anulan dos veces', async () => {
+  const intentos = [];
+  const { p, boton } = await conElPagoDeLucia({
+    anular: async (args) => { intentos.push(args); return { tipo: 'anulado', pago: PAGO_A_LUCIA, pagos: [] }; },
+  });
+  p.lanzar('click', boton);
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(intentos.length, 1, 'el segundo encuentra la pantalla ocupada');
+  assert.equal(p.preguntas.length, 1, 'y ni siquiera vuelve a preguntar');
+});
+
+// ---------------------------------------------------------------------------
+// Registrar un pago: lo que pasa DESPUÉS, según lo que conteste el guardado
+// ---------------------------------------------------------------------------
+// 39 de los 54 errores de `guardarPago` pasaban. Lo de «qué se aprieta» ya estaba cubierto; esto es lo
+// que la pantalla hace con cada clase de respuesta.
+
+/** Marca la renta m1 de Mario, abre el formulario, pone la fecha de hoy y aprieta Guardar. */
+async function registrarUnPago(opciones = {}) {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO, ...opciones });
+  p.marcar(LA_RENTA('m1'));
+  p.clic('[data-dn="registrar"]');
+  p.lanzar('change', '#dn-fecha', { value: HOY });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  return p;
+}
+
+test('registrar un pago: se le dice el número de comprobante y el formulario se cierra', async () => {
+  const p = await registrarUnPago({
+    pagar: async () => ({ tipo: 'guardado', pago: { id: 'pg-9', numero: 9 }, pagos: [] }),
+  });
+  assert.match(p.dichos.at(-1).texto, /Pago registrado\. Comprobante N\.° 9\./);
+  assert.equal(p.dichos.at(-1).tipo, 'exito');
+  assert.equal(p.hay('#dn-guardar-pago'), false, 'el formulario se cierra: ya no hay nada que guardar');
+  assert.equal(p.buscar('#dn-total-marcado')?.textContent, 'Q0.00', 'y lo marcado se suelta');
+});
+
+test('un pago que YA ESTABA registrado se dice distinto: no se anuncia como recién hecho', async () => {
+  // Él apretó dos veces, o se le cayó el internet y volvió a intentar. Decirle «Pago registrado» le haría
+  // creer que son dos pagos.
+  const p = await registrarUnPago({
+    pagar: async () => ({ tipo: 'ya-guardado', pago: { id: 'pg-9', numero: 9 }, pagos: [] }),
+  });
+  assert.match(p.dichos.at(-1).texto, /Ese pago ya estaba registrado \(comprobante N\.° 9\)/);
+  assert.equal(p.hay('#dn-guardar-pago'), false, 'y el formulario también se cierra');
+});
+
+test('si la cuenta CAMBIÓ, el formulario se queda abierto y lo marcado se suelta', async () => {
+  // Es lo contrario del caso bueno: hay que volver a mirar antes de pagar otra cosa.
+  const p = await registrarUnPago({ pagar: async () => ({ tipo: 'cambio', pagos: [] }) });
+  assert.ok(p.hay('#dn-guardar-pago'), 'el formulario sigue abierto');
+  assert.match(p.html(), /Mientras tanto cambió la cuenta de este dueño/);
+  assert.equal(p.buscar('#dn-total-marcado')?.textContent, 'Q0.00', 'lo marcado se suelta');
+  assert.ok(!p.dichos.some((d) => /Pago registrado/.test(d.texto)), 'y nunca se dice que se registró');
+});
+
+test('si el guardado FALLA, el formulario se queda abierto CON el mensaje, y se puede reintentar', async () => {
+  let falla = true;
+  const intentos = [];
+  const p = await registrarUnPago({
+    pagar: async (args) => {
+      intentos.push(args);
+      if (falla) throw new Error('se cayó el internet');
+      return { tipo: 'guardado', pago: { id: 'pg-9', numero: 9 }, pagos: [] };
+    },
+  });
+  assert.ok(p.hay('#dn-guardar-pago'), 'sigue abierto');
+  assert.match(p.html(), /No se pudo registrar el pago/);
+  assert.ok(!p.dichos.some((d) => d.tipo === 'exito'), 'no se canta nada como hecho');
+
+  falla = false;
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(intentos.length, 2, 'se puede volver a intentar: la pantalla no se queda ocupada');
+  assert.deepEqual(intentos[1].idsMarcados, intentos[0].idsMarcados, 'con lo mismo que él había marcado');
+});
+
+test('registrar: el reintento lleva el MISMO `enCurso`, para que el guardado reconozca su propio pago', async () => {
+  // Es lo que evita el pago doble cuando se cae el internet justo al guardar: el segundo intento llega con
+  // la misma marca y el guardado contesta «ya-guardado» en vez de cobrar otra vez.
+  let falla = true;
+  const intentos = [];
+  const p = await registrarUnPago({
+    pagar: async (args) => {
+      intentos.push(args.enCurso);
+      if (falla) throw new Error('se cayó el internet');
+      return { tipo: 'guardado', pago: { id: 'pg-9', numero: 9 }, pagos: [] };
+    },
+  });
+  falla = false;
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(intentos.length, 2);
+  assert.strictEqual(intentos[0], intentos[1], 'la misma marca, no una nueva');
+});
+
+test('registrar: dos clics seguidos no registran dos pagos', async () => {
+  const intentos = [];
+  const p = await pantallaDeDinero({
+    clave: CLAVE_MARIO,
+    pagar: async (args) => { intentos.push(args); return { tipo: 'guardado', pago: { id: 'pg-9', numero: 9 }, pagos: [] }; },
+  });
+  p.marcar(LA_RENTA('m1'));
+  p.clic('[data-dn="registrar"]');
+  p.lanzar('change', '#dn-fecha', { value: HOY });
+  p.clic('#dn-guardar-pago');
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(intentos.length, 1);
+});
