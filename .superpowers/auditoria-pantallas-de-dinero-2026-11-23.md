@@ -220,26 +220,31 @@ Firebase de verdad y la nube, así que ninguna prueba podía apretar un botón.
 |---|---:|---:|---:|---:|
 | Al empezar (commit `ca4997e`) | 354 | 19 | 335 | **5.4 %** |
 | 23 de noviembre (commit `8d9fe2a`) | 370 | 97 | 263 | **26.9 %** |
-| **24 de noviembre** (commit `133488c`) | 373 | 159 | 214 | **42.6 %** |
+| 24 de noviembre, mañana (commit `133488c`) | 373 | 159 | 214 | **42.6 %** |
+| **24 de noviembre, tarde** (commit `95cae7c`) | 373 | 208 | 165 | **55.8 %** |
 
-(El 23 hubo 10 mutantes colgados, que se cuentan aparte y nunca como muertos; el 24, ninguno.)
+(El 23 hubo 10 mutantes colgados, que se cuentan aparte y nunca como muertos; después, ninguno.)
 
-**De atrapar uno de cada veinte a atrapar casi la mitad.** Y lo que falta también se dice: **214 errores
+**De atrapar uno de cada veinte a atrapar más de la mitad.** Y lo que falta también se dice: **165 errores
 siguen pasando**. Dónde están, medido:
 
 | Pasan / total | Atrapa | Dentro de |
 |---:|---:|---|
 | 59 / 123 | 52 % | `migrar` (la mudanza del costo detrás de la contraseña) |
-| 39 / 54 | 28 % | `guardarPago` |
-| 27 / 35 | 23 % | `anularPagoDeDueno` |
-| 22 / 25 | 12 % | `guardarCosto` |
+| 23 / 54 | 57 % | `guardarPago` |
 | 22 / 52 | 58 % | `enlazar` |
 | 16 / 31 | 48 % | `dibujar` |
 | 14 / 21 | 33 % | `cargarYDibujar` |
+| 10 / 35 | 71 % | `anularPagoDeDueno` |
+| 7 / 25 | 72 % | `guardarCosto` |
+| 5 / 10 | 50 % | `verComprobante` |
 
-Casi todo lo que queda es **el manejo de la RESPUESTA**: qué hace la pantalla con cada clase de contestación
-(`ya-guardado`, `cambio`, `no-esta`, `ya-anulado`, los conflictos de la mudanza) y el orden de las lecturas.
-Los caminos de «qué pasa cuando él aprieta» ya están cubiertos.
+Las tres que se trabajaron el 24 por la tarde bajaron así: `guardarCosto` de 22 a 7 errores que pasan,
+`anularPagoDeDueno` de 27 a 10, `guardarPago` de 39 a 23.
+
+**Lo más grande que queda es `migrar`** (59 de los 165), que es la mudanza del costo de los dueños detrás
+de la contraseña: se corre UNA vez y no se puede deshacer. Después, el orden de las lecturas
+(`dibujar` + `cargarYDibujar`, 30 entre las dos) y lo que queda de `enlazar`.
 
 ### Cómo se midió, y una trampa que costó una corrida entera
 

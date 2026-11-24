@@ -64,11 +64,11 @@ sobre el código de hoy**, no reaplicar errores viejos.
 
 ## Lo que sigue, en orden
 
-1. **Seguir cableando `pintarCuentas`** (va en **42.6 %**, de 5.4 % al empezar). Enlazar, ver comprobante,
-   la migración y el cierre del área ya están hechos (24 de noviembre). Lo que queda son **las ramas de la
-   RESPUESTA**, por tamaño: `migrar` (59 errores pasan), `guardarPago` (39: `ya-guardado`, `cambio`),
-   `anularPagoDeDueno` (27: `no-esta`, `ya-anulado`), `guardarCosto` (22, el peor con 12 % atrapado),
-   `enlazar` (22) y el orden de las lecturas en `dibujar` / `cargarYDibujar` (30 entre las dos).
+1. **Seguir cableando `pintarCuentas`** (va en **55.8 %**, de 5.4 % al empezar). Hechos: enlazar, ver
+   comprobante, el cierre del área, `guardarCosto`, `anularPagoDeDueno` y `guardarPago`. Lo que queda, por
+   tamaño: **`migrar`** (59 errores pasan, de 123 — la mudanza del costo, que se corre una vez y no se
+   deshace), el orden de las lecturas en `dibujar` + `cargarYDibujar` (30 entre las dos), lo que resta de
+   `enlazar` (22) y de `guardarPago` (23), y `verComprobante` (5).
 2. **`pintarCuentas` de comisiones** (`js/pantallas/comisiones.js`): 246 de 321 errores pasaban, 23 %. La
    pantalla de mentira ya está hecha y sirve igual.
 3. **`avisoDelPapelQueNoCambia`** en comisiones: 45 de 134 pasaban.
