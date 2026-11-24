@@ -218,14 +218,28 @@ Firebase de verdad y la nube, así que ninguna prueba podía apretar un botón.
 
 | `pintarCuentas` (dinero) | Errores | Atrapados | Pasan | Atrapa |
 |---|---:|---:|---:|---:|
-| Antes (commit `ca4997e`) | 354 | 19 | 335 | **5.4 %** |
-| **Hoy** (commit `8d9fe2a`) | 370 | 97 | 263 | **26.9 %** |
+| Al empezar (commit `ca4997e`) | 354 | 19 | 335 | **5.4 %** |
+| 23 de noviembre (commit `8d9fe2a`) | 370 | 97 | 263 | **26.9 %** |
+| **24 de noviembre** (commit `133488c`) | 373 | 159 | 214 | **42.6 %** |
 
-(De los 370 de hoy, 10 se quedaron girando y se cuentan aparte, nunca como muertos.)
+(El 23 hubo 10 mutantes colgados, que se cuentan aparte y nunca como muertos; el 24, ninguno.)
 
-**Cinco veces más errores atrapados.** Sigue siendo el peor número del sistema, y eso también se dice: de
-cada cuatro errores que se le meten a esa función, tres siguen pasando. Lo que falta tiene nombre y está
-en la lista de «lo que sigue» del punto de retorno.
+**De atrapar uno de cada veinte a atrapar casi la mitad.** Y lo que falta también se dice: **214 errores
+siguen pasando**. Dónde están, medido:
+
+| Pasan / total | Atrapa | Dentro de |
+|---:|---:|---|
+| 59 / 123 | 52 % | `migrar` (la mudanza del costo detrás de la contraseña) |
+| 39 / 54 | 28 % | `guardarPago` |
+| 27 / 35 | 23 % | `anularPagoDeDueno` |
+| 22 / 25 | 12 % | `guardarCosto` |
+| 22 / 52 | 58 % | `enlazar` |
+| 16 / 31 | 48 % | `dibujar` |
+| 14 / 21 | 33 % | `cargarYDibujar` |
+
+Casi todo lo que queda es **el manejo de la RESPUESTA**: qué hace la pantalla con cada clase de contestación
+(`ya-guardado`, `cambio`, `no-esta`, `ya-anulado`, los conflictos de la mudanza) y el orden de las lecturas.
+Los caminos de «qué pasa cuando él aprieta» ya están cubiertos.
 
 ### Cómo se midió, y una trampa que costó una corrida entera
 

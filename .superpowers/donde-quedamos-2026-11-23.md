@@ -64,11 +64,11 @@ sobre el código de hoy**, no reaplicar errores viejos.
 
 ## Lo que sigue, en orden
 
-1. **Seguir cableando `pintarCuentas`**: lo que todavía no tiene prueba es enlazar un dueño
-   («enlazar» / «crear-y-enlazar»), la migración del costo, «ver comprobante», y el candado por
-   inactividad del área de dinero (`instalarLatidos`, `alExpirarPorInactividad`, `olvidarLosDatos`:
-   29 de 35 errores pasaban). Para enlazar y migrar hay que inyectar `guardarDueno`, `enlazarContratos` y
-   `migrarCostosDelDueno`, igual que se hizo con los otros.
+1. **Seguir cableando `pintarCuentas`** (va en **42.6 %**, de 5.4 % al empezar). Enlazar, ver comprobante,
+   la migración y el cierre del área ya están hechos (24 de noviembre). Lo que queda son **las ramas de la
+   RESPUESTA**, por tamaño: `migrar` (59 errores pasan), `guardarPago` (39: `ya-guardado`, `cambio`),
+   `anularPagoDeDueno` (27: `no-esta`, `ya-anulado`), `guardarCosto` (22, el peor con 12 % atrapado),
+   `enlazar` (22) y el orden de las lecturas en `dibujar` / `cargarYDibujar` (30 entre las dos).
 2. **`pintarCuentas` de comisiones** (`js/pantallas/comisiones.js`): 246 de 321 errores pasaban, 23 %. La
    pantalla de mentira ya está hecha y sirve igual.
 3. **`avisoDelPapelQueNoCambia`** en comisiones: 45 de 134 pasaban.
