@@ -2656,11 +2656,6 @@ test('el comprobante de otro pago de la misma cuenta no se enreda con el anulado
 // ---------- El cableado ----------
 
 
-test('el cableado: «Ver comprobante» tampoco se abre a la fuerza para un pago anulado', () => {
-  const codigo = sinComentarios(PANTALLA);
-  const cuerpo = codigo.slice(codigo.indexOf('function verComprobante('), codigo.indexOf('async function anularPagoDeDueno('));
-  assert.match(cuerpo, /pagoAnulado\(pago\)/);
-});
 
 // ===========================================================================
 // H-7: se le pagó más de lo que esas rentas cuestan hoy, y la ficha lo dice
@@ -3111,6 +3106,8 @@ async function pantallaDeDinero({
   anular,
   anotarCosto,
   enlazarAlDueno,
+  migrarCostos,
+  dibujarComprobante,
   ruta = clave === null ? '#/dinero' : `#/dinero/cuenta/${encodeURIComponent(clave)}`,
 } = {}) {
   const p = pantallaDeMentira();
@@ -3124,6 +3121,8 @@ async function pantallaDeDinero({
   const enlaces = [];
   const direcciones = [];
   let idsAcunados = 0;
+  const comprobantes = [];
+  const migraciones = [];
   let rutaActual = ruta;
   const aparatos = {
     lector,
@@ -3141,11 +3140,16 @@ async function pantallaDeDinero({
     enlazarAlDueno: enlazarAlDueno ?? (async (ids, duenoId) => { enlaces.push({ ids, duenoId }); }),
     cambiarLaDireccion: (r) => direcciones.push(r),
     acunarIdDeDueno: async () => `d-nuevo-${++idsAcunados}`,
+    dibujarComprobante: dibujarComprobante ?? ((_caja, modelo) => { comprobantes.push(modelo); }),
+    migrarCostos: migrarCostos ?? (async (args) => {
+      migraciones.push(args);
+      return { movidos: 3, conflictos: [], fallidos: [], copiaLocalLimpia: true };
+    }),
   };
   if (clave === null) await pintarDinero(p.contenedor, aparatos);
   else await pintarCuentaDeDueno(p.contenedor, clave, aparatos);
   return {
-    ...p, lector, preguntas, pagos, anulaciones, dichos, costos, altas, enlaces, direcciones, ruta: () => rutaActual,
+    ...p, lector, preguntas, pagos, anulaciones, dichos, costos, altas, enlaces, direcciones, comprobantes, migraciones, ruta: () => rutaActual,
   };
 }
 
@@ -3465,5 +3469,61 @@ test('el cableado: si el ENLACE falla, un reintento NO crea un segundo dueño co
   assert.equal(intentos.length, 2, 'se volvió a intentar el enlace');
   assert.equal(intentos[1].duenoId, p.altas[0].id, 'y los contratos van al dueño de siempre, no a uno nuevo');
   assert.deepEqual(intentos[0].ids, intentos[1].ids, 'los mismos contratos');
+});
+
+
+test('el cableado: «Ver comprobante» abre el comprobante DE ESE pago', async () => {
+  const p = await pantallaDeDinero({ clave: 'id:d2' });
+  const boton = p.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'comprobante');
+  assert.ok(boton, 'el pago de Lucía trae su botón');
+  p.lanzar('click', boton);
+  assert.equal(p.comprobantes.length, 1);
+  assert.equal(p.comprobantes[0].pago.id, 'pg-lucia', 'el que él apretó, no otro');
+  assert.equal(p.comprobantes[0].dueno.nombre, 'Lucía Barrios', 'y a nombre de quién va el papel');
+  assert.equal(p.comprobantes[0].hoy, HOY, 'fechado hoy');
+});
+
+test('el cableado: un pago ANULADO no abre comprobante ni a la fuerza', async () => {
+  // Venía de una prueba que leía el texto del código buscando `pagoAnulado(pago)`. Un papel que sale de
+  // la empresa no puede salir de un pago que ya no vale.
+  const anulado = { ...PAGO_A_LUCIA, anuladoEl: HOY, anulado: true };
+  const p = await pantallaDeDinero({ clave: 'id:d2', lectura: lecturaOk({ pagos: { datos: [anulado], fallo: false } }) });
+  const boton = p.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'comprobante');
+  if (boton) p.lanzar('click', boton);
+  assert.deepEqual(p.comprobantes, [], 'no se abre nada');
+});
+
+test('el cableado: si el comprobante no se puede dibujar, se le dice y la pantalla no se rompe', async () => {
+  const p = await pantallaDeDinero({
+    clave: 'id:d2',
+    dibujarComprobante: () => { throw new Error('se rompió al dibujar'); },
+  });
+  const boton = p.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'comprobante');
+  p.lanzar('click', boton);
+  assert.ok(p.dichos.some((d) => /No se pudo abrir el comprobante/.test(d.texto) && d.tipo === 'error'));
+  assert.match(p.html(), /Lucía Barrios/, 'y la ficha sigue ahí');
+});
+
+test('el cableado: la migración PREGUNTA antes; un «no» no mueve nada', async () => {
+  const p = await pantallaDeDinero({ responder: () => false });
+  const boton = p.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'migrar');
+  assert.ok(boton, 'la lista ofrece mover el costo');
+  p.lanzar('click', boton);
+  assert.equal(p.preguntas.length, 1);
+  assert.match(p.preguntas[0], /no se puede deshacer/);
+  assert.deepEqual(p.migraciones, [], 'dijo que no: no se movió nada');
+});
+
+test('el cableado: si la migración FALLA, nunca dice «0 contratos movidos»', async () => {
+  // Sin sesión de dinero, o con la lectura caída, un «0 movidos» le haría creer que ya está hecho.
+  const p = await pantallaDeDinero({
+    responder: () => true,
+    migrarCostos: async () => { throw new Error('no se pudo leer'); },
+  });
+  const boton = p.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'migrar');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.doesNotMatch(p.html(), /0 contratos movidos|0 movidos/);
+  assert.match(p.html(), /No se pudo mover el costo/);
 });
 

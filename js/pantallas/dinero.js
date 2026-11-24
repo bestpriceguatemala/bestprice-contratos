@@ -1580,6 +1580,8 @@ async function pintarCuentas(contenedor, claveDeFicha, {
   enlazarAlDueno = enlazarContratosAlDueno,
   cambiarLaDireccion = (ruta) => history.replaceState(null, '', ruta),
   acunarIdDeDueno = nuevoIdDueno,
+  dibujarComprobante = pintarComprobante,
+  migrarCostos = migrarCostosDelDueno,
 } = {}) {
   const miToken = ++ultimoToken;
   const hoy = ahora();
@@ -1808,7 +1810,7 @@ async function pintarCuentas(contenedor, claveDeFicha, {
     const pago = leida?.pagos.datos.find((p) => p.id === pagoId);
     if (!pago || pagoAnulado(pago)) return;
     try {
-      pintarComprobante(raiz, entradaDelComprobante({ entrada, pago, lectura: leida, hoy }), { alVolver: dibujar });
+      dibujarComprobante(raiz, entradaDelComprobante({ entrada, pago, lectura: leida, hoy }), { alVolver: dibujar });
     } catch (error) {
       console.error(error);
       avisar(MENSAJE_COMPROBANTE_FALLO, 'error');
@@ -1848,7 +1850,7 @@ async function pintarCuentas(contenedor, claveDeFicha, {
     boton.disabled = true;
     const caja = raiz.querySelector('#dn-migracion');
     try {
-      const resultado = await migrarCostosDelDueno({
+      const resultado = await migrarCostos({
         alAvanzar: (hechos, total) => { boton.textContent = `Moviendo… ${hechos} de ${total}`; },
       });
       const mensaje = mensajeDeMigracion(resultado);
