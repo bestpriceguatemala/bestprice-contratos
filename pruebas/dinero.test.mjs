@@ -3124,9 +3124,10 @@ async function pantallaDeDinero({
   const comprobantes = [];
   const migraciones = [];
   let rutaActual = ruta;
+  let sesionAbierta = sesion;
   const aparatos = {
     lector,
-    sesionAbierta: () => sesion,
+    sesionAbierta: () => sesionAbierta,
     ahora: () => HOY,
     doc: p.documento,
     preguntar: (texto) => { preguntas.push(texto); return responder(texto); },
@@ -3149,7 +3150,21 @@ async function pantallaDeDinero({
   if (clave === null) await pintarDinero(p.contenedor, aparatos);
   else await pintarCuentaDeDueno(p.contenedor, clave, aparatos);
   return {
-    ...p, lector, preguntas, pagos, anulaciones, dichos, costos, altas, enlaces, direcciones, comprobantes, migraciones, ruta: () => rutaActual,
+    ...p,
+    lector,
+    preguntas,
+    pagos,
+    anulaciones,
+    dichos,
+    costos,
+    altas,
+    enlaces,
+    direcciones,
+    comprobantes,
+    migraciones,
+    ruta: () => rutaActual,
+    /** Cierra la sesión de dinero por detrás, como la cierra Firebase cuando se le vence el permiso. */
+    cerrarLaSesion() { sesionAbierta = false; },
   };
 }
 
@@ -3599,4 +3614,94 @@ test('el cableado: montar la pantalla otra vez NO deja olvidadores colgados', as
   await cerrarElDinero({ salir: async () => {}, parar: () => {} });
   assert.equal(segunda.lector.actual, null, 'la puesta suelta lo suyo');
   assert.ok(primera.lector.actual, 'la anterior ya no está registrada: se dio de baja al montarse la otra');
+});
+
+// ---------------------------------------------------------------------------
+// Anotar el costo de una renta: lo que pasa DESPUÉS de apretar «Guardar»
+// ---------------------------------------------------------------------------
+// De los 25 errores que se le pueden meter a `guardarCosto`, 22 pasaban sin que nada se pusiera rojo
+// (medición del 24 de noviembre de 2026): el peor número de la pantalla. Y es un monto que él teclea.
+
+/** Abre la casilla del costo de la renta m5 (la única cerrada sin costo anotado) y devuelve la pantalla. */
+async function conLaCasillaDelCosto(opciones = {}) {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO, ...opciones });
+  p.clic('[data-dn="anotar-costo"][data-id="m5"]');
+  return p;
+}
+
+test('el costo anotado le queda a ESA renta, no a las demás', async () => {
+  // Con un `===` por un `!==` aquí, el costo se le pegaba a TODAS las otras rentas del dueño y a esa no.
+  const p = await conLaCasillaDelCosto();
+  p.buscar('#dn-costo-input').value = '450';
+  p.clic('[data-dn="guardar-costo"][data-id="m5"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  const porId = Object.fromEntries(p.lector.actual.contratos.datos.map((c) => [c.id, costoDelDocumento(c)]));
+  assert.equal(porId.m5, 450, 'la renta que él anotó');
+  assert.equal(porId.m1, 300, 'las demás se quedan con el suyo');
+  assert.equal(porId.m2, 300);
+});
+
+test('después de anotarlo, la casilla se cierra y el costo se ve en la ficha', async () => {
+  const p = await conLaCasillaDelCosto();
+  p.buscar('#dn-costo-input').value = '450';
+  p.clic('[data-dn="guardar-costo"][data-id="m5"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.hay('#dn-costo-input'), false, 'la casilla se cierra sola');
+  assert.doesNotMatch(p.html(), /Sin costo anotado/, 'y la renta deja de salir sin costo');
+  assert.ok(p.dichos.some((d) => /Costo anotado: Q450\.00 por día/.test(d.texto) && d.tipo === 'exito'),
+    'se le dice cuánto quedó anotado, y como algo que salió bien');
+});
+
+test('dos clics seguidos en «Guardar» no anotan el costo dos veces', async () => {
+  const p = await conLaCasillaDelCosto();
+  p.buscar('#dn-costo-input').value = '450';
+  p.clic('[data-dn="guardar-costo"][data-id="m5"]');
+  p.clic('[data-dn="guardar-costo"][data-id="m5"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.costos.length, 1, 'el segundo clic encuentra la pantalla ocupada y no hace nada');
+});
+
+test('sin sesión de dinero no se anota ningún costo', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  p.clic('[data-dn="anotar-costo"][data-id="m5"]');
+  p.buscar('#dn-costo-input').value = '450';
+  p.cerrarLaSesion();
+  p.clic('[data-dn="guardar-costo"][data-id="m5"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(p.costos, [], 'el costo del dueño no se escribe sin la contraseña');
+});
+
+test('si anotar el costo FALLA, se le dice y la casilla NO se cierra', async () => {
+  // Cerrarla le haría creer que quedó anotado, y el costo es lo que decide cuánto se le debe al dueño.
+  const p = await conLaCasillaDelCosto({
+    anotarCosto: async () => { throw new Error('se cayó el internet'); },
+  });
+  p.buscar('#dn-costo-input').value = '450';
+  p.clic('[data-dn="guardar-costo"][data-id="m5"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.ok(p.dichos.some((d) => /No se pudo guardar el costo/.test(d.texto) && d.tipo === 'error'));
+  assert.ok(p.hay('#dn-costo-input'), 'la casilla sigue abierta para volver a intentarlo');
+  const m5 = p.lector.actual.contratos.datos.find((c) => c.id === 'm5');
+  assert.equal(costoDelDocumento(m5), 0, 'y la renta sigue sin costo: no se apunta en memoria lo que no se guardó');
+});
+
+test('después de un fallo se puede volver a intentar: la pantalla no se queda ocupada', async () => {
+  let falla = true;
+  const intentos = [];
+  const p = await conLaCasillaDelCosto({
+    anotarCosto: async (contrato, costo) => {
+      intentos.push(costo);
+      if (falla) throw new Error('se cayó el internet');
+      return costo;
+    },
+  });
+  p.buscar('#dn-costo-input').value = '450';
+  p.clic('[data-dn="guardar-costo"][data-id="m5"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  falla = false;
+  p.buscar('#dn-costo-input').value = '450';
+  p.clic('[data-dn="guardar-costo"][data-id="m5"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(intentos, [450, 450], 'el segundo intento sí corre');
+  assert.equal(p.hay('#dn-costo-input'), false, 'y esta vez sí quedó anotado');
 });
