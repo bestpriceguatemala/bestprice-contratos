@@ -152,6 +152,11 @@ export function pantallaDeMentira() {
   const raiz = {
     get innerHTML() { return html; },
     set innerHTML(valor) { escribirHtml(valor); },
+    // `isConnected` es falso hasta que la caja se cuelga del contenedor, igual que en el navegador. El
+    // área de dinero lo mira antes de vaciar lo dibujado al cerrarse («lo ya dibujado también es dinero»):
+    // sin esto, ese camino no se ejercita nunca y la prueba se queda verde sin haberlo tocado.
+    isConnected: false,
+    replaceChildren() { escribirHtml(''); },
     querySelector: buscar,
     querySelectorAll: (selector) => etiquetas().filter((e) => haceJuego(e, selector)).map(nodoDeEtiqueta),
     addEventListener(tipo, fn) { (oyentes[tipo] ??= []).push(fn); },
@@ -162,7 +167,7 @@ export function pantallaDeMentira() {
     set innerHTML(valor) { escribirHtml(valor); },
     querySelector: buscar,
     querySelectorAll: raiz.querySelectorAll,
-    replaceChildren() { escribirHtml(''); },
+    replaceChildren(hijo) { escribirHtml(''); if (hijo) hijo.isConnected = true; },
     addEventListener(tipo, fn) { (oyentes[tipo] ??= []).push(fn); },
   };
 

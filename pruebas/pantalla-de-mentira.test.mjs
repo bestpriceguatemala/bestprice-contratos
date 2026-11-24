@@ -148,3 +148,14 @@ test('CONTROL 14: `id=` y `data-id=` no se confunden', () => {
   assert.equal(p.buscar('#m1'), null, 'data-id="m1" NO es id="m1"');
   assert.equal(p.buscar('#de-verdad').id, 'de-verdad');
 });
+
+test('CONTROL 17: la caja no está «conectada» hasta que se cuelga del contenedor', () => {
+  // El área de dinero mira `raizActual?.isConnected` antes de vaciar lo dibujado al cerrarse. Si la
+  // pantalla de mentira dijera siempre que no, ese camino no se tocaría nunca y la prueba quedaría verde
+  // sin haber comprobado que la página se vacía.
+  const p = pantallaDeMentira();
+  const caja = p.documento.createElement('div');
+  assert.equal(caja.isConnected, false, 'recién creada no está en la página');
+  p.contenedor.replaceChildren(caja);
+  assert.equal(caja.isConnected, true, 'colgada del contenedor, sí');
+});

@@ -18,7 +18,7 @@ import {
   estadoDeCosto, notasDeTotal, resumenDeMarcadas, razonDeNoCierre, pagosDeLaCuenta, registrarElPago,
   parchearMarcado, notasDelTotalGeneral, textoDeComprobantes, diferenciaBloqueada, rentasCortas,
   cerrarElDinero, cerrarElDineroOReiniciar, salirDelSistema, crearVigilante, crearLector, mensajeSeguro,
-  pintarDinero, pintarCuentaDeDueno,
+  pintarDinero, pintarCuentaDeDueno, alOlvidarElDinero,
   htmlEntrada, htmlFallo, htmlLista, htmlFicha, htmlMigracion, entradaDelComprobante, problemaDeLaFechaDelPago,
   textoConfirmarAnularPagoDueno, anularElPago, MENSAJE_ANULAR_SIN_COMPROBAR, MENSAJE_ANULAR_NO_ESTA, MENSAJE_ANULAR_FALLO,
   textoDePagadoDeMas, resumenDelDescuento, textoDelProblemaDelDescuento, textoDeDescuentoSinRespaldo,
@@ -3527,3 +3527,76 @@ test('el cableado: si la migración FALLA, nunca dice «0 contratos movidos»', 
   assert.match(p.html(), /No se pudo mover el costo/);
 });
 
+
+// ---------------------------------------------------------------------------
+// Cerrar el área de dinero: lo leído se suelta, y lo DIBUJADO también
+// ---------------------------------------------------------------------------
+// `olvidarLosDatos` es lo que corre cuando el área se cierra —a mano, o sola por inactividad—. Hasta hoy
+// las pruebas de `cerrarElDinero` le ponían un espía en su lugar, así que la función de verdad no la
+// ejercitaba nadie: 6 de sus 8 errores pasaban sin que nada se pusiera rojo.
+
+test('el cableado: cerrar el área suelta lo leído Y VACÍA lo dibujado', async () => {
+  // Lo ya dibujado también es dinero: quien abriera la consola lo leería de la página aunque la sesión
+  // estuviera cerrada.
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  assert.match(p.html(), /Mario López Alvarado/, 'el control: la ficha está dibujada');
+  assert.ok(p.lector.actual, 'y hay una lectura guardada');
+
+  const cerrada = await cerrarElDinero({ salir: async () => {}, parar: () => {} });
+  assert.equal(cerrada, true);
+  assert.equal(p.html(), '', 'la página queda vacía: no hay de dónde leerlo');
+});
+
+test('el cableado: al cerrar, cada pantalla registrada suelta lo suyo', async () => {
+  const soltaron = [];
+  const quitarA = alOlvidarElDinero(() => soltaron.push('A'));
+  const quitarB = alOlvidarElDinero(() => soltaron.push('B'));
+  try {
+    await cerrarElDinero({ salir: async () => {}, parar: () => {} });
+    assert.deepEqual(soltaron.sort(), ['A', 'B']);
+  } finally { quitarA(); quitarB(); }
+});
+
+test('el cableado: una pantalla que FALLA al soltar no deja a las demás con dinero en memoria', async () => {
+  const soltaron = [];
+  const quitarMala = alOlvidarElDinero(() => { throw new Error('esta pantalla se rompió'); });
+  const quitarBuena = alOlvidarElDinero(() => soltaron.push('la buena'));
+  const errores = [];
+  const consolaReal = console.error;
+  console.error = (...args) => errores.push(args.join(' '));
+  try {
+    await cerrarElDinero({ salir: async () => {}, parar: () => {} });
+    assert.deepEqual(soltaron, ['la buena'], 'la otra soltó lo suyo igual');
+    assert.ok(errores.some((e) => /no pudo soltar lo que leyó/.test(e)), 'y el fallo queda escrito');
+  } finally { console.error = consolaReal; quitarMala(); quitarBuena(); }
+});
+
+test('el cableado: quien se dio de baja ya no se entera de los cierres siguientes', async () => {
+  const soltaron = [];
+  const quitar = alOlvidarElDinero(() => soltaron.push('yo'));
+  quitar();
+  await cerrarElDinero({ salir: async () => {}, parar: () => {} });
+  assert.deepEqual(soltaron, [], 'ya no se le llama');
+});
+
+test('el cableado: al cerrar el área, la pantalla suelta LO QUE ELLA LEYÓ', async () => {
+  // Es lo más importante de cerrar: la página se vacía, pero si lo leído sigue en memoria basta con que
+  // algo la vuelva a dibujar para que el costo de cada dueño salga otra vez sin contraseña.
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  assert.ok(p.lector.actual, 'el control: la pantalla tiene su lectura guardada');
+
+  const cerrada = await cerrarElDinero({ salir: async () => {}, parar: () => {} });
+  assert.equal(cerrada, true);
+  assert.equal(p.lector.actual, null, 'y al cerrar la suelta');
+  assert.equal(p.html(), '', 'la página también queda vacía');
+});
+
+test('el cableado: montar la pantalla otra vez NO deja olvidadores colgados', async () => {
+  // Cada vuelta por el área de dinero registra el lector de esa vuelta. Si no se diera de baja el
+  // anterior, se irían amontonando para siempre, y cada cierre llamaría a todos los de todas las vueltas.
+  const primera = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  const segunda = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  await cerrarElDinero({ salir: async () => {}, parar: () => {} });
+  assert.equal(segunda.lector.actual, null, 'la puesta suelta lo suyo');
+  assert.ok(primera.lector.actual, 'la anterior ya no está registrada: se dio de baja al montarse la otra');
+});

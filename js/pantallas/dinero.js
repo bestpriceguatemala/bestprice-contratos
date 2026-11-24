@@ -173,6 +173,15 @@ let raizActual = null;
 // Cuenta las pantallas dibujadas: una carga lenta que termina cuando ya se dibujó
 // otra cosa (la entrada, otra ficha) no pinta encima.
 let ultimoToken = 0;
+
+/**
+ * Cómo se da de baja el lector de la pantalla que está puesta. La pantalla registra EL SUYO como
+ * olvidador (abajo, al montarse), para que cerrar el área suelte lo que esa pantalla leyó, sea cual sea su
+ * lector — y no por la casualidad de que resulte ser el mismo del módulo. Al montarse otra, la anterior se
+ * da de baja: si no, cada vuelta por la pantalla dejaría un olvidador más colgado para siempre.
+ * (24 de noviembre de 2026.)
+ */
+let bajaDelLectorPuesto = null;
 // Lo que la entrada le dice al dueño la próxima vez que se dibuje (por ejemplo, que se cerró sola).
 let mensajeDeEntrada = '';
 
@@ -1593,6 +1602,8 @@ async function pintarCuentas(contenedor, claveDeFicha, {
   const raiz = doc.createElement('div');
   contenedor.replaceChildren(raiz);
   raizActual = raiz;
+  bajaDelLectorPuesto?.();
+  bajaDelLectorPuesto = alOlvidarElDinero(() => elLector.olvidar());
 
   const ui = {
     marcados: new Set(), anotando: null, pagando: false, forma: FORMAS_DE_PAGO[0].valor, fecha: hoy,
