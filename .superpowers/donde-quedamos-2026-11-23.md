@@ -1,10 +1,12 @@
-# Dónde quedamos — 23 de noviembre de 2026
+# Dónde quedamos — 23 y 24 de noviembre de 2026
 
-Escrito al parar a media tarea, a pedido suyo («perame, continuamos después; no pierdas nada»).
+Escrito al parar a media tarea, a pedido suyo. Se actualiza en cada parada: lo de abajo es el estado de la
+ÚLTIMA (24 de noviembre, por la tarde).
 
-**Estado del árbol:** limpio. `npm test` = **2,811 pasan, 0 fallan**.
-**Último commit:** `8d9fe2a`, y **todo está subido** (`main` = `origin/main`).
-**Versión publicada:** `2026-11-23.2`. Nada pendiente de publicar.
+**Estado del árbol:** limpio. `npm test` = **2,845 pasan, 0 fallan**.
+**Último commit:** `5499e9e`. Falta subir ese (lo anterior sí está subido).
+**Versión publicada:** `2026-11-23.2`. **Nada pendiente de publicar**: todo lo del 24 son pruebas y
+cañería interna, no cambia nada de lo que él ve, y no hace falta darle «Actualizar».
 **Reglas de Firestore:** sin cambios. Nada que pegar en la consola.
 
 ---
@@ -39,7 +41,34 @@ sobre el código de hoy**, no reaplicar errores viejos.
 
 ---
 
-## Lo que se hizo hoy, en orden
+## Lo que se hizo el 24 de noviembre
+
+Todo sobre `pintarCuentas`, que pasó de atrapar el **26.9 %** al **55.8 %** de los errores que se le meten
+(373 en total; 208 atrapados, 165 pasan, ninguno colgado).
+
+1. **Enlazar un dueño** (no se puede deshacer): que no pregunte sin haber escogido; que pregunte antes con
+   cuántos contratos y a quién; que enlace SUS contratos a ESE dueño; que «dar de alta» cree al dueño con
+   el nombre de la cuenta; y que **un reintento tras un enlace fallido NO cree un segundo dueño**.
+2. **Ver comprobante** (el de ESE pago; uno anulado no abre papel) y **la migración** (pregunta antes; si
+   falla nunca dice «0 contratos movidos»).
+3. **Cerrar el área**: vacía lo dibujado, cada pantalla suelta lo suyo, una que falle no corta a las
+   demás, y la pantalla suelta LO QUE ELLA LEYÓ. Para esto la pantalla registra su lector como olvidador
+   al montarse y da de baja el de la vuelta anterior.
+4. **`guardarCosto`** (era el peor, 22 de 25 pasaban; ahora 7): el costo le queda a ESA renta y no a las
+   demás; la casilla se cierra al guardar y NO se cierra si falla; dos clics no lo anotan dos veces.
+5. **`anularPagoDeDueno`** (27 → 10) y **`guardarPago`** (39 → 23): las ramas de la RESPUESTA —
+   `ya-guardado`, `cambio`, `no-esta`, `ya-anulado`—, y que el reintento lleve la MISMA marca `enCurso`,
+   que es lo que evita el pago doble cuando se cae el internet al guardar.
+
+**Dos avisos del proceso, por si sirven:**
+- Una prueba propia era TEATRO (pasaba con el error puesto, porque miraba un lector que el módulo nunca
+  había llenado). Se descubrió metiéndole el mutante a propósito. **Cada prueba nueva de valor se
+  comprueba así antes de darla por buena.**
+- Dos mutantes se revisaron y NO eran huecos (`ui.altaDeDueno.terminada()` y `ui.anotando = null`): son
+  redundantes por razones que están escritas en los commits. No se inventó una prueba para un problema
+  que no existe.
+
+## Lo que se hizo el 23 de noviembre, en orden
 
 1. **El arnés de mutaciones se mudó al repositorio** (`analisis/mutaciones/`). El de octubre vivía en una
    carpeta temporal y se había perdido; sin él no se podía repetir ni comprobar nada de su informe.
