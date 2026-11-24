@@ -1576,6 +1576,10 @@ async function pintarCuentas(contenedor, claveDeFicha, {
   anular = anularElPago,
   avisar = aviso,
   anotarCosto = anotarCostoDelDueno,
+  guardarElDueno = guardarDueno,
+  enlazarAlDueno = enlazarContratosAlDueno,
+  cambiarLaDireccion = (ruta) => history.replaceState(null, '', ruta),
+  acunarIdDeDueno = nuevoIdDueno,
 } = {}) {
   const miToken = ++ultimoToken;
   const hoy = ahora();
@@ -1596,7 +1600,7 @@ async function pintarCuentas(contenedor, claveDeFicha, {
     // «Dar de alta como dueño y enlazar» crea un dueño: su id se decide una vez, antes del primer intento, para
     // que un reintento tras un tiempo vencido no cree un segundo dueño con el mismo nombre (H-2). Va por grupo
     // («sin enlazar»): un intento fallido de uno no le pega su id a otro.
-    altaDeDueno: altaConIdFijo(nuevoIdDueno),
+    altaDeDueno: altaConIdFijo(acunarIdDeDueno),
   };
   let vista = null;
   let entrada = null;
@@ -1771,13 +1775,13 @@ async function pintarCuentas(contenedor, claveDeFicha, {
     ui.mensajeEnlace = '';
     try {
       if (crear) {
-        const alta = await guardarDueno(await ui.altaDeDueno.paraGuardar(construirDueno({}, { nombre: entrada.nombre }), entrada.clave));
+        const alta = await guardarElDueno(await ui.altaDeDueno.paraGuardar(construirDueno({}, { nombre: entrada.nombre }), entrada.clave));
         duenoId = alta.id;
         // El dueño recién creado ya está: si el enlace falla, el siguiente intento lo escoge de la lista.
         const antes = elLector.actual;
         if (antes) antes.duenos = { ...antes.duenos, datos: [...(antes.duenos.datos ?? []), alta] };
       }
-      await enlazarContratosAlDueno(entrada.contratos.map((c) => c.id), duenoId);
+      await enlazarAlDueno(entrada.contratos.map((c) => c.id), duenoId);
       // Con el enlace hecho el alta terminó: la siguiente vez, otro dueño. Antes de aquí NO se suelta: si el enlace
       // falla y se repite «dar de alta», cae en el mismo dueño y no crea otro.
       ui.altaDeDueno.terminada();
@@ -1788,7 +1792,7 @@ async function pintarCuentas(contenedor, claveDeFicha, {
       avisar('Contratos enlazados.', 'exito');
       // La cuenta cambia de clave (de `texto:` a `id:`): se actualiza la dirección sin volver a leer.
       claveActual = `id:${duenoId}`;
-      history.replaceState(null, '', rutaDeCuenta(claveActual));
+      cambiarLaDireccion(rutaDeCuenta(claveActual));
       ui.mensajeEnlace = '';
     } catch (error) {
       ui.mensajeEnlace = mensajeSeguro(error, MENSAJE_ENLACE_FALLO);

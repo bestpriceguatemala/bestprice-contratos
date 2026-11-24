@@ -693,7 +693,10 @@ test('estructura: cada pantalla que da de alta guarda con el id decidido de ante
     ['carros', 'guardarVehiculo', 'nuevoIdVehiculo', 1, 1],
     ['sacarCarro', 'guardarCliente', 'nuevoIdCliente', 1, 1],
     ['sacarCarro', 'guardarDueno', 'nuevoIdDueno', 1, 1],
-    ['dinero', 'guardarDueno', 'nuevoIdDueno', 1, 1],
+    // `dinero` salió de esta lista el 24 de noviembre de 2026: desde que la pantalla recibe sus aparatos,
+    // el guardado entra por un nombre inyectado y contarlo en el TEXTO ya no dice nada. La propiedad que
+    // esta fila cuidaba —que un reintento después de un enlace fallido no cree un segundo dueño— se
+    // prueba APRETÁNDOLA en pruebas/dinero.test.mjs («un reintento no crea un segundo dueño»).
   ];
   for (const [pantalla, guardado, acuna, total, altas] of sitios) {
     const codigo = leerFuente(`../js/pantallas/${pantalla}.js`).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');

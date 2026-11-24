@@ -3110,6 +3110,7 @@ async function pantallaDeDinero({
   pagar,
   anular,
   anotarCosto,
+  enlazarAlDueno,
   ruta = clave === null ? '#/dinero' : `#/dinero/cuenta/${encodeURIComponent(clave)}`,
 } = {}) {
   const p = pantallaDeMentira();
@@ -3119,6 +3120,10 @@ async function pantallaDeDinero({
   const anulaciones = [];
   const dichos = [];
   const costos = [];
+  const altas = [];
+  const enlaces = [];
+  const direcciones = [];
+  let idsAcunados = 0;
   let rutaActual = ruta;
   const aparatos = {
     lector,
@@ -3132,11 +3137,15 @@ async function pantallaDeDinero({
     anular: anular ?? (async (args) => { anulaciones.push(args); return { pagos: lectura.pagos.datos }; }),
     avisar: (texto, tipo) => dichos.push({ texto, tipo }),
     anotarCosto: anotarCosto ?? (async (contrato, costo) => { costos.push({ id: contrato.id, costo }); return costo; }),
+    guardarElDueno: async (registro) => { altas.push(registro); return registro; },
+    enlazarAlDueno: enlazarAlDueno ?? (async (ids, duenoId) => { enlaces.push({ ids, duenoId }); }),
+    cambiarLaDireccion: (r) => direcciones.push(r),
+    acunarIdDeDueno: async () => `d-nuevo-${++idsAcunados}`,
   };
   if (clave === null) await pintarDinero(p.contenedor, aparatos);
   else await pintarCuentaDeDueno(p.contenedor, clave, aparatos);
   return {
-    ...p, lector, preguntas, pagos, anulaciones, dichos, costos, ruta: () => rutaActual,
+    ...p, lector, preguntas, pagos, anulaciones, dichos, costos, altas, enlaces, direcciones, ruta: () => rutaActual,
   };
 }
 
@@ -3378,3 +3387,83 @@ test('el cableado: una renta cuyo costo no se pudo leer no se puede marcar para 
   p.marcar(LA_RENTA('m2'));
   assert.equal(p.buscar('#dn-total-marcado').textContent, 'Q1,800.00', 'las demás sí');
 });
+
+// ---------------------------------------------------------------------------
+// Enlazar una cuenta escrita a mano con un dueño de la lista
+// ---------------------------------------------------------------------------
+// Dos contratos viejos traen el nombre del dueño escrito a mano, sin `duenoId`. Enlazarlos NO se puede
+// deshacer desde el sistema, así que cada paso de aquí importa.
+
+/** La cuenta de «Don Mario», que viene escrita a mano (clave `texto:`) y no está enlazada a ningún dueño. */
+const CLAVE_A_MANO = 'texto:Don Mario';
+
+test('el cableado: enlazar sin escoger a nadie no pregunta ni enlaza, solo lo dice', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_A_MANO });
+  assert.ok(p.hay('#dn-enlazar-dueno'), 'la cuenta a mano ofrece enlazarse');
+  p.clic('[data-dn="enlazar"]');
+  assert.deepEqual(p.preguntas, [], 'no pregunta por algo que todavía no se puede hacer');
+  assert.deepEqual(p.enlaces, []);
+  assert.match(p.html(), /Escoge a qué dueño de la lista corresponde/);
+});
+
+test('el cableado: enlazar PREGUNTA antes, con cuántos contratos y a quién; un «no» no enlaza nada', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_A_MANO, responder: () => false });
+  p.buscar('#dn-enlazar-dueno').value = 'd1';
+  p.clic('[data-dn="enlazar"]');
+  assert.equal(p.preguntas.length, 1);
+  assert.match(p.preguntas[0], /¿Enlazar 1 contrato de «Don Mario» al dueño «Mario López Alvarado»\?/);
+  assert.match(p.preguntas[0], /no se puede deshacer/);
+  assert.deepEqual(p.enlaces, [], 'dijo que no: no se enlazó nada');
+  assert.deepEqual(p.altas, [], 'ni se dio de alta a nadie');
+});
+
+test('el cableado: con un sí, se enlazan SUS contratos a ESE dueño y la cuenta cambia de dirección', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_A_MANO });
+  p.buscar('#dn-enlazar-dueno').value = 'd1';
+  p.clic('[data-dn="enlazar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.enlaces.length, 1);
+  assert.deepEqual(p.enlaces[0].ids, ['t1'], 'exactamente los contratos de esa cuenta');
+  assert.equal(p.enlaces[0].duenoId, 'd1');
+  assert.deepEqual(p.direcciones, ['#/dinero/cuenta/id%3Ad1'], 'la cuenta pasa de «texto:» a «id:» sin volver a leer');
+  assert.ok(p.dichos.some((d) => /Contratos enlazados/.test(d.texto)));
+});
+
+test('el cableado: «dar de alta y enlazar» crea al dueño con el nombre de la cuenta y le enlaza sus contratos', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_A_MANO });
+  p.clic('[data-dn="crear-y-enlazar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.match(p.preguntas[0], /¿Dar de alta a «Don Mario» como dueño y enlazarle 1 contrato\?/);
+  assert.equal(p.altas.length, 1);
+  assert.equal(p.altas[0].nombre, 'Don Mario');
+  assert.equal(p.enlaces[0].duenoId, p.altas[0].id, 'los contratos van al dueño que se acaba de crear');
+});
+
+test('el cableado: si el ENLACE falla, un reintento NO crea un segundo dueño con el mismo nombre', async () => {
+  // Es la razón de ser de `altaConIdFijo`: el id se decide UNA vez, antes del primer intento. Sin eso, él
+  // aprieta otra vez después de un fallo de internet y se queda con dos «Don Mario» en la lista de dueños,
+  // uno con los contratos y otro vacío. Hasta hoy esto se cuidaba contando llamadas en el TEXTO del código.
+  let falla = true;
+  const intentos = [];
+  const p = await pantallaDeDinero({
+    clave: CLAVE_A_MANO,
+    enlazarAlDueno: async (ids, duenoId) => {
+      intentos.push({ ids, duenoId });
+      if (falla) throw new Error('se cayó el internet');
+    },
+  });
+  p.clic('[data-dn="crear-y-enlazar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.altas.length, 1, 'se creó el dueño');
+  assert.match(p.html(), /No se pudieron enlazar los contratos/, 'y se dice que el enlace no se pudo');
+
+  falla = false;
+  p.clic('[data-dn="crear-y-enlazar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.altas.length, 2, 'se vuelve a intentar el alta…');
+  assert.equal(p.altas[0].id, p.altas[1].id, '…pero con el MISMO id: es el mismo dueño, no uno nuevo');
+  assert.equal(intentos.length, 2, 'se volvió a intentar el enlace');
+  assert.equal(intentos[1].duenoId, p.altas[0].id, 'y los contratos van al dueño de siempre, no a uno nuevo');
+  assert.deepEqual(intentos[0].ids, intentos[1].ids, 'los mismos contratos');
+});
+
