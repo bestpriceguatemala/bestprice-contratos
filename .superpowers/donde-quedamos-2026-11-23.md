@@ -93,13 +93,17 @@ Todo sobre `pintarCuentas`, que pasó de atrapar el **26.9 %** al **55.8 %** de 
 
 ## Lo que sigue, en orden
 
-1. **Seguir cableando la pantalla de dinero.** `js/pantallas/dinero.js` entero va en **67.5 %** (de 46.4 %
-   el 23 de noviembre). Hechos: enlazar, ver comprobante, el cierre del área, `guardarCosto`,
-   `anularPagoDeDueno`, `guardarPago`, el despachador de botones, la mudanza del costo y **la puerta**
-   (`dibujarEntrada`, de 22 errores que pasaban a 1). Lo que queda, por tamaño: los oyentes de eventos
-   (34 de 99), `guardarPago` (23), `enlazar` (22), `textoConfirmarAnularPagoDueno` (18 — el texto de la
-   pregunta antes de anular), `dibujar` + `cargarYDibujar` (30 entre las dos), `instalarLatidos` (14 — los
-   latidos que reinician el reloj de inactividad), `registrarElPago` (13) y `armarVista` (11).
+1. **`js/pantallas/comisiones.js`**, que es ahora lo que más rinde: sigue en **56.8 %** y tiene su propio
+   `pintarCuentas` con 246 errores que pasan. La pantalla de mentira (`fixtures/pantallaDeMentira.mjs`,
+   con sus 17 controles) y la forma de inyectar los aparatos sirven igual: se copia lo que se hizo en
+   `dinero.js`.
+
+   `js/pantallas/dinero.js` quedó en **71.8 %** (de 46.4 % el 23 de noviembre). Lo que le queda está
+   repartido en pedazos de diez errores o menos —ya no hay un bulto grande— y buena parte son guardias
+   defensivos que desde la pantalla no se pueden alcanzar. Si se vuelve, lo mayor es: los oyentes de
+   eventos (34 de 99), `enlazar` (18), `guardarPago` (16), `armarVista` (11) y `alExpirarPorInactividad`
+   (9, que es lo que pasa cuando el reloj cierra el área sola).
+
 2. **`pintarCuentas` de comisiones** (`js/pantallas/comisiones.js`): 246 de 321 errores pasaban, 23 %. La
    pantalla de mentira ya está hecha y sirve igual.
 3. **`avisoDelPapelQueNoCambia`** en comisiones: 45 de 134 pasaban.

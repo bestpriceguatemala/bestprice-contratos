@@ -118,7 +118,8 @@ descuento ya dentro.
 | Archivo | Errores metidos | Atrapados | Pasan sin que nadie lo note | Atrapa |
 |---|---:|---:|---:|---:|
 | `js/pantallas/dinero.js` (23 nov) | 1,042 | 484 | 558 | **46.4 %** |
-| **`js/pantallas/dinero.js` (25 nov)** | **1,058** | **714** | **344** | **67.5 %** |
+| `js/pantallas/dinero.js` (25 nov, mañana) | 1,058 | 714 | 344 | **67.5 %** |
+| **`js/pantallas/dinero.js` (25 nov, tarde)** | **1,058** | **760** | **298** | **71.8 %** |
 | `js/pantallas/comisiones.js` (23 nov) | 1,008 | 573 | 435 | **56.8 %** |
 
 El 23 de noviembre las dos juntas atrapaban el 51.6 %. `dinero.js` subió al 67.5 % entre el 23 y el 25;
@@ -239,22 +240,34 @@ pasan» mezclaba dos cosas, porque el reparto por función ponía bajo `migrar` 
 Separados: **`migrar` son 24 errores** y **los oyentes de eventos, 99**. Al 25 de noviembre, con el
 despachador y la mudanza ya probados, van así:
 
+Al cerrar el 25 de noviembre, lo que queda es esto:
+
 | Pasan / total | Dentro de |
 |---:|---|
 | 34 / 99 | **los oyentes de eventos** (el reparto de cada botón a su acción) |
-| 23 / 54 | `guardarPago` |
-| 22 / 52 | `enlazar` |
-| 18 / 31 | `textoConfirmarAnularPagoDueno` (el texto de la pregunta antes de anular) |
-| 16 / 31 | `dibujar` |
-| 14 / 18 | `instalarLatidos` (los latidos que reinician el reloj de inactividad) |
-| 14 / 21 | `cargarYDibujar` |
-| 13 / 49 | `registrarElPago` |
+| 18 / 52 | `enlazar` |
+| 16 / 54 | `guardarPago` |
+| 13 / 49 | `registrarElPago` (el guardado, que ya tenía sus pruebas aparte) |
+| 12 / 21 | `cargarYDibujar` |
 | 11 / 43 | `armarVista` |
+| 11 / 31 | `textoConfirmarAnularPagoDueno` |
+| 10 / 20 | `etiquetaDeForma` |
+| 10 / 13 | `pagosDeLaCuenta` |
+| 10 / 31 | `dibujar` |
+| 10 / 35 | `anularPagoDeDueno` |
 | 10 / 24 | `migrar` |
+| 9 / 14 | `alExpirarPorInactividad` |
 
-Lo trabajado bajó así: `guardarCosto` de 22 a 7 errores que pasan, `anularPagoDeDueno` de 27 a 10,
-`guardarPago` de 39 a 23, `dibujarEntrada` (la puerta) de 22 a 1, los oyentes de 44 a 34, `migrar` de 15
-a 10.
+Lo trabajado bajó así, en errores que pasan: la puerta (`dibujarEntrada`) de 22 a 1, `guardarCosto` de 22
+a 7, `anularPagoDeDueno` de 27 a 10, `guardarPago` de 39 a 16, `instalarLatidos` de 14 a 0,
+`conPuertaDeDinero` de 5 a 0, `textoConfirmarAnularPagoDueno` de 18 a 11, `dibujar` de 16 a 10, los
+oyentes de 44 a 34, `migrar` de 15 a 10, `enlazar` de 22 a 18.
+
+**Ya no hay un bulto grande.** Lo que queda está repartido en pedazos de diez o menos, y una buena parte
+son guardias defensivos que desde la pantalla no se pueden alcanzar (se revisaron uno por uno y están
+dichos en los commits). El siguiente paso con más provecho ya no es seguir aquí, sino
+**`js/pantallas/comisiones.js`**, que sigue en 56.8 % y tiene su propio `pintarCuentas` con 246 errores
+que pasan — y la pantalla de mentira que se construyó aquí sirve igual.
 
 ### Cómo se midió, y una trampa que costó una corrida entera
 
