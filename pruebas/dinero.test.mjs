@@ -4465,3 +4465,104 @@ test('una lectura que falla DESPUÉS de una buena no borra lo que ya se sabía�
   assert.match(p.html(), /No se pudieron leer los pagos a dueños/, 'se dice que falló');
   assert.doesNotMatch(p.html(), /Q\d/, 'y no se enseña ninguna cifra: cualquiera saldría incompleta');
 });
+
+// ---------------------------------------------------------------------------
+// Lo que falta de registrar un pago y de enlazar un dueño
+// ---------------------------------------------------------------------------
+
+test('lo que se guarda se LEE del formulario al guardar, no de lo que haya quedado apuntado', async () => {
+  // La misma regla de `hora24` y del monto: lo que se guarda no puede depender de que un evento del
+  // navegador haya alcanzado a correr. Si él cambia la fecha y aprieta Guardar de corrido, o si el
+  // navegador no manda el «change», lo que viaja tiene que ser lo que está escrito en la casilla.
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  p.marcar(LA_RENTA('m1'));
+  p.clic('[data-dn="registrar"]');
+  // Se cambian las casillas SIN disparar ningún evento, como si el navegador no hubiera alcanzado.
+  p.buscar('#dn-fecha').value = '2026-09-30';
+  p.buscar('#dn-forma').value = 'cheque';
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.pagos.at(-1).fecha, '2026-09-30', 'la fecha que estaba escrita');
+  assert.equal(p.pagos.at(-1).forma, 'cheque', 'y la forma que estaba escogida');
+});
+
+test('registrar: mientras guarda, el botón queda apagado', async () => {
+  let apagado = null;
+  const p = await pantallaDeDinero({
+    clave: CLAVE_MARIO,
+    pagar: async () => {
+      apagado = p.buscar('#dn-guardar-pago').disabled;
+      return { tipo: 'guardado', pago: { id: 'pg-9', numero: 9 }, pagos: [] };
+    },
+  });
+  p.marcar(LA_RENTA('m1'));
+  p.clic('[data-dn="registrar"]');
+  p.lanzar('change', '#dn-fecha', { value: HOY });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(apagado, true);
+});
+
+test('registrar: sin sesión de dinero no se guarda ningún pago', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  p.marcar(LA_RENTA('m1'));
+  p.clic('[data-dn="registrar"]');
+  p.lanzar('change', '#dn-fecha', { value: HOY });
+  p.cerrarLaSesion();
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(p.pagos, [], 'sin la contraseña no se escribe un pago');
+});
+
+test('enlazar: una cuenta que YA está enlazada no ofrece enlazarse', async () => {
+  // Mario tiene su `duenoId`: volver a enlazarlo no tiene sentido y le pegaría sus contratos a otro.
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  assert.equal(p.hay('[data-dn="enlazar"]'), false);
+  assert.equal(p.hay('[data-dn="crear-y-enlazar"]'), false);
+  assert.equal(p.hay('#dn-enlazar-dueno'), false);
+});
+
+test('enlazar: el dueño recién creado queda en la lista, para que un reintento lo pueda escoger', async () => {
+  // Si el enlace falla después de crearlo, el siguiente intento tiene que poder escogerlo del desplegable
+  // en vez de crear otro.
+  let falla = true;
+  const p = await pantallaDeDinero({
+    clave: CLAVE_A_MANO,
+    enlazarAlDueno: async () => { if (falla) throw new Error('se cayó el internet'); },
+  });
+  p.clic('[data-dn="crear-y-enlazar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  const nuevo = p.altas[0];
+  assert.ok(p.lector.actual.duenos.datos.some((d) => d.id === nuevo.id), 'ya está en la lista de dueños');
+  assert.match(p.html(), /Don Mario/, 'y se ofrece en el desplegable para volver a intentarlo');
+});
+
+test('enlazar: al lograrlo, los contratos quedan enlazados en memoria sin volver a leer de la nube', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_A_MANO });
+  const lecturasAntes = p.lecturas.length;
+  p.buscar('#dn-enlazar-dueno').value = 'd1';
+  p.clic('[data-dn="enlazar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  const t1 = p.lector.actual.contratos.datos.find((c) => c.id === 't1');
+  assert.equal(t1.duenoId, 'd1', 'el contrato ya lleva su dueño');
+  assert.equal(p.lecturas.length, lecturasAntes, 'y no se le volvió a pedir todo a la nube');
+});
+
+test('enlazar: la pregunta dice «contrato» o «contratos» según cuántos sean', async () => {
+  const unaSola = await pantallaDeDinero({ clave: CLAVE_A_MANO, responder: () => false });
+  unaSola.buscar('#dn-enlazar-dueno').value = 'd1';
+  unaSola.clic('[data-dn="enlazar"]');
+  assert.match(unaSola.preguntas[0], /1 contrato de/, 'en singular');
+  assert.doesNotMatch(unaSola.preguntas[0], /1 contratos/);
+
+  // Doña Pura también tiene una; se arma una cuenta a mano con dos para ver el plural.
+  const dos = cerrado('t3', { numero: 33, placas: 'P-TTT003', costoDia: 150, dias: 2, dueno: 'Don Mario', duenoId: null });
+  const conDos = await pantallaDeDinero({
+    clave: CLAVE_A_MANO,
+    lectura: lecturaOk({ contratos: { datos: [...TODOS, dos], fallo: false, costoSinLeer: [] } }),
+    responder: () => false,
+  });
+  conDos.buscar('#dn-enlazar-dueno').value = 'd1';
+  conDos.clic('[data-dn="enlazar"]');
+  assert.match(conDos.preguntas[0], /2 contratos de/, 'en plural');
+});
