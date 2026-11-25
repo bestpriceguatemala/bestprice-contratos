@@ -3111,7 +3111,8 @@ async function pantallaDeDinero({
   ruta = clave === null ? '#/dinero' : `#/dinero/cuenta/${encodeURIComponent(clave)}`,
 } = {}) {
   const p = pantallaDeMentira();
-  const lector = crearLector({ leer: async () => lectura });
+  const lecturas = [];
+  const lector = crearLector({ leer: async () => { lecturas.push(Date.now()); return lectura; } });
   const preguntas = [];
   const pagos = [];
   const anulaciones = [];
@@ -3162,6 +3163,7 @@ async function pantallaDeDinero({
     direcciones,
     comprobantes,
     migraciones,
+    lecturas,
     ruta: () => rutaActual,
     /** Cierra la sesión de dinero por detrás, como la cierra Firebase cuando se le vence el permiso. */
     cerrarLaSesion() { sesionAbierta = false; },
@@ -3884,4 +3886,134 @@ test('registrar: dos clics seguidos no registran dos pagos', async () => {
   p.clic('#dn-guardar-pago');
   await new Promise((ok) => { setTimeout(ok, 0); });
   assert.equal(intentos.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// El despachador: cada botón a SU acción, y lo que no es un botón no hace nada
+// ---------------------------------------------------------------------------
+// 44 de los 99 errores de los oyentes de eventos pasaban sin que nada se pusiera rojo. Es el reparto: un
+// error aquí no rompe una cuenta, hace que un botón haga lo de otro.
+
+test('el despachador: «Actualizar» vuelve a leer, forzando', async () => {
+  const p = await pantallaDeDinero();
+  const antes = p.lecturas.length;
+  p.clic('[data-dn="actualizar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.lecturas.length, antes + 1, 'se pide la lectura otra vez');
+});
+
+test('el despachador: «Cancelar» cierra la casilla del costo sin guardar', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  p.clic('[data-dn="anotar-costo"][data-id="m5"]');
+  assert.ok(p.hay('#dn-costo-input'));
+  p.clic('[data-dn="cancelar-costo"]');
+  assert.equal(p.hay('#dn-costo-input'), false);
+  assert.deepEqual(p.costos, [], 'y no se anotó nada');
+});
+
+test('el despachador: «Cancelar» del pago cierra el formulario y suelta lo marcado', async () => {
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  p.marcar(LA_RENTA('m1'));
+  p.clic('[data-dn="registrar"]');
+  assert.ok(p.hay('#dn-guardar-pago'));
+  p.clic('[data-dn="cancelar-pago"]');
+  assert.equal(p.hay('#dn-guardar-pago'), false, 'el formulario se cierra');
+  assert.deepEqual(p.pagos, [], 'y no se registró nada');
+});
+
+test('el despachador: un clic en un ENLACE de la fila no abre además la cuenta', async () => {
+  // Las filas de la lista se abren con un clic en cualquier parte. Si el enlace de adentro contara
+  // también, un clic haría las dos cosas y él acabaría en una pantalla que no pidió.
+  const p = await pantallaDeDinero();
+  const rutaAntes = p.ruta();
+  const enlaces = p.raiz.querySelectorAll('a');
+  const dentroDeUnaFila = enlaces.find((a) => a.closest('tr[data-dn-clave]'));
+  if (dentroDeUnaFila) {
+    p.lanzar('click', dentroDeUnaFila);
+    assert.equal(p.ruta(), rutaAntes, 'el enlace se encarga; la fila no se mete');
+  }
+  // El control: un clic en la fila FUERA del enlace sí abre la cuenta.
+  const fila = p.raiz.querySelectorAll('tr[data-dn-clave]')[0];
+  p.lanzar('click', fila);
+  assert.notEqual(p.ruta(), rutaAntes);
+});
+
+test('el despachador: un `data-dn` que no existe no hace NADA', async () => {
+  // El `default: return` del reparto. Sin él, un botón nuevo mal escrito caería en la acción de al lado.
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  p.raiz.innerHTML = `${p.html()}<button id="inventado" data-dn="esto-no-existe" data-id="m1">x</button>`;
+  p.clic('#inventado');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual([p.pagos, p.anulaciones, p.costos, p.migraciones, p.enlaces], [[], [], [], [], []]);
+  assert.deepEqual(p.preguntas, [], 'ni siquiera pregunta nada');
+});
+
+// ---------------------------------------------------------------------------
+// La mudanza del costo: lo que se le dice según cómo haya salido
+// ---------------------------------------------------------------------------
+
+/** Aprieta «mover el costo» en la lista y espera a que termine. */
+async function moverElCosto(resultado, opciones = {}) {
+  const p = await pantallaDeDinero({
+    responder: () => true,
+    migrarCostos: typeof resultado === 'function' ? resultado : async () => resultado,
+    ...opciones,
+  });
+  const boton = p.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'migrar');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  return p;
+}
+
+test('la mudanza: si sale limpia, se dice cuántos se movieron y NO se marca como problema', async () => {
+  const p = await moverElCosto({ migrados: 3, conflictos: [], fallidos: [], copiaLocalLimpia: true });
+  assert.match(p.html(), /Se movieron 3 contratos detrás de la contraseña de dinero/);
+  assert.doesNotMatch(p.html(), /barra-lectura-fallida/, 'salió bien: nada en rojo');
+});
+
+test('la mudanza: un CONFLICTO se marca como problema, con el número del contrato', async () => {
+  // Un contrato que trae un costo distinto al ya guardado no se toca: hay que mirarlo a mano.
+  const p = await moverElCosto({ migrados: 1, conflictos: [{ numero: 41 }], fallidos: [], copiaLocalLimpia: true });
+  assert.match(p.html(), /41/, 'dice cuál');
+  assert.match(p.html(), /barra-lectura-fallida/, 'y sale marcado como problema');
+});
+
+test('la mudanza: lo que NO se pudo mover se marca como problema, aunque otros sí se movieran', async () => {
+  const p = await moverElCosto({ migrados: 5, conflictos: [], fallidos: [{ numero: 12 }], copiaLocalLimpia: true });
+  assert.match(p.html(), /No se pudo mover el contrato/);
+  assert.match(p.html(), /barra-lectura-fallida/);
+});
+
+test('la mudanza: una copia local que no se pudo limpiar también es problema', async () => {
+  const p = await moverElCosto({ migrados: 2, conflictos: [], fallidos: [], copiaLocalLimpia: false });
+  assert.match(p.html(), /No se pudo limpiar la copia de esta computadora/);
+  assert.match(p.html(), /barra-lectura-fallida/);
+});
+
+test('la mudanza: mientras corre, el botón dice por dónde va y queda apagado', async () => {
+  // Mover el costo de todos los contratos tarda. Sin esto, él ve un botón quieto, cree que no pasó nada y
+  // lo vuelve a apretar — y esto se corre UNA vez y no se deshace.
+  const visto = [];
+  const p = await pantallaDeDinero({ responder: () => true });
+  const boton = p.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'migrar');
+  assert.equal(boton.disabled, false, 'el control: antes de apretarlo está vivo');
+
+  const pantalla = await pantallaDeDinero({
+    responder: () => true,
+    migrarCostos: async ({ alAvanzar }) => {
+      const suyo = pantalla.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'migrar');
+      alAvanzar(1, 4);
+      visto.push({ texto: suyo.textContent, apagado: suyo.disabled });
+      alAvanzar(3, 4);
+      visto.push({ texto: suyo.textContent, apagado: suyo.disabled });
+      return { migrados: 4, conflictos: [], fallidos: [], copiaLocalLimpia: true };
+    },
+  });
+  const suBoton = pantalla.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'migrar');
+  pantalla.lanzar('click', suBoton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+
+  assert.deepEqual(visto.map((v) => v.texto), ['Moviendo… 1 de 4', 'Moviendo… 3 de 4'], 'va contando');
+  assert.deepEqual(visto.map((v) => v.apagado), [true, true], 'y apagado mientras tanto');
+  assert.match(pantalla.html(), /Se movieron 4 contratos/);
 });
