@@ -117,9 +117,12 @@ descuento ya dentro.
 
 | Archivo | Errores metidos | Atrapados | Pasan sin que nadie lo note | Atrapa |
 |---|---:|---:|---:|---:|
-| `js/pantallas/dinero.js` | 1,042 | 484 | 558 | **46.4 %** |
-| `js/pantallas/comisiones.js` | 1,008 | 573 | 435 | **56.8 %** |
-| **Las dos** | **2,050** | **1,057** | **993** | **51.6 %** |
+| `js/pantallas/dinero.js` (23 nov) | 1,042 | 484 | 558 | **46.4 %** |
+| **`js/pantallas/dinero.js` (25 nov)** | **1,058** | **714** | **344** | **67.5 %** |
+| `js/pantallas/comisiones.js` (23 nov) | 1,008 | 573 | 435 | **56.8 %** |
+
+El 23 de noviembre las dos juntas atrapaban el 51.6 %. `dinero.js` subió al 67.5 % entre el 23 y el 25;
+`comisiones.js` no se ha vuelto a tocar.
 
 Cero anomalías y cero mutantes colgados: cada uno de los 2,050 terminó con un veredicto.
 
@@ -223,28 +226,35 @@ Firebase de verdad y la nube, así que ninguna prueba podía apretar un botón.
 | 24 de noviembre, mañana (commit `133488c`) | 373 | 159 | 214 | **42.6 %** |
 | **24 de noviembre, tarde** (commit `95cae7c`) | 373 | 208 | 165 | **55.8 %** |
 
+El 25 de noviembre se midió el **archivo entero** en vez de solo `pintarCuentas`, porque el trabajo de ese
+día tocó también la puerta (`dibujarEntrada`), que vive fuera: **`dinero.js` pasó de 46.4 % a 67.5 %.**
+
 (El 23 hubo 10 mutantes colgados, que se cuentan aparte y nunca como muertos; después, ninguno.)
 
 **De atrapar uno de cada veinte a atrapar más de la mitad.** Y lo que falta también se dice: **165 errores
 siguen pasando**. Dónde están, medido:
 
-| Pasan / total | Atrapa | Dentro de |
-|---:|---:|---|
-| 59 / 123 | 52 % | `migrar` (la mudanza del costo detrás de la contraseña) |
-| 23 / 54 | 57 % | `guardarPago` |
-| 22 / 52 | 58 % | `enlazar` |
-| 16 / 31 | 48 % | `dibujar` |
-| 14 / 21 | 33 % | `cargarYDibujar` |
-| 10 / 35 | 71 % | `anularPagoDeDueno` |
-| 7 / 25 | 72 % | `guardarCosto` |
-| 5 / 10 | 50 % | `verComprobante` |
+**Una corrección de cuenta (25 de noviembre).** Lo que el 24 se apuntó como «`migrar`: 59 de 123 errores
+pasan» mezclaba dos cosas, porque el reparto por función ponía bajo `migrar` todo lo que venía después.
+Separados: **`migrar` son 24 errores** y **los oyentes de eventos, 99**. Al 25 de noviembre, con el
+despachador y la mudanza ya probados, van así:
 
-Las tres que se trabajaron el 24 por la tarde bajaron así: `guardarCosto` de 22 a 7 errores que pasan,
-`anularPagoDeDueno` de 27 a 10, `guardarPago` de 39 a 23.
+| Pasan / total | Dentro de |
+|---:|---|
+| 34 / 99 | **los oyentes de eventos** (el reparto de cada botón a su acción) |
+| 23 / 54 | `guardarPago` |
+| 22 / 52 | `enlazar` |
+| 18 / 31 | `textoConfirmarAnularPagoDueno` (el texto de la pregunta antes de anular) |
+| 16 / 31 | `dibujar` |
+| 14 / 18 | `instalarLatidos` (los latidos que reinician el reloj de inactividad) |
+| 14 / 21 | `cargarYDibujar` |
+| 13 / 49 | `registrarElPago` |
+| 11 / 43 | `armarVista` |
+| 10 / 24 | `migrar` |
 
-**Lo más grande que queda es `migrar`** (59 de los 165), que es la mudanza del costo de los dueños detrás
-de la contraseña: se corre UNA vez y no se puede deshacer. Después, el orden de las lecturas
-(`dibujar` + `cargarYDibujar`, 30 entre las dos) y lo que queda de `enlazar`.
+Lo trabajado bajó así: `guardarCosto` de 22 a 7 errores que pasan, `anularPagoDeDueno` de 27 a 10,
+`guardarPago` de 39 a 23, `dibujarEntrada` (la puerta) de 22 a 1, los oyentes de 44 a 34, `migrar` de 15
+a 10.
 
 ### Cómo se midió, y una trampa que costó una corrida entera
 

@@ -93,11 +93,13 @@ Todo sobre `pintarCuentas`, que pasó de atrapar el **26.9 %** al **55.8 %** de 
 
 ## Lo que sigue, en orden
 
-1. **Seguir cableando `pintarCuentas`** (va en **55.8 %**, de 5.4 % al empezar). Hechos: enlazar, ver
-   comprobante, el cierre del área, `guardarCosto`, `anularPagoDeDueno` y `guardarPago`. Lo que queda, por
-   tamaño: **`migrar`** (59 errores pasan, de 123 — la mudanza del costo, que se corre una vez y no se
-   deshace), el orden de las lecturas en `dibujar` + `cargarYDibujar` (30 entre las dos), lo que resta de
-   `enlazar` (22) y de `guardarPago` (23), y `verComprobante` (5).
+1. **Seguir cableando la pantalla de dinero.** `js/pantallas/dinero.js` entero va en **67.5 %** (de 46.4 %
+   el 23 de noviembre). Hechos: enlazar, ver comprobante, el cierre del área, `guardarCosto`,
+   `anularPagoDeDueno`, `guardarPago`, el despachador de botones, la mudanza del costo y **la puerta**
+   (`dibujarEntrada`, de 22 errores que pasaban a 1). Lo que queda, por tamaño: los oyentes de eventos
+   (34 de 99), `guardarPago` (23), `enlazar` (22), `textoConfirmarAnularPagoDueno` (18 — el texto de la
+   pregunta antes de anular), `dibujar` + `cargarYDibujar` (30 entre las dos), `instalarLatidos` (14 — los
+   latidos que reinician el reloj de inactividad), `registrarElPago` (13) y `armarVista` (11).
 2. **`pintarCuentas` de comisiones** (`js/pantallas/comisiones.js`): 246 de 321 errores pasaban, 23 %. La
    pantalla de mentira ya está hecha y sirve igual.
 3. **`avisoDelPapelQueNoCambia`** en comisiones: 45 de 134 pasaban.
