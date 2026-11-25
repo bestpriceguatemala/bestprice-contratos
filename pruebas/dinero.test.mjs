@@ -4361,3 +4361,107 @@ test('antes de anular: un pago cuya lista de rentas no es una lista no revienta'
     assert.doesNotMatch(texto, /undefined|NaN|\[object/, JSON.stringify(malo));
   }
 });
+
+// ---------------------------------------------------------------------------
+// El orden de las lecturas: qué se dibuja, cuándo, y qué se suelta al redibujar
+// ---------------------------------------------------------------------------
+// 30 errores entre `dibujar` y `cargarYDibujar` pasaban. Aquí vive la regla de la casa —una lectura
+// caída nunca se dibuja como buena noticia— y dos cosas que son dinero: lo que quedó marcado y el
+// descuento que quedó tecleado cuando la cuenta cambia debajo.
+
+test('al redibujar, lo que quedó marcado y ya no se puede pagar NO vuelve marcado si reaparece', async () => {
+  // Qué protege de verdad esta línea: el total de abajo ya filtra por lo que se puede pagar, así que
+  // dejar el id colgado no cambia ninguna cifra HOY. Lo que cambia es mañana: si esa renta vuelve a
+  // poder pagarse (se anuló el pago que la cubría), reaparecería MARCADA sin que él la marcara, y la
+  // pagaría otra vez sin darse cuenta.
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO });
+  p.marcar(LA_RENTA('m1'));
+  assert.equal(p.buscar(LA_RENTA('m1')).checked, true, 'el control: la marcó');
+
+  // m1 se paga en otra computadora, y la ficha se redibuja (cualquier acción la redibuja).
+  const pagoDeM1 = pagoDuenoParaGuardar(
+    construirPagoDueno({ duenoId: 'd1', fecha: HOY, forma: 'efectivo', contratos: TODOS, pagos: [], idsMarcados: ['m1'], costoSinLeer: [] }),
+    { id: 'pg-m1', numero: 31, ahora: AHORA },
+  );
+  p.lector.actual.pagos.datos = [PAGO_A_LUCIA, pagoDeM1];
+  p.clic('[data-dn="anotar-costo"][data-id="m5"]');
+  p.clic('[data-dn="cancelar-costo"]');
+  assert.equal(p.buscar(LA_RENTA('m1')), null, 'ya no se ofrece: está pagada');
+
+  // Y ahora se anula ese pago: m1 vuelve a poder pagarse.
+  p.lector.actual.pagos.datos = [PAGO_A_LUCIA];
+  p.clic('[data-dn="anotar-costo"][data-id="m5"]');
+  p.clic('[data-dn="cancelar-costo"]');
+  assert.ok(p.buscar(LA_RENTA('m1')), 'vuelve a estar');
+  assert.equal(p.buscar(LA_RENTA('m1')).checked, false, 'pero SIN marcar: él no la marcó esta vez');
+  assert.equal(p.buscar('#dn-total-marcado').textContent, 'Q0.00');
+});
+
+test('al redibujar, un descuento tecleado que ya no se puede aplicar NO vuelve escrito si reaparece', async () => {
+  // Lo mismo que lo de arriba, con el descuento: hoy no cambia ninguna cifra (sin pago de más, el
+  // descuento vale cero igual). Lo que evita es que mañana el campo reaparezca con Q500 adentro que él
+  // nunca volvió a escribir, y los entregue de menos.
+  const conM5 = lecturaConPagoDeMas({ contratos: [X1_CORREGIDA, X2_POR_PAGAR, M5] });
+  const p = await pantallaDeDinero({ clave: CLAVE_MARIO, lectura: conM5 });
+  p.marcar(LA_RENTA('x2'));
+  p.clic('[data-dn="registrar"]');
+  p.teclear('#dn-descuento', '500');
+  assert.equal(p.buscar('#dn-entregar').textContent, 'Q100.00', 'el control: descuenta Q500 de Q600');
+
+  // Se anula el pago que dejaba el saldo a favor: ya no hay con qué descontar, y la ficha se redibuja.
+  const pagosDeAntes = p.lector.actual.pagos.datos;
+  p.lector.actual.pagos.datos = [];
+  p.clic('[data-dn="anotar-costo"][data-id="m5"]');
+  p.clic('[data-dn="cancelar-costo"]');
+  assert.equal(p.hay('#dn-descuento'), false, 'el campo ya no se ofrece');
+
+  // Y vuelve el pago de más: el campo reaparece, y tiene que estar VACÍO.
+  p.lector.actual.pagos.datos = pagosDeAntes;
+  p.clic('[data-dn="anotar-costo"][data-id="m5"]');
+  p.clic('[data-dn="cancelar-costo"]');
+  assert.ok(p.hay('#dn-descuento'), 'el campo vuelve');
+  assert.equal(p.buscar('#dn-descuento').value, '', 'vacío: los Q500 de antes no volvieron solos');
+  assert.equal(p.buscar('#dn-entregar').textContent, 'Q600.00', 'y entrega todo lo marcado');
+});
+
+test('una cuenta que ya no existe no se dibuja en blanco: lo dice y deja cómo volver', async () => {
+  const p = await pantallaDeDinero({ clave: 'id:no-existe' });
+  assert.match(p.html(), /No se encontró esta cuenta/);
+  assert.match(p.html(), /href="#\/dinero"/, 'y cómo volver a la lista');
+  assert.doesNotMatch(p.html(), /Q\d/, 'ni una cifra de otro');
+});
+
+test('mientras lee, lo primero que se dibuja es que está leyendo', async () => {
+  // Sin eso, la pantalla se queda con lo de antes y él no sabe si está pasando algo.
+  const p = await pantallaDeDinero();
+  assert.match(p.html(), /Mario López Alvarado/, 'el control: ya estaba dibujada');
+  p.clic('[data-dn="actualizar"]');
+  assert.match(p.html(), /Leyendo las cuentas de los dueños…/, 'se dibuja ANTES de esperar la respuesta');
+  assert.doesNotMatch(p.html(), /Mario López Alvarado/, 'y lo de antes se quita: no se mezcla con lo que llega');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.match(p.html(), /Mario López Alvarado/, 'y al llegar, las cuentas otra vez');
+});
+
+test('si la sesión se cerró MIENTRAS leía, se pide la contraseña: no se dibuja como si siguiera abierta', async () => {
+  // Pasa de verdad: se vence el permiso de Firebase, o el reloj de inactividad cierra el área mientras
+  // la lectura viaja. Dibujar las cuentas con la sesión cerrada sería enseñar lo que ya no se puede.
+  const p = await pantallaDeDinero();
+  assert.match(p.html(), /Mario López Alvarado/, 'el control: estaba dibujada');
+  p.cerrarLaSesion();
+  p.clic('[data-dn="actualizar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.ok(p.hay('#dn-entrada'), 'se pide la contraseña');
+  assert.doesNotMatch(p.html(), /Mario López Alvarado/, 'y no queda ni un nombre a la vista');
+  assert.doesNotMatch(p.html(), /Q\d/, 'ni una cifra');
+});
+
+test('una lectura que falla DESPUÉS de una buena no borra lo que ya se sabía… pero tampoco miente', async () => {
+  const lectura = lecturaOk();
+  const p = await pantallaDeDinero({ lectura });
+  assert.match(p.html(), /Mario López Alvarado/);
+  lectura.pagos = { datos: null, fallo: true };
+  p.clic('[data-dn="actualizar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.match(p.html(), /No se pudieron leer los pagos a dueños/, 'se dice que falló');
+  assert.doesNotMatch(p.html(), /Q\d/, 'y no se enseña ninguna cifra: cualquiera saldría incompleta');
+});
