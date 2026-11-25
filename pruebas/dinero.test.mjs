@@ -19,6 +19,7 @@ import {
   parchearMarcado, notasDelTotalGeneral, textoDeComprobantes, diferenciaBloqueada, rentasCortas,
   cerrarElDinero, cerrarElDineroOReiniciar, salirDelSistema, crearVigilante, crearLector, mensajeSeguro,
   pintarDinero, pintarCuentaDeDueno, alOlvidarElDinero,
+  instalarLatidos, EVENTOS_DE_LATIDO, OPCIONES_DE_LATIDO, conPuertaDeDinero,
   htmlEntrada, htmlFallo, htmlLista, htmlFicha, htmlMigracion, entradaDelComprobante, problemaDeLaFechaDelPago,
   textoConfirmarAnularPagoDueno, anularElPago, MENSAJE_ANULAR_SIN_COMPROBAR, MENSAJE_ANULAR_NO_ESTA, MENSAJE_ANULAR_FALLO,
   textoDePagadoDeMas, resumenDelDescuento, textoDelProblemaDelDescuento, textoDeDescuentoSinRespaldo,
@@ -4132,4 +4133,136 @@ test('la puerta: al entrar bien, arranca el reloj de inactividad', async () => {
 test('la puerta: el cursor empieza en el campo de la contraseña', async () => {
   const { p } = await laPuerta();
   assert.equal(p.focos[0], 'dn-clave');
+});
+
+// ---------------------------------------------------------------------------
+// Los latidos: lo que reinicia el reloj que cierra el área de dinero sola
+// ---------------------------------------------------------------------------
+// 14 de los 18 errores de `instalarLatidos` pasaban. Si esto se rompe hay dos desenlaces, los dos malos:
+// el área se cierra sola mientras él la está usando, o no se cierra nunca y el costo de cada dueño se
+// queda a la vista de quien pase por la computadora.
+
+/** Un documento de mentira que apunta a qué le engancharon y con qué opciones. */
+function documentoDeMentira() {
+  const enganchados = [];
+  return {
+    enganchados,
+    addEventListener(evento, fn, opciones) { enganchados.push({ evento, fn, opciones }); },
+    /** Dispara un evento como lo haría el navegador. */
+    disparar(evento) { enganchados.filter((e) => e.evento === evento).forEach((e) => e.fn()); },
+  };
+}
+
+test('los latidos escuchan tocar, teclear y rodar la rueda — y NADA más', async () => {
+  // El movimiento del ratón NO cuenta a propósito: un empujón a la mesa no es alguien usando el sistema,
+  // y con eso el área se quedaría abierta toda la tarde.
+  const doc = documentoDeMentira();
+  const puestos = instalarLatidos(doc, () => {});
+  assert.deepEqual(puestos, ['pointerdown', 'keydown', 'wheel']);
+  assert.deepEqual(doc.enganchados.map((e) => e.evento), ['pointerdown', 'keydown', 'wheel']);
+  assert.ok(!doc.enganchados.some((e) => /mousemove|pointermove|scroll/.test(e.evento)));
+});
+
+test('los latidos se enganchan con `capture` y `passive`', async () => {
+  // `capture` para oírlos aunque algo de la página detenga el evento antes de que suba; `passive` para que
+  // escucharlos no frene el desplazamiento de la pantalla.
+  const doc = documentoDeMentira();
+  instalarLatidos(doc, () => {});
+  for (const e of doc.enganchados) {
+    assert.equal(e.opciones.capture, true, e.evento);
+    assert.equal(e.opciones.passive, true, e.evento);
+  }
+  assert.deepEqual(OPCIONES_DE_LATIDO, { capture: true, passive: true });
+  assert.deepEqual([...EVENTOS_DE_LATIDO], ['pointerdown', 'keydown', 'wheel']);
+});
+
+test('cualquiera de los tres eventos DA un latido', async () => {
+  const doc = documentoDeMentira();
+  const latidos = [];
+  instalarLatidos(doc, () => latidos.push('tum'));
+  for (const evento of EVENTOS_DE_LATIDO) doc.disparar(evento);
+  assert.equal(latidos.length, 3, 'los tres cuentan, no solo el primero');
+});
+
+test('los latidos se enganchan UNA sola vez por documento', async () => {
+  // Cada vuelta por el área de dinero pasa por aquí. Sin esto se irían amontonando tres oyentes más por
+  // vuelta, para siempre, y cada tecla llamaría al reloj una vez por cada vuelta que él haya dado.
+  const doc = documentoDeMentira();
+  const latidos = [];
+  const primera = instalarLatidos(doc, () => latidos.push('tum'));
+  const segunda = instalarLatidos(doc, () => latidos.push('tum'));
+  const tercera = instalarLatidos(doc, () => latidos.push('tum'));
+  assert.equal(primera.length, 3, 'la primera los pone');
+  assert.deepEqual(segunda, [], 'la segunda no');
+  assert.deepEqual(tercera, []);
+  assert.equal(doc.enganchados.length, 3, 'tres oyentes en total, no nueve');
+  doc.disparar('keydown');
+  assert.equal(latidos.length, 1, 'y una tecla da UN latido, no tres');
+});
+
+test('sin documento (como en Node) los latidos no se ponen y no se revienta', async () => {
+  assert.deepEqual(instalarLatidos(null, () => {}), []);
+  assert.deepEqual(instalarLatidos(undefined, () => {}), []);
+});
+
+// ---------------------------------------------------------------------------
+// La puerta delante de TODAS las pantallas de dinero
+// ---------------------------------------------------------------------------
+// `conPuertaDeDinero` envuelve las demás pantallas del área (dueños, empleados, comisiones). Sus 5
+// errores pasaban todos.
+
+test('la puerta: sin sesión NO se dibuja la pantalla de atrás, se pide la contraseña', async () => {
+  const pintadas = [];
+  const puertas = [];
+  const conPuerta = conPuertaDeDinero(
+    (caja, ...resto) => { pintadas.push(resto); },
+    { haySesion: () => false, puerta: (caja, opciones) => puertas.push(opciones), ponerLatidos: () => {}, arrancarElVigilante: () => {} },
+  );
+  const devuelto = await conPuerta({}, 'uno', 'dos');
+  assert.deepEqual(pintadas, [], 'la pantalla de atrás NO se dibuja');
+  assert.equal(puertas.length, 1, 'se dibuja la puerta');
+  assert.equal(devuelto, undefined);
+});
+
+test('la puerta: al entrar bien, se vuelve a intentar CON LOS MISMOS parámetros', async () => {
+  // Si no, él escribe la contraseña y aterriza en otra cuenta, o en ninguna.
+  const pintadas = [];
+  let abrir = null;
+  let hay = false;
+  const conPuerta = conPuertaDeDinero(
+    (caja, ...resto) => { pintadas.push(resto); },
+    {
+      haySesion: () => hay,
+      puerta: (caja, { alEntrar }) => { abrir = alEntrar; },
+      ponerLatidos: () => {},
+      arrancarElVigilante: () => {},
+    },
+  );
+  await conPuerta({}, 'id:d1');
+  hay = true;
+  await abrir();
+  assert.deepEqual(pintadas, [['id:d1']], 'la misma cuenta que él había pedido');
+});
+
+test('la puerta: con sesión, pone los latidos y arranca el reloj ANTES de dibujar', async () => {
+  const orden = [];
+  const conPuerta = conPuertaDeDinero(
+    () => { orden.push('dibujar'); },
+    {
+      haySesion: () => true,
+      ponerLatidos: () => orden.push('latidos'),
+      arrancarElVigilante: () => orden.push('reloj'),
+      puerta: () => assert.fail('con sesión no se pide la contraseña'),
+    },
+  );
+  await conPuerta({});
+  assert.deepEqual(orden, ['latidos', 'reloj', 'dibujar']);
+});
+
+test('la puerta: lo que devuelve la pantalla de atrás se devuelve tal cual', async () => {
+  const conPuerta = conPuertaDeDinero(
+    async () => 'lo que sea que devuelva',
+    { haySesion: () => true, ponerLatidos: () => {}, arrancarElVigilante: () => {} },
+  );
+  assert.equal(await conPuerta({}), 'lo que sea que devuelva');
 });

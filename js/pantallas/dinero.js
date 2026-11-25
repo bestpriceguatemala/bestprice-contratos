@@ -318,13 +318,38 @@ async function alExpirarPorInactividad() {
 
 const vigilante = crearVigilante({ alExpirar: alExpirarPorInactividad });
 
-let latidosInstalados = false;
-function instalarLatidos() {
-  if (latidosInstalados || typeof document === 'undefined') return;
-  latidosInstalados = true;
-  for (const evento of ['pointerdown', 'keydown', 'wheel']) {
-    document.addEventListener(evento, () => vigilante.latido(), { capture: true, passive: true });
-  }
+/**
+ * Lo que cuenta como «él sigue aquí»: cualquiera de estos reinicia el reloj que cierra el área de dinero
+ * sola. No se escucha el movimiento del ratón a propósito: un ratón que se mueve solo por un empujón de
+ * la mesa no es alguien usando el sistema, y el área se quedaría abierta toda la tarde.
+ */
+export const EVENTOS_DE_LATIDO = Object.freeze(['pointerdown', 'keydown', 'wheel']);
+
+/**
+ * `capture` para oírlos aunque algo de la página detenga el evento antes de que suba; `passive` para que
+ * escucharlos no frene el desplazamiento de la pantalla.
+ */
+export const OPCIONES_DE_LATIDO = Object.freeze({ capture: true, passive: true });
+
+/** La marca que lleva un documento al que ya se le pusieron. */
+const MARCA_DE_LATIDOS = '__latidosDelAreaDeDinero';
+
+/**
+ * Engancha los latidos al documento. Devuelve los eventos que enganchó, o una lista vacía si ya estaban
+ * puestos (o si no hay documento, que es como corren las pruebas en Node).
+ *
+ * Se enganchan UNA sola vez. La marca va en el documento y no en una variable del módulo porque es del
+ * documento de quien se habla: cada vuelta por el área de dinero pasa por aquí, y sin la marca se irían
+ * amontonando tres oyentes más por vuelta, para siempre.
+ */
+export function instalarLatidos(
+  doc = (typeof document === 'undefined' ? null : document),
+  alLatir = () => vigilante.latido(),
+) {
+  if (!doc || doc[MARCA_DE_LATIDOS]) return [];
+  doc[MARCA_DE_LATIDOS] = true;
+  for (const evento of EVENTOS_DE_LATIDO) doc.addEventListener(evento, alLatir, OPCIONES_DE_LATIDO);
+  return [...EVENTOS_DE_LATIDO];
 }
 
 // ---------------------------------------------------------------------------
@@ -1537,14 +1562,19 @@ function dibujarEntrada(contenedor, {
  * sesión se pregunta cada vez a `sesionDeDinero()`, que la lee del Auth en vivo:
  * si Firebase la cerró por su cuenta, la puerta lo sabe.
  */
-export function conPuertaDeDinero(pintar) {
+export function conPuertaDeDinero(pintar, {
+  haySesion = sesionDeDinero,
+  ponerLatidos = instalarLatidos,
+  arrancarElVigilante = () => vigilante.iniciar(),
+  puerta = dibujarEntrada,
+} = {}) {
   return async function conPuerta(contenedor, ...parametros) {
-    if (!sesionDeDinero()) {
-      dibujarEntrada(contenedor, { alEntrar: () => conPuerta(contenedor, ...parametros) });
+    if (!haySesion()) {
+      puerta(contenedor, { alEntrar: () => conPuerta(contenedor, ...parametros) });
       return undefined;
     }
-    instalarLatidos();
-    vigilante.iniciar();
+    ponerLatidos();
+    arrancarElVigilante();
     return pintar(contenedor, ...parametros);
   };
 }
