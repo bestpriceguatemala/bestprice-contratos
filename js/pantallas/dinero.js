@@ -1494,7 +1494,9 @@ const lector = crearLector({ leer: leerTodo, alCambiar: () => repintarActual?.()
 // La entrada y la puerta
 // ---------------------------------------------------------------------------
 
-function dibujarEntrada(contenedor, { alEntrar }) {
+function dibujarEntrada(contenedor, {
+  alEntrar, entrar = entrarADinero, arrancarElVigilante = () => vigilante.iniciar(),
+}) {
   // Lo que se esté cargando para dibujarse más tarde no tiene que tapar la entrada.
   ultimoToken += 1;
   const mensaje = mensajeDeEntrada;
@@ -1514,7 +1516,7 @@ function dibujarEntrada(contenedor, { alEntrar }) {
     error.hidden = true;
     boton.disabled = true;
     try {
-      await entrarADinero(CORREO_DE_DINERO, clave);
+      await entrar(CORREO_DE_DINERO, clave);
     } catch (fallo) {
       // `entrarADinero` ya traduce todo a una frase en español: nunca un código de Firebase.
       error.textContent = fallo.message;
@@ -1524,7 +1526,7 @@ function dibujarEntrada(contenedor, { alEntrar }) {
       return;
     }
     boton.disabled = false;
-    vigilante.iniciar();
+    arrancarElVigilante();
     alEntrar();
   });
 }
@@ -1590,7 +1592,10 @@ async function pintarCuentas(contenedor, claveDeFicha, {
   cambiarLaDireccion = (ruta) => history.replaceState(null, '', ruta),
   acunarIdDeDueno = nuevoIdDueno,
   dibujarComprobante = pintarComprobante,
+  entrar = entrarADinero,
+  arrancarElVigilante = () => vigilante.iniciar(),
   migrarCostos = migrarCostosDelDueno,
+  mostrarLaRuta = mostrar,
 } = {}) {
   const miToken = ++ultimoToken;
   const hoy = ahora();
@@ -1665,7 +1670,7 @@ async function pintarCuentas(contenedor, claveDeFicha, {
     }
     // Si la sesión se cerró mientras se leía (inactividad, o Firebase), se pide la contraseña otra vez.
     if (!sesionAbierta()) {
-      dibujarEntrada(contenedor, { alEntrar: () => mostrar(rutaDeAhora()) });
+      dibujarEntrada(contenedor, { alEntrar: () => mostrarLaRuta(rutaDeAhora()), entrar, arrancarElVigilante });
       return;
     }
     dibujar();
@@ -1681,7 +1686,7 @@ async function pintarCuentas(contenedor, claveDeFicha, {
   function haySesion() {
     if (sesionAbierta()) return true;
     elLector.olvidar();
-    dibujarEntrada(contenedor, { alEntrar: () => mostrar(rutaDeAhora()) });
+    dibujarEntrada(contenedor, { alEntrar: () => mostrarLaRuta(rutaDeAhora()), entrar, arrancarElVigilante });
     return false;
   }
 

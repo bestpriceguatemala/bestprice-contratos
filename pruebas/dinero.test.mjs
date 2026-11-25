@@ -1565,9 +1565,10 @@ test('ninguna frase que el área de dinero le puede dar al dueño habla de un co
   }
   const fuente = readFileSync(new URL('../js/pantallas/dinero.js', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   // La constante se usa en UN solo lugar: la llamada que entrega la contraseña.
-  assert.equal(fuente.match(/CORREO_DE_DINERO/g).length, 2, 'su definición y la llamada a entrarADinero, y nada más');
-  assert.match(fuente, /entrarADinero\(CORREO_DE_DINERO, clave\)/);
+  assert.equal(fuente.match(/CORREO_DE_DINERO/g).length, 2, 'su definición y la llamada que entrega la contraseña, y nada más');
   assert.match(CORREO_DE_DINERO, /^[^@\s]+@[^@\s]+\.[^@\s]+$/, 'es un correo válido: Firebase lo exige');
+  // Que esa llamada lleve la CONSTANTE (y no algo que él teclee) se aprieta en «la puerta: entrega el
+  // correo de la casa», más abajo: antes se miraba el texto del código y se rompía con un renombre.
 });
 
 // ---------------------------------------------------------------------------
@@ -3106,12 +3107,15 @@ async function pantallaDeDinero({
   anular,
   anotarCosto,
   enlazarAlDueno,
+  entrar,
+  arrancarElVigilante,
   migrarCostos,
   dibujarComprobante,
   ruta = clave === null ? '#/dinero' : `#/dinero/cuenta/${encodeURIComponent(clave)}`,
 } = {}) {
   const p = pantallaDeMentira();
   const lecturas = [];
+  const rutasMostradas = [];
   const lector = crearLector({ leer: async () => { lecturas.push(Date.now()); return lectura; } });
   const preguntas = [];
   const pagos = [];
@@ -3142,6 +3146,9 @@ async function pantallaDeDinero({
     enlazarAlDueno: enlazarAlDueno ?? (async (ids, duenoId) => { enlaces.push({ ids, duenoId }); }),
     cambiarLaDireccion: (r) => direcciones.push(r),
     acunarIdDeDueno: async () => `d-nuevo-${++idsAcunados}`,
+    mostrarLaRuta: (r) => rutasMostradas.push(r),
+    ...(entrar ? { entrar } : {}),
+    ...(arrancarElVigilante ? { arrancarElVigilante } : {}),
     dibujarComprobante: dibujarComprobante ?? ((_caja, modelo) => { comprobantes.push(modelo); }),
     migrarCostos: migrarCostos ?? (async (args) => {
       migraciones.push(args);
@@ -3164,6 +3171,7 @@ async function pantallaDeDinero({
     comprobantes,
     migraciones,
     lecturas,
+    rutasMostradas,
     ruta: () => rutaActual,
     /** Cierra la sesión de dinero por detrás, como la cierra Firebase cuando se le vence el permiso. */
     cerrarLaSesion() { sesionAbierta = false; },
@@ -4016,4 +4024,112 @@ test('la mudanza: mientras corre, el botón dice por dónde va y queda apagado',
   assert.deepEqual(visto.map((v) => v.texto), ['Moviendo… 1 de 4', 'Moviendo… 3 de 4'], 'va contando');
   assert.deepEqual(visto.map((v) => v.apagado), [true, true], 'y apagado mientras tanto');
   assert.match(pantalla.html(), /Se movieron 4 contratos/);
+});
+
+// ---------------------------------------------------------------------------
+// La puerta del área de dinero: donde él escribe la contraseña
+// ---------------------------------------------------------------------------
+// 22 de los 23 errores de `dibujarEntrada` pasaban sin que nada se pusiera rojo. Es la puerta: lo que
+// pase aquí decide quién ve lo que le cuesta cada carro.
+
+/** Dibuja la puerta (la pantalla sin sesión) y devuelve con qué apretarla. */
+async function laPuerta({ entrar, ...opciones } = {}) {
+  const entradas = [];
+  const arranques = [];
+  const p = await pantallaDeDinero({
+    sesion: false,
+    entrar: entrar ?? (async (correo, clave) => { entradas.push({ correo, clave }); }),
+    arrancarElVigilante: () => arranques.push(true),
+    ...opciones,
+  });
+  return { p, entradas, arranques };
+}
+
+test('la puerta: entrega el CORREO DE LA CASA y la contraseña que él escribió', async () => {
+  // El correo es una constante del sistema: él solo teclea la contraseña, y nunca ve ni escribe un correo.
+  const { p, entradas } = await laPuerta();
+  p.buscar('#dn-clave').value = 'la-de-la-caja';
+  p.lanzar('submit', '#dn-entrada');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(entradas, [{ correo: CORREO_DE_DINERO, clave: 'la-de-la-caja' }]);
+});
+
+test('la puerta: la contraseña sale del campo ANTES de esperar, no se queda escrita en la página', async () => {
+  // Quien abriera la consola con el ingreso a medias la leería del campo. Por eso se vacía antes del await.
+  let visto = null;
+  const { p } = await laPuerta({
+    entrar: async () => { visto = p.buscar('#dn-clave').value; },
+  });
+  p.buscar('#dn-clave').value = 'la-de-la-caja';
+  p.lanzar('submit', '#dn-entrada');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(visto, '', 'mientras se comprueba, el campo ya está vacío');
+  assert.equal(p.buscar('#dn-clave').value, '', 'y después también');
+});
+
+test('la puerta: el formulario NO se envía de verdad (recargaría la página y se perdería todo)', async () => {
+  const { p } = await laPuerta();
+  p.buscar('#dn-clave').value = 'x';
+  const ev = p.lanzar('submit', '#dn-entrada');
+  assert.equal(ev.seEvito, true);
+});
+
+test('la puerta: mientras comprueba, el botón queda APAGADO', async () => {
+  // Es lo que impide el envío doble: con el único botón de enviar apagado, el navegador no envía el
+  // formulario ni con Enter. Lo que se afirma aquí es lo que hace el CÓDIGO —apagarlo mientras Firebase
+  // contesta—, no lo que hace el navegador con él: dispararle un «submit» a mano, como hace esta prueba,
+  // se salta esa defensa, y afirmar que «dos envíos no entran dos veces» sería prometer de más.
+  const apagado = [];
+  const { p } = await laPuerta({
+    entrar: async () => { apagado.push(p.buscar('#dn-abrir').disabled); },
+  });
+  p.buscar('#dn-clave').value = 'x';
+  p.lanzar('submit', '#dn-entrada');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(apagado, [true], 'apagado mientras Firebase contesta');
+  assert.equal(p.buscar('#dn-abrir').disabled, false, 'y encendido otra vez al terminar');
+});
+
+test('la puerta: si la contraseña NO sirve, se le dice, el botón vuelve y el cursor también', async () => {
+  const { p, arranques } = await laPuerta({
+    entrar: async () => { throw new Error('Esa contraseña no abre el área de dinero.'); },
+  });
+  p.buscar('#dn-clave').value = 'mala';
+  p.lanzar('submit', '#dn-entrada');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  const error = p.buscar('#dn-error');
+  assert.equal(error.textContent, 'Esa contraseña no abre el área de dinero.');
+  assert.equal(error.hidden, false, 'el aviso se ve');
+  assert.equal(p.buscar('#dn-abrir').disabled, false, 'se puede volver a intentar');
+  assert.equal(p.focos.at(-1), 'dn-clave', 'y el cursor vuelve al campo');
+  assert.deepEqual(arranques, [], 'y el reloj de inactividad NO arranca: no entró');
+});
+
+test('la puerta: el aviso de error se esconde al volver a intentar', async () => {
+  let falla = true;
+  const { p } = await laPuerta({
+    entrar: async () => { if (falla) throw new Error('Esa contraseña no abre el área de dinero.'); },
+  });
+  p.buscar('#dn-clave').value = 'mala';
+  p.lanzar('submit', '#dn-entrada');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.buscar('#dn-error').hidden, false);
+  falla = false;
+  p.buscar('#dn-clave').value = 'buena';
+  p.lanzar('submit', '#dn-entrada');
+  assert.equal(p.buscar('#dn-error').hidden, true, 'el error de antes no se queda colgado');
+});
+
+test('la puerta: al entrar bien, arranca el reloj de inactividad', async () => {
+  // Sin eso, el área se queda abierta para siempre y el costo de los dueños a la vista de cualquiera.
+  const { p, arranques } = await laPuerta();
+  p.buscar('#dn-clave').value = 'buena';
+  p.lanzar('submit', '#dn-entrada');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(arranques, [true]);
+});
+
+test('la puerta: el cursor empieza en el campo de la contraseña', async () => {
+  const { p } = await laPuerta();
+  assert.equal(p.focos[0], 'dn-clave');
 });
