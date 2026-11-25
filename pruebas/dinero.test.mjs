@@ -4266,3 +4266,98 @@ test('la puerta: lo que devuelve la pantalla de atrás se devuelve tal cual', as
   );
   assert.equal(await conPuerta({}), 'lo que sea que devuelva');
 });
+
+
+
+
+
+
+
+// ---------------------------------------------------------------------------
+// El texto que lee ANTES de anular un pago
+// ---------------------------------------------------------------------------
+// 18 de los 31 errores de `textoConfirmarAnularPagoDueno` pasaban. Es lo único que le dice a quién, cuánto
+// y qué va a pasar, justo antes de una acción que gasta el número de comprobante. Lo de siempre (nombre,
+// monto, comprobante, fecha, cuántas rentas) ya estaba probado; lo que faltaba era todo lo demás.
+
+/** Una renta pagada y DESPUÉS corregida hacia arriba, con su diferencia pagada en un segundo comprobante. */
+function dosComprobantesDeLaMisma() {
+  const chico = saldado(recibido(salida({ id: 'w1', numero: 81, placas: 'P-WWW111', costoDia: 300, cliente: ROSA }), 0));
+  const primero = pagoDuenoParaGuardar(
+    construirPagoDueno({ duenoId: 'd1', fecha: '2026-09-20', forma: 'efectivo', contratos: [alLeer(chico)], pagos: [], idsMarcados: ['w1'], costoSinLeer: [] }),
+    { id: 'pg-w1', numero: 21, ahora: AHORA },
+  );
+  const crecida = alLeer(saldado(recibido(chico, 3)));
+  const lecturaDeUno = { contratos: { datos: [crecida], fallo: false, costoSinLeer: [] }, pagos: { datos: [primero], fallo: false }, duenos: { datos: DUENOS, fallo: false } };
+  const dif = entradaDe(armarVista(lecturaDeUno), 'Mario López Alvarado').cuenta.diferencias.map((d) => d.clave);
+  const segundo = pagoDuenoParaGuardar(
+    construirPagoDueno({ duenoId: 'd1', fecha: '2026-09-26', forma: 'efectivo', contratos: [crecida], pagos: [primero], idsMarcados: dif, costoSinLeer: [] }),
+    { id: 'pg-w2', numero: 22, ahora: AHORA },
+  );
+  const lectura = { contratos: { datos: [crecida], fallo: false, costoSinLeer: [] }, pagos: { datos: [primero, segundo], fallo: false }, duenos: { datos: DUENOS, fallo: false } };
+  return { primero, segundo, entrada: entradaDe(armarVista(lectura), 'Mario López Alvarado') };
+}
+
+test('antes de anular: si esas rentas están en OTRO comprobante, lo dice y no promete que vuelvan enteras', async () => {
+  // Decirle «Esa renta vuelve a Por pagar» cuando la mitad la cubre otro comprobante le haría esperar una
+  // cifra que no va a ver.
+  const { primero, entrada } = dosComprobantesDeLaMisma();
+  const texto = textoConfirmarAnularPagoDueno(primero, entrada);
+  assert.match(texto, /también están en el comprobante N\.° 22/);
+  assert.match(texto, /solo vuelve a «Por pagar» lo que falte para completar lo que cuestan hoy/);
+  assert.doesNotMatch(texto, /Esa renta vuelve a «Por pagar»/, 'no se promete de más');
+});
+
+test('antes de anular: un pago CON descuento avisa que el descuento vuelve a verse como pagado de más', async () => {
+  const grande = saldado(recibido(salida({ id: 'z1', numero: 71, placas: 'P-ZZZ111', costoDia: 300, cliente: ROSA }), 3));
+  const primero = pagoDuenoParaGuardar(
+    construirPagoDueno({ duenoId: 'd1', fecha: '2026-09-20', forma: 'efectivo', contratos: [alLeer(grande)], pagos: [], idsMarcados: ['z1'], costoSinLeer: [] }),
+    { id: 'pg-z1', numero: 11, ahora: AHORA },
+  );
+  const encogida = alLeer(saldado(recibido(grande, 0)));
+  const otra = cerrado('z2', { numero: 72, placas: 'P-ZZZ222', costoDia: 300, dias: 2 });
+  const conDescuento = pagoDuenoParaGuardar(
+    construirPagoDueno({
+      duenoId: 'd1', fecha: '2026-09-25', forma: 'efectivo', contratos: [encogida, otra], pagos: [primero], idsMarcados: ['z2'], costoSinLeer: [], descuento: 200,
+    }),
+    { id: 'pg-z2', numero: 12, ahora: AHORA },
+  );
+  const lectura = { contratos: { datos: [encogida, otra], fallo: false, costoSinLeer: [] }, pagos: { datos: [primero, conDescuento], fallo: false }, duenos: { datos: DUENOS, fallo: false } };
+  const mario = entradaDe(armarVista(lectura), 'Mario López Alvarado');
+
+  const texto = textoConfirmarAnularPagoDueno(conDescuento, mario);
+  assert.match(texto, /Tenía un descuento de Q200\.00 por lo que se le había pagado de más/);
+  assert.match(texto, /al anularlo, eso vuelve a verse como pagado de más/);
+  assert.match(texto, /el pago de Q400\.00/, 'y el monto es lo que se ENTREGÓ, ya con el descuento restado');
+
+  // El control: el pago sin descuento no dice ni una palabra de descuentos.
+  assert.doesNotMatch(textoConfirmarAnularPagoDueno(primero, mario), /descuento/i);
+});
+
+test('antes de anular: una renta repetida en el pago se cuenta UNA vez', async () => {
+  // Un pago con el mismo contrato dos veces diría «Cubre 2 rentas» y la cifra no cuadraría con la lista.
+  const lucia = luciaDe(lecturaOk());
+  const repetido = { ...PAGO_A_LUCIA, contratos: ['l3', 'l3', 'l3'] };
+  assert.match(textoConfirmarAnularPagoDueno(repetido, lucia), /Cubre 1 renta\b/);
+});
+
+test('antes de anular: un pago a medio guardar no inventa ni número ni nombre', async () => {
+  // Nunca debería pasar, pero si pasa, un «comprobante N.° undefined» es peor que un guion.
+  const lucia = luciaDe(lecturaOk());
+  const sinNumero = textoConfirmarAnularPagoDueno({ ...PAGO_A_LUCIA, numero: undefined }, lucia);
+  assert.match(sinNumero, /comprobante N\.° —/);
+  const sinNombre = textoConfirmarAnularPagoDueno(PAGO_A_LUCIA, { ...lucia, nombre: undefined });
+  assert.match(sinNombre, /a este dueño \(/);
+  const sinNada = textoConfirmarAnularPagoDueno(null, null);
+  assert.match(sinNada, /Cubre 0 rentas/, 'sin pago, cero rentas: no se inventa una');
+  assert.doesNotMatch(sinNada, /undefined|NaN|\[object/);
+});
+
+test('antes de anular: un pago cuya lista de rentas no es una lista no revienta', async () => {
+  const lucia = luciaDe(lecturaOk());
+  for (const malo of [null, undefined, 'l3', 42, {}]) {
+    const texto = textoConfirmarAnularPagoDueno({ ...PAGO_A_LUCIA, contratos: malo }, lucia);
+    assert.match(texto, /Cubre 0 rentas/, JSON.stringify(malo));
+    assert.doesNotMatch(texto, /undefined|NaN|\[object/, JSON.stringify(malo));
+  }
+});
