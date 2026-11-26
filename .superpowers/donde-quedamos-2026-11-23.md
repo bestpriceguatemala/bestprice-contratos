@@ -93,16 +93,13 @@ Todo sobre `pintarCuentas`, que pasó de atrapar el **26.9 %** al **55.8 %** de 
 
 ## Lo que sigue, en orden
 
-1. **`js/pantallas/comisiones.js`**, que es ahora lo que más rinde: sigue en **56.8 %** y tiene su propio
-   `pintarCuentas` con 246 errores que pasan. La pantalla de mentira (`fixtures/pantallaDeMentira.mjs`,
-   con sus 17 controles) y la forma de inyectar los aparatos sirven igual: se copia lo que se hizo en
-   `dinero.js`.
+1. **Seguir en `comisiones.js`**, que va en **66.0 %** (de 56.8 % el 23 de noviembre). Hecho el 26: bajar
+   el Excel, ver el comprobante, registrar, enlazar (con el porcentaje que NO toca lo ya pagado) y anular.
+   Lo que queda, por tamaño: los oyentes de eventos (50 de 77), `avisoDelPapelQueNoCambia` (45 de 134 —
+   lo que cambió en las rentas desde que salió el papel), `guardarPago` (23), `enlazar` (22),
+   `armarVistaDeComisiones` (15), `modeloDeComisionesEnExcel` (15) y `anularPago` (14).
 
-   `js/pantallas/dinero.js` quedó en **71.8 %** (de 46.4 % el 23 de noviembre). Lo que le queda está
-   repartido en pedazos de diez errores o menos —ya no hay un bulto grande— y buena parte son guardias
-   defensivos que desde la pantalla no se pueden alcanzar. Si se vuelve, lo mayor es: los oyentes de
-   eventos (34 de 99), `enlazar` (18), `guardarPago` (16), `armarVista` (11) y `alExpirarPorInactividad`
-   (9, que es lo que pasa cuando el reloj cierra el área sola).
+   `js/pantallas/dinero.js` quedó en **71.8 %**. Las dos juntas, en **69.0 %** (de 51.6 % el 23).
 
 2. **`pintarCuentas` de comisiones** (`js/pantallas/comisiones.js`): 246 de 321 errores pasaban, 23 %. La
    pantalla de mentira ya está hecha y sirve igual.
