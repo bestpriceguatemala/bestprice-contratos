@@ -1579,3 +1579,134 @@ test('la vista: con la lista de empleados CAÍDA no se acusa a nadie de «no est
   const leida = armarVistaDeComisiones(lecturaOk({ contratos: [firme('a1')], empleados: [wilder, luis] }));
   assert.ok(leida.entradas.some((e) => e.sinRegistro === true), 'ahí sí');
 });
+
+// ---------------------------------------------------------------------------
+// Lo que falta de registrar y de enlazar: lo que queda en memoria después
+// ---------------------------------------------------------------------------
+
+test('registrar: lo que contestó el guardado es la verdad, no lo que la pantalla tenía', async () => {
+  const comoQuedo = [{ id: 'pc-9', numero: 9, monto: 140 }];
+  const rentasFrescas = { datos: [firme('a1'), firme('a2', { numero: 2 })], fallo: false };
+  const p = await conElPagoAbierto({
+    pagar: async () => ({ tipo: 'guardado', pago: comoQuedo[0], pagos: comoQuedo, contratos: rentasFrescas }),
+  });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(p.lector.actual.pagos.datos, comoQuedo, 'los pagos quedan como los dejó el guardado');
+  assert.equal(p.lector.actual.contratos.datos.length, 2, 'y las rentas que se leyeron al guardar son las de ahora');
+});
+
+test('registrar: si el área se cerró y soltó lo leído mientras guardaba, no se escribe en memoria', async () => {
+  // Lo que `if (!elLector.actual) return` cuida: cuando el área de dinero se cierra, suelta lo leído; si
+  // la respuesta del guardado llega después, no hay dónde ponerla y no se inventa una lectura nueva.
+  const p = await conElPagoAbierto({
+    pagar: async () => {
+      p.lector.olvidar();
+      return { tipo: 'guardado', pago: { id: 'pc-9', numero: 9, monto: 140 }, pagos: [{ id: 'colado' }] };
+    },
+  });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.lector.actual, null, 'lo leído sigue suelto');
+  assert.ok(p.dichos.every((d) => !/Pago registrado/.test(d.texto)), 'y no se canta un pago sobre una pantalla vacía');
+  // Sin el guardia, escribir sobre lo que ya no está REVIENTA; el reventón se traga en el `catch` y la
+  // pantalla se cambia por la de «no se pudo leer», que es mentira: el pago SÍ se registró, y lo que
+  // pasó es que el área se cerró mientras tanto. Con el guardia, la pantalla se queda como estaba y la
+  // puerta se encarga en la siguiente acción.
+  assert.doesNotMatch(p.html(), /No se pudieron leer las rentas|No se pudieron leer los pagos/, 'no se cambia por la pantalla de fallo');
+});
+
+test('registrar: dos clics seguidos no registran dos pagos de comisión', async () => {
+  const p = await conElPagoAbierto();
+  p.clic('#dn-guardar-pago');
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.pagos.length, 1);
+});
+
+test('registrar: al lograrlo el formulario se cierra y lo marcado se suelta', async () => {
+  const p = await conElPagoAbierto();
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.hay('#dn-guardar-pago'), false, 'el formulario se cierra');
+  assert.equal(p.buscar('#dn-total-marcado')?.textContent ?? 'Q0.00', 'Q0.00', 'y no queda nada marcado');
+});
+
+test('enlazar: el empleado se lee del DESPLEGABLE al apretar, aunque no haya llegado ningún evento', async () => {
+  // La misma regla de la casa: lo que se guarda no puede depender de que el navegador haya alcanzado a
+  // mandar el aviso de que cambió el desplegable.
+  const { p } = await conUnaCuentaAMano();
+  p.buscar('#cm-enlazar-empleado').value = 'e16';   // sin lanzar ningún `change`
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'enlazar');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.enlaces.length, 1);
+  assert.equal(p.enlaces[0].empleadoId, 'e16', 'el que estaba escogido en el campo');
+});
+
+test('enlazar: SOLO las rentas de esa cuenta toman al empleado; las de otros no se tocan', async () => {
+  // Sin el guardia, el `map` sobre todos los contratos le pondría ESTE empleado a TODAS las rentas que
+  // haya en memoria, incluidas las de otra gente.
+  const dePedro = rentaDeAntes({ id: 'v1', rentadoPor: 'Pedro', recibidoEl: '2026-09-29' });
+  const deAna = firme('a1');
+  const lectura = lecturaOk({ contratos: [dePedro, deAna] });
+  const p = await pantallaDeComisiones({ lectura, clave: 'texto:Pedro' });
+  p.buscar('#cm-enlazar-empleado').value = 'e16';
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'enlazar');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+
+  const porId = Object.fromEntries(p.lector.actual.contratos.datos.map((c) => [c.id, c.empleadoId]));
+  assert.equal(porId.v1, 'e16', 'la de la cuenta que se enlazó');
+  assert.equal(porId.a1, 'e1', 'la de Ana se queda con el suyo');
+  assert.deepEqual(p.enlaces[0].ids, ['v1'], 'y a la nube solo se le mandan las de esa cuenta');
+});
+
+test('enlazar: al lograrlo, la cuenta deja de ofrecer el enlace y no queda nada marcado', async () => {
+  // Lo que se puede afirmar de verdad: enlazada la cuenta, el formulario del enlace ya no se dibuja (la
+  // cuenta dejó de estar «sin enlazar»). Las líneas que limpian el desplegable y la casilla del
+  // porcentaje se revisaron con un error a propósito y NO rompen nada, porque ese formulario ya no sale:
+  // son limpieza de más, no un agujero.
+  const { p } = await conUnaCuentaAMano();
+  p.lanzar('change', '#cm-enlazar-porcentaje', { checked: true });
+  p.buscar('#cm-enlazar-empleado').value = 'e1';
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'enlazar');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.hay('#cm-enlazar-empleado'), false, 'ya no se ofrece enlazar');
+  assert.equal(p.buscar('#dn-total-marcado')?.textContent ?? 'Q0.00', 'Q0.00', 'y no queda nada marcado');
+});
+
+test('enlazar: si el área se cerró y soltó lo leído mientras enlazaba, no se escribe en memoria', async () => {
+  const { p } = await conUnaCuentaAMano({
+    enlazarAlEmpleado: async () => { p.lector.olvidar(); },
+  });
+  p.buscar('#cm-enlazar-empleado').value = 'e1';
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'enlazar');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.lector.actual, null, 'lo leído sigue suelto: no se inventa una lectura nueva');
+  assert.ok(p.dichos.every((d) => !/Rentas enlazadas/.test(d.texto)), 'y no se canta el enlace');
+  assert.doesNotMatch(p.html(), /No se pudieron leer las rentas|No se pudieron leer los pagos/, 'ni se cambia por la pantalla de fallo');
+});
+
+test('enlazar: después de un fallo se puede volver a intentar', async () => {
+  let falla = true;
+  const intentos = [];
+  const { p } = await conUnaCuentaAMano({
+    enlazarAlEmpleado: async (ids, empleadoId) => {
+      intentos.push(empleadoId);
+      if (falla) throw new Error('se cayó el internet');
+    },
+  });
+  p.buscar('#cm-enlazar-empleado').value = 'e1';
+  const boton = () => p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'enlazar');
+  p.lanzar('click', boton());
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.match(p.html(), /No se pudieron enlazar las rentas/);
+  falla = false;
+  p.buscar('#cm-enlazar-empleado').value = 'e1';
+  p.lanzar('click', boton());
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(intentos, ['e1', 'e1'], 'el segundo intento corre: la pantalla no se quedó ocupada');
+});
