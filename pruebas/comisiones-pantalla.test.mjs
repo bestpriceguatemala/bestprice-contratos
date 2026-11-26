@@ -14,7 +14,10 @@ import {
   htmlPeriodos, idsDelPeriodo, etiquetaDelPeriodo, nombreDelMes, textoDeSinMarcar, parchearSinMarcar,
   MENSAJE_FALLO_RENTAS, MENSAJE_FALLO_PAGOS_DE_COMISION, MENSAJE_FALLO_EMPLEADOS, MENSAJE_COMISION_SIN_COMPROBAR,
   MENSAJE_COMISION_SIN_COMPROBAR_RENTAS, MENSAJE_ANULAR_COMISION_SIN_COMPROBAR, MENSAJE_COMISION_FALLO,
+  pintarComisiones, pintarComisionesDeEmpleado, MENSAJE_BAJAR_FALLO, MENSAJE_COMPROBANTE_COMISION_NO_ESTA,
 } from '../js/pantallas/comisiones.js';
+import { crearLector } from '../js/pantallas/dinero.js';
+import { pantallaDeMentira } from './fixtures/pantallaDeMentira.mjs';
 import { cerrarElDinero, parchearMarcado, alOlvidarElDinero, razonDeNoCierre } from '../js/pantallas/dinero.js';
 import { MENSAJE_COMISION_SIN_RENTAS, MENSAJE_COMISION_SIN_DINERO } from '../js/datos.js';
 import { comisionDe } from '../js/nucleo/comision.js';
@@ -960,3 +963,233 @@ test('la pantalla no arma los períodos ni decide «quincena»: se los pide al n
   assert.match(PANTALLA, /razonDeNoCierre\(c\)/);
   assert.match(PANTALLA, /estadoDeComision\(c\) === 'estimada'/);
 });
+
+// ===========================================================================
+// El CABLEADO de la pantalla de comisiones: qué pasa cuando él aprieta algo
+// ===========================================================================
+//
+// Hasta el 26 de noviembre de 2026 esto no se podía probar: hacía falta un navegador, una sesión de
+// Firebase de verdad y la nube. Lo dice la cabecera vieja de este archivo — «el cableado del DOM se
+// comprobó a mano en el navegador». Ahora `pintarCuentas` recibe sus aparatos, igual que la pantalla de
+// los dueños, y se aprieta con la misma pantalla de mentira (`fixtures/pantallaDeMentira.mjs`), que solo
+// encuentra lo que la pantalla dibujó de verdad.
+
+/** Monta la pantalla de comisiones con todo de mentira menos ella misma. */
+async function pantallaDeComisiones({
+  lectura = lecturaOk({ contratos: [firme('a1', { empleado: ana })] }),
+  clave = null,
+  sesion = true,
+  responder = () => true,
+  pagar,
+  anular,
+  bajarElExcel,
+  leerElPago,
+  dibujarComprobante,
+} = {}) {
+  const p = pantallaDeMentira();
+  const lecturas = [];
+  // El mismo `valida` que usa la pantalla de verdad: si no, el lector da por mala una lectura buena.
+  const lector = crearLector({
+    leer: async () => { lecturas.push(1); return lectura; },
+    valida: (l) => armarVistaDeComisiones(l).ok,
+  });
+  const preguntas = [];
+  const dichos = [];
+  const pagos = [];
+  const anulaciones = [];
+  const bajadas = [];
+  const comprobantes = [];
+  const rutasMostradas = [];
+  let rutaActual = clave === null ? '#/dinero/comisiones' : `#/dinero/comisiones/${encodeURIComponent(clave)}`;
+  let sesionAbierta = sesion;
+  const aparatos = {
+    lector,
+    sesionAbierta: () => sesionAbierta,
+    ahora: () => HOY,
+    doc: p.documento,
+    preguntar: (texto2) => { preguntas.push(texto2); return responder(texto2); },
+    rutaDeAhora: () => rutaActual,
+    irA: (r) => { rutaActual = r; },
+    cambiarLaDireccion: (r) => { rutaActual = r; },
+    avisar: (texto2, tipo) => dichos.push({ texto: texto2, tipo }),
+    mostrarLaRuta: (r) => rutasMostradas.push(r),
+    pagar: pagar ?? (async (args) => { pagos.push(args); return { tipo: 'guardado', pago: { id: 'pc-1', numero: 5, monto: 100 }, pagos: [] }; }),
+    anular: anular ?? (async (args) => { anulaciones.push(args); return { tipo: 'anulado', pago: { numero: 5 }, pagos: [] }; }),
+    bajarElExcel: bajarElExcel ?? (async (args) => {
+      bajadas.push(args);
+      return { nombre: 'comisiones-2026.xlsx', cuenta: { empleados: 3, rentas: 7, pagos: 2, debe: 1500 }, avisos: [] };
+    }),
+    leerElPago: leerElPago ?? (async (args) => ({ tipo: 'esta', pago: { id: args.pagoId, numero: 5, monto: 100 }, pagos: [] })),
+    dibujarComprobante: dibujarComprobante ?? ((_caja, modelo) => comprobantes.push(modelo)),
+  };
+  if (clave === null) await pintarComisiones(p.contenedor, aparatos);
+  else await pintarComisionesDeEmpleado(p.contenedor, clave, aparatos);
+  return {
+    ...p, lector, lecturas, preguntas, dichos, pagos, anulaciones, bajadas, comprobantes, rutasMostradas,
+    ruta: () => rutaActual,
+    cerrarLaSesion() { sesionAbierta = false; },
+  };
+}
+
+test('el cableado: la pantalla de comisiones se dibuja con la lectura, sin tocar la nube', async () => {
+  const p = await pantallaDeComisiones();
+  assert.match(p.html(), /Ana/, 'sale el empleado de la lectura');
+  assert.ok(p.hay('tr[data-cm-clave]'), 'cada empleado trae su fila con su clave');
+});
+
+test('el cableado: sin sesión de dinero no se dibuja ni una cifra; se vuelve a pasar por la puerta', async () => {
+  // Esta pantalla vive detrás de `conPuertaDeDinero` (app.js), así que no dibuja ella la puerta: vuelve a
+  // pedir la ruta, y la puerta de app.js se encarga de pedir la contraseña.
+  const p = await pantallaDeComisiones({ sesion: false });
+  assert.doesNotMatch(p.html(), /Q\d/, 'ni una cifra');
+  assert.doesNotMatch(p.html(), /Ana/, 'ni un nombre');
+  assert.deepEqual(p.rutasMostradas, ['#/dinero/comisiones'], 'se vuelve a pasar por la puerta');
+});
+
+test('el cableado: bajar el Excel pide la cuenta ABIERTA cuando es «una», y todas cuando no', async () => {
+  // Reemplaza a una prueba que leía ocho pedazos del TEXTO del código.
+  const p = await pantallaDeComisiones({ clave: 'id:e1' });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'bajar');
+  assert.ok(boton, 'la ficha trae su botón de bajar');
+  assert.equal(boton.dataset.alcance, 'una', 'el de la ficha baja SOLO esta cuenta');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.bajadas.length, 1);
+  assert.equal(p.bajadas[0].clave, 'id:e1', 'y pide la cuenta ABIERTA, no todas');
+  assert.equal(p.bajadas[0].hoy, HOY, 'con la fecha de hoy');
+  assert.ok(p.dichos.some((d) => d.tipo === 'exito'), 'y se le dice que se bajó');
+
+  // Y el de la lista baja TODAS: clave null.
+  const lista = await pantallaDeComisiones();
+  const suyo = lista.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'bajar');
+  assert.notEqual(suyo.dataset.alcance, 'una');
+  lista.lanzar('click', suyo);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(lista.bajadas[0].clave, null, 'todas las cuentas');
+});
+
+test('el cableado: mientras arma el Excel, el botón se apaga y lo dice', async () => {
+  let visto = null;
+  const p = await pantallaDeComisiones({
+    clave: 'id:e1',
+    bajarElExcel: async () => {
+      const b = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'bajar');
+      visto = { apagado: b.disabled, texto: b.textContent };
+      return { cuantas: 1 };
+    },
+  });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'bajar');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(visto.apagado, true);
+  assert.equal(visto.texto, 'Armando el archivo…');
+});
+
+test('el cableado: si bajar el Excel falla, el aviso se QUEDA ESCRITO en la página', async () => {
+  // Un aviso flotante de cinco segundos se pierde, y él creería que el archivo se bajó.
+  const p = await pantallaDeComisiones({
+    clave: 'id:e1',
+    bajarElExcel: async () => { throw new Error('se rompió algo raro'); },
+  });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'bajar');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.match(p.html(), /No se bajó nada/, 'queda escrito en la pantalla, no en un aviso que se va');
+  assert.ok(!p.dichos.some((d) => d.tipo === 'exito'), 'y nunca se canta como bajado');
+});
+
+test('el cableado: bajar el Excel dos veces de un clic doble solo lo baja una vez', async () => {
+  const p = await pantallaDeComisiones({ clave: 'id:e1' });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'bajar');
+  p.lanzar('click', boton);
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.bajadas.length, 1);
+});
+
+/** Una ficha con un pago de comisión ya hecho, para poder apretar «Ver comprobante» y «Anular». */
+async function conUnPagoHecho(opciones = {}) {
+  const renta1 = firme('a1');
+  // Un pago CON PAPEL (número y detalle) es el que ofrece «Ver comprobante»; los de antes del papel, no.
+  const pago = { ...pagoDeComision({ id: 'p1', monto: 140, contratos: ['a1'] }), numero: 5, detalle: [filaDeDetalle(renta1)] };
+  const lectura = lecturaOk({ contratos: [renta1], pagos: [pago] });
+  const vista = armarVistaDeComisiones(lectura);
+  const clave = vista.entradas.find((e) => e.pagos?.length || e.nombre === 'Ana López')?.clave ?? vista.entradas[0].clave;
+  const p = await pantallaDeComisiones({ lectura, clave, ...opciones });
+  return { p, pago, clave };
+}
+
+test('el cableado: «Ver comprobante» vuelve a LEER el pago antes de dibujar el papel', async () => {
+  // Reemplaza a una prueba que leía once pedazos del TEXTO del código. Un papel que sale de la empresa no
+  // puede salir de una copia vieja: se lee otra vez, y lo leído manda.
+  const leidos = [];
+  const { p } = await conUnPagoHecho({
+    leerElPago: async ({ pagoId }) => {
+      leidos.push(pagoId);
+      return { tipo: 'esta', pago: { id: pagoId, numero: 5, monto: 100 }, pagos: [] };
+    },
+  });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'comprobante');
+  assert.ok(boton, 'la ficha trae su botón de comprobante');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(leidos.length, 1, 'se lee de nuevo antes de dibujar');
+  assert.equal(p.comprobantes.length, 1, 'y se dibuja el papel');
+});
+
+test('el cableado: un pago que YA NO ESTÁ no dibuja ningún papel: se dice y se redibuja la ficha', async () => {
+  const { p } = await conUnPagoHecho({
+    leerElPago: async () => ({ tipo: 'no-esta', pago: null, pagos: [] }),
+  });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'comprobante');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(p.comprobantes, [], 'no sale ningún papel');
+  assert.ok(p.dichos.some((d) => d.texto === MENSAJE_COMPROBANTE_COMISION_NO_ESTA && d.tipo === 'error'));
+});
+
+test('el cableado: si la sesión se cerró MIENTRAS leía el pago, lo leído se tira', async () => {
+  // Es dinero, y se suelta con la sesión: ni se guarda en memoria ni se dibuja el papel.
+  const { p } = await conUnPagoHecho({
+    leerElPago: async ({ pagoId }) => {
+      p.cerrarLaSesion();
+      return { tipo: 'esta', pago: { id: pagoId, numero: 5, monto: 100 }, pagos: [{ id: 'colado' }] };
+    },
+  });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'comprobante');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(p.comprobantes, [], 'no se dibuja el papel');
+  assert.equal(p.lector.actual, null, 'y al encontrar la sesión cerrada, lo leído se suelta entero');
+  const pagosAhora = p.lector.actual?.pagos?.datos ?? [];
+  assert.ok(!pagosAhora.some((x) => x.id === 'colado'), 'lo que llegó tarde no se guardó');
+});
+
+test('el cableado: si leer el pago FALLA, se le dice y la ficha sigue ahí', async () => {
+  const { p } = await conUnPagoHecho({
+    leerElPago: async () => { throw new Error('se cayó el internet'); },
+  });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'comprobante');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(p.comprobantes, []);
+  assert.equal(p.dichos.at(-1).tipo, 'error');
+  assert.match(p.html(), /Ana/, 'y la ficha sigue dibujada');
+});
+
+test('el cableado: «Ver comprobante» dos veces de un clic doble solo lee una vez', async () => {
+  const leidos = [];
+  const { p } = await conUnPagoHecho({
+    leerElPago: async ({ pagoId }) => {
+      leidos.push(pagoId);
+      return { tipo: 'esta', pago: { id: pagoId, numero: 5, monto: 100 }, pagos: [] };
+    },
+  });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'comprobante');
+  p.lanzar('click', boton);
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(leidos.length, 1);
+});
+
+

@@ -747,18 +747,10 @@ test('el mensaje que se le dice a un error que no es nuestro es el genérico: nu
   for (const m of [MENSAJE_BAJAR_SIN_SESION, MENSAJE_BAJAR_CUENTA_YA_NO_ESTA, MENSAJE_BAJAR_SIN_CUENTAS]) assert.match(m, /^No se bajó nada/);
 });
 
-test('el clic: mira la sesión antes, bloquea el doble clic, baja la cuenta abierta (o todas), con la fecha de hoy, y redibuja', () => {
-  const clic = PANTALLA.slice(PANTALLA.indexOf('async function bajarExcel'), PANTALLA.indexOf('// ----- Los eventos'));
-  assert.match(clic, /async function bajarExcel\(alcance\) \{\s*if \(ui\.ocupado \|\| !haySesion\(\)\) return;\s*ui\.ocupado = true;/);
-  assert.match(clic, /bajarLasCuentasEnExcel\(\{ clave: alcance === 'una' \? claveActual : null, hoy: hoyISO\(\) \}\)/);
-  assert.match(clic, /finally \{\s*ui\.ocupado = false;/);
-  assert.match(clic, /if \(ui\.mensajeBajar === MENSAJE_BAJAR_SIN_SESION && !haySesion\(\)\) return;\s*dibujar\(\);/);
-  assert.match(PANTALLA, /case 'bajar': bajarExcel\(accion\.dataset\.alcance\); return;/);
-  // Lo que falló se dibuja en la lista y en la ficha: la lista recibe el mensaje y la ficha lo lee de `ui`.
-  assert.match(PANTALLA, /raiz\.innerHTML = htmlListaDeComisiones\(vista, \{ mensajeBajar: ui\.mensajeBajar \}\);/);
-  assert.match(PANTALLA, /raiz\.innerHTML = htmlFichaDeComisiones\(\{ entrada, vista, ui, lectura: lector\.actual, hoy \}\);/);
-  assert.match(clic, /boton\.disabled = true; boton\.textContent = 'Armando el archivo…'/);
-});
+// La prueba que miraba el TEXTO de `pintarCuentas` para comprobar este recorrido se cambió el 26 de
+// noviembre de 2026 por pruebas que lo APRIETAN, en pruebas/comisiones-pantalla.test.mjs («el
+// cableado: …»). Se rompía con un refactor que no cambia el comportamiento, que es justo lo que la
+// auditoría de octubre le critica a esa clase de prueba.
 
 test('el botón de bajar existe solo en las pantallas de comisiones, detrás de la contraseña: ni el menú ni otra pantalla lo traen', () => {
   assert.doesNotMatch(leer('../index.html'), /bajar|comisiones/i);

@@ -1080,18 +1080,10 @@ test('anular: el mensaje nombra el comprobante cuando lo hay, y avisa que el pap
   assert.ok(!/comprobante N/.test(viejo) && !/papel/.test(viejo));
 });
 
-test('la ficha engancha el botón al recorrido seguro: sesión, relectura, y nada guardado en el módulo', () => {
-  const codigo = sinComentarios(leer('../js/pantallas/comisiones.js'));
-  assert.match(codigo, /case 'comprobante': verComprobante\(accion\.dataset\.id\); return;/);
-  const f = codigo.slice(codigo.indexOf('async function verComprobante'), codigo.indexOf('// ----- Enlazar'));
-  assert.match(f, /async function verComprobante\(pagoId\) \{\s*if \(ui\.ocupado \|\| !haySesion\(\) \|\| !entrada\) return;/);
-  assert.match(f, /await leerElPagoParaElComprobante\(\{ pagoId \}\)/, 'lee de nuevo');
-  assert.match(f, /if \(!haySesion\(\) \|\| !lector\.actual\) return;/, 'y mira la sesión otra vez después de leer');
-  assert.match(f, /lector\.actual\.pagos\.datos = r\.pagos/);
-  assert.match(f, /if \(r\.tipo === 'no-esta'\) \{ aviso\(MENSAJE_COMPROBANTE_COMISION_NO_ESTA, 'error'\); dibujar\(\); return; \}/, 'un pago que ya no está se dice');
-  assert.match(f, /alVolver: dibujar/);
-  assert.match(codigo, /Pago registrado: \$\{dinero\(r\.pago\.monto\)\}\. Comprobante N\.° \$\{r\.pago\.numero\}\./, 'al registrar se le dice el número');
-});
+// La prueba que miraba el TEXTO de `pintarCuentas` para comprobar este recorrido se cambió el 26 de
+// noviembre de 2026 por pruebas que lo APRIETAN, en pruebas/comisiones-pantalla.test.mjs («el
+// cableado: …»). Se rompía con un refactor que no cambia el comportamiento, que es justo lo que la
+// auditoría de octubre le critica a esa clase de prueba.
 
 // ---------------------------------------------------------------------------
 // La hoja de estilos: el papel del empleado se imprime con las reglas del de los dueños
