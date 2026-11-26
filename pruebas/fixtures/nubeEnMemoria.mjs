@@ -140,6 +140,21 @@ export function nubeEnMemoria({
       subir(ref.ruta);
     },
     /**
+     * Borrar un documento, como `deleteDoc` de Firestore: borrar uno que no existe NO es un error (así un
+     * reintento después de un tiempo vencido no revienta). Cuenta como escritura, para que una transacción
+     * que leyó ese documento se dé cuenta de que cambió.
+     */
+    deleteDoc: async (ref) => {
+      llamadas.push(['deleteDoc', ref.ruta, ref.db.nombre]);
+      if (falla('deleteDoc', ref.ruta)) throw new Error('sin internet');
+      // Las mismas reglas que para escribir: lo que vive detrás de la credencial de dinero tampoco se borra sin ella.
+      if (['pagosDueno/', 'pagosComision/', 'empleados/'].some((x) => ref.ruta.startsWith(x)) && !ref.db.esDinero) {
+        throw Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' });
+      }
+      docs.delete(ref.ruta);
+      subir(ref.ruta);
+    },
+    /**
      * Una transacción como la de Firestore: la función corre, y al terminar solo
      * se escribe si ningún documento que LEYÓ cambió mientras tanto; si cambió,
      * se vuelve a correr desde cero. Es lo que hace que dos pestañas tomando el

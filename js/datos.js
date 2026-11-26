@@ -1326,6 +1326,31 @@ export async function marcarCarroFueraDeServicio(carroId, motivo, deps) {
   return cambiarEnNubeYLocal('vehiculos', carroId, (carro) => carroFueraDeServicio(carro, motivo), deps);
 }
 
+/**
+ * «Borrar carro»: lo quita de la nube y de la copia local.
+ *
+ * Primero la nube, después la copia: si el borrado de la nube falla, el carro TODAVÍA existe, y haberlo
+ * quitado de la copia local mostraría una flota que no es. Al revés no se puede recuperar.
+ *
+ * Borrar uno que ya no está no es un error (`deleteDoc` de Firestore no se queja): así un reintento después
+ * de un tiempo vencido —cuando el primero sí llegó— termina bien en vez de asustarlo con un fallo.
+ *
+ * Si falla la copia local se avisa pero no se deshace el borrado de la nube: el carro ya no está, y la
+ * próxima lectura completa lo quita de la copia igual (`idsQueSobran`). (26 de noviembre de 2026.)
+ */
+export async function borrarCarro(carroId, {
+  iniciar = iniciarFirebase, borrarCopia = borrarLocales, avisar = avisarCopiaLocal,
+} = {}) {
+  const { db, fsMod } = await iniciar();
+  await conLimiteDeTiempo(fsMod.deleteDoc(fsMod.doc(db, 'vehiculos', carroId)));
+  try {
+    await borrarCopia('vehiculos', [carroId]);
+  } catch (error) {
+    avisar('vehiculos', error);
+  }
+  return carroId;
+}
+
 /** «Volver a habilitar» (la ficha y `#/habilitar/:id`): quita SOLO las dos marcas del taller, sobre el carro que la nube tiene ahora. */
 export async function habilitarCarro(carroId, deps) {
   return cambiarEnNubeYLocal('vehiculos', carroId, (carro) => carroHabilitado(carro), deps);

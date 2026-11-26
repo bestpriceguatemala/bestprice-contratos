@@ -6,6 +6,7 @@ import {
   construirVehiculo, mensajesDeFalloDeCarros, htmlListaVaciaDeCarros, textoCarroNoEncontrado,
   htmlAvisoDePlacas, formularioHTML,
 } from '../js/pantallas/carros.js';
+import { loQueSePierdeAlBorrarElCarro, textoConfirmarBorrarElCarro } from '../js/nucleo/carro.js';
 
 test('construirVehiculo: un carro nuevo tiene propiedad Propio y sin fuera de servicio', () => {
   const campos = {
@@ -186,4 +187,99 @@ test('la pantalla de carros avisa al escribir y al abrir, y guardar NUNCA consul
   const guardar = fuente.match(/async function guardar\(ev\) \{[\s\S]*?\n  \}\n/)[0];
   assert.doesNotMatch(guardar, /htmlAvisoDePlacas|mostrarAvisoDePlacas|Repetid|repetid/, 'guardar no mira si hay repetido');
   assert.doesNotMatch(fuente, /confirm\(|alert\(|showModal|<dialog/, 'y nada es modal');
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Borrar un carro: lo que se pierde, y la pregunta que lo dice
+// ---------------------------------------------------------------------------------------------------
+// Por qué. Hasta el 26 de noviembre de 2026 no se podía borrar un carro: solo «marcar fuera de servicio».
+// Un carro agregado por error se quedaba en la flota para siempre. Decisión de él: se puede borrar
+// cualquiera, con historial o sin él, siempre que el aviso diga exactamente qué se pierde. Borrar es lo
+// único del sistema que no se puede deshacer, así que la pregunta se mide como se mide un papel.
+
+const CARRO = { id: 'v1', codigo: 'A-07', placas: 'P-123ABC', servicios: [] };
+const cerrado = (id, carroId) => ({ id, carroId, numero: 41, cierre: { fechaReal: '2026-10-01' } });
+const abierto = (id, carroId) => ({ id, carroId, numero: 42, cierre: null });
+
+test('loQueSePierdeAlBorrarElCarro: sin carro no se pierde nada, y no revienta', () => {
+  for (const nada of [null, undefined, {}]) {
+    assert.deepEqual(loQueSePierdeAlBorrarElCarro(nada), { contratos: 0, reservas: 0, afuera: null, servicios: 0 });
+  }
+  // Y con basura en lugar de listas tampoco: esto corre justo antes de borrar, no es el lugar para reventar.
+  assert.deepEqual(
+    loQueSePierdeAlBorrarElCarro(CARRO, { contratos: 'x', reservas: null }),
+    { contratos: 0, reservas: 0, afuera: null, servicios: 0 },
+  );
+});
+
+test('loQueSePierdeAlBorrarElCarro: cuenta SOLO lo de ese carro, no lo de los demás', () => {
+  const p = loQueSePierdeAlBorrarElCarro(CARRO, {
+    contratos: [cerrado('c1', 'v1'), cerrado('c2', 'v9'), cerrado('c3', 'v1')],
+    reservas: [{ id: 'r1', carroId: 'v1' }, { id: 'r2', carroId: 'v9' }],
+  });
+  assert.equal(p.contratos, 2, 'los dos de v1, no el de v9');
+  assert.equal(p.reservas, 1);
+});
+
+test('loQueSePierdeAlBorrarElCarro: una reservación ya entregada o cancelada NO cuenta', () => {
+  // Solo las pendientes se quedan sin carro; las otras ya se resolvieron. La regla no se repite aquí:
+  // es `estadoReserva` (nucleo/reserva.js), la misma que usa todo lo demás.
+  const p = loQueSePierdeAlBorrarElCarro(CARRO, {
+    reservas: [
+      { id: 'r1', carroId: 'v1' },
+      { id: 'r2', carroId: 'v1', contratoId: 'c9' },
+      { id: 'r3', carroId: 'v1', cancelada: true },
+    ],
+  });
+  assert.equal(p.reservas, 1, 'solo la pendiente');
+});
+
+test('loQueSePierdeAlBorrarElCarro: dice si el carro está AFUERA ahora mismo', () => {
+  const con = loQueSePierdeAlBorrarElCarro(CARRO, { contratos: [cerrado('c1', 'v1'), abierto('c2', 'v1')] });
+  assert.equal(con.afuera?.id, 'c2', 'el que no ha regresado');
+  const sin = loQueSePierdeAlBorrarElCarro(CARRO, { contratos: [cerrado('c1', 'v1')] });
+  assert.equal(sin.afuera, null);
+});
+
+test('loQueSePierdeAlBorrarElCarro: cuenta los servicios anotados, que viven dentro del carro', () => {
+  const p = loQueSePierdeAlBorrarElCarro({ ...CARRO, servicios: [{ id: 's1' }, { id: 's2' }] });
+  assert.equal(p.servicios, 2);
+});
+
+test('textoConfirmarBorrarElCarro: nombra el carro y dice que no se puede deshacer', () => {
+  const t = textoConfirmarBorrarElCarro(CARRO, loQueSePierdeAlBorrarElCarro(CARRO));
+  assert.match(t, /A-07/, 'el código');
+  assert.match(t, /P-123ABC/, 'y las placas: borrar el carro equivocado no se arregla');
+  assert.match(t, /no se puede deshacer/i);
+});
+
+test('textoConfirmarBorrarElCarro: con historial dice que los contratos NO se borran, y qué sí se pierde', () => {
+  // Es la duda que de verdad tendría: «¿se me van los contratos?». La respuesta es no, y tiene que estar
+  // escrita antes de apretar, no después.
+  const carro = { ...CARRO, servicios: [{ id: 's1' }] };
+  const p = loQueSePierdeAlBorrarElCarro(carro, {
+    contratos: [cerrado('c1', 'v1'), cerrado('c2', 'v1')],
+    reservas: [{ id: 'r1', carroId: 'v1' }],
+  });
+  const t = textoConfirmarBorrarElCarro(carro, p);
+  assert.match(t, /2 contratos/);
+  assert.match(t, /NO se borran/, 'lo que no se pierde');
+  assert.match(t, /kilometraje y el mantenimiento/, 'lo que sí se pierde');
+  assert.match(t, /1 servicio anotado/, 'en singular cuando es uno');
+  assert.match(t, /1 reservación pendiente queda/, 'y la reservación que se queda colgada');
+});
+
+test('textoConfirmarBorrarElCarro: si el carro está AFUERA, eso va primero y con OJO', () => {
+  const p = loQueSePierdeAlBorrarElCarro(CARRO, { contratos: [abierto('c2', 'v1')] });
+  const t = textoConfirmarBorrarElCarro(CARRO, p);
+  assert.match(t, /OJO: este carro está AFUERA ahora mismo, rentado en el contrato N\.° 42/);
+  assert.ok(t.indexOf('OJO') < t.indexOf('contrato.'), 'antes que el resto del detalle');
+});
+
+test('textoConfirmarBorrarElCarro: sin historial no inventa pérdidas que no hay', () => {
+  const t = textoConfirmarBorrarElCarro(CARRO, loQueSePierdeAlBorrarElCarro(CARRO));
+  assert.doesNotMatch(t, /contrato/i, 'no habla de contratos si no tiene');
+  assert.doesNotMatch(t, /servicio/i);
+  assert.doesNotMatch(t, /reservaci/i);
+  assert.doesNotMatch(t, /OJO/);
 });

@@ -29,10 +29,11 @@ service cloud.firestore {
       //     que ni menciona el porcentaje lo deja igual y pasa. Un contrato sin el campo y uno con
       //     `null` cuentan lo mismo (el `get(..., null)` de abajo), así que uno de antes de que el campo
       //     existiera se sigue guardando; lo que no puede es RECIBIR un porcentaje que no tenía.
-      //   - BORRAR: solo con la credencial de dinero. El sistema no borra contratos (no hay un solo
-      //     `deleteDoc` en js/, y una prueba lo vigila). Está cerrado porque, si cualquiera pudiera
-      //     borrar, bastaría borrar el contrato y volver a crearlo con el mismo id y otro porcentaje,
-      //     y lo de arriba no serviría de nada.
+      //   - BORRAR: solo con la credencial de dinero. El sistema no borra contratos. Desde el 26 de
+      //     noviembre de 2026 sí borra UNA cosa —carros, desde la ficha del carro («Borrar carro»)—, y
+      //     una prueba vigila que ése siga siendo el único `deleteDoc` de js/ y que no toque otra
+      //     colección. Está cerrado porque, si cualquiera pudiera borrar un contrato, bastaría borrarlo
+      //     y volver a crearlo con el mismo id y otro porcentaje, y lo de arriba no serviría de nada.
       //
       // Lo que NO protege, a propósito, dicho aquí para que nadie crea que sí:
       //   - CREAR: cualquier sesión puede crear un contrato NUEVO con el porcentaje que quiera.

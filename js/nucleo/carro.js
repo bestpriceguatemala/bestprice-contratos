@@ -13,6 +13,8 @@
 // mandar al taller reaparecería como rentable, y a un cliente se le entregaría un carro descompuesto. Cada escritor lee el carro de la nube
 // DENTRO de la transacción que lo escribe (`cambiarEnNubeYLocal`, datos.js) y cambia solo sus llaves; la ficha deja las ajenas como están.
 import { CAMPOS_DEL_MANTENIMIENTO } from './mantenimiento.js';
+// `estadoReserva` es la ÚNICA copia de qué cuenta como reservación pendiente: se reusa, no se repite.
+import { estadoReserva } from './reserva.js';
 
 /** Las dos marcas del taller. Las escriben SOLO `carroFueraDeServicio` y `carroHabilitado`. */
 export const CAMPOS_DE_LA_DISPONIBILIDAD = Object.freeze(['fueraDeServicio', 'motivoFueraDeServicio']);
@@ -58,4 +60,80 @@ export function carroConLoDeLaFicha(fresco, deLaFicha) {
     carro[campo] = valor;
   }
   return carro;
+}
+
+/**
+ * Lo que se pierde al BORRAR un carro, para poder decírselo antes de borrarlo.
+ *
+ * Borrar no es «marcar fuera de servicio»: el carro desaparece de la flota y no vuelve. Decisión del 26 de
+ * noviembre de 2026: se puede borrar cualquiera, con historial o sin él, pero el aviso tiene que decir
+ * exactamente qué se pierde y qué NO, porque es lo único que no se puede deshacer desde el sistema.
+ *
+ * Lo que **no** se pierde: los contratos. Cada contrato guarda `carroPlacas` y `carroDescripcion` como se
+ * vieron el día de la salida, y el papel los lee del contrato, no del carro (`hojaContrato.js`), así que los
+ * contratos viejos siguen imprimiéndose igual después de borrar.
+ *
+ * Lo que **sí** se pierde: el kilometraje y el mantenimiento de ese carro, que se calculan recorriendo los
+ * contratos por `carroId` (`mantenimiento.js`), y los servicios anotados, que viven dentro del documento del
+ * carro. Las reservaciones pendientes quedan apuntando a un carro que ya no existe.
+ *
+ * `afuera` es el contrato abierto, si el carro está rentado AHORA. No impide borrar —él decide—, pero es el
+ * caso que tiene que ver escrito: el carro está físicamente con un cliente.
+ */
+export function loQueSePierdeAlBorrarElCarro(carro, { contratos = [], reservas = [] } = {}) {
+  const id = carro?.id ?? null;
+  const vacio = { contratos: 0, reservas: 0, afuera: null, servicios: 0 };
+  if (!id) return vacio;
+  const suyos = (Array.isArray(contratos) ? contratos : []).filter((c) => c?.carroId === id);
+  const pendientes = (Array.isArray(reservas) ? reservas : [])
+    .filter((r) => r?.carroId === id && estadoReserva(r) === 'pendiente');
+  return {
+    contratos: suyos.length,
+    reservas: pendientes.length,
+    afuera: suyos.find((c) => !c?.cierre?.fechaReal) ?? null,
+    servicios: Array.isArray(carro?.servicios) ? carro.servicios.length : 0,
+  };
+}
+
+/**
+ * La pregunta de «Borrar carro», con lo que se pierde escrito. Pura y aparte de la pantalla para poder
+ * medirla: es la última cosa que él lee antes de que el carro desaparezca.
+ */
+export function textoConfirmarBorrarElCarro(carro, perdida) {
+  const nombre = [carro?.codigo, carro?.placas].filter(Boolean).join(' · ') || 'este carro';
+  const partes = [`¿Borrar «${nombre}» de la flota?`];
+  if (perdida?.afuera) {
+    const numero = perdida.afuera.numero ? `N.° ${perdida.afuera.numero}` : 'sin número';
+    partes.push(`OJO: este carro está AFUERA ahora mismo, rentado en el contrato ${numero}.`);
+  }
+  if (perdida?.contratos) {
+    partes.push(`Tiene ${perdida.contratos} ${perdida.contratos === 1 ? 'contrato' : 'contratos'}. `
+      + 'Los contratos NO se borran y siguen imprimiéndose igual, porque guardan las placas y la descripción '
+      + 'del carro como se vieron ese día.');
+    partes.push('Lo que se pierde es el kilometraje y el mantenimiento de este carro, que se calculan desde '
+      + 'sus contratos.');
+  }
+  if (perdida?.servicios) {
+    partes.push(`También se pierden ${perdida.servicios} ${perdida.servicios === 1 ? 'servicio anotado' : 'servicios anotados'}.`);
+  }
+  if (perdida?.reservas) {
+    partes.push(`Y ${perdida.reservas} ${perdida.reservas === 1 ? 'reservación pendiente queda' : 'reservaciones pendientes quedan'} `
+      + 'apuntando a un carro que ya no existe.');
+  }
+  partes.push('Esto no se puede deshacer desde el sistema.');
+  return partes.join('\n\n');
+}
+
+/**
+ * El aviso de que la cuenta de «lo que se pierde» puede estar incompleta, cuando algo no se pudo leer.
+ *
+ * Una pregunta que calla lo que no sabe es peor que no preguntar: si los contratos no se leyeron, el aviso
+ * diría «no tiene contratos» cuando la verdad es «no se sabe». Devuelve cadena vacía cuando se leyó todo,
+ * para no asustar sin motivo.
+ */
+export function textoDeLoQueNoSePudoLeer({ contratos = false, reservas = false } = {}) {
+  const faltan = [contratos ? 'los contratos' : null, reservas ? 'las reservaciones' : null].filter(Boolean);
+  if (!faltan.length) return '';
+  return `OJO: no se pudieron leer ${faltan.join(' ni ')}, así que esta cuenta puede estar incompleta: `
+    + 'puede haber más de lo que dice aquí.';
 }

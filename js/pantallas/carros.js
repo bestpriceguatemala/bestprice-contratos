@@ -13,9 +13,11 @@ import { avisoDeCarroRepetido } from '../nucleo/repetidos.js';
 import { hoyISO } from '../nucleo/fechas.js';
 import {
   cargarFlota, cargarContratosAbiertos, cargarTodosLosContratos, guardarVehiculo, marcarCarroFueraDeServicio, habilitarCarro,
-  altaConIdFijo, nuevoIdVehiculo, CODIGO_DOCUMENTO_NO_ESTA,
+  altaConIdFijo, nuevoIdVehiculo, CODIGO_DOCUMENTO_NO_ESTA, borrarCarro, cargarReservas,
 } from '../datos.js';
-import { MENSAJE_FALTA_EL_MOTIVO } from '../nucleo/carro.js';
+import {
+  MENSAJE_FALTA_EL_MOTIVO, loQueSePierdeAlBorrarElCarro, textoConfirmarBorrarElCarro, textoDeLoQueNoSePudoLeer,
+} from '../nucleo/carro.js';
 import { lecturaConNubeDetras } from '../nucleo/lecturas.js';
 import { aviso, htmlAvisoRepetido } from '../ui.js';
 import { pintarMantenimiento } from './mantenimiento.js';
@@ -260,7 +262,22 @@ export function formularioHTML() {
             <button type="submit" id="frm-guardar" class="btn btn-primario">Guardar carro</button>
             <button type="button" id="frm-fuera" class="btn" style="display: none;">Marcar fuera de servicio</button>
             <button type="button" id="frm-habilitar" class="btn" style="display: none;">Volver a habilitar</button>
+            <button type="button" id="frm-borrar" class="btn btn-peligro" style="display: none;">Borrar carro</button>
           </div>
+
+          <!--
+            La confirmación de borrar va DENTRO de la página, no en un diálogo del navegador: el aviso es
+            largo (dice qué se pierde y qué no) y un diálogo del navegador lo corta. Esta pantalla nunca ha
+            usado diálogos de página, y una prueba lo vigila.
+          -->
+          <section id="frm-borrar-caja" class="carro-seccion barra-lectura-fallida" hidden>
+            <h2>Borrar carro</h2>
+            <p id="frm-borrar-texto" style="white-space: pre-line;"></p>
+            <div class="carro-botones">
+              <button type="button" id="frm-borrar-no" class="btn">No, dejarlo</button>
+              <button type="button" id="frm-borrar-si" class="btn btn-peligro">Sí, borrar este carro</button>
+            </div>
+          </section>
         </div>
       </div>
     </form>`;
@@ -268,6 +285,9 @@ export function formularioHTML() {
 
 async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, falloFlota = false, {
   falloContratos = false, alLlegarTarde = () => {},
+  // Los aparatos de «Borrar carro», con sus valores de siempre: así la ficha se puede apretar en una prueba
+  // sin navegador ni Firebase, igual que las pantallas de dinero.
+  leerLasReservas = cargarReservas, borrarElCarro = borrarCarro,
 } = {}) {
   const esNuevo = carroId === 'nuevo';
   let carro = null;
@@ -313,6 +333,8 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
     } else {
       btnFuera.style.display = 'inline-block';
     }
+    // «Borrar carro» solo al EDITAR uno que ya existe: uno nuevo no se borra, se cancela.
+    el('frm-borrar').style.display = 'inline-block';
   }
 
   // Si ya hay un carro con estas placas se dice aquí mismo, debajo del campo, mientras se escribe y al abrir
@@ -409,6 +431,65 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
     }
   }
 
+  /**
+   * «Borrar carro». Es lo único del sistema que no se puede deshacer, así que antes de preguntar se lee
+   * TODO lo que lo menciona para que la pregunta diga la verdad: los contratos ya los tiene la pantalla, y
+   * las reservaciones se leen AQUÍ, al apretar, no al abrir la ficha. Leerlas al abrir le costaría una
+   * lectura de Firebase cada vez que mira un carro, y esto se aprieta una vez al año.
+   *
+   * Si las reservaciones no se pueden leer no se adivina que no hay: se le dice que no se pudo saber, y él
+   * decide. Una pregunta que calla lo que no sabe es peor que no preguntar. (26 de noviembre de 2026.)
+   */
+  /**
+   * «Borrar carro», primer paso: armar el aviso y mostrarlo. Es lo único del sistema que no se puede
+   * deshacer, así que antes de preguntar se lee TODO lo que menciona al carro para que el aviso diga la
+   * verdad: los contratos ya los tiene la pantalla, y las reservaciones se leen AQUÍ, al apretar, no al
+   * abrir la ficha. Leerlas al abrir costaría una lectura de Firebase cada vez que él mira un carro, y
+   * esto se aprieta una vez al año.
+   *
+   * Si algo no se pudo leer NO se adivina que no hay: se le dice que la cuenta puede estar incompleta y él
+   * decide. Un aviso que calla lo que no sabe es peor que no avisar. (26 de noviembre de 2026.)
+   */
+  async function prepararElBorrado() {
+    const boton = el('frm-borrar');
+    boton.disabled = true;
+    try {
+      let reservas = [];
+      let falloReservas = false;
+      try {
+        const r = await leerLasReservas();
+        reservas = r?.datos ?? [];
+        falloReservas = Boolean(r?.fallo);
+      } catch (error) {
+        falloReservas = true;
+        console.error('No se pudieron leer las reservaciones antes de borrar el carro:', error);
+      }
+      const perdida = loQueSePierdeAlBorrarElCarro(carro, { contratos, reservas });
+      const incompleto = textoDeLoQueNoSePudoLeer({ contratos: Boolean(falloContratos), reservas: falloReservas });
+      el('frm-borrar-texto').textContent = [textoConfirmarBorrarElCarro(carro, perdida), incompleto]
+        .filter(Boolean).join('\n\n');
+      el('frm-borrar-caja').hidden = false;
+    } finally {
+      boton.disabled = false;
+    }
+  }
+
+  /** «Sí, borrar este carro»: el único lugar que de verdad borra. */
+  async function borrarDeVerdad() {
+    const boton = el('frm-borrar-si');
+    boton.disabled = true;
+    try {
+      await borrarElCarro(carro.id);
+      aviso(`Carro ${carro.codigo || carro.placas || ''} borrado.`.replace('  ', ' '), 'exito');
+      location.hash = '#/carros';
+    } catch (error) {
+      aviso(textoFalloAlGuardarElCarro(error, 'borrar el carro'), 'error');
+      console.error(error);
+    } finally {
+      boton.disabled = false;
+    }
+  }
+
   // Eventos
   el('frm-placas').addEventListener('input', mostrarAvisoDePlacas);
   mostrarAvisoDePlacas();
@@ -418,6 +499,9 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
   });
   el('frm-fuera').addEventListener('click', marcarFueraDeServicio);
   el('frm-habilitar').addEventListener('click', habilitar);
+  el('frm-borrar').addEventListener('click', prepararElBorrado);
+  el('frm-borrar-si').addEventListener('click', borrarDeVerdad);
+  el('frm-borrar-no').addEventListener('click', () => { el('frm-borrar-caja').hidden = true; });
 
   // El mantenimiento de este carro (§12b): solo un carro que ya existe lleva servicios. Va DEBAJO del formulario, no
   // dentro: sus botones no son los de «Guardar carro». Cuando un servicio se anota, el carro de esta pantalla pasa a ser el

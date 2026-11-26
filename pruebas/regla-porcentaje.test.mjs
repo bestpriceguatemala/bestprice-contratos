@@ -277,10 +277,28 @@ function funcionDeDatos(nombre) {
   return fuente.slice(inicio, fuente.indexOf('\n}\n', inicio) + 3);
 }
 
-test('nada en el sistema borra documentos: por eso las reglas le niegan el borrado de contratos a la sesión del mostrador sin romper nada', () => {
+test('lo ÚNICO que el sistema borra son carros: ningún borrado se acerca a un contrato', () => {
+  // Hasta el 26 de noviembre de 2026 esta prueba decía «nada en el sistema borra documentos», y las reglas
+  // de Firestore se apoyaban en eso por escrito. Ese día se agregó «Borrar carro» (él lo pidió: un carro
+  // agregado por error se quedaba en la flota para siempre). La invariante NO se borró, se estrechó: ahora
+  // vigila que el único borrado sea el del carro, y que viva en un solo lugar.
+  //
+  // Por qué sigue importando: la regla de `contratos` niega el borrado a la sesión del mostrador porque, si
+  // cualquiera pudiera borrar, bastaría borrar el contrato y volver a crearlo con el mismo id y otro
+  // `porcentajeComision`. Un `deleteDoc` nuevo en cualquier otra parte vuelve esa regla papel mojado, así
+  // que aparecer aquí es obligatorio y se revisa a mano.
+  const PERMITIDO = { 'datos.js': ['vehiculos'] };
   for (const [ruta, codigo] of codigoDelSistema()) {
-    assert.doesNotMatch(codigo, /\bdeleteDoc\b/, `js/${ruta}: un borrado de contratos pide la credencial de dinero (firestore.rules: allow delete: if esDinero())`);
-    assert.doesNotMatch(codigo, /\b(lote|batch|tx|transaccion)\.delete\(/, `js/${ruta}: igual, un borrado dentro de un lote o una transacción`);
+    assert.doesNotMatch(codigo, /\b(lote|batch|tx|transaccion)\.delete\(/, `js/${ruta}: un borrado dentro de un lote o una transacción no está permitido en ninguna parte`);
+    const borrados = [...codigo.matchAll(/deleteDoc\(\s*fsMod\.doc\(\s*db\s*,\s*'([a-zA-Z]+)'/g)].map((m) => m[1]);
+    const sueltos = (codigo.match(/\bdeleteDoc\b/g) ?? []).length;
+    if (!PERMITIDO[ruta]) {
+      assert.equal(sueltos, 0, `js/${ruta}: este archivo no puede borrar documentos. Si de verdad hace falta, agrégalo a PERMITIDO aquí y di qué colección borra.`);
+      continue;
+    }
+    assert.deepEqual(borrados, PERMITIDO[ruta], `js/${ruta}: borra colecciones que no están declaradas aquí`);
+    assert.equal(sueltos, borrados.length,
+      `js/${ruta}: hay un deleteDoc que esta prueba no pudo leer (no tiene la forma deleteDoc(fsMod.doc(db, 'coleccion'...)). Escríbelo así para que se pueda vigilar qué borra.`);
   }
 });
 

@@ -20,6 +20,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   guardarVehiculo, marcarCarroFueraDeServicio, habilitarCarro, registrarServicioDelCarro, anularServicioDelCarro,
+  borrarCarro,
   cambiarIntervaloDelCarro, nuevoIdVehiculo, altaConIdFijo, CODIGO_DOCUMENTO_NO_ESTA, MENSAJE_CARRO_NO_ESTA,
 } from '../js/datos.js';
 import { construirVehiculo, textoFalloAlGuardarElCarro } from '../js/pantallas/carros.js';
@@ -610,4 +611,53 @@ test('estructura: la ficha guarda con guardarVehiculo y los botones del taller c
   const campos = codigo.slice(codigo.indexOf('const campos = {'), codigo.indexOf('};', codigo.indexOf('const campos = {')));
   assert.deepEqual([...campos.matchAll(/^\s+(\w+)\s*[:,]/gm)].map((m) => m[1]),
     ['id', 'codigo', 'placas', 'tipo', 'marca', 'linea', 'color', 'modelo']);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// borrarCarro: lo único del sistema que no se puede deshacer
+// ---------------------------------------------------------------------------------------------------
+
+test('borrarCarro: lo quita de la nube Y de la copia local', async () => {
+  const dos = dosComputadoras();
+  await borrarCarro('v1', { ...dos.A.deps, borrarCopia: dos.A.copia.borrarCopia });
+  assert.equal(dos.nube.docs.has('vehiculos/v1'), false, 'ya no está en la nube');
+  assert.equal(dos.A.copia.guardados.has('v1'), false, 'ni en la copia local');
+});
+
+test('borrarCarro: si la NUBE falla, la copia local NO se toca', async () => {
+  // El orden importa y no es simétrico: con el carro todavía en la nube, haberlo quitado de la copia local
+  // mostraría una flota que no es, y eso no se recupera solo.
+  const dos = dosComputadoras();
+  dos.nube.fallan.push({ op: 'deleteDoc', ruta: 'vehiculos/v1' });
+  await assert.rejects(borrarCarro('v1', { ...dos.A.deps, borrarCopia: dos.A.copia.borrarCopia }), /sin internet/);
+  assert.equal(dos.nube.docs.has('vehiculos/v1'), true, 'el carro sigue en la nube');
+  assert.equal(dos.A.copia.guardados.has('v1'), true, 'y sigue en la copia local');
+});
+
+test('borrarCarro: si falla la COPIA LOCAL, el borrado de la nube se queda hecho y solo se avisa', async () => {
+  // Al revés que el anterior: el carro ya no está en la nube, deshacerlo sería peor. La próxima lectura
+  // completa lo quita de la copia igual.
+  const dos = dosComputadoras();
+  const avisados = [];
+  await borrarCarro('v1', {
+    ...dos.A.deps,
+    borrarCopia: async () => { throw new Error('IndexedDB lleno'); },
+    avisar: (coleccion, error) => avisados.push({ coleccion, mensaje: error.message }),
+  });
+  assert.equal(dos.nube.docs.has('vehiculos/v1'), false, 'el borrado de la nube se queda hecho');
+  assert.deepEqual(avisados, [{ coleccion: 'vehiculos', mensaje: 'IndexedDB lleno' }], 'y se avisa');
+});
+
+test('borrarCarro: borrar uno que YA no está termina bien (un reintento no revienta)', async () => {
+  const dos = dosComputadoras();
+  await borrarCarro('v1', { ...dos.A.deps, borrarCopia: dos.A.copia.borrarCopia });
+  await borrarCarro('v1', { ...dos.A.deps, borrarCopia: dos.A.copia.borrarCopia });
+  assert.equal(dos.nube.docs.has('vehiculos/v1'), false);
+});
+
+test('borrarCarro: no toca ningún otro carro', async () => {
+  const dos = dosComputadoras();
+  dos.nube.docs.set('vehiculos/v2', { placas: 'P-999ZZZ' });
+  await borrarCarro('v1', { ...dos.A.deps, borrarCopia: dos.A.copia.borrarCopia });
+  assert.equal(dos.nube.docs.has('vehiculos/v2'), true, 'el otro carro sigue ahí');
 });
