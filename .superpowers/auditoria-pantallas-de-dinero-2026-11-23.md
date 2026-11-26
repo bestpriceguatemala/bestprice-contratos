@@ -316,6 +316,44 @@ a quien lo escribió:
   `innerHTML = ...` destruye el campo y se lleva lo escrito. Es justo el error del que la pantalla se cuida
   al no redibujar mientras él escribe el descuento; guardarlo lo habría tapado.
 
+## Los dos oyentes de «click» (26 de noviembre, tarde)
+
+El reparto de cada botón a su acción. Medido con el filtro nuevo `--lineas`, que mide solo una parte del
+archivo: sin él había que medir los más de mil mutantes del archivo entero para mirar veinte líneas.
+
+| Oyente | Antes | Después |
+|---|---:|---:|
+| `dinero.js` (renglones 1927-1953) | 38 / 40 — **95 %** | 39 / 40 — **97.5 %** |
+| `comisiones.js` (renglones 1548-1575) | 20 / 34 — **59 %** | 33 / 34 — **97 %** |
+| Los dos juntos | 58 / 74 — **78 %** | **72 / 74 — 97.3 %** |
+
+Cero anomalías y cero mutantes colgados. Controles corridos antes de cada medición.
+
+**El número viejo estaba mal atribuido.** El informe decía «34 / 99 — los oyentes de eventos» y yo se lo
+leí como si fuera el de «click». Los 99 son los **cuatro** oyentes juntos (click, change, input, keydown);
+el de «click» solo tiene 40, y ya estaba al 95 %. El trabajo real estaba todo en comisiones.
+
+### Lo que no notaba nadie en comisiones, y ahora sí
+
+- **«Actualizar» podía dejar de leer.** Quitarle el `forzar: true` deja que el lector devuelva la copia
+  guardada: el botón se aprieta, no pasa nada, y es justo el botón para cuando él sospecha que la pantalla
+  está vieja. Tres errores distintos vivían en esa línea.
+- **«Cancelar» podía dejar de cerrar el formulario de pago** (tres errores más, uno de ellos cambiando
+  `ui.pagando = false` por `true`, que lo dejaría abierto para siempre).
+- **El clic en la fila de un empleado** podía abrir otra cuenta, ninguna, o comerse el enlace del nombre
+  (cinco errores). Que no se coma el enlace importa: es cómo se miran dos empleados a la vez, con «abrir
+  en otra pestaña».
+- **Un clic en cualquier parte que no sea un botón** reventaba sin el `if (accion)`.
+
+### El único que sobrevive en los dos, y por qué se deja
+
+`default: return;` se puede borrar en las dos pantallas sin que nadie lo note. **Es equivalente hoy, y está
+comprobado, no supuesto:** las únicas acciones dibujadas que el `switch` no atiende son las casillas
+(`marcar`, `marcar-todas`), y viven en filas `tr.dn-sin-clic` que llevan `data-id`, nunca `data-dn-clave`
+ni `data-cm-clave`. Así que caerse del `switch` no puede alcanzar el clic de fila. Es defensa para el día
+que alguien meta un botón nuevo dentro de una fila de la lista; se queda, y se queda dicho, en vez de
+escribir una prueba que fije el HTML de hoy.
+
 ## 4. Lo que todavía NO se ha medido
 
 `contar.mjs` dice el tamaño del trabajo entero: **14,769 errores posibles sobre 13,987 líneas ejecutables,

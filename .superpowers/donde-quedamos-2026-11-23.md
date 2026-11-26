@@ -152,6 +152,23 @@ lectura y dibuja la pantalla de la contraseña**. Por eso una prueba que lea por
 después de que se cierre la sesión está leyendo una lista vacía que no puede fallar nunca: hay que
 capturar la lectura ANTES de apretar.
 
+## 26 de noviembre, tarde: los dos oyentes de «click» (hecho)
+
+De **78 % a 97.3 %** los dos juntos (72 de 74). Ocho pruebas nuevas, todas de cableado: «Actualizar» vuelve
+a leer de verdad, «Volver a leer» tras un fallo, «Cancelar» cierra el formulario, el clic en la fila abre
+la cuenta de ese empleado, el clic en el nombre deja seguir el enlace, y un clic en lo que no es botón no
+hace nada.
+
+Queda **un** sobreviviente en cada pantalla y es el mismo: `default: return;`, equivalente comprobado (las
+únicas acciones sin atender son las casillas, y no viven dentro de una fila con clave). Se deja como
+defensa, dicho.
+
+Al arnés se le agregó `--lineas D-H` para medir solo una parte de un archivo.
+
+**El número viejo del informe estaba mal atribuido:** el «34 / 99» eran los CUATRO oyentes juntos, no el de
+«click». El de «click» de dueños ya estaba al 95 %. Antes de recomendar un objetivo por un número viejo,
+medirlo de nuevo con `--lineas`.
+
 ## Cómo se trabaja esto
 
 - Agentes de a dos como mucho: comparten el cupo y mueren juntos a media tarea.
