@@ -120,11 +120,24 @@ if (orden === 'preparar') {
   const salidaJsonl = valor('--salida', join(CASA, `resultados-${archivo.replace(/\W+/g, '_')}.jsonl`));
   const desde = Number(valor('--desde', '0'));
   const hasta = Number(valor('--hasta', '0')) || Infinity;
+  // `--lineas 1927-1953` mide SOLO una parte del archivo (una función, un oyente). Sin esto hay que medir
+  // el archivo entero para mirar veinte líneas, y eso son horas. Va por número de renglón del archivo,
+  // no por índice de mutante como `--desde/--hasta`. (26 de noviembre de 2026.)
+  const rango = valor('--lineas', '');
+  const [lineaDesde, lineaHasta] = rango
+    ? rango.split('-').map(Number)
+    : [0, Infinity];
+  if (rango && (!Number.isFinite(lineaDesde) || !Number.isFinite(lineaHasta) || lineaDesde > lineaHasta)) {
+    console.error(`--lineas no se entiende: «${rango}». Se escribe así: --lineas 1927-1953`);
+    process.exit(2);
+  }
 
   const mapa = mapaDeAlcance(BASE);
   const pruebas = pruebasQueAlcanzan(mapa, archivo);
   const src = readFileSync(join(BASE, archivo), 'utf8');
-  const todos = generar(src, archivo).slice(desde, hasta);
+  const todos = generar(src, archivo)
+    .filter((m) => m.renglon >= lineaDesde && m.renglon <= lineaHasta)
+    .slice(desde, hasta);
 
   const dirs = [];
   for (let n = 0; n < trabajadores; n++) dirs.push(await copiaDeTrabajo(n));
@@ -155,6 +168,6 @@ if (orden === 'preparar') {
   await Promise.all(dirs.map((_, n) => trabajar(n)));
   console.log(JSON.stringify({ archivo, total: todos.length, cuenta, salida: salidaJsonl }, null, 2));
 } else {
-  console.error('órdenes: preparar | alcance --archivo X | contar --archivo X | correr --archivo X [--trabajadores N] [--salida F] [--desde N] [--hasta N]');
+  console.error('órdenes: preparar | alcance --archivo X | contar --archivo X | correr --archivo X [--trabajadores N] [--salida F] [--desde N] [--hasta N] [--lineas D-H]');
   process.exit(1);
 }

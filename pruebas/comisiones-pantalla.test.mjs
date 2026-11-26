@@ -1761,3 +1761,78 @@ test('comisiones: si la SESIÓN se cerró mientras anulaba, no se escribe en mem
   assert.ok(!leida.pagos.datos.some((x) => x.id === 'colado'), 'lo que volvió con la sesión cerrada no entra');
   assert.ok(p.dichos.every((d) => !/Pago anulado/.test(d.texto)), 'y no se canta la anulación');
 });
+
+// ---------------------------------------------------------------------------------------------------
+// El oyente de «click»: el reparto de cada botón a su acción
+// ---------------------------------------------------------------------------------------------------
+// Por qué. La medición del 26 de noviembre de 2026 dio que de los 34 errores que se le pueden meter a este
+// oyente, 14 no los notaba nadie: «Actualizar» podía dejar de leer, «Cancelar» podía dejar de cerrar el
+// formulario, y un clic en la fila de un empleado podía abrir otra cuenta o ninguna. Es el cableado entre
+// lo que él aprieta y lo que pasa: un botón conectado a la acción de al lado no lo atrapa ninguna prueba
+// de las funciones por separado.
+
+test('comisiones: «Actualizar» vuelve a LEER de la nube, no redibuja la copia que ya tenía', async () => {
+  // `cargarYDibujar({ forzar: true })`: sin el `forzar`, el lector devuelve lo que ya tenía guardado y el
+  // botón no haría nada visible. Es el botón que él aprieta justamente cuando sospecha que la pantalla
+  // está vieja.
+  const p = await pantallaDeComisiones();
+  assert.equal(p.lecturas.length, 1, 'se leyó una vez al entrar');
+  p.clic('[data-cm="actualizar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.lecturas.length, 2, 'apretarlo lee otra vez, saltándose la copia guardada');
+});
+
+test('comisiones: tras un fallo de lectura, «Volver a leer» vuelve a leer', async () => {
+  const rota = { contratos: { datos: null, fallo: true }, pagos: { datos: null, fallo: true }, empleados: { datos: null, fallo: true } };
+  const p = await pantallaDeComisiones({ lectura: rota });
+  assert.ok(p.hay('[data-cm="reintentar"]'), 'con la lectura caída sale el botón de volver a leer');
+  assert.equal(p.lecturas.length, 1);
+  p.clic('[data-cm="reintentar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.lecturas.length, 2, 'y apretarlo lee otra vez');
+});
+
+test('comisiones: «Cancelar» cierra el formulario de pago y deja la pantalla como estaba', async () => {
+  const p = await pantallaDeComisiones({ lectura: lecturaOk({ contratos: [firme('a1')] }), clave: 'id:e1' });
+  const casilla = p.raiz.querySelectorAll('[data-cm="marcar"]')[0];
+  assert.ok(casilla, 'la cuenta trae una renta por pagar');
+  p.marcar(casilla);
+  p.clic('[data-cm="registrar"]');
+  assert.ok(p.hay('#dn-guardar-pago'), 'el formulario se abrió');
+  p.clic('[data-cm="cancelar-pago"]');
+  assert.ok(!p.hay('#dn-guardar-pago'), 'y «Cancelar» lo cierra');
+  assert.ok(p.hay('[data-cm="registrar"]'), 'vuelve a ofrecer registrar un pago');
+});
+
+test('comisiones: un clic en la fila de un empleado abre LA DE ÉL, no otra', async () => {
+  const p = await pantallaDeComisiones();
+  const filas = p.raiz.querySelectorAll('tr[data-cm-clave]');
+  assert.ok(filas.length >= 2, 'hacen falta dos filas para que la prueba distinga una de otra');
+  const suya = filas[1];
+  p.lanzar('click', suya);
+  assert.match(p.ruta(), new RegExp(encodeURIComponent(suya.dataset.cmClave) + '$'), 'se abre la cuenta de la fila que apretó');
+});
+
+test('comisiones: un clic en el NOMBRE de la fila lo deja seguir el enlace, no lo intercepta', async () => {
+  // La fila lleva un `<a href>` con el nombre. Si el oyente se lo come, el clic derecho «abrir en otra
+  // pestaña» y el clic con la rueda dejan de funcionar, que es cómo se mira a dos empleados a la vez.
+  const p = await pantallaDeComisiones();
+  const rutaAntes = p.ruta();
+  const enlace = p.raiz.querySelectorAll('a').find((n) => n.closest('tr[data-cm-clave]'));
+  assert.ok(enlace, 'la fila trae el nombre como enlace');
+  p.lanzar('click', enlace);
+  assert.equal(p.ruta(), rutaAntes, 'el oyente no cambia la dirección: la cambia el enlace');
+});
+
+test('comisiones: un clic en una parte de la pantalla que no es un botón no hace nada', async () => {
+  // `if (accion)`: sin esa pregunta, un clic en cualquier parte reventaría al leer `accion.dataset.cm`.
+  const p = await pantallaDeComisiones();
+  const lecturasAntes = p.lecturas.length;
+  const rutaAntes = p.ruta();
+  const titulo = p.raiz.querySelectorAll('h2')[0] ?? p.raiz.querySelectorAll('p')[0];
+  assert.ok(titulo, 'hace falta algo que no sea un botón para apretar');
+  p.lanzar('click', titulo);
+  assert.equal(p.lecturas.length, lecturasAntes, 'no se lee');
+  assert.equal(p.ruta(), rutaAntes, 'ni se cambia de pantalla');
+  assert.deepEqual(p.dichos, [], 'ni se dice nada');
+});
