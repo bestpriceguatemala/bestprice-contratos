@@ -6,7 +6,7 @@
 // Es la gemela de la parte de pruebas/dinero.test.mjs que prueba la pantalla de los dueños.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import {
   armarVistaDeComisiones, resumenDeMarcadasDeComision, pagosDeLaCuentaDeComision, registrarElPagoDeComision, anularElPagoDeComision,
   textoConfirmarAnularPagoDeComision, htmlListaDeComisiones, htmlFichaDeComisiones, htmlFalloDeComisiones, mensajeSeguroDeComision,
@@ -1835,4 +1835,33 @@ test('comisiones: un clic en una parte de la pantalla que no es un botón no hac
   assert.equal(p.lecturas.length, lecturasAntes, 'no se lee');
   assert.equal(p.ruta(), rutaAntes, 'ni se cambia de pantalla');
   assert.deepEqual(p.dichos, [], 'ni se dice nada');
+});
+
+test('ningún aparato de ninguna pantalla se llama a SÍ MISMO en su valor de siempre', () => {
+  // El fallo, tal como estuvo: al meterle los aparatos a `pintarCuentas` de comisiones, dos valores de
+  // siempre quedaron escritos `preguntar = (texto) => preguntar(texto)`. Eso no llama a `window.confirm`:
+  // se llama a sí mismo hasta que se acaba la pila. En el navegador, «Anular» y «Enlazar» de la pantalla de
+  // comisiones reventaban con «Maximum call stack size exceeded» y no hacían nada.
+  //
+  // Ninguna prueba lo vio porque TODAS le inyectan sus aparatos: el valor de siempre nunca corría. Esta
+  // prueba no mira esos dos casos, mira la forma del error en todo el sistema, que es lo que se repite.
+  const raiz = new URL('../js/', import.meta.url);
+  const archivos = [];
+  (function recorrer(dir) {
+    for (const entrada of readdirSync(dir, { withFileTypes: true })) {
+      const ruta = new URL(`${entrada.name}${entrada.isDirectory() ? '/' : ''}`, dir);
+      if (entrada.isDirectory()) recorrer(ruta);
+      else if (entrada.name.endsWith('.js')) archivos.push(ruta);
+    }
+  })(raiz);
+  assert.ok(archivos.length > 20, `hacen falta los archivos del sistema para que esto mida algo (hay ${archivos.length})`);
+
+  const culpables = [];
+  for (const ruta of archivos) {
+    readFileSync(ruta, 'utf8').split('\n').forEach((linea, i) => {
+      const m = /^\s*([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>\s*([A-Za-z0-9_$]+)\s*\(/.exec(linea);
+      if (m && m[1] === m[3]) culpables.push(`${ruta.pathname.split('/js/')[1]}:${i + 1}  ${linea.trim()}`);
+    });
+  }
+  assert.deepEqual(culpables, [], `un valor de siempre que se llama a sí mismo revienta la pila al usarlo:\n${culpables.join('\n')}`);
 });
