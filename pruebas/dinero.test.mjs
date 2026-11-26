@@ -4659,3 +4659,67 @@ test('dueños: tras un fallo de lectura, APRETAR «Volver a leer» vuelve a leer
   await new Promise((ok) => { setTimeout(ok, 0); });
   assert.equal(p.lecturas.length, 2, 'y apretarlo lee otra vez');
 });
+
+// ---------------------------------------------------------------------------------------------------
+// armarVista: los seis huecos que dejó la medición del 26 de noviembre de 2026
+// ---------------------------------------------------------------------------------------------------
+// Es la función que decide a quién se le debe y cuánto. De los 11 errores que nadie notaba, 5 eran
+// equivalentes de verdad (un `??` donde el valor nunca puede ser falso, un `if` que solo ahorra trabajo);
+// estos 6 sí cambian lo que él ve.
+
+test('armarVista: una lectura SIN la llave de dueños no revienta la pantalla', () => {
+  // El `?.` de `duenos?.datos`. Sin él, una lectura a la que le falte esa llave tira una excepción, y una
+  // excepción aquí no es «no se pudo leer»: es una pantalla en blanco.
+  const vista = armarVista({ contratos: { datos: TODOS, fallo: false, costoSinLeer: [] }, pagos: { datos: [], fallo: false } });
+  assert.equal(vista.ok, true, 'la pantalla se puede dibujar');
+  assert.ok(vista.entradas.length > 0, 'con las cuentas que salen de los contratos');
+});
+
+test('armarVista: un dueño cuyo nombre son PUROS ESPACIOS no deja la fila en blanco ni ensucia su clave', () => {
+  // Aquí el nombre no es solo lo que se lee: `claveDeEntrada` lo usa para armar la DIRECCIÓN de la cuenta.
+  // Sin el `.trim()`, «   » gana sobre el nombre que traen los contratos, la fila sale vacía y la clave se
+  // arma con espacios.
+  const vista = armarVista(lecturaOk({
+    duenos: { datos: DUENOS.map((d) => (d.id === 'd1' ? { ...d, nombre: '   ' } : d)), fallo: false },
+  }));
+  for (const e of vista.entradas) {
+    assert.notEqual(e.nombre.trim(), '', `una fila sin nombre no dice a quién se le debe: ${JSON.stringify(e.nombre)}`);
+    assert.equal(e.clave, e.clave.trim(), `la clave de la cuenta no puede llevar espacios al borde: ${JSON.stringify(e.clave)}`);
+  }
+});
+
+test('armarVista: una cuenta SIN enlazar no se marca como «enlazada a un dueño que no está»', () => {
+  // `Boolean(g.duenoId && !registro)`: con un «o» en lugar del «y», toda cuenta sin dueño enlazado saldría
+  // marcada como si apuntara a un dueño borrado. Son dos cosas distintas y la pantalla las dibuja distinto:
+  // una pide «enlazar a un dueño», la otra avisa de un dueño que ya no está.
+  const vista = armarVista(lecturaOk());
+  const sinEnlazar = vista.entradas.filter((e) => !e.duenoId);
+  assert.ok(sinEnlazar.length > 0, 'hace falta al menos una cuenta sin enlazar para que esto mida algo');
+  for (const e of sinEnlazar) {
+    assert.equal(e.sinRegistro, false, `${e.nombre}: no está enlazada a nadie, así que no le falta ningún registro`);
+  }
+});
+
+test('armarVista: un dueño SIN rentas sale sin nombre propio como «Dueño sin nombre», no en blanco', () => {
+  // Dos errores vivían en esa línea: quitarle el `.trim()` (un nombre de puros espacios gana) y vaciar el
+  // texto de respaldo. Las dos formas dejan una fila sin nombre en la lista de dueños.
+  const vista = armarVista(lecturaOk({
+    contratos: { datos: [], fallo: false, costoSinLeer: [] },
+    duenos: { datos: [{ id: 'd9', nombre: '   ' }], fallo: false },
+  }));
+  const suya = vista.entradas.find((e) => e.duenoId === 'd9');
+  assert.ok(suya, 'el dueño sin rentas igual sale en la lista');
+  assert.equal(suya.nombre, 'Dueño sin nombre');
+});
+
+test('armarVista: un dueño SIN rentas no sale marcado como «sin enlazar»', () => {
+  // `sinEnlazar: false`. Si saliera en true, la pantalla le ofrecería «enlazar estos contratos a un dueño»
+  // a una cuenta que no tiene ni un contrato que enlazar.
+  const vista = armarVista(lecturaOk({
+    contratos: { datos: [], fallo: false, costoSinLeer: [] },
+    duenos: { datos: [{ id: 'd9', nombre: 'Rita Solís' }], fallo: false },
+  }));
+  const suya = vista.entradas.find((e) => e.duenoId === 'd9');
+  assert.equal(suya.sinEnlazar, false);
+  assert.deepEqual(suya.contratos, [], 'no tiene ningún contrato que enlazar');
+});

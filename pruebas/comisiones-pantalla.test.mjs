@@ -1865,3 +1865,34 @@ test('ningún aparato de ninguna pantalla se llama a SÍ MISMO en su valor de si
   }
   assert.deepEqual(culpables, [], `un valor de siempre que se llama a sí mismo revienta la pila al usarlo:\n${culpables.join('\n')}`);
 });
+
+// ---------------------------------------------------------------------------------------------------
+// armarVistaDeComisiones: los dos huecos que dejó la medición del 26 de noviembre de 2026
+// ---------------------------------------------------------------------------------------------------
+
+test('armarVistaDeComisiones: una lectura SIN la llave de empleados no revienta la pantalla', () => {
+  // Los `?.` de `empleados?.datos` y `empleados?.fallo` existen para esto, y nadie los probaba: todas las
+  // pruebas armaban la lectura con las tres llaves puestas. Sin ellos, una lectura a la que le falte
+  // `empleados` tira una excepción, y una excepción aquí no es «no se pudo leer» — es una PANTALLA EN
+  // BLANCO, que es justo lo que el resto de esta función se esfuerza por evitar.
+  const sinEmpleados = { contratos: { datos: [firme('a1')], fallo: false }, pagos: { datos: [], fallo: false } };
+  const vista = armarVistaDeComisiones(sinEmpleados);
+  assert.equal(vista.ok, true, 'la pantalla se puede dibujar');
+  assert.ok(Array.isArray(vista.entradas), 'con sus entradas');
+  // Y sin la lista de empleados no se afirma que a alguien le falte su ficha: no se sabe.
+  assert.ok(vista.entradas.every((e) => e.sinRegistro === false), 'no se inventa un problema que no se puede saber');
+});
+
+test('armarVistaDeComisiones: un empleado cuyo nombre son PUROS ESPACIOS cae al nombre del contrato', () => {
+  // El `.trim()` del nombre. Sin él, un registro con nombre «   » gana sobre el nombre que traen los
+  // contratos, y la fila del empleado sale en blanco: no se sabe a quién se le debe.
+  const renta = firme('a1');
+  const lectura = lecturaOk({
+    contratos: [renta],
+    empleados: [{ id: 'e1', nombre: '   ', porcentajeComision: 5 }],
+  });
+  const conNombre = armarVistaDeComisiones(lectura);
+  for (const e of conNombre.entradas) {
+    assert.notEqual(e.nombre.trim(), '', `una fila sin nombre no dice a quién se le debe: ${JSON.stringify(e.nombre)}`);
+  }
+});
