@@ -144,6 +144,51 @@ body {
   background: var(--azul-oscuro);
 }
 
+/*
+  El botón de una acción DESTRUCTIVA. La primera del sistema es «Borrar carro» (26 de noviembre de 2026):
+  hasta entonces nada se borraba. Tiene que verse distinto del de «Cancelar» que está a su lado, porque lo
+  que hace no se puede deshacer. Usa el mismo rojo que el resto del programa (`--rojo`), no uno nuevo.
+*/
+.btn-peligro {
+  background: var(--rojo);
+  border-color: var(--rojo);
+  color: var(--blanco);
+}
+
+.btn-peligro:hover {
+  filter: brightness(0.9);
+  background: var(--rojo);
+}
+
+/*
+  La caja de confirmar el borrado. NO va en rojo sólido como la barra de un fallo de lectura: dentro de
+  un fondo rojo, el botón «Sí, borrar este carro» —que también es rojo— se confunde con el fondo y deja de
+  verse como un botón. Se vio así, midiendo el color de los dos en el navegador: eran el mismo
+  `rgb(179,38,30)`. Fondo claro con borde rojo, y el botón resalta. (26 de noviembre de 2026.)
+*/
+.carro-borrar-caja {
+  border: 2px solid var(--rojo);
+  background: #fdf3f2;
+}
+
+.carro-borrar-caja h2 {
+  color: var(--rojo);
+}
+
+/* La línea de «Nuevo contrato», arriba de los cuadros de la flota: el botón no se estira de lado a lado. */
+.flota-nuevo-contrato {
+  margin: 0 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.flota-nuevo-contrato .btn {
+  width: auto;
+  margin-top: 0;
+}
+
 .btn:disabled {
   opacity: 0.6;
   cursor: default;

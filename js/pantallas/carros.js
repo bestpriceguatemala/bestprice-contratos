@@ -270,7 +270,7 @@ export function formularioHTML() {
             largo (dice qué se pierde y qué no) y un diálogo del navegador lo corta. Esta pantalla nunca ha
             usado diálogos de página, y una prueba lo vigila.
           -->
-          <section id="frm-borrar-caja" class="carro-seccion barra-lectura-fallida" hidden>
+          <section id="frm-borrar-caja" class="carro-seccion carro-borrar-caja" hidden>
             <h2>Borrar carro</h2>
             <p id="frm-borrar-texto" style="white-space: pre-line;"></p>
             <div class="carro-botones">

@@ -1,7 +1,8 @@
 // Tests para la pantalla de carros: construirVehiculo() y casos críticos.
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import {
   construirVehiculo, mensajesDeFalloDeCarros, htmlListaVaciaDeCarros, textoCarroNoEncontrado,
   htmlAvisoDePlacas, formularioHTML,
@@ -267,7 +268,10 @@ test('textoConfirmarBorrarElCarro: con historial dice que los contratos NO se bo
   assert.match(t, /2 contratos/);
   assert.match(t, /NO se borran/, 'lo que no se pierde');
   assert.match(t, /kilometraje y el mantenimiento/, 'lo que sí se pierde');
-  assert.match(t, /1 servicio anotado/, 'en singular cuando es uno');
+  // «se pierden 1 servicio» se leyó en pantalla el 26 de noviembre de 2026: el singular es del verbo
+  // también, no solo del sustantivo.
+  assert.match(t, /También se pierde 1 servicio anotado\./, 'el VERBO también va en singular');
+  assert.doesNotMatch(t, /se pierden 1 /);
   assert.match(t, /1 reservación pendiente queda/, 'y la reservación que se queda colgada');
 });
 
@@ -359,4 +363,68 @@ test('carrosAjenosUsados: un ajeno sin una placa de VERDAD no entra', () => {
   // La misma regla que para la flota (`claveDeNumero`): una placa siempre trae al menos un dígito. Dos
   // carros «sin placas» o dos «N/A» no son el mismo carro, así que no se agrupan ni se ofrecen.
   assert.deepEqual(carrosAjenosUsados([ajeno(''), ajeno('   '), ajeno('N/A'), ajeno('ninguno')]), []);
+});
+
+test('todo modificador «btn-…» que el programa usa existe en el CSS', () => {
+  // El fallo, tal como pasó: al agregar «Borrar carro» le puse `class="btn btn-peligro"` y esa clase no
+  // existía en ninguna hoja de estilo. El botón salía EXACTAMENTE igual al de «Cancelar» que está a su
+  // lado — en lo único del sistema que no se puede deshacer. Ninguna prueba lo vio porque node no mira el
+  // CSS, y la suite entera pasaba en verde.
+  //
+  // Se vigilan solo los modificadores `btn-*` a propósito: son los que cambian cómo se VE un botón, y un
+  // botón que se ve como otro es el error que de verdad hace daño. (26 de noviembre de 2026.)
+  const raizJs = new URL('../js/', import.meta.url);
+  const archivos = [];
+  (function recorrer(dir) {
+    for (const entrada of readdirSync(dir, { withFileTypes: true })) {
+      const ruta = new URL(`${entrada.name}${entrada.isDirectory() ? '/' : ''}`, dir);
+      if (entrada.isDirectory()) recorrer(ruta);
+      else if (entrada.name.endsWith('.js')) archivos.push(ruta);
+    }
+  })(raizJs);
+
+  const hojas = ['estilos.css', 'contrato-papel.css', 'respaldo.css']
+    .map((n) => readFileSync(new URL(`../css/${n}`, import.meta.url), 'utf8')).join('\n');
+  const definidos = new Set([...hojas.matchAll(/\.(btn-[a-zA-Z0-9_-]+)/g)].map((m) => m[1]));
+  assert.ok(definidos.has('btn-primario'), `la prueba tiene que estar leyendo el CSS de verdad (encontró ${definidos.size} modificadores)`);
+
+  const sinEstilo = new Map();
+  for (const ruta of archivos) {
+    for (const m of readFileSync(ruta, 'utf8').matchAll(/class=\\?["']([^"'\\]*)/g)) {
+      for (const clase of m[1].split(/\s+/)) {
+        if (!clase.startsWith('btn-') || clase.includes('${') || definidos.has(clase)) continue;
+        sinEstilo.set(clase, [...(sinEstilo.get(clase) ?? []), ruta.pathname.split('/js/')[1]]);
+      }
+    }
+  }
+  assert.deepEqual([...sinEstilo.keys()], [],
+    `un botón con una clase que el CSS no define se ve igual que el de al lado:\n${[...sinEstilo].map(([c, r]) => `  ${c} <- ${r.join(', ')}`).join('\n')}`);
+});
+
+test('el «?v=» de las hojas de estilo es el contenido de las hojas, no un número a mano', () => {
+  // El fallo, tal como pasó: `index.html` pedía `css/estilos.css?v=1` y ese «1» no había cambiado nunca.
+  // Al agregar la clase del botón de borrar, el archivo en disco la tenía y el navegador seguía pintando
+  // el botón igual al de «Cancelar», porque servía la hoja vieja de su caché. En GitHub Pages eso dura
+  // hasta que se le vence la caché; publicar y «no ver el cambio» es exactamente esto.
+  //
+  // Con el `?v=` atado al CONTENIDO, cambiar el CSS y olvidar esto pone roja esta prueba y dice qué pegar.
+  // (26 de noviembre de 2026.)
+  const hojas = ['estilos.css', 'contrato-papel.css', 'respaldo.css'];
+  const h = createHash('sha256');
+  for (const n of hojas) h.update(readFileSync(new URL(`../css/${n}`, import.meta.url)));
+  const esperado = h.digest('hex').slice(0, 8);
+
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  for (const n of hojas) {
+    const m = new RegExp(`href="css/${n.replace('.', '\\.')}\\?v=([a-z0-9]+)"`).exec(html);
+    assert.ok(m, `index.html tiene que pedir css/${n} con un ?v=`);
+    assert.equal(m[1], esperado,
+      `cambió el CSS: en index.html, poné ?v=${esperado} en las TRES hojas (hoy dice ?v=${m[1]} en ${n})`);
+  }
+});
+
+test('textoConfirmarBorrarElCarro: con VARIOS servicios el verbo va en plural', () => {
+  const carro = { ...CARRO, servicios: [{ id: 's1' }, { id: 's2' }, { id: 's3' }] };
+  const t = textoConfirmarBorrarElCarro(carro, loQueSePierdeAlBorrarElCarro(carro, { contratos: [cerrado('c1', 'v1')] }));
+  assert.match(t, /También se pierden 3 servicios anotados\./);
 });

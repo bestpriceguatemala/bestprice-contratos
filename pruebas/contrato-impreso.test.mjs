@@ -1963,7 +1963,10 @@ test('lo que tiene que verse en la hoja de prueba no depende de «Gráficos de f
 
 test('index.html carga la hoja de estilos del contrato', () => {
   const index = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(index, /<link rel="stylesheet" href="css\/contrato-papel\.css\?v=1">/);
+  // El `?v=` no se fija aquí: desde el 26 de noviembre de 2026 es el hash del contenido de las hojas y
+  // cambia con cada cambio de CSS. Quien vigila que sea el correcto es su propia prueba (carros.test.mjs);
+  // ésta solo comprueba que la hoja del papel se cargue.
+  assert.match(index, /<link rel="stylesheet" href="css\/contrato-papel\.css\?v=[a-z0-9]+">/);
 });
 
 test('la hoja de estilos no toca el @page de los demás papeles', () => {

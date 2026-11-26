@@ -116,7 +116,9 @@ export function textoConfirmarBorrarElCarro(carro, perdida) {
       + 'sus contratos.');
   }
   if (perdida?.servicios) {
-    partes.push(`También se pierden ${perdida.servicios} ${perdida.servicios === 1 ? 'servicio anotado' : 'servicios anotados'}.`);
+    partes.push(perdida.servicios === 1
+      ? 'También se pierde 1 servicio anotado.'
+      : `También se pierden ${perdida.servicios} servicios anotados.`);
   }
   if (perdida?.reservas) {
     partes.push(`Y ${perdida.reservas} ${perdida.reservas === 1 ? 'reservación pendiente queda' : 'reservaciones pendientes quedan'} `

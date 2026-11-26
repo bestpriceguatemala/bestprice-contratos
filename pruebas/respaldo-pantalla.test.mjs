@@ -337,7 +337,8 @@ test('app.js: la ruta del respaldo pasa por la puerta de la contraseña de diner
 test('index.html: hay un enlace a Respaldo en la barra y se carga su hoja de estilos', () => {
   const html = leer('../index.html');
   assert.match(html, /<a href="#\/dinero\/respaldo">Respaldo<\/a>/);
-  assert.match(html, /<link rel="stylesheet" href="css\/respaldo\.css\?v=1">/);
+  // El `?v=` es el hash del contenido de las hojas y lo vigila su propia prueba (carros.test.mjs).
+  assert.match(html, /<link rel="stylesheet" href="css\/respaldo\.css\?v=[a-z0-9]+">/);
 });
 
 test('la regla de cuándo se recuerda NO lee el reloj: `hoy` llega de fuera (Guatemala va seis horas detrás de UTC)', () => {

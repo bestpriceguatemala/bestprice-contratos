@@ -4,9 +4,25 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Best Price — Contratos</title>
-<link rel="stylesheet" href="css/estilos.css?v=1">
-<link rel="stylesheet" href="css/contrato-papel.css?v=1">
-<link rel="stylesheet" href="css/respaldo.css?v=1">
+<!--
+  El `?v=` de las hojas de estilo NO es un número a mano: es un pedazo del contenido de las tres hojas
+  juntas (su hash). Lo vigila `pruebas/carros.test.mjs` y, si alguien cambia el CSS sin cambiarlo aquí, la
+  prueba se pone roja y dice el valor nuevo que hay que pegar.
+
+  Por qué hace falta. Esto estuvo en `?v=1` desde el principio, o sea sin cambiar nunca: después de
+  publicar, un navegador que ya había entrado seguía usando la hoja VIEJA hasta que se le venciera la
+  caché. Se encontró el 26 de noviembre de 2026 así: se agregó la clase `.btn-peligro` para el botón de
+  borrar, el archivo en disco la tenía, y el navegador seguía pintando el botón igual al de «Cancelar».
+
+  Lo que esto NO arregla, dicho para que nadie crea que sí: los módulos de `js/`. `js/app.js?v=…` solo
+  afecta a app.js; todo lo que app.js importa se pide con su ruta pelada y se guarda en caché por su
+  cuenta. Versionarlos pediría un paso de compilación, y este programa no tiene ninguno a propósito. Ahí
+  manda la caché de GitHub Pages (unos diez minutos), así que un cambio de código recién publicado puede
+  tardar ese rato en verse. Si hay que verlo ya: recargar con Ctrl+Shift+R (Cmd+Shift+R en Mac).
+-->
+<link rel="stylesheet" href="css/estilos.css?v=2ab9d0a6">
+<link rel="stylesheet" href="css/contrato-papel.css?v=2ab9d0a6">
+<link rel="stylesheet" href="css/respaldo.css?v=2ab9d0a6">
 </head>
 <body>
   <div id="entrada" class="entrada">
