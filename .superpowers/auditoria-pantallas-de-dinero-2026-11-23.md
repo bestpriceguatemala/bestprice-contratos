@@ -121,27 +121,34 @@ descuento ya dentro.
 | `js/pantallas/dinero.js` (25 nov, mañana) | 1,058 | 714 | 344 | **67.5 %** |
 | **`js/pantallas/dinero.js` (25 nov, tarde)** | **1,058** | **760** | **298** | **71.8 %** |
 | `js/pantallas/comisiones.js` (23 nov) | 1,008 | 573 | 435 | **56.8 %** |
-| **`js/pantallas/comisiones.js` (26 nov)** | **1,008** | **665** | **343** | **66.0 %** |
+| `js/pantallas/comisiones.js` (26 nov, tarde) | 1,008 | 665 | 343 | **66.0 %** |
+| **`js/pantallas/comisiones.js` (26 nov, cierre)** | **1,008** | **715** | **293** | **70.9 %** |
 
-El 23 de noviembre las dos juntas atrapaban el 51.6 %. Al 26 de noviembre, **las dos juntas atrapan el
-69.0 %** (1,425 de 2,066): `dinero.js` el 71.8 % y `comisiones.js` el 66.0 %.
+El 23 de noviembre las dos juntas atrapaban el **51.6 %** (1,057 de 2,050). Al cerrar el 26 de noviembre,
+**las dos juntas atrapan el 71.4 %** (1,475 de 2,066): `dinero.js` el 71.8 % y `comisiones.js` el 70.9 %.
 
 ### Lo que le queda a `comisiones.js` (26 de noviembre)
 
 | Pasan / total | Dentro de |
 |---:|---|
-| 50 / 77 | los oyentes de eventos (el reparto de cada botón a su acción) |
-| 45 / 134 | `avisoDelPapelQueNoCambia` (lo que cambió en las rentas desde que salió el papel) |
 | 23 / 50 | `guardarPago` |
 | 22 / 41 | `enlazar` |
-| 15 / 46 | `armarVistaDeComisiones` |
-| 15 / 55 | `modeloDeComisionesEnExcel` |
+| 18 / 54 | `COLUMNAS_DE_RENTAS` (casi todo son ANCHOS de columna) |
 | 14 / 37 | `anularPago` |
+| 14 / 34 | el oyente de «click» (el reparto de cada botón a su acción) |
+| 11 / 46 | `armarVistaDeComisiones` |
+| 11 / 33 | `COLUMNAS_DE_PAGOS` |
+| 11 / 33 | `COLUMNAS_DE_RESUMEN` |
 | 11 / 24 | `dibujar` |
-| 8 / 26 | `bajarExcel` |
+| 9 / 20 | `textoConfirmarAnularPagoDeComision` |
 
-Lo trabajado el 26 bajó así, en errores que pasan: `bajarExcel` de 26 a 8, `verComprobante` a 4,
-`guardarPago` de 39 a 23, `anularPago` a 14, `enlazar` a 22.
+Lo trabajado el 26 bajó así, en errores que pasan: el oyente de «change» de 36 a 0, `bajarExcel` de 26 a
+8, `modeloDeComisionesEnExcel` de 15 a 0, `verComprobante` a 4, `guardarPago` de 39 a 23, `anularPago` a
+14, `enlazar` a 22, `armarVistaDeComisiones` de 15 a 11.
+
+**Lo que se decidió NO probar, y por qué.** De los 40 que quedan en las tres `COLUMNAS_*`, la mayoría son
+**anchos de columna** (`24` → `25`). Fijarlos sería pinchar cosmética y dejar pruebas que se rompen cada
+vez que alguien acomoda una columna del Excel. Quedan dichos como lo que son, en vez de inflar el número.
 
 Cero anomalías y cero mutantes colgados: cada uno de los 2,050 terminó con un veredicto.
 
