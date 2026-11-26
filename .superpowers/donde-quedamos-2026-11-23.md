@@ -142,7 +142,15 @@ Cuatro pruebas nuevas, escritas primero y rojas antes del arreglo. Medido quitan
 `diff` confirmado: las cuatro mueren (1, 1, 2, 1). Control sin mutar 0 en rojo; control que sí rompe 85.
 Commit `ea99217`. 2944 pruebas pasan.
 
-**Falta la misma forma** en `anularPago` (las dos pantallas) y en `guardarCosto` (dueños).
+Después se cerró también en `anularPagoDeDueno`, `anularPago` (comisiones) y `guardarCosto`. Con eso,
+**los seis lugares** de las dos pantallas donde se escribe dinero vuelven a mirar la sesión al terminar.
+Cada guardia medida contra SU PROPIA prueba (no contra la suite entera: ahí un mutante puede morir por
+otra prueba y parecer cubierto). Controles: 0 en rojo sin mutar, 6 en rojo con un mutante que sí rompe.
+
+Dato útil para más adelante: `haySesion()` no solo responde — cuando la sesión está cerrada **suelta la
+lectura y dibuja la pantalla de la contraseña**. Por eso una prueba que lea por `p.lector.actual?.…`
+después de que se cierre la sesión está leyendo una lista vacía que no puede fallar nunca: hay que
+capturar la lectura ANTES de apretar.
 
 ## Cómo se trabaja esto
 
