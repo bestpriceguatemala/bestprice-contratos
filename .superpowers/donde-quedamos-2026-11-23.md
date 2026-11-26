@@ -127,6 +127,23 @@ Todo sobre `pintarCuentas`, que pasó de atrapar el **26.9 %** al **55.8 %** de 
   mantenimiento, una pasada de concurrencia con dos computadoras contra el Firebase de verdad, y mirar
   cuántas lecturas de Firebase se gastan al día (el plan gratuito se puede acabar a media tarde).
 
+## 26 de noviembre: la sesión en guardarPago y enlazar (hecho)
+
+Las dos pantallas de dinero vuelven a mirar si la sesión sigue abierta **después** de guardar, no solo si
+el lector sigue teniendo algo. Firebase puede cerrar la sesión mientras el guardado viaja; el lector sigue
+con lo de antes en la mano, así que el pago nuevo entraba en memoria y se cantaba «Pago registrado» sobre
+una sesión que ya no existía.
+
+- `guardarPago` (dueños y comisiones): `if (!haySesion() || !elLector.actual) return;`
+- `enlazar` (las dos): `if (!haySesion()) return;`, **después** de `ui.altaDeDueno.terminada()` — el enlace
+  ya quedó escrito en la nube, y soltar el alta antes haría que un reintento creara otro dueño.
+
+Cuatro pruebas nuevas, escritas primero y rojas antes del arreglo. Medido quitando cada guardia con el
+`diff` confirmado: las cuatro mueren (1, 1, 2, 1). Control sin mutar 0 en rojo; control que sí rompe 85.
+Commit `ea99217`. 2944 pruebas pasan.
+
+**Falta la misma forma** en `anularPago` (las dos pantallas) y en `guardarCosto` (dueños).
+
 ## Cómo se trabaja esto
 
 - Agentes de a dos como mucho: comparten el cupo y mueren juntos a media tarea.
