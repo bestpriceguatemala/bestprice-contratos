@@ -13,8 +13,10 @@ import {
   textoCarroPropioNoEncontrado, avisosConSobrecobro, avisoAnticipoDeMas, htmlAvisoDeDocumentoEnAlta,
   filaEmpleado, textoDelEmpleadoEscogido, empleadoParaEnter, cargarEmpleadosActivos,
   leerTarjetasDe, leerTarjetasEscritasDe, tarjetasParaImprimir, destinoDespuesDeGuardar, irDespuesDeGuardar,
-  vencimientoParaElCampo, AVISO_DE_VENCIMIENTO
+  vencimientoParaElCampo, AVISO_DE_VENCIMIENTO,
+  pintarSacarCarro,
 } from '../js/pantallas/sacarCarro.js';
+import { pantallaDeMentira } from './fixtures/pantallaDeMentira.mjs';
 import { tomarTraspaso, olvidarTraspaso } from '../js/pantallas/traspasoDeTarjetas.js';
 import { EMPLEADOS } from './fixtures/rentasConComision.mjs';
 import { resumen } from '../js/nucleo/contrato.js';
@@ -1752,8 +1754,10 @@ test('ADR-001 en el código de «Sacar carro»: las cajas del CBC se leen en UN 
   // lo leído solo entra al traspaso: se lee una vez, antes de esperar a la nube, y se entrega después de guardar
   assert.equal((codigo.match(/leerTarjetasEscritas\(\)/g) ?? []).length, 1);
   const iLee = codigo.indexOf('tarjetasParaImprimir(leerTarjetas(), leerTarjetasEscritas())');
-  const iGuarda = codigo.indexOf('await guardarContrato(contrato');
-  const iVa = codigo.lastIndexOf('irDespuesDeGuardar({');
+  // Los dos son aparatos inyectados desde el 26 de noviembre de 2026; sus valores de siempre son
+  // `guardarContrato` e `irDespuesDeGuardar`.
+  const iGuarda = codigo.indexOf('await guardarElContrato(contrato');
+  const iVa = codigo.lastIndexOf('irAlImprimir({');
   assert.ok(iLee > 0 && iLee < iGuarda && iGuarda < iVa, 'se lee, se guarda, se va');
   assert.ok(codigo.includes('sigueAqui: sigoVigente()'), 'solo se lleva a imprimir si la pantalla sigue a la vista');
   assert.equal(/localStorage|sessionStorage|indexedDB|console\.|history\./.test(codigo), false, 'esta pantalla no escribe en ningún almacén ni en la consola');
@@ -1837,4 +1841,270 @@ test('motivoParaNoGuardar: con «carro ajeno» marcado, entrar sin carro no esto
   // formulario (aquí, el empleado y su porcentaje): esta prueba es del carro, y no se mete en esa cadena.
   const conPlacas = motivoParaNoGuardar(paraGuardar({ seEntroSinCarro: true, ajeno: true, placasAjeno: 'P-555EEE' }));
   assert.doesNotMatch(conPlacas, /carro|placas|flota/i, `ya no pide nada del carro, pero dijo: ${conPlacas}`);
+});
+
+// ===================================================================================================
+// LA PANTALLA DE SACAR CARRO, APRETADA
+// ===================================================================================================
+// Por qué. Hasta el 26 de noviembre de 2026 esta pantalla era la única del contrato sin probar por su
+// CABLE: todo lo de arriba mide sus piezas por separado (qué contrato se arma, qué avisos salen, qué dice
+// cada texto), pero nada apretaba un botón. Y aquí el cable es lo que decide **qué carro sale en el
+// contrato** y **a quién se le entrega**. Un selector conectado al campo de al lado no lo atrapa ninguna
+// prueba de las de arriba.
+//
+// Es el mismo instrumento que las pantallas de dinero: `pantallaDeMentira`, cuya regla es que solo
+// encuentra lo que la pantalla dibujó de verdad.
+
+const LECTURA_OK = (datos) => ({ datos, fallo: false });
+
+/** Una lista de sesión de mentira, con la misma forma que `crearListaDeSesion`. */
+function listaDeMentira(items = [], { fallo = false } = {}) {
+  const altas = [];
+  let alCambiar = null;
+  let leida = false;
+  return {
+    estado: () => ({ items: [...items, ...altas], altas: [...altas], fallo, leida }),
+    escuchar(fn) { alCambiar = fn; },
+    registrarAlta(ficha) { altas.push(ficha); },
+    olvidar() { leida = false; },
+    async leer() { leida = true; if (alCambiar) alCambiar(); },
+  };
+}
+
+const CARRO_PROPIO = {
+  id: 'v1', codigo: 'A-07', placas: 'P-123ABC', tipo: 'Sedán', marca: 'Toyota', linea: 'Yaris', color: 'Blanco', modelo: '2021',
+};
+const OTRO_CARRO = {
+  id: 'v2', codigo: 'A-08', placas: 'P-999ZZZ', tipo: 'Pickup', marca: 'Ford', linea: 'Ranger', color: 'Gris', modelo: '2022',
+};
+
+/**
+ * Monta «Sacar carro» con todo de mentira menos ella misma, y devuelve con qué apretarla.
+ * `ruta` es lo que vendría en la dirección: un id de carro, o '' para entrar por «Nuevo contrato».
+ */
+async function pantallaDeSacar({
+  ruta = 'v1',
+  flota = [CARRO_PROPIO, OTRO_CARRO],
+  contratos = [],
+  reservas = [],
+  empleados = Object.values(EMPLEADOS).filter((e) => e.porcentajeComision > 0),
+  clientes = CLIENTES_DE_LA_SESION,
+  duenos = [],
+  guardarElContrato,
+  acunarIdDeContrato,
+  acunarNumeroDeContrato,
+  guardarElCliente,
+  guardarElDueno,
+} = {}) {
+  const p = pantallaDeMentira();
+  const guardados = [];
+  const dichos = [];
+  const impresiones = [];
+  const clientesGuardados = [];
+  const duenosGuardados = [];
+  let idsAcunados = 0;
+  let idsDeCliente = 0;
+  let idsDeDueno = 0;
+  let numerosAcunados = 0;
+  let rutaActual = `#/sacar/${ruta}`;
+
+  await pintarSacarCarro(p.contenedor, ruta, {
+    doc: p.documento,
+    rutaDeAhora: () => rutaActual,
+    ahora: () => HOY_DE_LA_PANTALLA,
+    avisar: (texto, tipo) => dichos.push({ texto, tipo }),
+    traerFlota: async (alLlegar) => { const r = LECTURA_OK(flota); alLlegar(r); return r; },
+    traerContratos: async (alLlegar) => { const r = LECTURA_OK(contratos); alLlegar(r); return r; },
+    traerReservas: async (alLlegar) => { const r = LECTURA_OK(reservas); alLlegar(r); return r; },
+    traerAjustes: async () => ({ porcentajeTarjeta: 12 }),
+    traerEmpleados: async () => LECTURA_OK(empleados),
+    listaClientes: listaDeMentira(clientes),
+    listaDuenos: listaDeMentira(duenos),
+    guardarElContrato: guardarElContrato ?? (async (contrato, extra) => {
+      guardados.push({ contrato, extra });
+      return { ...contrato, numero: contrato.numero ?? 41 };
+    }),
+    guardarElCliente: guardarElCliente ?? (async (c) => { clientesGuardados.push(c); return c; }),
+    guardarElDueno: guardarElDueno ?? (async (d) => { duenosGuardados.push(d); return d; }),
+    acunarIdDeContrato: acunarIdDeContrato ?? (async () => `ct-${++idsAcunados}`),
+    acunarIdDeCliente: async () => `k-${++idsDeCliente}`,
+    acunarIdDeDuenoNuevo: async () => `d-${++idsDeDueno}`,
+    acunarNumeroDeContrato: acunarNumeroDeContrato ?? (async () => ++numerosAcunados + 40),
+    irAlImprimir: (args) => impresiones.push(args),
+  });
+
+  return {
+    ...p,
+    /**
+     * Lo que la pantalla escribió DENTRO de una caja después de dibujar. Hace falta porque esta pantalla
+     * no se redibuja entera: se dibuja una vez y después rellena cajas sueltas (`sc-carro-info`,
+     * `sc-avisos`…). La pantalla de mentira modela el contenedor, así que lo que va dentro de un nodo se
+     * lee del nodo. Si la caja no se dibujó, esto se cae en vez de devolver vacío.
+     */
+    dentroDe(selector) {
+      const nodo = p.buscar(selector);
+      if (!nodo) throw new Error(`No hay ninguna caja «${selector}» en lo que la pantalla dibujó`);
+      return `${nodo.innerHTML ?? ''} ${nodo.textContent ?? ''}`;
+    },
+    guardados,
+    dichos,
+    impresiones,
+    clientesGuardados,
+    duenosGuardados,
+    idsAcunados: () => idsAcunados,
+    ruta: () => rutaActual,
+    irseDeLaPantalla() { rutaActual = '#/flota'; },
+  };
+}
+
+const HOY_DE_LA_PANTALLA = '2026-11-26';
+
+test('sacar: el cableado mínimo — la pantalla se dibuja con el carro de la ruta, sin tocar la nube', async () => {
+  const p = await pantallaDeSacar();
+  assert.ok(p.hay('#sc-form'), 'el formulario se dibujó');
+  assert.match(p.dentroDe('#sc-carro-info'), /P-123ABC/, 'y muestra el carro de la dirección, no otro');
+  assert.doesNotMatch(p.dentroDe('#sc-carro-info'), /P-999ZZZ/, 'ni el otro carro de la flota');
+});
+
+test('sacar: entrando SIN carro, el selector ofrece la flota y NO se dibuja si el carro vino en la ruta', async () => {
+  // La puerta nueva del 26 de noviembre de 2026 («Nuevo contrato», #/sacar sin carro). Que el selector no
+  // aparezca cuando el carro vino en la dirección es lo que impide cambiarlo por accidente después de
+  // haber apretado «Sacar carro» en un cuadro de la flota.
+  const sinCarro = await pantallaDeSacar({ ruta: '' });
+  assert.equal(sinCarro.buscar('#sc-carro-escoger-campo').hidden, false, 'se ofrece escoger');
+  const opciones = sinCarro.buscar('#sc-carro-escoger').innerHTML;
+  assert.match(opciones, /P-123ABC/);
+  assert.match(opciones, /P-999ZZZ/, 'con los dos carros de la flota');
+
+  const conCarro = await pantallaDeSacar({ ruta: 'v1' });
+  assert.equal(conCarro.buscar('#sc-carro-escoger-campo').hidden, true, 'con el carro ya decidido no hay nada que escoger');
+});
+
+test('sacar: escoger un carro en el selector cambia EL CARRO DE LA FICHA, no solo el texto', async () => {
+  // Es el cable más importante de esta pantalla. Si el selector no llegara a `carroPropio()`, la ficha
+  // seguiría diciendo un carro y el contrato saldría con otro (o con ninguno).
+  const p = await pantallaDeSacar({ ruta: '' });
+  p.lanzar('change', '#sc-carro-escoger', { value: 'v2' });
+  assert.match(p.dentroDe('#sc-carro-info'), /P-999ZZZ/, 'la ficha muestra el que escogió');
+  assert.doesNotMatch(p.dentroDe('#sc-carro-info'), /P-123ABC/, 'y ya no el otro');
+});
+
+test('sacar: un carro FUERA DE SERVICIO no se ofrece en el selector', async () => {
+  // Lo que está en el taller no se puede rentar. Ofrecerlo sería dejar que se arme un contrato que al
+  // guardar se rechaza, o peor, que salga.
+  const p = await pantallaDeSacar({
+    ruta: '',
+    flota: [CARRO_PROPIO, { ...OTRO_CARRO, fueraDeServicio: true, motivoFueraDeServicio: 'Taller' }],
+  });
+  const opciones = p.buscar('#sc-carro-escoger').innerHTML;
+  assert.match(opciones, /P-123ABC/, 'el bueno sí');
+  assert.doesNotMatch(opciones, /P-999ZZZ/, 'el del taller no');
+});
+
+test('sacar: marcar «Carro ajeno» esconde la flota y abre los campos del subarrendado', async () => {
+  const p = await pantallaDeSacar({ ruta: '' });
+  assert.equal(p.buscar('#sc-ajeno-campos').hidden, true, 'al abrir están cerrados');
+  p.marcar('#sc-ajeno');
+  assert.equal(p.buscar('#sc-ajeno-campos').hidden, false, 'se abren al marcar');
+  assert.equal(p.buscar('#sc-carro-escoger-campo').hidden, true, 'y la flota no viene al caso');
+});
+
+test('sacar: los ajenos YA USADOS se ofrecen, y escoger uno rellena los campos', async () => {
+  // Lo que él pidió: «que no me estorben con mi flotilla pero que se queden guardados para cualquier
+  // ocasión». Salen de los contratos anteriores, no de una colección nueva.
+  const antes = {
+    id: 'c-viejo', fechaSalida: '2026-09-10', duenoId: 'd-beto',
+    carroAjeno: { placas: 'P-555EEE', tipo: 'Pickup', marca: 'Mazda', color: 'Azul', modelo: '2019', dueno: 'Don Beto' },
+  };
+  const p = await pantallaDeSacar({ ruta: '', contratos: [antes] });
+  p.marcar('#sc-ajeno');
+  assert.equal(p.buscar('#sc-ajeno-usados-campo').hidden, false, 'se ofrece el que ya usó');
+  assert.match(p.buscar('#sc-ajeno-usados').innerHTML, /P-555EEE/);
+
+  p.lanzar('change', '#sc-ajeno-usados', { value: '0' });
+  assert.equal(p.buscar('#sc-ajeno-placas').value, 'P-555EEE', 'rellena las placas');
+  assert.equal(p.buscar('#sc-ajeno-marca').value, 'Mazda');
+  assert.equal(p.buscar('#sc-ajeno-color').value, 'Azul');
+  assert.equal(p.buscar('#sc-ajeno-modelo').value, '2019');
+});
+
+test('sacar: sin ningún ajeno anterior NO se ofrece una lista vacía', async () => {
+  const p = await pantallaDeSacar({ ruta: '', contratos: [] });
+  p.marcar('#sc-ajeno');
+  assert.equal(p.buscar('#sc-ajeno-usados-campo').hidden, true, 'un selector vacío solo estorba');
+});
+
+/** Llena lo mínimo para poder guardar: cliente dado de alta aquí mismo, empleado, días y precio. */
+async function listaParaGuardar(opciones = {}) {
+  const p = await pantallaDeSacar(opciones);
+  // El cliente: se da de alta en la pantalla, que al terminar lo deja escogido.
+  p.clic('#sc-cliente-nuevo');
+  for (const [id, valor] of [
+    ['sc-nc-nombres', 'Juan'], ['sc-nc-apellidos', 'Pérez'],
+    ['sc-nc-documento', '2345 67890 0101'], ['sc-nc-licencia', 'L-445566'], ['sc-nc-telefono', '5555-0000'],
+  ]) p.buscar(`#${id}`).value = valor;
+  p.clic('#sc-cliente-guardar');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  // El empleado: se escribe su código y Enter lo escoge (el mismo camino del mostrador).
+  p.teclear('#sc-empleado-buscar', EMPLEADOS.ana.nombre);
+  p.tecla('#sc-empleado-buscar', 'Enter');
+  p.buscar('#sc-dias').value = '3';
+  p.buscar('#sc-precio-dia').value = '350';
+  return p;
+}
+
+test('sacar: el contrato que se guarda lleva EL CARRO que él escogió, no otro de la flota', async () => {
+  // El cable más caro de todos: si el selector no llega hasta `construirContrato`, el cliente firma por un
+  // carro y se lleva otro. Ninguna de las pruebas de arriba lo ve, porque todas le pasan el carro a mano.
+  const p = await listaParaGuardar({ ruta: '' });
+  p.lanzar('change', '#sc-carro-escoger', { value: 'v2' });
+  p.lanzar('submit', '#sc-form');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.guardados.length, 1, `se guardó un contrato (dichos: ${JSON.stringify(p.dichos)})`);
+  assert.equal(p.guardados[0].contrato.carroId, 'v2', 'el carro que escogió');
+  assert.equal(p.guardados[0].contrato.carroPlacas, 'P-999ZZZ');
+  assert.equal(p.guardados[0].contrato.ajeno, false);
+});
+
+test('sacar: con «Carro ajeno», el contrato NO lleva carroId y sí los datos del subarrendado', async () => {
+  // Lo que él pidió: el subarrendado vive dentro del contrato y nunca entra a la flota. `carroId` en null
+  // es lo que mantiene a ese carro fuera de los estados y del mantenimiento de la flota propia.
+  const p = await listaParaGuardar({ ruta: '' });
+  p.marcar('#sc-ajeno');
+  p.buscar('#sc-ajeno-placas').value = 'P-555EEE';
+  p.buscar('#sc-ajeno-marca').value = 'Mazda';
+  p.lanzar('submit', '#sc-form');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.guardados.length, 1, `se guardó un contrato (dichos: ${JSON.stringify(p.dichos)})`);
+  const c = p.guardados[0].contrato;
+  assert.equal(c.ajeno, true);
+  assert.equal(c.carroId, null, 'un ajeno nunca toca carroId: no es de la flota');
+  assert.equal(c.carroPlacas, 'P-555EEE', 'y el papel sale con sus placas');
+});
+
+test('sacar: un REINTENTO tras un guardado que falló no da de alta al mismo cliente dos veces', async () => {
+  // La propiedad que cuidaba la lista de `concurrencia.test.mjs` contando llamadas en el texto. Desde que
+  // la pantalla recibe sus aparatos eso ya no dice nada, así que se prueba apretándola: el id del cliente
+  // nuevo se decide UNA vez, antes del primer intento, y el reintento cae en la misma ficha.
+  const guardados = [];
+  let primera = true;
+  const p = await pantallaDeSacar({
+    ruta: 'v1',
+    guardarElCliente: async (c) => {
+      guardados.push(c);
+      if (primera) { primera = false; throw new Error('se venció el tiempo'); }
+      return c;
+    },
+  });
+  p.clic('#sc-cliente-nuevo');
+  for (const [id, valor] of [
+    ['sc-nc-nombres', 'Juan'], ['sc-nc-apellidos', 'Pérez'],
+    ['sc-nc-documento', '2345 67890 0101'], ['sc-nc-licencia', 'L-445566'], ['sc-nc-telefono', '5555-0000'],
+  ]) p.buscar(`#${id}`).value = valor;
+  p.clic('#sc-cliente-guardar');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  p.clic('#sc-cliente-guardar');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(guardados.length, 2, 'se intentó dos veces');
+  assert.equal(guardados[0].id, guardados[1].id, 'y las dos veces con el MISMO id: una sola ficha, no dos clientes');
 });

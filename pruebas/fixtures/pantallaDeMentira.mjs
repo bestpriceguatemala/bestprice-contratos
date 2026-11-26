@@ -76,6 +76,10 @@ export function pantallaDeMentira() {
     const nodo = {
       id: etiqueta.attrs.id ?? '',
       tag: etiqueta.tag,
+      // En MAYÚSCULAS, como en el navegador. «Sacar carro» lo mira para no mandar el formulario con Enter
+      // (`ev.target.tagName !== 'INPUT'`): sin esto, Enter no hacía NADA y en silencio. Es el mismo agujero
+      // que ya había con `matches`. (26 de noviembre de 2026.)
+      tagName: etiqueta.tag.toUpperCase(),
       attrs: etiqueta.attrs,
       dataset: etiqueta.dataset,
       etiqueta,
@@ -128,6 +132,13 @@ export function pantallaDeMentira() {
    * de apertura que hace juego, más cercana hacia atrás, que todavía no se ha cerrado. Alcanza para los
    * dos casos que usa el sistema (`[data-dn]` y `tr[data-dn-clave]`) y se niega a adivinar otros.
    */
+  /**
+   * Las etiquetas que NO pueden contener nada: no llevan cierre, así que la cuenta de «¿ya se cerró?» las
+   * daría siempre por abiertas y las tomaría por ancestros de todo lo que venga después. Lo encontró el
+   * control 20 el 26 de noviembre de 2026: un `<input>` salía como ancestro del campo de la fila de abajo.
+   */
+  const SIN_CIERRE = new Set(['input', 'img', 'br', 'hr', 'meta', 'link', 'source', 'col', 'area', 'embed']);
+
   const masCercano = (etiqueta, selector) => {
     const todas = etiquetas();
     const yo = todas.findIndex((e) => e.desde === etiqueta.desde);
@@ -135,6 +146,7 @@ export function pantallaDeMentira() {
     for (let i = yo; i >= 0; i--) {
       if (!haceJuego(todas[i], selector)) continue;
       if (i === yo) return nodoDeEtiqueta(todas[i]);
+      if (SIN_CIERRE.has(todas[i].tag)) continue;
       // Que no se haya cerrado antes de mí: se cuenta su cierre en el texto de por medio.
       const enMedio = html.slice(todas[i].desde, etiqueta.desde);
       const cierres = (enMedio.match(new RegExp(`</${todas[i].tag}>`, 'g')) ?? []).length;
@@ -142,6 +154,30 @@ export function pantallaDeMentira() {
       if (cierres <= aperturas) return nodoDeEtiqueta(todas[i]);
     }
     return null;
+  };
+
+  /**
+   * Los ancestros de una etiqueta, de adentro hacia afuera, con la MISMA regla que `masCercano`: una
+   * etiqueta de más atrás es ancestro solo si todavía no se había cerrado cuando empieza ésta.
+   *
+   * Hace falta para que un evento BURBUJEE como en el navegador. Hasta el 26 de noviembre de 2026
+   * `lanzar` solo avisaba al nodo y a la caja de arriba, así que un manejador enganchado en un nodo de
+   * EN MEDIO —«Sacar carro» engancha todo el `change` en su `<form>`— no se enteraba nunca, y una prueba
+   * que apretara algo quedaba verde sin que pasara nada.
+   */
+  const ancestrosDe = (etiqueta) => {
+    const todas = etiquetas();
+    const yo = todas.findIndex((e) => e.desde === etiqueta.desde);
+    const fuera = [];
+    if (yo < 0) return fuera;
+    for (let i = yo - 1; i >= 0; i--) {
+      if (SIN_CIERRE.has(todas[i].tag)) continue;
+      const enMedio = html.slice(todas[i].desde, etiqueta.desde);
+      const cierres = (enMedio.match(new RegExp(`</${todas[i].tag}>`, 'g')) ?? []).length;
+      const aperturas = (enMedio.match(new RegExp(`<${todas[i].tag}\\b`, 'g')) ?? []).length - 1;
+      if (cierres <= aperturas) fuera.push(todas[i]);
+    }
+    return fuera;
   };
 
   const buscar = (selector) => {
@@ -171,7 +207,16 @@ export function pantallaDeMentira() {
     addEventListener(tipo, fn) { (oyentes[tipo] ??= []).push(fn); },
   };
 
-  const documento = { createElement: () => raiz };
+  const documento = {
+    createElement: () => raiz,
+    /**
+     * `getElementById` con la MISMA regla que todo lo demás de aquí: solo encuentra lo que la pantalla
+     * dibujó de verdad. «Sacar carro» busca sus campos así (`const el = (id) => doc.getElementById(id)`),
+     * y si un manejador apunta a un id que el HTML ya no trae, tiene que salir `null` —y la prueba caerse—
+     * en vez de quedarse verde apretando campos imaginarios. (26 de noviembre de 2026.)
+     */
+    getElementById: (id) => buscar(`#${id}`),
+  };
 
   /**
    * Lanza un evento sobre un elemento —por selector, o el nodo mismo— como lo haría el navegador: primero
@@ -185,6 +230,11 @@ export function pantallaDeMentira() {
     const ev = { type: tipo, preventDefault() { ev.seEvito = true; }, seEvito: false, ...cambios };
     ev.target = nodo;
     for (const fn of nodo.oyentes?.[tipo] ?? []) fn(ev);
+    // Y después los de cada ancestro, de adentro hacia afuera, como burbujea en el navegador: un
+    // manejador enganchado en el `<form>` de en medio tiene que enterarse de lo que pasó en un campo.
+    for (const padre of nodo.etiqueta ? ancestrosDe(nodo.etiqueta) : []) {
+      for (const fn of campos.get(padre.desde)?.oyentes?.[tipo] ?? []) fn(ev);
+    }
     for (const fn of oyentes[tipo] ?? []) fn(ev);
     return ev;
   };

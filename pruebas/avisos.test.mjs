@@ -570,7 +570,9 @@ test('H-4, «Sacar carro»: una lectura que falló nunca se dibuja como un clien
 
 test('H-4, «Sacar carro»: la pantalla lee TODOS los contratos y se los pasa a los avisos como historial (no solo los abiertos)', () => {
   const fuente = readFileSync(new URL('../js/pantallas/sacarCarro.js', import.meta.url), 'utf8');
-  assert.match(fuente, /cargarTodosLosContratos\(/, 'la lectura que conserva los cerrados');
+  // Desde el 26 de noviembre de 2026 la pantalla recibe sus aparatos, así que la elección de QUÉ lectura
+  // usar está en el valor de siempre, no en la llamada.
+  assert.match(fuente, /traerContratos = cargarTodosLosContratos/, 'la lectura que conserva los cerrados');
   assert.doesNotMatch(fuente, /cargarContratosAbiertos\(/, 'la que los tira antes de que nadie los vea');
   assert.match(fuente, /avisosDeSalida\(entradaDeAvisos\(\{[^}]*\bhistorial\b/s, 'y se los da a la regla (la llamada de la pantalla, no la definición de la función)');
   assert.match(fuente, /contratosAbiertosDe\(/, 'los abiertos salen de esa misma lectura, con la misma regla de «abierto» que datos.js');

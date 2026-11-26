@@ -1420,10 +1420,41 @@ let ultimoToken = 0;
  * juntos en `parametroRuta` ('carroId' o 'carroId?reserva=reservaId'), ver
  * leerParametroRuta() arriba.
  */
-export async function pintarSacarCarro(contenedor, parametroRuta) {
+export async function pintarSacarCarro(contenedor, parametroRuta, {
+  // LOS APARATOS. Todo lo que esta pantalla toca del mundo de afuera entra por aquí, con su valor de
+  // siempre puesto, para poder apretarla en una prueba sin navegador y sin Firebase. Es el mismo patrón que
+  // ya tienen las dos pantallas de dinero (`pintarCuentas`). Hasta el 26 de noviembre de 2026 esto no se
+  // podía medir: el CABLE entre lo que él aprieta y lo que se guarda era lo único del contrato sin probar,
+  // y es el cable que decide QUÉ CARRO sale en el contrato.
+  //
+  // CUIDADO al tocar esta lista: un valor de siempre nunca puede llamarse a sí mismo
+  // (`avisar = (t) => avisar(t)` se llama a sí mismo hasta reventar la pila). Pasó de verdad en
+  // comisiones.js y una prueba lo vigila ahora en todo el sistema.
+  doc = typeof document === 'undefined' ? null : document,
+  rutaDeAhora = () => (typeof location === 'undefined' ? '' : location.hash),
+  ahora = hoyISO,
+  avisar = aviso,
+  traerFlota = cargarFlota,
+  traerContratos = cargarTodosLosContratos,
+  traerReservas = cargarReservas,
+  traerAjustes = cargarAjustes,
+  traerEmpleados = cargarEmpleadosActivos,
+  guardarElContrato = guardarContrato,
+  guardarElCliente = guardarCliente,
+  guardarElDueno = guardarDueno,
+  acunarIdDeContrato = nuevoIdContrato,
+  acunarIdDeCliente = nuevoIdCliente,
+  acunarIdDeDuenoNuevo = nuevoIdDueno,
+  acunarNumeroDeContrato = siguienteNumeroContrato,
+  irAlImprimir = irDespuesDeGuardar,
+  // Las dos listas de sesión son del MÓDULO a propósito (se leen una vez y se comparten entre aperturas).
+  // Se inyectan para que una prueba pueda darle las suyas sin ensuciar las del programa ni tocar la nube.
+  listaClientes = listaDeClientes,
+  listaDuenos = listaDeDuenos,
+} = {}) {
   const { carroId, reservaId } = leerParametroRuta(parametroRuta);
   const miToken = ++ultimoToken;
-  const sigoVigente = () => location.hash.startsWith(PREFIJO_RUTA) && miToken === ultimoToken;
+  const sigoVigente = () => rutaDeAhora().startsWith(PREFIJO_RUTA) && miToken === ultimoToken;
 
   let flota = [];
   let contratosAbiertos = [];
@@ -1473,16 +1504,16 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   let numeroContrato = null;
   // Lo mismo para las altas rápidas: el id del cliente o del dueño NUEVO se decide una vez, antes del primer
   // intento, y un reintento tras un tiempo vencido cae en la misma ficha (H-2). Se sueltan al salir bien.
-  const altaDeCliente = altaConIdFijo(nuevoIdCliente);
-  const altaDeDueno = altaConIdFijo(nuevoIdDueno);
+  const altaDeCliente = altaConIdFijo(acunarIdDeCliente);
+  const altaDeDueno = altaConIdFijo(acunarIdDeDuenoNuevo);
   // La lista de empleados se lee de la nube en CADA apertura, no una vez por sesión como las de clientes y dueños: es
   // chica, no tiene copia local, y el porcentaje que se sella en el contrato tiene que ser el de ahora. Una lectura que
   // falle no se recuerda: `crearListaDeSesion` la vuelve a pedir.
-  const listaDeEmpleados = crearListaDeSesion({ cargar: (alLlegar) => cargarEmpleadosActivos(alLlegar) });
+  const listaDeEmpleados = crearListaDeSesion({ cargar: (alLlegar) => traerEmpleados(alLlegar) });
 
   contenedor.innerHTML = plantilla();
 
-  const el = (id) => document.getElementById(id);
+  const el = (id) => doc.getElementById(id);
   // Los lectores de campos viven fuera de la pantalla (lectorDeCampos) para
   // poder probar, con los mismos ids, lo que de verdad llega al contrato.
   const { val, num, texto, marcado } = lectorDeCampos(el);
@@ -1705,9 +1736,9 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   async function preseleccionarClienteDeReserva(reserva) {
     if (!reserva?.clienteId) return;
     try {
-      await listaDeClientes.leer();
+      await listaClientes.leer();
       if (!sigoVigente()) return;
-      const { items, altas } = listaDeClientes.estado();
+      const { items, altas } = listaClientes.estado();
       const cliente = conAltasDeHoy(items, altas).find((c) => c.id === reserva.clienteId);
       if (cliente) elegirCliente(cliente);
     } catch {
@@ -1749,7 +1780,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     // recibió, dejaba el saldo en cero y soltaba el candado de la garantía.
     // Q500 de caja perdidos sin que un solo aviso se enterara.
     if (estadoReserva(encontrada) !== 'pendiente') {
-      aviso('Esa reservación ya no está pendiente, así que no se usó para llenar el formulario.'
+      avisar('Esa reservación ya no está pendiente, así que no se usó para llenar el formulario.'
         + ' Puedes hacer la salida normal de este carro.', 'error');
       return;
     }
@@ -1846,14 +1877,14 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   const buscadorClientes = crearBuscador({
     tipo: 'clientes',
     prefijo: 'cliente',
-    lista: listaDeClientes,
+    lista: listaClientes,
     fila: filaCliente,
     hayElegido: () => Boolean(clienteSeleccionado),
     // Cuando la lista llega (o falla) tarde, el aviso de documento repetido del alta se vuelve a mirar.
     alLlegar: () => mostrarAvisoDeDocumentoEnAlta(),
   });
   const buscadorDuenos = crearBuscador({
-    tipo: 'duenos', prefijo: 'dueno', lista: listaDeDuenos, fila: filaDueno, hayElegido: () => Boolean(duenoSeleccionado),
+    tipo: 'duenos', prefijo: 'dueno', lista: listaDuenos, fila: filaDueno, hayElegido: () => Boolean(duenoSeleccionado),
   });
   const buscadorEmpleados = crearBuscador({
     tipo: 'empleados', prefijo: 'empleado', lista: listaDeEmpleados, fila: filaEmpleado, hayElegido: () => Boolean(empleadoSeleccionado),
@@ -1904,7 +1935,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
    */
   function mostrarAvisoDeDocumentoEnAlta() {
     const lugar = el('sc-nc-documento-repetido');
-    const html = htmlAvisoDeDocumentoEnAlta({ documento: texto('sc-nc-documento'), ...listaDeClientes.estado() });
+    const html = htmlAvisoDeDocumentoEnAlta({ documento: texto('sc-nc-documento'), ...listaClientes.estado() });
     lugar.innerHTML = html;
     lugar.hidden = !html;
   }
@@ -1920,13 +1951,13 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     const nuevo = construirCliente({}, leerCamposAlta());
     const falta = faltaAlgo(nuevo);
     if (falta.length) {
-      aviso(`Falta completar: ${falta.join(', ')}.`, 'error');
+      avisar(`Falta completar: ${falta.join(', ')}.`, 'error');
       return;
     }
     const boton = el('sc-cliente-guardar');
     boton.disabled = true;
     try {
-      const cliente = await guardarCliente(await altaDeCliente.paraGuardar(nuevo));
+      const cliente = await guardarElCliente(await altaDeCliente.paraGuardar(nuevo));
       altaDeCliente.terminada();
       buscadorClientes.registrarAlta(cliente);
       // Si mientras se guardaba el mostrador ya salió de esta pantalla, el
@@ -1934,9 +1965,9 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       // guardarDuenoNuevo).
       if (!sigoVigente()) return;
       elegirCliente(cliente);
-      aviso('Cliente guardado.', 'exito');
+      avisar('Cliente guardado.', 'exito');
     } catch {
-      aviso('No se pudo guardar el cliente. Intenta de nuevo.', 'error');
+      avisar('No se pudo guardar el cliente. Intenta de nuevo.', 'error');
     } finally {
       boton.disabled = false;
     }
@@ -1990,12 +2021,12 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     const nuevo = construirDueno({}, leerCamposDueno());
     const falta = faltaAlgoEnDueno(nuevo);
     if (falta.length) {
-      aviso(`Falta completar: ${falta.join(', ')}.`, 'error');
+      avisar(`Falta completar: ${falta.join(', ')}.`, 'error');
       return;
     }
     boton.disabled = true;
     try {
-      const dueno = await guardarDueno(await altaDeDueno.paraGuardar(nuevo));
+      const dueno = await guardarElDueno(await altaDeDueno.paraGuardar(nuevo));
       altaDeDueno.terminada();
       buscadorDuenos.registrarAlta(dueno);
       // Si mientras se guardaba el mostrador ya salió de esta pantalla, el
@@ -2008,9 +2039,9 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       // daría de alta a la misma persona dos veces.
       CAMPOS_DUENO.forEach((c) => { el(`sc-nd-${c.id}`).value = ''; });
       elegirDueno(dueno);
-      aviso('Dueño guardado.', 'exito');
+      avisar('Dueño guardado.', 'exito');
     } catch {
-      aviso('No se pudo guardar el dueño. Intenta de nuevo.', 'error');
+      avisar('No se pudo guardar el dueño. Intenta de nuevo.', 'error');
     } finally {
       boton.disabled = false;
     }
@@ -2047,7 +2078,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       },
     });
     if (motivo) {
-      aviso(motivo, 'error');
+      avisar(motivo, 'error');
       return;
     }
 
@@ -2060,11 +2091,11 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       // reutilizan: si esta llamada es un reintento porque la anterior se
       // dio por vencida sin saberse si en verdad llegó a guardar, tiene que
       // caer en el mismo documento y no gastar un número nuevo.
-      if (!contratoId) contratoId = await nuevoIdContrato();
+      if (!contratoId) contratoId = await acunarIdDeContrato();
       // Este número lo manda el contador de la nube, no el del papel: el dueño dijo que coinciden con el preimpreso de su hoja
       // y que se quede así (23 de octubre de 2026, §8b punto 18). Si algún día dejan de coincidir no hay aviso; el riesgo
       // está escrito en `siguienteNumeroContrato` (datos.js).
-      if (!numeroContrato) numeroContrato = await siguienteNumeroContrato();
+      if (!numeroContrato) numeroContrato = await acunarNumeroDeContrato();
       const base = construirContrato(leerFormulario(numeroContrato));
       // Tarea 9, Regla 1: el anticipo YA PAGADO de la reservación de origen
       // se agrega como un pago de verdad, por agregarPago (datos.js) — nunca
@@ -2088,15 +2119,15 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       // ADR-001 (aclaración del 16 de octubre de 2026): el número completo y el CBC se leen aquí, junto con el resto del
       // formulario y antes de esperar a la nube, y viven solo en esta constante hasta que se entregan al traspaso.
       const paraImprimir = tarjetasParaImprimir(leerTarjetas(), leerTarjetasEscritas());
-      const guardado = await guardarContrato(contrato, { reservaDeOrigen: reservaOrigen });
-      aviso(reservaOrigen
+      const guardado = await guardarElContrato(contrato, { reservaDeOrigen: reservaOrigen });
+      avisar(reservaOrigen
         ? `Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro. La reservación quedó entregada.`
         : `Contrato N° ${guardado.numero} guardado. ${guardado.clienteNombre} se lleva el carro.`, 'exito');
       const idGuardado = guardado.id || contratoId;
       // A imprimir ese contrato (siempre, decisión del 16 de octubre), con las tarjetas puestas si se tecleó alguna.
-      irDespuesDeGuardar({ contratoId: idGuardado, tarjetas: paraImprimir, sigueAqui: sigoVigente() });
+      irAlImprimir({ contratoId: idGuardado, tarjetas: paraImprimir, sigueAqui: sigoVigente() });
     } catch (error) {
-      aviso(textoFalloAlGuardarElContrato(error), 'error');
+      avisar(textoFalloAlGuardarElContrato(error), 'error');
     } finally {
       guardando = false;
       boton.disabled = false;
@@ -2248,8 +2279,8 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // la nube falla o el documento no existe todavía), así que tampoco hace
   // falta un try/catch.
   const [rFlota, rContratos, rReservas, ajustesCargados] = await Promise.all([
-    cargarFlota((r) => { lecturas.flota.deLaNube(r); flota = r.datos; falloFlota = r.fallo; if (sigoVigente()) refrescarCarro(); }),
-    cargarTodosLosContratos((r) => {
+    traerFlota((r) => { lecturas.flota.deLaNube(r); flota = r.datos; falloFlota = r.fallo; if (sigoVigente()) refrescarCarro(); }),
+    traerContratos((r) => {
       lecturas.contratos.deLaNube(r);
       historial = r;
       contratosAbiertos = contratosAbiertosDe(r.datos);
@@ -2259,14 +2290,14 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     // encontrar la reservación de origen (`reservaId`) si la primera lectura
     // (copia local, abajo) todavía no la tenía — intentarAplicarReserva() ya
     // se cuida de aplicarla una sola vez.
-    cargarReservas((r) => {
+    traerReservas((r) => {
       lecturas.reservas.deLaNube(r);
       reservas = r.datos;
       if (!sigoVigente()) return;
       intentarAplicarReserva();
       recalcular();
     }),
-    cargarAjustes(),
+    traerAjustes(),
   ]);
   // Lo inmediato (la copia local) entra solo si la nube no trajo nada antes; si ya llegó algo por detrás, eso es lo vigente.
   lecturas.flota.inmediata(rFlota);
@@ -2289,7 +2320,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     // la nube (borrada, o un enlace viejo): se avisa en vez de quedarse
     // callado, pero no bloquea — el mostrador puede seguir armando la salida
     // a mano, como cualquier otra.
-    aviso('No se encontró la reservación de origen. Puedes seguir llenando el formulario a mano.', 'error');
+    avisar('No se encontró la reservación de origen. Puedes seguir llenando el formulario a mano.', 'error');
   }
   // El recargo de tarjeta (hallazgo crítico de la
   // revisión final): el campo arranca en PORCENTAJE_TARJETA_DEFECTO (por si

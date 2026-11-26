@@ -159,3 +159,66 @@ test('CONTROL 17: la caja no está «conectada» hasta que se cuelga del contene
   p.contenedor.replaceChildren(caja);
   assert.equal(caja.isConnected, true, 'colgada del contenedor, sí');
 });
+
+test('control 18: getElementById encuentra lo dibujado y devuelve null para lo que no está', () => {
+  // «Sacar carro» busca TODOS sus campos con `getElementById`. Si esto devolviera un nodo inventado para
+  // cualquier id, un manejador que apunte a un campo que ya no se dibuja pasaría en verde sin hacer nada.
+  const p = pantallaDeMentira();
+  p.contenedor.innerHTML = '<input id="sc-dias" value="3"><button id="sc-guardar">Guardar</button>';
+  assert.equal(p.documento.getElementById('sc-dias').value, '3', 'lo dibujado se encuentra, con su valor');
+  assert.equal(p.documento.getElementById('sc-guardar').id, 'sc-guardar');
+  assert.equal(p.documento.getElementById('sc-no-existe'), null, 'lo que no se dibujó es null, no un nodo de mentira');
+});
+
+test('control 19: getElementById devuelve EL MISMO nodo dentro de un dibujo, y uno nuevo al redibujar', () => {
+  // Lo que una prueba (o la pantalla) le deje escrito a un campo tiene que seguir ahí al volver a pedirlo
+  // por id; y al redibujar se pierde, como en el navegador.
+  const p = pantallaDeMentira();
+  p.contenedor.innerHTML = '<input id="sc-dias">';
+  p.documento.getElementById('sc-dias').value = '7';
+  assert.equal(p.documento.getElementById('sc-dias').value, '7', 'el mismo nodo dentro del mismo dibujo');
+  p.contenedor.innerHTML = '<input id="sc-dias">';
+  assert.notEqual(p.documento.getElementById('sc-dias').value, '7', 'redibujar se lleva lo tecleado');
+});
+
+test('control 20: un evento BURBUJEA hasta los manejadores de en medio, no solo al nodo y a la caja', () => {
+  // «Sacar carro» engancha TODO su `change` en el `<form>`, un nodo de en medio. Sin burbujeo, apretar un
+  // campo no avisaba a nadie y la prueba quedaba verde sin que pasara nada.
+  const p = pantallaDeMentira();
+  p.contenedor.innerHTML = '<form id="f"><div id="caja"><input id="dias"></div></form><input id="fuera">';
+  const vistos = [];
+  p.buscar('#f').addEventListener('change', (ev) => vistos.push(`form:${ev.target.id}`));
+  p.buscar('#caja').addEventListener('change', (ev) => vistos.push(`caja:${ev.target.id}`));
+  p.buscar('#dias').addEventListener('change', (ev) => vistos.push(`campo:${ev.target.id}`));
+
+  p.lanzar('change', '#dias', { value: '5' });
+  assert.deepEqual(vistos, ['campo:dias', 'caja:dias', 'form:dias'], 'de adentro hacia afuera, y el target es el campo');
+
+  // Y un campo que NO está dentro del formulario no despierta a su manejador.
+  vistos.length = 0;
+  p.lanzar('change', '#fuera');
+  assert.deepEqual(vistos, [], 'lo de fuera no burbujea hacia adentro');
+});
+
+test('control 21: una etiqueta que no se cierra (<input>) nunca es ancestro de nadie', () => {
+  // Lo encontró el control 20: un `<input>` no lleva cierre, así que la cuenta de «¿ya se cerró?» lo daba
+  // siempre por abierto y lo tomaba por ancestro de todo lo que viniera después. En el navegador un
+  // `<input>` no puede contener nada.
+  const p = pantallaDeMentira();
+  p.contenedor.innerHTML = '<div data-dn="caja"><input id="a"><span id="b">x</span></div>';
+  assert.equal(p.buscar('#b').closest('[data-dn]').dataset.dn, 'caja', 'el ancestro de verdad es el div');
+  const vistos = [];
+  p.buscar('#a').addEventListener('click', () => vistos.push('input'));
+  p.lanzar('click', '#b');
+  assert.deepEqual(vistos, [], 'el input de al lado no se entera de lo que pasa en su hermano');
+});
+
+test('control 22: cada nodo trae su tagName en MAYÚSCULAS, como en el navegador', () => {
+  // «Sacar carro» decide con `ev.target.tagName !== 'INPUT'` si Enter manda el formulario o escoge de la
+  // lista. Con un `tagName` ausente, esa comparación es siempre cierta y Enter no hace NADA, en silencio.
+  const p = pantallaDeMentira();
+  p.contenedor.innerHTML = '<form id="f"><input id="a"><button id="b">x</button></form>';
+  assert.equal(p.buscar('#a').tagName, 'INPUT');
+  assert.equal(p.buscar('#b').tagName, 'BUTTON');
+  assert.equal(p.buscar('#f').tagName, 'FORM');
+});

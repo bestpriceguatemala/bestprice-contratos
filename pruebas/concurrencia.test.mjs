@@ -487,9 +487,10 @@ test('«Sacar carro» dice la frase del rechazo; un fallo cualquiera sigue pidie
 test('estructura: «Sacar carro» saca el contrato y marca la reservación en UN solo guardado, y usa el texto del rechazo', () => {
   const fuente = leerFuente('../js/pantallas/sacarCarro.js');
   const guardar = fuente.slice(fuente.indexOf('async function guardar(ev)'), fuente.indexOf('// ---------- Cablear los eventos'));
-  assert.match(guardar, /guardarContrato\(contrato, \{ reservaDeOrigen: reservaOrigen \}\)/);
+  // `guardarElContrato` es el nombre del aparato inyectado; su valor de siempre es `guardarContrato`.
+  assert.match(guardar, /guardarElContrato\(contrato, \{ reservaDeOrigen: reservaOrigen \}\)/);
   assert.doesNotMatch(guardar, /guardarReserva\(/, 'marcarla aparte, después, es lo que dejaba el hueco');
-  assert.match(guardar, /aviso\(textoFalloAlGuardarElContrato\(error\), 'error'\)/);
+  assert.match(guardar, /avisar\(textoFalloAlGuardarElContrato\(error\), 'error'\)/);
 });
 
 // ---------------------------------------------------------------------------
@@ -691,8 +692,11 @@ test('estructura: cada pantalla que da de alta guarda con el id decidido de ante
     ['clientes', 'guardarCliente', 'nuevoIdCliente', 1, 1],
     ['duenos', 'guardarDueno', 'nuevoIdDueno', 1, 1],
     ['carros', 'guardarVehiculo', 'nuevoIdVehiculo', 1, 1],
-    ['sacarCarro', 'guardarCliente', 'nuevoIdCliente', 1, 1],
-    ['sacarCarro', 'guardarDueno', 'nuevoIdDueno', 1, 1],
+    // `sacarCarro` salió de esta lista el 26 de noviembre de 2026, por la MISMA razón que `dinero`: desde
+    // que la pantalla recibe sus aparatos, el guardado entra por un nombre inyectado y contarlo en el
+    // TEXTO ya no dice nada. La propiedad que estas dos filas cuidaban —que un reintento tras un tiempo
+    // vencido caiga en la misma ficha y no dé de alta a la misma persona dos veces— se prueba
+    // APRETÁNDOLA en pruebas/sacarCarro.test.mjs («un reintento no da de alta al mismo … dos veces»).
     // `dinero` salió de esta lista el 24 de noviembre de 2026: desde que la pantalla recibe sus aparatos,
     // el guardado entra por un nombre inyectado y contarlo en el TEXTO ya no dice nada. La propiedad que
     // esta fila cuidaba —que un reintento después de un enlace fallido no cree un segundo dueño— se
