@@ -354,6 +354,40 @@ ni `data-cm-clave`. Así que caerse del `switch` no puede alcanzar el clic de fi
 que alguien meta un botón nuevo dentro de una fila de la lista; se queda, y se queda dicho, en vez de
 escribir una prueba que fije el HTML de hoy.
 
+## Las dos funciones que deciden a quién se le debe (26 de noviembre, noche)
+
+`armarVista` (dueños) y `armarVistaDeComisiones`. De ahí sale cada fila con su nombre y su cifra.
+
+| Función | Antes | Después |
+|---|---:|---:|
+| `armarVistaDeComisiones` | 35 / 46 — **76 %** | 40 / 46 — **87 %** |
+| `armarVista` (dueños) | 32 / 43 — **74 %** | 38 / 43 — **88.4 %** |
+
+Cero anomalías, cero colgados, controles antes de cada medición.
+
+**Lo que nadie notaba, y ahora sí.** Lo más serio no era una cifra mal sumada: era **dejar la pantalla en
+blanco**. Tres `?.` existían para eso y ninguna prueba los tocaba, porque todas armaban la lectura con las
+tres llaves puestas y con fichas sanas:
+
+- Una lectura sin la llave de `duenos` (o de `empleados`) tiraba una excepción. Eso no es «no se pudo
+  leer» —que se dice con palabras y una barra roja—, es una pantalla muda.
+- Una ficha nula o sin id en Firestore hacía lo mismo al filtrar la lista.
+- Un nombre de puros espacios dejaba la fila sin nombre. En dueños es peor: el nombre arma además la
+  **dirección** de la cuenta (`claveDeEntrada`), así que la clave se armaba con espacios.
+- `sinRegistro` y `sinEnlazar` son dos marcas distintas que la pantalla dibuja distinto (una pide enlazar,
+  la otra avisa de un dueño borrado), y cada una tenía su hueco.
+
+**Los 11 que quedan son equivalentes, y quedan dichos.** `??` por `||` donde el valor nunca puede ser falso
+(un objeto que sale de un `Map`, una cadena que enseguida pasa por `.trim()`); `if (sinRentas.length)` por
+`true`, que solo evita calcular una cuenta vacía de balde; `if (g.duenoId)` por `true`, que mete `undefined`
+en un conjunto donde después se buscan ids de verdad. Fijarlos sería inflar el número.
+
+**Un tropiezo propio, para que no se repita.** Al clasificar a ojo di tres por equivalentes sin serlo. Dos
+fueron porque medí la línea entera con un reemplazo global: los dos `?.` de esa línea se mutaban juntos y
+parecía que la prueba los mataba a los dos. El arnés muta **uno a la vez**, que es lo correcto, y por eso
+lo vio. El tercero fue confundir dos renglones seguidos (`sinEnlazar` y `sinRegistro`). La regla: la
+clasificación a ojo propone, la medición dispone.
+
 ## 4. Lo que todavía NO se ha medido
 
 `contar.mjs` dice el tamaño del trabajo entero: **14,769 errores posibles sobre 13,987 líneas ejecutables,

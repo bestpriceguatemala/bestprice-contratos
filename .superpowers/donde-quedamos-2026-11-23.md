@@ -169,6 +169,23 @@ Al arnés se le agregó `--lineas D-H` para medir solo una parte de un archivo.
 «click». El de «click» de dueños ya estaba al 95 %. Antes de recomendar un objetivo por un número viejo,
 medirlo de nuevo con `--lineas`.
 
+## 26 de noviembre, noche: lo que él pidió al revisar, y las vistas de dinero
+
+**Lo que él pidió** (hecho y comiteado): borrar carros, «Nuevo contrato» sin pasar por la flota, y que los
+subarrendados queden guardados sin entrar a la flotilla. Los tres en sus commits, con el detalle ahí.
+
+**Tres fallos que solo se vieron abriendo el navegador** (la suite entera pasaba en verde): una clase de
+CSS que no existía dejaba el botón de borrar idéntico al de «Cancelar»; el `?v=1` de las hojas nunca
+cambiaba, así que publicar un cambio de CSS y no verlo era normal; y el botón «Sí, borrar» era del mismo
+rojo que su caja. **Lección: node no mira el CSS. Hay que abrir el programa.**
+
+**Las dos vistas de dinero**: comisiones 76 % → 87 %, dueños 74 % → 88.4 %. Lo más serio que tapaban no
+eran cifras mal sumadas: eran pantallas en blanco (una lectura sin una llave, una ficha dañada).
+
+**Lo que sigue sin probarse, y es lo que más importa ahora**: el CABLEADO de las pantallas de carros y de
+sacar carro. Ninguna de las dos tiene su «pantalla de mentira» como las de dinero, y en sacar carro el
+cable es lo que decide **qué carro sale en el contrato**.
+
 ## Cómo se trabaja esto
 
 - Agentes de a dos como mucho: comparten el cupo y mueren juntos a media tarea.
