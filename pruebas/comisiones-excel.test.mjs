@@ -811,3 +811,53 @@ test('reutiliza el libro y el zip del respaldo y la descarga del respaldo: no es
   assert.match(PANTALLA, /import \{ serialDeFecha \} from '\.\.\/respaldo\/hojas\.js';/);
   assert.ok(!/escribirZip|CompressionStream|new Blob|createObjectURL/.test(PANTALLA));
 });
+
+// ---------------------------------------------------------------------------
+// Las notas del Excel: lo que explica el archivo cuando él lo abra dentro de un año
+// ---------------------------------------------------------------------------
+// Este archivo es su ÚNICA copia de las comisiones: el respaldo anual no las lleva (§10). Dentro de un
+// año, lo que haga legible ese archivo son estas notas. Al medir con mutaciones salió que se podían dejar
+// TODAS en blanco sin que ninguna prueba se pusiera roja.
+
+test('las notas del Resumen explican cada hoja, y ninguna se puede quedar en blanco', () => {
+  const modelo = modeloDe();
+  const resumen = modelo.hojas.find((h) => h.nombre === 'Resumen');
+  const textos = resumen.notas.map((n) => n.texto);
+
+  for (const nota of resumen.notas) {
+    assert.ok(nota.texto.trim().length >= 20, `una nota de ${nota.texto.trim().length} letras no explica nada: «${nota.texto}»`);
+    assert.ok(['titulo', 'nota', 'aviso'].includes(nota.estilo), `estilo raro: «${nota.estilo}»`);
+  }
+  assert.equal(resumen.notas[0].estilo, 'titulo', 'la primera es el título');
+
+  const todo = textos.join(' | ');
+  assert.match(todo, /Comisiones de los empleados/, 'de qué es el archivo');
+  assert.match(todo, /foto del día/, 'que no se actualiza solo');
+  assert.match(todo, /Hoja «Rentas»/, 'qué trae la hoja de rentas');
+  assert.match(todo, /Hoja «Pagos»/, 'qué trae la hoja de pagos');
+  assert.match(todo, /Solo la columna «Por pagar» es deuda/, 'y qué es deuda y qué no');
+  assert.match(todo, /nombre de los clientes/, 'y el cuidado que merece');
+});
+
+test('las notas dicen DE QUIÉN es el archivo: de todos, o de esa persona', () => {
+  const todos = modeloDe();
+  assert.match(todos.hojas[0].notas[0].texto, /todas las cuentas/);
+  assert.equal(todos.titulo, 'Comisiones de todos');
+
+  const vista = armarVistaDeComisiones(escenario());
+  const una = modeloDe(escenario(), { clave: vista.entradas[0].clave });
+  assert.match(una.hojas[0].notas[0].texto, new RegExp(vista.entradas[0].nombre.split(' ')[0]));
+  assert.ok(!/todas las cuentas/.test(una.hojas[0].notas[0].texto), 'no dice «todas» cuando es de una');
+});
+
+test('si la lista de empleados no se pudo leer, el Excel lo DICE en sus notas', () => {
+  // Sin eso, él abre el archivo dentro de un año y lee nombres y porcentajes viejos creyendo que son los
+  // de ese día. Lo que se debe sale de las rentas y los pagos, pero los nombres pueden estar atrasados.
+  const modelo = modeloDe({ ...escenario(), empleados: { datos: null, fallo: true } });
+  const avisos = modelo.hojas[0].notas.filter((n) => n.estilo === 'aviso');
+  assert.ok(avisos.some((n) => /No se pudo leer la lista de empleados/.test(n.texto)), JSON.stringify(modelo.hojas[0].notas));
+
+  // El control: con la lista leída, esa nota no sale.
+  const bien = modeloDe();
+  assert.ok(!bien.hojas[0].notas.some((n) => /No se pudo leer la lista de empleados/.test(n.texto)));
+});
