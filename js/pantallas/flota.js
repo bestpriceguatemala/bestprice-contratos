@@ -288,6 +288,15 @@ function barraFallo(falloFlota, falloContratos, falloReservas) {
   return `<div class="barra-lectura-fallida">${mensajes.map((m) => `<p>${esc(m)}</p>`).join('')}</div>`;
 }
 
+/**
+ * «Nuevo contrato»: la puerta para empezar un contrato SIN escoger antes un carro de la flota. Hace falta
+ * para los carros subarrendados —no son de la flota, así que no tienen cuadro donde apretar «Sacar carro»—,
+ * y de paso sirve para los propios: en la pantalla de sacar se escoge el carro. (26 de noviembre de 2026.)
+ */
+export const BOTON_CONTRATO_NUEVO = '<p class="flota-nuevo-contrato">'
+  + '<a href="#/sacar" class="btn btn-primario">Nuevo contrato</a>'
+  + '<span class="dn-gris"> — para un carro de la flota o uno subarrendado</span></p>';
+
 function dibujar(contenedor, flota, contratos, reservas, hoy, {
   falloFlota = false, falloContratos = false, falloReservas = false,
 } = {}) {
@@ -314,7 +323,7 @@ function dibujar(contenedor, flota, contratos, reservas, hoy, {
     contenedor.innerHTML = falloFlota
       ? `${barra}${bloqueResumen}<p class="pendiente">No se pudo leer la flota. Intenta de nuevo o revisa la conexión.</p>`
       : `${barra}${bloqueResumen}<p class="pendiente">Todavía no hay carros en la flota.<br>
-        <a href="#/carros/nuevo" class="btn btn-primario">Agregar el primer carro</a></p>`;
+        <a href="#/carros/nuevo" class="btn btn-primario">Agregar el primer carro</a></p>${BOTON_CONTRATO_NUEVO}`;
     return;
   }
 
@@ -349,6 +358,7 @@ function dibujar(contenedor, flota, contratos, reservas, hoy, {
   contenedor.innerHTML = `
     ${barra}
     ${bloqueResumen}
+    ${BOTON_CONTRATO_NUEVO}
     <div class="flota-cuadros" id="flota-cuadros">${tarjetas}</div>
     ${seccionPendientes('Garantías por liberar', filasGarantia, 'pendientes-garantia')}
     ${seccionPendientes('Pendientes de cobro', filasCobro)}

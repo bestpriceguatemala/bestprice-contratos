@@ -1794,3 +1794,47 @@ test('vencimientoParaElCampo: un campo vacío NO es un error — no toda tarjeta
     assert.deepEqual(vencimientoParaElCampo(vacio), { valor: '', aviso: '' }, JSON.stringify(vacio));
   }
 });
+
+// ---------------------------------------------------------------------------------------------------
+// Empezar un contrato SIN pasar antes por un carro de la flota
+// ---------------------------------------------------------------------------------------------------
+// Él lo pidió el 26 de noviembre de 2026: la única puerta era «Sacar carro» en un cuadro de la flota, así
+// que para rentar un carro subarrendado había que escoger primero un carro propio que no era el que iba a
+// salir. Ahora «Nuevo contrato» (#/sacar) abre esta pantalla con el carro todavía por escoger.
+
+const paraGuardar = (cambios = {}) => ({
+  hayCliente: true, ajeno: false, hayCarroPropio: false, fechaSalida: '2026-11-26', dias: 3, precioDia: 350, ...cambios,
+});
+
+test('motivoParaNoGuardar: entrando SIN carro, se le dice que escoja aquí — no que vuelva a la flota', () => {
+  // Mandarlo «de vuelta a la flota» a alguien que entró por «Nuevo contrato» es mandarlo a dar una vuelta
+  // de balde: nunca estuvo en un carro, tiene que escoger en esta misma pantalla.
+  const m = motivoParaNoGuardar(paraGuardar({ seEntroSinCarro: true }));
+  assert.match(m, /Escoge un carro de la flota, o marca «Carro ajeno»/);
+  assert.doesNotMatch(m, /Vuelve a la flota/);
+});
+
+test('motivoParaNoGuardar: entrando POR un carro que ya no está, se sigue diciendo lo de antes', () => {
+  const m = motivoParaNoGuardar(paraGuardar({ seEntroSinCarro: false }));
+  assert.match(m, /Este carro ya no está disponible/);
+});
+
+test('motivoParaNoGuardar: con la flota caída manda el fallo de lectura, haya entrado como haya entrado', () => {
+  // Sin poder leer la flota no se sabe si el carro está libre: eso pesa más que el consejo de escoger, y
+  // decirle «escoge un carro» cuando la lista está vacía POR UN FALLO sería ofrecerle una lista que no es.
+  for (const sinCarro of [true, false]) {
+    const m = motivoParaNoGuardar(paraGuardar({ seEntroSinCarro: sinCarro, falloFlota: true }));
+    assert.match(m, /No se pudo leer la flota/, `entrando ${sinCarro ? 'sin' : 'con'} carro`);
+  }
+});
+
+test('motivoParaNoGuardar: con «carro ajeno» marcado, entrar sin carro no estorba', () => {
+  // Es justo el caso que él pidió: un subarrendado no es de la flota, así que no tener carro propio no es
+  // un problema. Lo que falta pedirle son las placas.
+  const m = motivoParaNoGuardar(paraGuardar({ seEntroSinCarro: true, ajeno: true, placasAjeno: '' }));
+  assert.match(m, /placas del carro ajeno/);
+  // Con las placas puestas ya no se le pide nada del carro. Lo que siga faltando es de otra parte del
+  // formulario (aquí, el empleado y su porcentaje): esta prueba es del carro, y no se mete en esa cadena.
+  const conPlacas = motivoParaNoGuardar(paraGuardar({ seEntroSinCarro: true, ajeno: true, placasAjeno: 'P-555EEE' }));
+  assert.doesNotMatch(conPlacas, /carro|placas|flota/i, `ya no pide nada del carro, pero dijo: ${conPlacas}`);
+});

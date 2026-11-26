@@ -24,6 +24,10 @@ import { vigilarVersion } from './version.js';
 import { limpiarCopiaLocalDelCosto } from './datos.js';
 
 registrarPantalla('#/flota', pintarFlota);
+// Un contrato se puede empezar SIN carro: '#/sacar' abre la pantalla con el carro todavía por escoger
+// (de la flota, o uno ajeno). Antes la única puerta era «Sacar carro» en un carro de la flota, así que
+// para rentar uno subarrendado había que escoger primero un carro que no era. (26 de noviembre de 2026.)
+registrarPantalla('#/sacar', pintarSacarCarro);
 registrarPantalla('#/sacar/:carroId', pintarSacarCarro);
 registrarPantalla('#/recibir/:contratoId', pintarRecibirCarro);
 registrarPantalla('#/carros', pintarCarros);

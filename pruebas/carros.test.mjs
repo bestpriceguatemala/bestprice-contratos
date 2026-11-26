@@ -6,7 +6,9 @@ import {
   construirVehiculo, mensajesDeFalloDeCarros, htmlListaVaciaDeCarros, textoCarroNoEncontrado,
   htmlAvisoDePlacas, formularioHTML,
 } from '../js/pantallas/carros.js';
-import { loQueSePierdeAlBorrarElCarro, textoConfirmarBorrarElCarro } from '../js/nucleo/carro.js';
+import {
+  loQueSePierdeAlBorrarElCarro, textoConfirmarBorrarElCarro, carrosAjenosUsados,
+} from '../js/nucleo/carro.js';
 
 test('construirVehiculo: un carro nuevo tiene propiedad Propio y sin fuera de servicio', () => {
   const campos = {
@@ -282,4 +284,79 @@ test('textoConfirmarBorrarElCarro: sin historial no inventa pérdidas que no hay
   assert.doesNotMatch(t, /servicio/i);
   assert.doesNotMatch(t, /reservaci/i);
   assert.doesNotMatch(t, /OJO/);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Los carros ajenos (subarrendados) que ya se usaron
+// ---------------------------------------------------------------------------------------------------
+// Decisión suya del 26 de noviembre de 2026: «que no me estorben con mi flotilla pero que se queden
+// guardados para cualquier ocasión». No se guardan en ninguna colección nueva: se sacan de los contratos,
+// que es donde un carro ajeno vive desde siempre.
+
+const ajeno = (placas, campos = {}, contrato = {}) => ({
+  id: `c-${placas}`,
+  fechaSalida: '2026-05-01',
+  carroAjeno: { placas, tipo: 'Sedán', marca: 'Toyota', color: 'Gris', modelo: '2020', dueno: 'Don Beto', ...campos },
+  duenoId: 'd-beto',
+  ...contrato,
+});
+
+test('carrosAjenosUsados: sin contratos, sin nada, y no revienta con basura', () => {
+  for (const nada of [undefined, null, [], 'x', {}]) {
+    assert.deepEqual(carrosAjenosUsados(nada), []);
+  }
+});
+
+test('carrosAjenosUsados: un contrato de carro PROPIO no aporta ningún ajeno', () => {
+  const propios = [{ id: 'c1', carroId: 'v1', carroPlacas: 'P-111AAA', carroAjeno: null }];
+  assert.deepEqual(carrosAjenosUsados(propios), []);
+});
+
+test('carrosAjenosUsados: el mismo carro en tres contratos sale UNA vez', () => {
+  const lista = carrosAjenosUsados([ajeno('P-222BBB'), ajeno('P-222BBB'), ajeno('P-222BBB')]);
+  assert.equal(lista.length, 1);
+  assert.equal(lista[0].placas, 'P-222BBB');
+});
+
+test('carrosAjenosUsados: las mismas placas escritas distinto son EL MISMO carro', () => {
+  // Él las escribe «P-222BBB», «p 222 bbb» y «P222BBB» el mismo mes. Si cada forma fuera un carro distinto,
+  // la lista se llenaría de duplicados del mismo vehículo y dejaría de servir.
+  const lista = carrosAjenosUsados([ajeno('P-222BBB'), ajeno('p 222 bbb'), ajeno('P222BBB')]);
+  assert.equal(lista.length, 1, 'uno solo');
+});
+
+test('carrosAjenosUsados: gana el contrato MÁS NUEVO, no el primero que apareció', () => {
+  // Si el dueño del carro cambió, lo que se ofrece tiene que ser el último que se vio: ofrecer el viejo
+  // haría que el pago del subarriendo se le anote a quien ya no es.
+  const lista = carrosAjenosUsados([
+    ajeno('P-333CCC', { dueno: 'Don Beto' }, { fechaSalida: '2026-01-10', duenoId: 'd-beto' }),
+    ajeno('P-333CCC', { dueno: 'Doña Mila' }, { fechaSalida: '2026-09-20', duenoId: 'd-mila' }),
+  ]);
+  assert.equal(lista.length, 1);
+  assert.equal(lista[0].dueno, 'Doña Mila', 'el del contrato más nuevo');
+  assert.equal(lista[0].duenoId, 'd-mila');
+});
+
+test('carrosAjenosUsados: el más usado recientemente va primero', () => {
+  const lista = carrosAjenosUsados([
+    ajeno('P-111AAA', {}, { fechaSalida: '2026-02-01' }),
+    ajeno('P-333CCC', {}, { fechaSalida: '2026-11-01' }),
+    ajeno('P-222BBB', {}, { fechaSalida: '2026-07-01' }),
+  ]);
+  assert.deepEqual(lista.map((c) => c.placas), ['P-333CCC', 'P-222BBB', 'P-111AAA']);
+});
+
+test('carrosAjenosUsados: trae lo que hace falta para rellenar el formulario, y NO el costo por día', () => {
+  // El costo por día vive detrás de la contraseña de dinero (`subarriendo`), y esta lista se arma en el
+  // mostrador. Traerlo aquí lo sacaría de donde está guardado a propósito.
+  const [c] = carrosAjenosUsados([ajeno('P-444DDD', {}, { subarriendo: { costoDia: 250 } })]);
+  assert.deepEqual(Object.keys(c).sort(), ['color', 'dueno', 'duenoId', 'marca', 'modelo', 'placas', 'tipo']);
+  assert.equal(c.marca, 'Toyota');
+  assert.equal(c.dueno, 'Don Beto');
+});
+
+test('carrosAjenosUsados: un ajeno sin una placa de VERDAD no entra', () => {
+  // La misma regla que para la flota (`claveDeNumero`): una placa siempre trae al menos un dígito. Dos
+  // carros «sin placas» o dos «N/A» no son el mismo carro, así que no se agrupan ni se ofrecen.
+  assert.deepEqual(carrosAjenosUsados([ajeno(''), ajeno('   '), ajeno('N/A'), ajeno('ninguno')]), []);
 });

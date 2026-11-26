@@ -29,6 +29,7 @@ import { lecturaConNubeDetras } from '../nucleo/lecturas.js';
 // Se vuelve a exportar desde aquí: es lo que esta pantalla usa y donde sus pruebas lo buscan primero.
 export { lecturaConNubeDetras };
 import { estadoReserva } from '../nucleo/reserva.js';
+import { carrosAjenosUsados } from '../nucleo/carro.js';
 import { devolucionPrevista, hoyISO, esFechaISO } from '../nucleo/fechas.js';
 import { q, suma, recargoTarjeta } from '../nucleo/dinero.js';
 import {
@@ -439,10 +440,16 @@ export function textoFalloAlGuardarElContrato(error) {
  */
 export function motivoParaNoGuardar({
   hayCliente, ajeno, hayCarroPropio, falloFlota = false, placasAjeno, fechaSalida, dias, precioDia, empleado = null,
-  listaDeEmpleados = { leida: true, fallo: false, cantidad: 1 }, cobrosExtra = {},
+  listaDeEmpleados = { leida: true, fallo: false, cantidad: 1 }, cobrosExtra = {}, seEntroSinCarro = false,
 }) {
   if (!hayCliente) return 'Elige o da de alta un cliente antes de guardar.';
   if (!ajeno && !hayCarroPropio) {
+    // Son dos situaciones distintas y decirlas al revés manda a dar una vuelta de balde: quien entró por
+    // «Nuevo contrato» (#/sacar, sin carro) todavía no ha escogido ninguno, así que «vuelve a la flota» no
+    // es lo que tiene que hacer — tiene que escoger aquí mismo. (26 de noviembre de 2026.)
+    if (seEntroSinCarro && !falloFlota) {
+      return 'Escoge un carro de la flota, o marca «Carro ajeno» si es subarrendado.';
+    }
     return falloFlota
       ? 'No se pudo leer la flota, así que no se sabe si este carro está disponible. Revisa tu conexión e intenta de nuevo.'
       : 'Este carro ya no está disponible. Vuelve a la flota e intenta de nuevo.';
@@ -1124,11 +1131,31 @@ export function plantilla() {
 
         <section class="sc-bloque">
           <h2>2. Carro</h2>
+          <!--
+            Cuando se entra por «Nuevo contrato» (#/sacar, sin carro) el carro todavía está por escoger: la
+            flota ya está en memoria, así que es un selector y no un buscador de la nube — no gasta ni una
+            lectura más. Si se entró por «Sacar carro» de un carro, este selector no se dibuja.
+          -->
+          <div class="sc-campo ancho" id="sc-carro-escoger-campo" hidden>
+            <label class="sc-campo ancho">¿Cuál carro de la flota?
+              <select id="sc-carro-escoger"><option value="">— Escoge el carro —</option></select>
+            </label>
+          </div>
           <div id="sc-carro-info" class="sc-carro-info">Cargando...</div>
           <label class="sc-checkbox">
             <input type="checkbox" id="sc-ajeno"> Carro ajeno (no es de la flota propia)
           </label>
           <div id="sc-ajeno-campos" class="sc-campos" hidden>
+            <!--
+              Los subarrendados que ya se usaron antes, para no reescribirlos. Salen de los contratos
+              anteriores (ahí vive un carro ajeno desde siempre), no de una colección nueva: así quedan
+              guardados sin entrar a la flota. Decisión suya del 26 de noviembre de 2026.
+            -->
+            <div class="sc-campo ancho" id="sc-ajeno-usados-campo" hidden>
+              <label class="sc-campo ancho">¿Ya lo has rentado antes?
+                <select id="sc-ajeno-usados"><option value="">— Escribirlo a mano —</option></select>
+              </label>
+            </div>
             ${campo('sc-ajeno-placas', 'Placas')}
             ${campo('sc-ajeno-tipo', 'Tipo de vehículo')}
             ${campo('sc-ajeno-marca', 'Marca')}
@@ -1417,6 +1444,10 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // El empleado que rentó, escogido de la lista de activos (por código o por nombre). De él salen el id, el nombre y el
   // porcentaje de comisión que se sellan en el contrato; el mostrador no los escribe ni ve el porcentaje (§12b).
   let empleadoSeleccionado = null;
+  // Lo que él escogió en «¿Cuál carro de la flota?» (solo existe cuando se entró sin carro en la ruta).
+  let carroEscogidoId = '';
+  // Los ajenos ya usados que se están ofreciendo ahora, para poder rellenar el formulario con el escogido.
+  let ajenosUsados = [];
   let montoPagoTocado = false;
   let tarjetaTocada = false;
   let anticipoTarjetaTocada = false;
@@ -1455,7 +1486,10 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
   // Los lectores de campos viven fuera de la pantalla (lectorDeCampos) para
   // poder probar, con los mismos ids, lo que de verdad llega al contrato.
   const { val, num, texto, marcado } = lectorDeCampos(el);
-  const carroPropio = () => flota.find((c) => c.id === carroId) || null;
+  // El carro que él escogió en el selector, cuando entró por «Nuevo contrato» sin carro. El de la ruta
+  // manda si viene: entrar por «Sacar carro» de un carro no se puede cambiar por accidente.
+  const idDelCarro = () => carroId || carroEscogidoId;
+  const carroPropio = () => flota.find((c) => c.id === idDelCarro()) || null;
   // Lo que `motivoParaNoGuardar` necesita saber de la lista de empleados: si llegó, si falló y cuántos hay.
   const estadoDeLaListaDeEmpleados = () => {
     const { items, fallo, leida } = listaDeEmpleados.estado();
@@ -1484,16 +1518,47 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     numero,
   );
 
+  /** Las opciones de un `<select>`, sin perder lo que ya estaba escogido. */
+  function ponerOpciones(id, opciones, primera) {
+    const sel = el(id);
+    const antes = sel.value;
+    sel.innerHTML = [`<option value="">${esc(primera)}</option>`,
+      ...opciones.map((o) => `<option value="${esc(o.valor)}">${esc(o.texto)}</option>`)].join('');
+    sel.value = opciones.some((o) => String(o.valor) === antes) ? antes : '';
+  }
+
   function refrescarCarro() {
     const caja = el('sc-carro-info');
     const ajeno = marcado('sc-ajeno');
     el('sc-ajeno-campos').hidden = !ajeno;
+    // El selector de la flota solo cuando se entró SIN carro y no es ajeno: con el carro ya decidido por la
+    // ruta no hay nada que escoger, y con «carro ajeno» marcado la flota no viene al caso.
+    el('sc-carro-escoger-campo').hidden = Boolean(carroId) || ajeno;
+    if (!carroId && !ajeno) {
+      ponerOpciones('sc-carro-escoger', flota
+        .filter((c) => !c.fueraDeServicio)
+        .map((c) => ({ valor: c.id, texto: [c.codigo, c.placas, c.marca, c.linea].filter(Boolean).join(' · ') })),
+        flota.length ? '— Escoge el carro —' : 'No hay carros en la flota');
+    }
     if (ajeno) {
+      const usados = carrosAjenosUsados(historial?.datos ?? []);
+      el('sc-ajeno-usados-campo').hidden = !usados.length;
+      if (usados.length) {
+        ajenosUsados = usados;
+        ponerOpciones('sc-ajeno-usados',
+          usados.map((c, i) => ({ valor: String(i), texto: [c.placas, c.marca, c.modelo, c.dueno && `(${c.dueno})`].filter(Boolean).join(' · ') })),
+          '— Escribirlo a mano —');
+      }
       caja.hidden = true;
       return;
     }
     caja.hidden = false;
     const carro = carroPropio();
+    if (!carro && !carroId) {
+      caja.className = 'sc-carro-info';
+      caja.textContent = 'Escoge un carro de la flota, o marca «Carro ajeno» si es subarrendado.';
+      return;
+    }
     if (!carro) {
       caja.className = 'sc-carro-info sc-carro-aviso';
       caja.textContent = textoCarroPropioNoEncontrado(falloFlota);
@@ -1962,6 +2027,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
       hayCliente: Boolean(clienteSeleccionado),
       ajeno,
       hayCarroPropio: Boolean(carroPropio()),
+      seEntroSinCarro: !carroId,
       falloFlota,
       placasAjeno: texto('sc-ajeno-placas'),
       fechaSalida: texto('sc-fecha-salida'),
@@ -2062,6 +2128,27 @@ export async function pintarSacarCarro(contenedor, parametroRuta) {
     if (ev.target.id === 'sc-ajeno') {
       refrescarCarro();
       if (marcado('sc-ajeno')) buscadorDuenos.pedir();
+    }
+    // Escoger el carro de la flota: cambia el carro del contrato y vuelve a calcular todo (los avisos de
+    // cruce con reservaciones y con otros contratos son DE ESE carro, así que no sirven los del anterior).
+    if (ev.target.id === 'sc-carro-escoger') {
+      carroEscogidoId = ev.target.value;
+      refrescarCarro();
+      recalcular();
+    }
+    // Escoger uno de los ajenos ya usados: rellena los campos con lo ÚLTIMO que se vio de ese carro. Queda
+    // todo editable: si el dueño le cambió el color o las placas, él lo corrige antes de guardar, y lo que
+    // se guarda es lo que esté escrito, no lo que se rellenó.
+    if (ev.target.id === 'sc-ajeno-usados') {
+      const elegido = ajenosUsados[Number(ev.target.value)];
+      if (elegido) {
+        el('sc-ajeno-placas').value = elegido.placas ?? '';
+        el('sc-ajeno-tipo').value = elegido.tipo ?? '';
+        el('sc-ajeno-marca').value = elegido.marca ?? '';
+        el('sc-ajeno-color').value = elegido.color ?? '';
+        el('sc-ajeno-modelo').value = elegido.modelo ?? '';
+        recalcular();
+      }
     }
     if (ev.target.id === 'sc-t2-agregar') el('sc-t2-campos').hidden = !marcado('sc-t2-agregar');
     if (ev.target.id === 'sc-nc-mas-datos') el('sc-nc-mas-datos-campos').hidden = !marcado('sc-nc-mas-datos');

@@ -15,6 +15,8 @@
 import { CAMPOS_DEL_MANTENIMIENTO } from './mantenimiento.js';
 // `estadoReserva` es la ÚNICA copia de qué cuenta como reservación pendiente: se reusa, no se repite.
 import { estadoReserva } from './reserva.js';
+// `claveDeNumero` es la ÚNICA copia de cuándo dos placas son la misma: se reusa, no se repite.
+import { claveDeNumero } from './repetidos.js';
 
 /** Las dos marcas del taller. Las escriben SOLO `carroFueraDeServicio` y `carroHabilitado`. */
 export const CAMPOS_DE_LA_DISPONIBILIDAD = Object.freeze(['fueraDeServicio', 'motivoFueraDeServicio']);
@@ -136,4 +138,48 @@ export function textoDeLoQueNoSePudoLeer({ contratos = false, reservas = false }
   if (!faltan.length) return '';
   return `OJO: no se pudieron leer ${faltan.join(' ni ')}, así que esta cuenta puede estar incompleta: `
     + 'puede haber más de lo que dice aquí.';
+}
+
+/**
+ * Los carros ajenos (subarrendados) que ya se usaron antes, para poder volver a escogerlos sin reescribirlos.
+ *
+ * Decisión suya, 26 de noviembre de 2026: «que no me estorben con mi flotilla pero que se queden guardados
+ * para cualquier ocasión». Por eso NO se guardan en ninguna colección nueva: se sacan de los contratos que
+ * ya se leyeron, que es donde un carro ajeno vive desde siempre (`contrato.carroAjeno`). Así quedan
+ * guardados, no entran a la flota, no gastan ni una lectura de Firebase más, y no hay una copia aparte que
+ * se pueda desactualizar.
+ *
+ * Se agrupan por placas con `claveDeNumero` (repetidos.js), la MISMA llave con la que el sistema decide si
+ * dos carros de la flota son el mismo: «P-222BBB», «p 222 bbb» y «P222BBB» son un solo carro. No se repite
+ * la regla aquí; si algún día cambia, cambia en los dos lugares a la vez. Gana el contrato MÁS NUEVO: si el dueño o el costo por día cambiaron, lo que se ofrece es lo último que se vio,
+ * no lo primero. El costo por día NO viene aquí: vive detrás de la contraseña de dinero (`subarriendo`), y
+ * esta lista se arma en el mostrador.
+ */
+export function carrosAjenosUsados(contratos = []) {
+  const porPlacas = new Map();
+  for (const c of Array.isArray(contratos) ? contratos : []) {
+    const a = c?.carroAjeno;
+    const placas = claveDeNumero(a?.placas);
+    // Sin una placa de verdad no hay con qué reconocerlo (`claveDeNumero` da '' para un «N/A»), y dos así
+    // no son el mismo carro: no entran.
+    if (!placas) continue;
+    const cuando = String(c?.fechaSalida ?? '');
+    const previo = porPlacas.get(placas);
+    if (previo && String(previo.cuando) >= cuando) continue;
+    porPlacas.set(placas, {
+      cuando,
+      carro: {
+        placas: a.placas,
+        tipo: a.tipo ?? '',
+        marca: a.marca ?? '',
+        color: a.color ?? '',
+        modelo: a.modelo ?? '',
+        dueno: a.dueno ?? '',
+        duenoId: c?.duenoId ?? null,
+      },
+    });
+  }
+  return [...porPlacas.values()]
+    .sort((x, y) => String(y.cuando).localeCompare(String(x.cuando)))
+    .map((x) => x.carro);
 }
