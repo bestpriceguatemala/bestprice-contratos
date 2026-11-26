@@ -4646,3 +4646,16 @@ test('dueños: si la SESIÓN se cerró mientras anulaba, no se escribe en memori
   assert.ok(!leida.pagos.datos.some((x) => x.id === 'colado'), 'lo que volvió con la sesión cerrada no entra');
   assert.ok(p.dichos.every((d) => !/Pago anulado/.test(d.texto)), 'y no se canta la anulación');
 });
+
+test('dueños: tras un fallo de lectura, APRETAR «Volver a leer» vuelve a leer', async () => {
+  // Ya había una prueba de que el botón se DIBUJA con la lectura caída, pero ninguna de que apretarlo
+  // haga algo: el único error que sobrevivía en el oyente de «click» de esta pantalla era borrarle el
+  // nombre al `case 'reintentar'`, y nadie se daba cuenta. Es el botón del que depende salir de una
+  // pantalla en rojo sin recargar el navegador. (26 de noviembre de 2026.)
+  const p = await pantallaDeDinero({ lectura: lecturaOk({ pagos: { datos: null, fallo: true } }) });
+  assert.ok(p.hay('[data-dn="reintentar"]'));
+  assert.equal(p.lecturas.length, 1, 'se leyó una vez al entrar');
+  p.clic('[data-dn="reintentar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.lecturas.length, 2, 'y apretarlo lee otra vez');
+});
