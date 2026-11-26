@@ -1504,7 +1504,9 @@ async function pintarCuentas(contenedor, claveDeFicha, {
     ui.ocupado = true;
     try {
       const r = await anular({ pago, hoy: ahora() });
-      if (!elLector.actual) return;
+      // Es dinero, y se suelta con la sesión: si Firebase la cerró mientras esto viajaba, lo que
+      // volvió no se escribe en memoria y se pide la contraseña otra vez. (26 de noviembre de 2026.)
+      if (!haySesion() || !elLector.actual) return;
       elLector.actual.pagos.datos = r.pagos;
       if (r.tipo === 'no-esta') avisar(MENSAJE_ANULAR_COMISION_NO_ESTA, 'error');
       else {

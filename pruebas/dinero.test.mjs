@@ -4578,14 +4578,16 @@ test('dueños: si la SESIÓN se cerró mientras guardaba el pago, no se escribe 
       return { tipo: 'guardado', pago: { id: 'pg-9', numero: 9 }, pagos: [{ id: 'colado' }] };
     },
   });
+  // Se mira la lectura CAPTURADA, no `p.lector.actual`: al cerrarse la sesión el lector se suelta, y leer
+  // a través de él daría una lista vacía que no puede fallar nunca (teatro).
+  const leida = p.lector.actual;
   p.marcar(LA_RENTA('m1'));
   p.clic('[data-dn="registrar"]');
   p.lanzar('change', '#dn-fecha', { value: HOY });
   p.clic('#dn-guardar-pago');
   await new Promise((ok) => { setTimeout(ok, 0); });
-  const pagos = p.lector.actual?.pagos?.datos ?? [];
-  assert.ok(!pagos.some((x) => x.id === 'colado'), 'lo que llegó con la sesión cerrada no entra');
-  assert.equal(p.lector.actual, null, 'y lo que había se suelta');
+  assert.ok(!leida.pagos.datos.some((x) => x.id === 'colado'), 'lo que llegó con la sesión cerrada no entra');
+  assert.equal(p.lector.actual, null, 'y lo que había se suelta: haySesion() olvida la lectura y pide la contraseña');
   assert.ok(p.dichos.every((d) => !/Pago registrado/.test(d.texto)), 'no se canta un pago sobre una pantalla cerrada');
 });
 
@@ -4603,4 +4605,44 @@ test('dueños: si la SESIÓN se cerró mientras enlazaba, el alta se cierra pero
   assert.ok(!t1 || t1.duenoId === null || t1.duenoId === undefined, 'el contrato no queda enlazado en memoria');
   assert.ok(p.dichos.every((d) => !/Contratos enlazados/.test(d.texto)), 'y no se canta el enlace');
   assert.deepEqual(p.direcciones, [], 'ni se cambia la dirección de la cuenta');
+});
+
+test('dueños: si la SESIÓN se cerró mientras anotaba el costo, no se escribe en memoria', async () => {
+  // Misma regla que al registrar y al enlazar: el costo del dueño vive detrás de la contraseña de dinero,
+  // así que si Firebase cerró la sesión mientras el costo viajaba, lo escrito en la nube ya quedó, pero la
+  // pantalla no lo pone en memoria ni canta «Costo anotado». (26 de noviembre de 2026.)
+  const anotados = [];
+  const p = await pantallaDeDinero({
+    clave: CLAVE_MARIO,
+    anotarCosto: async (contrato, costo) => { anotados.push({ id: contrato.id, costo }); p.cerrarLaSesion(); return costo; },
+  });
+  const leida = p.lector.actual;
+  const comoEstaba = leida.contratos.datos;
+  p.clic('[data-dn="anotar-costo"][data-id="m5"]');
+  p.buscar('#dn-costo-input').value = '350';
+  p.clic('[data-dn="guardar-costo"][data-id="m5"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(anotados, [{ id: 'm5', costo: 350 }], 'el costo SÍ llegó a la nube: la prueba no pasa por no haber apretado');
+  assert.equal(leida.contratos.datos, comoEstaba, 'pero la lista en memoria queda como estaba');
+  assert.ok(p.dichos.every((d) => !/Costo anotado/.test(d.texto)), 'y no se canta el costo');
+});
+
+test('dueños: si la SESIÓN se cerró mientras anulaba, no se escribe en memoria', async () => {
+  const anuladas = [];
+  const p = await pantallaDeDinero({
+    clave: 'id:d2',
+    responder: () => true,
+    anular: async (args) => {
+      anuladas.push(args);
+      p.cerrarLaSesion();
+      return { tipo: 'anulado', pago: { numero: 4 }, pagos: [{ id: 'colado' }] };
+    },
+  });
+  const leida = p.lector.actual;
+  const anularEn = p.raiz.querySelectorAll('[data-dn]').find((n) => n.dataset.dn === 'anular-pago');
+  p.lanzar('click', anularEn);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(anuladas.length, 1, 'la anulación SÍ viajó a la nube');
+  assert.ok(!leida.pagos.datos.some((x) => x.id === 'colado'), 'lo que volvió con la sesión cerrada no entra');
+  assert.ok(p.dichos.every((d) => !/Pago anulado/.test(d.texto)), 'y no se canta la anulación');
 });

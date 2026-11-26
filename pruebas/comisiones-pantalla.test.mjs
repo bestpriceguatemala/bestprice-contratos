@@ -1742,3 +1742,22 @@ test('enlazar: si la SESIÓN se cerró mientras enlazaba, no se escribe en memor
   assert.equal(p.lector.actual, null, 'lo leído se suelta');
   assert.ok(p.dichos.every((d) => !/Rentas enlazadas/.test(d.texto)), 'y no se canta el enlace');
 });
+
+test('comisiones: si la SESIÓN se cerró mientras anulaba, no se escribe en memoria', async () => {
+  // Igual que al registrar y al enlazar: es dinero y se suelta con la sesión. (26 de noviembre de 2026.)
+  const anuladas = [];
+  const { p } = await conUnPagoHecho({
+    anular: async (args) => {
+      anuladas.push(args);
+      p.cerrarLaSesion();
+      return { tipo: 'anulado', pago: { numero: 5 }, pagos: [{ id: 'colado' }] };
+    },
+  });
+  const leida = p.lector.actual;
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'anular-pago');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(anuladas.length, 1, 'la anulación SÍ viajó a la nube');
+  assert.ok(!leida.pagos.datos.some((x) => x.id === 'colado'), 'lo que volvió con la sesión cerrada no entra');
+  assert.ok(p.dichos.every((d) => !/Pago anulado/.test(d.texto)), 'y no se canta la anulación');
+});
