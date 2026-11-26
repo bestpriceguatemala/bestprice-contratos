@@ -1413,3 +1413,100 @@ test('comisiones: anular dos veces de un clic doble solo anula una', async () =>
   assert.equal(p.anulaciones.length, 1);
   assert.equal(p.preguntas.length, 1, 'ni vuelve a preguntar');
 });
+
+// ---------------------------------------------------------------------------
+// Marcar rentas: la casilla de cada fila y la de «todas»
+// ---------------------------------------------------------------------------
+// 36 de los 43 errores del manejador de `change` pasaban sin que nada se pusiera rojo: es el pedazo con
+// más huecos de esta pantalla, y es el que decide CUÁNTO se le va a pagar al empleado.
+
+/** La ficha de Ana con tres rentas firmes, todas pagables. */
+async function conTresRentas(opciones = {}) {
+  const lectura = lecturaOk({ contratos: [firme('a1'), firme('a2', { numero: 2 }), firme('a3', { numero: 3 })] });
+  const p = await pantallaDeComisiones({ lectura, clave: 'id:e1', ...opciones });
+  const casillas = () => p.raiz.querySelectorAll('[data-cm="marcar"]');
+  const todas = () => p.buscar('[data-cm="marcar-todas"]');
+  const total = () => p.buscar('#dn-total-marcado')?.textContent;
+  return { p, casillas, todas, total };
+}
+
+test('marcar: cada casilla suma lo suyo al total de lo marcado', async () => {
+  const { p, casillas, total } = await conTresRentas();
+  assert.equal(casillas().length, 3, 'el control: tres rentas pagables');
+  p.lanzar('change', casillas()[0], { checked: true });
+  const unaSola = total();
+  p.lanzar('change', casillas()[1], { checked: true });
+  assert.notEqual(total(), unaSola, 'con dos marcadas el total cambia');
+  p.lanzar('change', casillas()[1], { checked: false });
+  assert.equal(total(), unaSola, 'y al desmarcar vuelve');
+});
+
+test('marcar: «todas» marca TODAS las que se pueden pagar, y desmarcarla las suelta', async () => {
+  const { p, casillas, todas, total } = await conTresRentas();
+  p.lanzar('change', todas(), { checked: true });
+  assert.deepEqual(casillas().map((c) => c.checked), [true, true, true], 'las tres quedan marcadas');
+  const conTodas = total();
+  p.lanzar('change', todas(), { checked: false });
+  assert.deepEqual(casillas().map((c) => c.checked), [false, false, false]);
+  assert.notEqual(total(), conTodas, 'y el total vuelve a cero');
+  assert.equal(total(), 'Q0.00');
+});
+
+test('marcar: la casilla de «todas» se marca sola cuando ya están todas, y se suelta si falta una', async () => {
+  // Si no siguiera a las de abajo, él vería «todas» sin marcar con todo marcado, o al revés — y una
+  // casilla que miente sobre lo que está marcado es una cifra que no cuadra con lo que se va a pagar.
+  const { p, casillas, todas } = await conTresRentas();
+  for (const c of casillas()) p.lanzar('change', c, { checked: true });
+  assert.equal(todas().checked, true, 'con las tres marcadas, «todas» se marca sola');
+  p.lanzar('change', casillas()[1], { checked: false });
+  assert.equal(todas().checked, false, 'y al quitar una, se suelta');
+});
+
+test('marcar: en una cuenta SIN rentas que pagar, «todas» no se marca sola', async () => {
+  // `filas.length > 0` en `sincronizarCasillas`: sin ese guardia, una cuenta vacía dibuja «todas»
+  // marcada —porque «todas las de la lista» de una lista vacía es cierto— y eso se lee como si hubiera
+  // algo marcado cuando no hay nada.
+  const lectura = lecturaOk({ contratos: [abierta('a9')] }); // el carro sigue afuera: no se puede pagar
+  const p = await pantallaDeComisiones({ lectura, clave: 'id:e1' });
+  const todas = p.buscar('[data-cm="marcar-todas"]');
+  if (todas) assert.equal(todas.checked, false, 'no se marca sola sobre una lista vacía');
+  assert.equal(p.raiz.querySelectorAll('[data-cm="marcar"]').length, 0, 'el control: no hay nada que marcar');
+});
+
+test('marcar: lo que se escoge en el formulario queda apuntado al instante', async () => {
+  const p = await conElPagoAbierto();
+  p.lanzar('change', '#dn-forma', { value: 'transferencia' });
+  p.lanzar('change', '#dn-fecha', { value: '2026-10-18' });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.pagos.at(-1).forma, 'transferencia');
+  assert.equal(p.pagos.at(-1).fecha, '2026-10-18');
+});
+
+test('marcar: el empleado y el porcentaje del enlace quedan apuntados al escogerlos', async () => {
+  const { p } = await conUnaCuentaAMano({ responder: () => false });
+  p.lanzar('change', '#cm-enlazar-empleado', { value: 'e16' });
+  p.lanzar('change', '#cm-enlazar-porcentaje', { checked: true });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'enlazar');
+  p.lanzar('click', boton);
+  assert.equal(p.preguntas.length, 1, 'con el empleado apuntado ya se puede preguntar');
+  assert.match(p.preguntas[0], /Luis Mérida/, 'el que él escogió');
+});
+
+test('marcar: el empleado escogido NO se pierde si OTRA COSA redibuja la pantalla', async () => {
+  // Para esto sirve apuntarlo. `enlazar()` lee el campo por su cuenta al apretar, así que no hace falta
+  // para enlazar; hace falta para cuando él escoge al empleado y, antes de apretar Enlazar, pasa otra
+  // cosa que redibuja la ficha (aquí, bajar el Excel). Sin lo apuntado, el desplegable vuelve a «Escoge
+  // un empleado» y la casilla del porcentaje se destilda: él tendría que buscarlo otra vez, y podría
+  // escoger a otro sin darse cuenta.
+  const { p } = await conUnaCuentaAMano();
+  p.lanzar('change', '#cm-enlazar-empleado', { value: 'e16' });
+  p.lanzar('change', '#cm-enlazar-porcentaje', { checked: true });
+
+  const bajar = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'bajar');
+  p.lanzar('click', bajar);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+
+  assert.match(p.html(), /<option value="e16" selected>/, 'Luis Mérida sigue escogido');
+  assert.match(p.html(), /id="cm-enlazar-porcentaje" checked/, 'y la casilla del porcentaje sigue marcada');
+});
