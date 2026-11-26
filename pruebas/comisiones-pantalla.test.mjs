@@ -984,6 +984,7 @@ async function pantallaDeComisiones({
   anular,
   bajarElExcel,
   leerElPago,
+  enlazarAlEmpleado,
   dibujarComprobante,
 } = {}) {
   const p = pantallaDeMentira();
@@ -1000,6 +1001,7 @@ async function pantallaDeComisiones({
   const bajadas = [];
   const comprobantes = [];
   const rutasMostradas = [];
+  const enlaces = [];
   let rutaActual = clave === null ? '#/dinero/comisiones' : `#/dinero/comisiones/${encodeURIComponent(clave)}`;
   let sesionAbierta = sesion;
   const aparatos = {
@@ -1021,11 +1023,12 @@ async function pantallaDeComisiones({
     }),
     leerElPago: leerElPago ?? (async (args) => ({ tipo: 'esta', pago: { id: args.pagoId, numero: 5, monto: 100 }, pagos: [] })),
     dibujarComprobante: dibujarComprobante ?? ((_caja, modelo) => comprobantes.push(modelo)),
+    enlazarAlEmpleado: enlazarAlEmpleado ?? (async (ids, empleadoId, extra) => { enlaces.push({ ids, empleadoId, ...extra }); }),
   };
   if (clave === null) await pintarComisiones(p.contenedor, aparatos);
   else await pintarComisionesDeEmpleado(p.contenedor, clave, aparatos);
   return {
-    ...p, lector, lecturas, preguntas, dichos, pagos, anulaciones, bajadas, comprobantes, rutasMostradas,
+    ...p, lector, lecturas, preguntas, dichos, pagos, anulaciones, bajadas, comprobantes, rutasMostradas, enlaces,
     ruta: () => rutaActual,
     cerrarLaSesion() { sesionAbierta = false; },
   };
@@ -1193,3 +1196,220 @@ test('el cableado: «Ver comprobante» dos veces de un clic doble solo lee una v
 });
 
 
+
+// ---------------------------------------------------------------------------
+// Registrar el pago de una comisión
+// ---------------------------------------------------------------------------
+
+/** La ficha de Ana con una renta firme marcada y el formulario de pago abierto. */
+async function conElPagoAbierto(opciones = {}) {
+  const lectura = lecturaOk({ contratos: [firme('a1')] });
+  const p = await pantallaDeComisiones({ lectura, clave: 'id:e1', ...opciones });
+  const casilla = p.raiz.querySelectorAll('[data-cm="marcar"]')[0];
+  if (casilla) p.lanzar('change', casilla, { checked: true });
+  const registrar = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'registrar');
+  p.lanzar('click', registrar);
+  return p;
+}
+
+test('comisiones: lo que se guarda se LEE del formulario al guardar', async () => {
+  // La misma regla de la pantalla de dueños y de `hora24`: no puede depender de que un evento del
+  // navegador haya alcanzado a correr.
+  const p = await conElPagoAbierto();
+  p.buscar('#dn-fecha').value = '2026-10-19';
+  p.buscar('#dn-forma').value = 'cheque';
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.pagos.at(-1).fecha, '2026-10-19');
+  assert.equal(p.pagos.at(-1).forma, 'cheque');
+});
+
+test('comisiones: una fecha que todavía no llega NO gasta un número de comprobante', async () => {
+  const p = await conElPagoAbierto();
+  p.buscar('#dn-fecha').value = '2062-01-05';
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(p.pagos, []);
+  assert.match(p.html(), /La fecha del pago todavía no llega/);
+});
+
+test('comisiones: el pago lleva la lista de EMPLEADOS, que es de donde sale el porcentaje', async () => {
+  const p = await conElPagoAbierto();
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  const empleados = p.pagos.at(-1).empleados;
+  assert.equal(empleados.fallo, false);
+  assert.ok(empleados.datos.some((e) => e.id === 'e1'), 'con el empleado de esta cuenta adentro');
+});
+
+test('comisiones: al registrar se le dice el MONTO y el número de comprobante', async () => {
+  const p = await conElPagoAbierto({
+    pagar: async () => ({ tipo: 'guardado', pago: { id: 'pc-9', numero: 9, monto: 140 }, pagos: [] }),
+  });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.match(p.dichos.at(-1).texto, /Pago registrado: Q140\.00\. Comprobante N\.° 9\./);
+  assert.equal(p.dichos.at(-1).tipo, 'exito');
+});
+
+test('comisiones: uno que YA ESTABA registrado se dice distinto', async () => {
+  const p = await conElPagoAbierto({
+    pagar: async () => ({ tipo: 'ya-guardado', pago: { id: 'pc-9', numero: 9, monto: 140 }, pagos: [] }),
+  });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.match(p.dichos.at(-1).texto, /Ese pago ya estaba registrado \(comprobante N\.° 9\)/);
+  assert.doesNotMatch(p.dichos.at(-1).texto, /Pago registrado:/);
+});
+
+test('comisiones: si la cuenta CAMBIÓ, el formulario se queda abierto y lo marcado se suelta', async () => {
+  const p = await conElPagoAbierto({ pagar: async () => ({ tipo: 'cambio', pagos: [] }) });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.ok(p.hay('#dn-guardar-pago'), 'sigue abierto');
+  assert.match(p.html(), /Mientras tanto cambió la cuenta de este empleado/);
+  assert.ok(!p.dichos.some((d) => /Pago registrado/.test(d.texto)));
+});
+
+test('comisiones: el reintento lleva la MISMA marca, para no pagar dos veces', async () => {
+  let falla = true;
+  const marcas = [];
+  const p = await conElPagoAbierto({
+    pagar: async (args) => {
+      marcas.push(args.enCurso);
+      if (falla) throw new Error('se cayó el internet');
+      return { tipo: 'guardado', pago: { id: 'pc-9', numero: 9, monto: 140 }, pagos: [] };
+    },
+  });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.match(p.html(), /No se pudo registrar el pago/);
+  falla = false;
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(marcas.length, 2);
+  assert.strictEqual(marcas[0], marcas[1], 'la misma marca, no una nueva');
+});
+
+// ---------------------------------------------------------------------------
+// Enlazar rentas viejas a un empleado de la lista
+// ---------------------------------------------------------------------------
+
+/** Una cuenta de antes de la lista de empleados: el nombre escrito a mano, sin `empleadoId`. */
+async function conUnaCuentaAMano(opciones = {}) {
+  const vieja = rentaDeAntes({ id: 'v1', rentadoPor: 'Pedro', recibidoEl: '2026-09-29' });
+  const lectura = lecturaOk({ contratos: [vieja] });
+  const p = await pantallaDeComisiones({ lectura, clave: 'texto:Pedro', ...opciones });
+  return { p, vieja };
+}
+
+test('comisiones: enlazar sin escoger a nadie no pregunta ni enlaza', async () => {
+  const { p } = await conUnaCuentaAMano();
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'enlazar');
+  assert.ok(boton, 'la cuenta a mano ofrece enlazarse');
+  p.lanzar('click', boton);
+  assert.deepEqual(p.preguntas, []);
+  assert.match(p.html(), /Escoge a qué empleado de la lista corresponde/);
+});
+
+test('comisiones: enlazar pregunta antes; un «no» no enlaza nada', async () => {
+  const { p } = await conUnaCuentaAMano({ responder: () => false });
+  p.buscar('#cm-enlazar-empleado').value = 'e1';
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'enlazar');
+  p.lanzar('click', boton);
+  assert.equal(p.preguntas.length, 1);
+  assert.match(p.preguntas[0], /Ana López/);
+});
+
+test('comisiones: al enlazar, las rentas quedan con su empleado en memoria y la cuenta cambia de dirección', async () => {
+  const { p } = await conUnaCuentaAMano();
+  p.buscar('#cm-enlazar-empleado').value = 'e1';
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'enlazar');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  const v1 = p.lector.actual.contratos.datos.find((c) => c.id === 'v1');
+  assert.equal(v1.empleadoId, 'e1');
+  assert.equal(p.ruta(), '#/dinero/comisiones/id%3Ae1', 'de «texto:» a «id:», sin volver a leer');
+  assert.ok(p.dichos.some((d) => /Rentas enlazadas/.test(d.texto)));
+});
+
+test('comisiones: al enlazar con porcentaje nuevo, SOLO las rentas sin pagar lo toman', async () => {
+  // Lo ya pagado no se toca: el empleado tiene su comprobante con la cifra de ese día, y cambiarle el
+  // porcentaje por detrás haría que su cuenta ya no cuadre con el papel que tiene en la mano.
+  const pagada = rentaDeAntes({ id: 'v1', rentadoPor: 'Pedro', recibidoEl: '2026-09-29' });
+  const sinPagar = rentaDeAntes({ id: 'v2', rentadoPor: 'Pedro', recibidoEl: '2026-09-30', numero: 2 });
+  const pago = { ...pagoDeComision({ id: 'pv1', monto: 140, contratos: ['v1'] }), numero: 1, detalle: [filaDeDetalle(pagada)] };
+  const lectura = lecturaOk({ contratos: [pagada, sinPagar], pagos: [pago] });
+  const p = await pantallaDeComisiones({ lectura, clave: 'texto:Pedro' });
+
+  p.buscar('#cm-enlazar-empleado').value = 'e16';          // Luis, que cobra 7.5 %
+  p.lanzar('change', '#cm-enlazar-porcentaje', { checked: true });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'enlazar');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+
+  assert.equal(p.enlaces.length, 1);
+  assert.deepEqual(p.enlaces[0].ids.sort(), ['v1', 'v2'], 'las dos se enlazan al empleado');
+  assert.deepEqual(p.enlaces[0].idsConPorcentaje, ['v2'], 'pero SOLO la que no se ha pagado toma el porcentaje nuevo');
+  assert.equal(p.enlaces[0].porcentajeComision, 7.5);
+
+  const enMemoria = Object.fromEntries(p.lector.actual.contratos.datos.map((c) => [c.id, c.porcentajeComision]));
+  assert.equal(enMemoria.v2, 7.5, 'la que no se había pagado queda con el porcentaje nuevo');
+  assert.equal(enMemoria.v1, 5, 'la pagada se queda con el que tenía: su comprobante ya salió así');
+});
+
+test('comisiones: sin marcar el porcentaje, ninguna renta lo cambia', async () => {
+  const { p } = await conUnaCuentaAMano();
+  p.buscar('#cm-enlazar-empleado').value = 'e16';
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'enlazar');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(p.enlaces[0].idsConPorcentaje, [], 'nadie toma el porcentaje nuevo');
+  const v1 = p.lector.actual.contratos.datos.find((c) => c.id === 'v1');
+  assert.equal(v1.porcentajeComision, 5, 'la renta se queda con el suyo');
+});
+
+// ---------------------------------------------------------------------------
+// Anular un pago de comisión
+// ---------------------------------------------------------------------------
+
+test('comisiones: anular pregunta antes; un «no» no anula nada', async () => {
+  const { p } = await conUnPagoHecho({ responder: () => false });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'anular-pago');
+  p.lanzar('click', boton);
+  assert.equal(p.preguntas.length, 1);
+  assert.deepEqual(p.anulaciones, []);
+});
+
+test('comisiones: anular avisa dónde queda el pago; uno YA anulado se dice distinto', async () => {
+  const { p } = await conUnPagoHecho({ anular: async () => ({ tipo: 'anulado', pago: { numero: 5 }, pagos: [] }) });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'anular-pago');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.match(p.dichos.at(-1).texto, /Pago anulado\. Queda en «Ya pagado», marcado como anulado/);
+
+  const otra = await conUnPagoHecho({ anular: async () => ({ tipo: 'ya-anulado', pago: { numero: 5 }, pagos: [] }) });
+  const suyo = otra.p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'anular-pago');
+  otra.p.lanzar('click', suyo);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.match(otra.p.dichos.at(-1).texto, /Ese pago ya estaba anulado/);
+});
+
+test('comisiones: anular uno que YA NO ESTÁ se avisa como error, nunca como éxito', async () => {
+  const { p } = await conUnPagoHecho({ anular: async () => ({ tipo: 'no-esta', pago: null, pagos: [] }) });
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'anular-pago');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.dichos.at(-1).tipo, 'error');
+  assert.ok(!p.dichos.some((d) => /Pago anulado\./.test(d.texto)));
+});
+
+test('comisiones: anular dos veces de un clic doble solo anula una', async () => {
+  const { p } = await conUnPagoHecho();
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'anular-pago');
+  p.lanzar('click', boton);
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.equal(p.anulaciones.length, 1);
+  assert.equal(p.preguntas.length, 1, 'ni vuelve a preguntar');
+});
