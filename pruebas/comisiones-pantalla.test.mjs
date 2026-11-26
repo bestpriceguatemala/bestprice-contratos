@@ -1896,3 +1896,14 @@ test('armarVistaDeComisiones: un empleado cuyo nombre son PUROS ESPACIOS cae al 
     assert.notEqual(e.nombre.trim(), '', `una fila sin nombre no dice a quién se le debe: ${JSON.stringify(e.nombre)}`);
   }
 });
+
+test('armarVistaDeComisiones: una ficha DAÑADA en la lista de empleados no tumba la pantalla', () => {
+  // El `e?.id` que filtra la lista: un documento nulo o sin id no es «no se pudo leer», y con el punto
+  // pelado tira una excepción que deja la pantalla en blanco. Se salta y se sigue.
+  const vista = armarVistaDeComisiones(lecturaOk({
+    contratos: [firme('a1')],
+    empleados: [null, undefined, {}, { nombre: 'Sin id' }, { id: 'e1', nombre: 'Ana López', porcentajeComision: 5 }],
+  }));
+  assert.equal(vista.ok, true, 'la pantalla se dibuja igual');
+  assert.ok(vista.entradas.some((e) => e.empleadoId === 'e1'), 'y la ficha buena sigue ahí');
+});

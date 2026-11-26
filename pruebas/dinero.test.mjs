@@ -4723,3 +4723,25 @@ test('armarVista: un dueño SIN rentas no sale marcado como «sin enlazar»', ()
   assert.equal(suya.sinEnlazar, false);
   assert.deepEqual(suya.contratos, [], 'no tiene ningún contrato que enlazar');
 });
+
+test('armarVista: un dueño SIN rentas no se marca como «enlazado a un dueño que no está»', () => {
+  // `sinRegistro: false` en la entrada que se arma PARA el dueño. Marcarla en true sería decir que le falta
+  // su ficha justo a la entrada que SALE de su ficha. En la primera lectura de la medición confundí este
+  // renglón con el de `sinEnlazar`, que está arriba: son dos marcas distintas y la pantalla las dibuja
+  // distinto. (26 de noviembre de 2026.)
+  const vista = armarVista(lecturaOk({
+    contratos: { datos: [], fallo: false, costoSinLeer: [] },
+    duenos: { datos: [{ id: 'd9', nombre: 'Rita Solís' }], fallo: false },
+  }));
+  assert.equal(vista.entradas.find((e) => e.duenoId === 'd9').sinRegistro, false);
+});
+
+test('armarVista: una ficha DAÑADA en la lista de dueños no tumba la pantalla', () => {
+  // El `d?.id` que filtra la lista. Un documento nulo o sin id en Firestore no es «no se pudo leer»: con el
+  // punto pelado tira una excepción y deja la pantalla de dinero en blanco. Se salta y se sigue.
+  const vista = armarVista(lecturaOk({
+    duenos: { datos: [null, undefined, {}, { nombre: 'Sin id' }, REGISTRO_LUCIA], fallo: false },
+  }));
+  assert.equal(vista.ok, true, 'la pantalla se dibuja igual');
+  assert.ok(vista.entradas.some((e) => e.duenoId === REGISTRO_LUCIA.id), 'y la ficha buena sigue ahí');
+});
