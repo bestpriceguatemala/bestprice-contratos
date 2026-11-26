@@ -1399,7 +1399,10 @@ async function pintarCuentas(contenedor, claveDeFicha, {
         empleados: { datos: elLector.actual?.empleados.datos ?? [], fallo: false },
         enCurso: ui.enCurso ?? (ui.enCurso = {}),
       });
-      if (!elLector.actual) return;
+      // Se vuelve a mirar la sesión, no solo si quedó algo leído: es dinero, y se suelta con la sesión
+      // (lo mismo que hace `verComprobante`). Si Firebase la cerró mientras el guardado viajaba, lo que
+      // llega no se guarda en memoria y se pide la contraseña otra vez. (26 de noviembre de 2026.)
+      if (!haySesion() || !elLector.actual) return;
       elLector.actual.pagos.datos = r.pagos;
       // Las rentas que se leyeron al guardar son ahora la verdad: si una cambió mientras tanto, la lista ya la dibuja como está.
       if (r.contratos) elLector.actual.contratos = r.contratos;
@@ -1464,6 +1467,9 @@ async function pintarCuentas(contenedor, claveDeFicha, {
       await enlazarAlEmpleado(entrada.contratos.map((c) => c.id), registro.id, {
         idsConPorcentaje: sinPagar.map((c) => c.id), porcentajeComision: registro.porcentajeComision,
       });
+      // Igual que al registrar un pago: si la sesión se cerró mientras se enlazaba, lo que llega no se
+      // guarda en memoria y se pide la contraseña otra vez.
+      if (!haySesion()) return;
       const leida = elLector.actual;
       if (!leida) return;
       const enlazadas = new Set(entrada.contratos.map((c) => c.id));

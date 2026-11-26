@@ -4566,3 +4566,41 @@ test('enlazar: la pregunta dice «contrato» o «contratos» según cuántos sea
   conDos.clic('[data-dn="enlazar"]');
   assert.match(conDos.preguntas[0], /2 contratos de/, 'en plural');
 });
+
+test('dueños: si la SESIÓN se cerró mientras guardaba el pago, no se escribe en memoria', async () => {
+  // La regla que ya seguía la pantalla de comisiones al ver un comprobante: es dinero, y se suelta con la
+  // sesión. Hasta el 26 de noviembre de 2026 esto solo miraba si quedaba algo leído, así que una sesión
+  // cerrada por Firebase mientras el guardado viajaba dejaba los pagos nuevos en memoria.
+  const p = await pantallaDeDinero({
+    clave: CLAVE_MARIO,
+    pagar: async () => {
+      p.cerrarLaSesion();
+      return { tipo: 'guardado', pago: { id: 'pg-9', numero: 9 }, pagos: [{ id: 'colado' }] };
+    },
+  });
+  p.marcar(LA_RENTA('m1'));
+  p.clic('[data-dn="registrar"]');
+  p.lanzar('change', '#dn-fecha', { value: HOY });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  const pagos = p.lector.actual?.pagos?.datos ?? [];
+  assert.ok(!pagos.some((x) => x.id === 'colado'), 'lo que llegó con la sesión cerrada no entra');
+  assert.equal(p.lector.actual, null, 'y lo que había se suelta');
+  assert.ok(p.dichos.every((d) => !/Pago registrado/.test(d.texto)), 'no se canta un pago sobre una pantalla cerrada');
+});
+
+test('dueños: si la SESIÓN se cerró mientras enlazaba, el alta se cierra pero no se toca la memoria', async () => {
+  // El enlace ya quedó escrito en la nube, así que el alta termina igual (un reintento no debe crear otro
+  // dueño). Lo que no se hace es escribir en memoria ni cantar el éxito.
+  const p = await pantallaDeDinero({
+    clave: CLAVE_A_MANO,
+    enlazarAlDueno: async () => { p.cerrarLaSesion(); },
+  });
+  p.buscar('#dn-enlazar-dueno').value = 'd1';
+  p.clic('[data-dn="enlazar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  const t1 = p.lector.actual?.contratos?.datos?.find((c) => c.id === 't1');
+  assert.ok(!t1 || t1.duenoId === null || t1.duenoId === undefined, 'el contrato no queda enlazado en memoria');
+  assert.ok(p.dichos.every((d) => !/Contratos enlazados/.test(d.texto)), 'y no se canta el enlace');
+  assert.deepEqual(p.direcciones, [], 'ni se cambia la dirección de la cuenta');
+});

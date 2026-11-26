@@ -1779,7 +1779,10 @@ async function pintarCuentas(contenedor, claveDeFicha, {
         descuento: descuento.descuento,
         enCurso: ui.enCurso ?? (ui.enCurso = {}),
       });
-      if (!elLector.actual) return;
+      // Se vuelve a mirar la sesión, no solo si quedó algo leído: es dinero, y se suelta con la sesión.
+      // Si Firebase la cerró mientras el guardado viajaba, lo que llega no se guarda en memoria y se
+      // pide la contraseña otra vez. (26 de noviembre de 2026.)
+      if (!haySesion() || !elLector.actual) return;
       elLector.actual.pagos.datos = r.pagos;
       // Los contratos que se leyeron al guardar son ahora la verdad: si una renta
       // cambió mientras tanto, la lista ya la dibuja como está, no como estaba.
@@ -1833,6 +1836,10 @@ async function pintarCuentas(contenedor, claveDeFicha, {
       // Con el enlace hecho el alta terminó: la siguiente vez, otro dueño. Antes de aquí NO se suelta: si el enlace
       // falla y se repite «dar de alta», cae en el mismo dueño y no crea otro.
       ui.altaDeDueno.terminada();
+      // Igual que al registrar un pago: si la sesión se cerró mientras se enlazaba, lo escrito en la nube
+      // ya quedó —el alta se cierra igual—, pero no se toca la memoria ni se canta el éxito: es dinero, y
+      // se suelta con la sesión. Se pide la contraseña otra vez. (26 de noviembre de 2026.)
+      if (!haySesion()) return;
       const leida = elLector.actual;
       if (!leida) return;
       const enlazados = new Set(entrada.contratos.map((c) => c.id));

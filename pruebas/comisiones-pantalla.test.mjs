@@ -1710,3 +1710,35 @@ test('enlazar: después de un fallo se puede volver a intentar', async () => {
   await new Promise((ok) => { setTimeout(ok, 0); });
   assert.deepEqual(intentos, ['e1', 'e1'], 'el segundo intento corre: la pantalla no se quedó ocupada');
 });
+
+test('registrar: si la SESIÓN se cerró mientras guardaba, no se escribe en memoria y se pide la contraseña', async () => {
+  // La misma regla que ya seguía `verComprobante`: es dinero, y se suelta con la sesión. Antes del 26 de
+  // noviembre de 2026, `guardarPago` solo miraba si el lector seguía teniendo algo, así que una sesión
+  // cerrada por Firebase mientras el guardado viajaba dejaba los pagos nuevos en memoria.
+  const p = await conElPagoAbierto({
+    pagar: async () => {
+      p.cerrarLaSesion();
+      return { tipo: 'guardado', pago: { id: 'pc-9', numero: 9, monto: 140 }, pagos: [{ id: 'colado' }] };
+    },
+  });
+  p.clic('#dn-guardar-pago');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  const pagos = p.lector.actual?.pagos?.datos ?? [];
+  assert.ok(!pagos.some((x) => x.id === 'colado'), 'lo que llegó con la sesión cerrada no entra en memoria');
+  assert.equal(p.lector.actual, null, 'y lo que había se suelta');
+  assert.ok(p.dichos.every((d) => !/Pago registrado/.test(d.texto)), 'no se canta un pago sobre una pantalla cerrada');
+});
+
+test('enlazar: si la SESIÓN se cerró mientras enlazaba, no se escribe en memoria', async () => {
+  const { p } = await conUnaCuentaAMano({
+    enlazarAlEmpleado: async () => { p.cerrarLaSesion(); },
+  });
+  p.buscar('#cm-enlazar-empleado').value = 'e1';
+  const boton = p.raiz.querySelectorAll('[data-cm]').find((n) => n.dataset.cm === 'enlazar');
+  p.lanzar('click', boton);
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  const v1 = p.lector.actual?.contratos?.datos?.find((c) => c.id === 'v1');
+  assert.ok(!v1 || v1.empleadoId === undefined, 'la renta no queda enlazada en memoria');
+  assert.equal(p.lector.actual, null, 'lo leído se suelta');
+  assert.ok(p.dichos.every((d) => !/Rentas enlazadas/.test(d.texto)), 'y no se canta el enlace');
+});
