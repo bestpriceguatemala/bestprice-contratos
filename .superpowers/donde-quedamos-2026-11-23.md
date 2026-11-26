@@ -186,6 +186,60 @@ eran cifras mal sumadas: eran pantallas en blanco (una lectura sin una llave, un
 sacar carro. Ninguna de las dos tiene su «pantalla de mentira» como las de dinero, y en sacar carro el
 cable es lo que decide **qué carro sale en el contrato**.
 
+## PAUSA del 26 de noviembre de 2026, noche — aquí se retoma
+
+### Lo primero al volver: la medición que quedó a medias
+
+`pintarSacarCarro` ya recibe sus aparatos y tiene 10 pruebas de cableado, pero **su medición no está
+hecha**: iba en 50 de 673 y se detuvo a propósito (dejarla correr despertaba la sesión y le gastaba
+créditos en pausa). De esos 50 primeros, 25 sobrevivían y 25 morían — **ese número NO es el resultado**,
+es el primer 7 % del archivo y no se reporta como medición.
+
+Se retoma con esto (preparar y controles van SIEMPRE antes):
+
+```
+node analisis/mutaciones/correr.mjs preparar
+node analisis/mutaciones/controles.mjs
+node analisis/mutaciones/correr.mjs correr --archivo js/pantallas/sacarCarro.js --lineas 1423-2343 --trabajadores 5 --salida /tmp/cable-sacar.jsonl
+```
+
+Son unos 25 minutos. Si `/tmp/cable-sacar.jsonl` todavía existe pero tiene menos de 674 renglones, está
+incompleto: se borra y se corre de nuevo, no se lee a medias.
+
+### El encargo del agente (lo pidió él en la pausa)
+
+«Que ponga a prueba todo lo hecho. **Pero que esta vez sí trabaje, no te confíes.**»
+
+Lo que tiene que poner a prueba: borrar carros, «Nuevo contrato» sin pasar por la flota, los subarrendados
+guardados fuera de la flotilla, las seis guardias de sesión de las pantallas de dinero, los dos oyentes de
+«click», las dos vistas de dinero y el cableado nuevo de sacar carro.
+
+**CÓMO SE COMPROBARÁ QUE EL AGENTE TRABAJÓ.** No se le cree ningún número. El 25 de octubre de 2026 un
+agente reportó «12 mutantes, todos muertos» con un script que **nunca corrió las pruebas**, y un mutante
+que no cambiaba nada también «moría». De ahí sale la regla de la casa: *un arnés sin controles no mide,
+adivina*. Antes de pasarle a él una sola cifra del agente:
+
+1. **Los controles del agente, corridos por mí.** Si no los corrió, su medición no existe.
+2. **El diff aplicado.** Cada mutante que diga haber metido tiene que haber cambiado el archivo de verdad
+   (`diff` confirmado). Esto ya falló tres veces en este proyecto, dos de ellas mías.
+3. **Vuelvo a correr yo una muestra de lo que reporte.** Si un número no se reproduce, se tira entero: no
+   se publica un número que salió de un instrumento que no apunta al mismo sitio.
+4. **Ninguna credencial, ningún toque al Firebase de verdad.** El agente trabaja contra el arnés y las
+   nubes de mentira, nunca contra el proyecto real.
+5. Si el agente dice «todo bien» sin enseñar con qué lo midió, eso cuenta como *no medido*, y así se le
+   dice a él.
+
+### Lo que sigue abierto, por orden
+
+1. Terminar la medición del cableado de sacar carro (arriba).
+2. Ensanchar la pantalla de mentira para que una lista de resultados rellenada DENTRO de un nodo se pueda
+   buscar y apretar. Hoy no se puede probar «escoger un cliente de la lista»; en las pruebas se llega al
+   cliente dándolo de alta y al empleado con Enter.
+3. La pantalla de carros tampoco tiene su pantalla de mentira: el cableado de «Borrar carro» (apretar →
+   ver el aviso → «Sí, borrar») sigue sin medirse.
+4. Las 18 clases de CSS sin definir que quedan de antes (casi todas decorativas). La guardia nueva solo
+   vigila los `btn-…`.
+
 ## Cómo se trabaja esto
 
 - Agentes de a dos como mucho: comparten el cupo y mueren juntos a media tarea.
