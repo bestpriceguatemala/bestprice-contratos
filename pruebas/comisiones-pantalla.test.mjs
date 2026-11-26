@@ -1510,3 +1510,72 @@ test('marcar: el empleado escogido NO se pierde si OTRA COSA redibuja la pantall
   assert.match(p.html(), /<option value="e16" selected>/, 'Luis Mérida sigue escogido');
   assert.match(p.html(), /id="cm-enlazar-porcentaje" checked/, 'y la casilla del porcentaje sigue marcada');
 });
+
+// ---------------------------------------------------------------------------
+// La vista: de qué lectura se arma, y QUÉ NOMBRE se ve
+// ---------------------------------------------------------------------------
+
+test('la vista: cada lectura que falla se dice por su nombre, y las dos juntas también', async () => {
+  const soloPagos = armarVistaDeComisiones({ ...lecturaOk(), pagos: { datos: null, fallo: true } });
+  assert.equal(soloPagos.ok, false);
+  assert.deepEqual(soloPagos.problemas, ['pagos']);
+
+  const soloRentas = armarVistaDeComisiones({ ...lecturaOk(), contratos: { datos: null, fallo: true } });
+  assert.deepEqual(soloRentas.problemas, ['rentas']);
+
+  const ambas = armarVistaDeComisiones({
+    contratos: { datos: null, fallo: true }, pagos: { datos: null, fallo: true }, empleados: { datos: [], fallo: false },
+  });
+  assert.deepEqual(ambas.problemas, ['rentas', 'pagos'], 'las dos, en orden');
+});
+
+test('la vista: una lectura que llega SIN la lista (no es un arreglo) también es un problema', async () => {
+  // No es lo mismo «llegó vacía» que «no llegó»: una lista que no es lista no se puede recorrer, y
+  // tratarla como vacía dibujaría «no le debes nada a nadie» sobre una lectura rota.
+  for (const malo of [null, undefined, 'nada', 42, {}]) {
+    const v = armarVistaDeComisiones({ ...lecturaOk(), pagos: { datos: malo, fallo: false } });
+    assert.equal(v.ok, false, JSON.stringify(malo));
+    assert.deepEqual(v.problemas, ['pagos'], JSON.stringify(malo));
+  }
+});
+
+test('la vista: el nombre que se ve es el de la LISTA de empleados, no el que se escribió ese día', async () => {
+  // El contrato guarda el nombre como estaba el día de la renta. Si después se corrige en la ficha del
+  // empleado, la cuenta tiene que salir con el nombre bueno, no con el viejo.
+  const corregida = { ...ana, nombre: 'Ana López Mejía' };
+  const v = armarVistaDeComisiones(lecturaOk({ contratos: [firme('a1')], empleados: [corregida, wilder, luis] }));
+  const suya = v.entradas.find((e) => e.empleadoId === 'e1');
+  assert.equal(suya.nombre, 'Ana López Mejía', 'el de la lista manda');
+});
+
+test('la vista: sin empleado en la lista, se ve el nombre escrito en el contrato', async () => {
+  const v = armarVistaDeComisiones(lecturaOk({ contratos: [rentaDeAntes({ id: 'v1', rentadoPor: 'Pedro', recibidoEl: '2026-09-29' })] }));
+  const pedro = v.entradas.find((e) => e.sinEnlazar);
+  assert.equal(pedro.nombre, 'Pedro', 'el que quedó escrito a mano');
+});
+
+test('la vista: un empleado de la lista SIN nombre no sale en blanco', async () => {
+  // Una fila sin nombre no se puede escoger ni leer: se dice que le falta.
+  const sinNombre = { ...luis, nombre: '   ' };
+  const v = armarVistaDeComisiones(lecturaOk({ contratos: [], empleados: [sinNombre] }));
+  const html = htmlListaDeComisiones(v);
+  assert.match(html, /Empleado sin nombre/, 'se dice que le falta el nombre');
+});
+
+test('la vista: con la lista de empleados CAÍDA no se acusa a nadie de «no está en la lista»', async () => {
+  // Decirlo de alguien que sí está sería inventar un problema: la barra roja ya dice que no se pudo leer.
+  const caida = { ...lecturaOk({ contratos: [firme('a1')] }), empleados: { datos: null, fallo: true } };
+  const v = armarVistaDeComisiones(caida);
+  assert.equal(v.ok, true, 'la cuenta se puede armar igual: los empleados solo ponen el nombre');
+  assert.ok(v.entradas.every((e) => e.sinRegistro === false), 'de nadie se afirma que no está');
+
+  // Una lista ROTA que no dice que falló cuenta igual que una caída: no se sabe quién está.
+  for (const rota of [null, undefined, 'nada', 42]) {
+    const v2 = armarVistaDeComisiones({ ...lecturaOk({ contratos: [firme('a1')] }), empleados: { datos: rota, fallo: false } });
+    assert.ok(v2.entradas.every((e) => e.sinRegistro === false), `con datos ${JSON.stringify(rota)} tampoco se acusa`);
+  }
+
+  // El control: con la lista leída, el que no está sí se dice.
+  const leida = armarVistaDeComisiones(lecturaOk({ contratos: [firme('a1')], empleados: [wilder, luis] }));
+  assert.ok(leida.entradas.some((e) => e.sinRegistro === true), 'ahí sí');
+});
