@@ -14,7 +14,7 @@ import {
   filaEmpleado, textoDelEmpleadoEscogido, empleadoParaEnter, cargarEmpleadosActivos,
   leerTarjetasDe, leerTarjetasEscritasDe, tarjetasParaImprimir, destinoDespuesDeGuardar, irDespuesDeGuardar,
   vencimientoParaElCampo, AVISO_DE_VENCIMIENTO,
-  pintarSacarCarro,
+  pintarSacarCarro, PREFIJO_RUTA,
 } from '../js/pantallas/sacarCarro.js';
 import { pantallaDeMentira } from './fixtures/pantallaDeMentira.mjs';
 import { tomarTraspaso, olvidarTraspaso } from '../js/pantallas/traspasoDeTarjetas.js';
@@ -1906,7 +1906,11 @@ async function pantallaDeSacar({
   let idsDeCliente = 0;
   let idsDeDueno = 0;
   let numerosAcunados = 0;
-  let rutaActual = `#/sacar/${ruta}`;
+  // La dirección tal como la arma la APLICACIÓN, no una inventada aquí. El arnés ponía siempre
+  // `#/sacar/${ruta}`, que con `ruta` vacío da «#/sacar/» —con barra— y esa dirección no existe: entrar por
+  // «Nuevo contrato» da «#/sacar» a secas. Esa barra de más tapó un fallo real durante dos días.
+  // (27 de noviembre de 2026.)
+  let rutaActual = ruta ? `#/sacar/${ruta}` : '#/sacar';
 
   await pintarSacarCarro(p.contenedor, ruta, {
     doc: p.documento,
@@ -2109,4 +2113,23 @@ test('sacar: un REINTENTO tras un guardado que falló no da de alta al mismo cli
   await new Promise((ok) => { setTimeout(ok, 0); });
   assert.equal(guardados.length, 2, 'se intentó dos veces');
   assert.equal(guardados[0].id, guardados[1].id, 'y las dos veces con el MISMO id: una sola ficha, no dos clientes');
+});
+
+test('sacar: la pantalla se reconoce en TODAS las direcciones con las que la aplicación la abre', () => {
+  // El fallo, tal como lo vio él: `PREFIJO_RUTA` llevaba barra final (`'#/sacar/'`) y «Nuevo contrato»
+  // entra por `#/sacar` a secas. `sigoVigente()` daba falso desde el primer instante, así que la pantalla
+  // hacía todo su trabajo y después se iba sin dibujar: el menú decía «No hay carros en la flota» con la
+  // flota llena, el alta de un cliente no lo dejaba escogido, y al guardar no llevaba a imprimir.
+  //
+  // Esta prueba ata las dos puntas: las rutas que app.js registra para esta pantalla, y el prefijo con el
+  // que la pantalla decide si sigue ahí. Si alguien registra una ruta nueva que no calce, se pone roja.
+  const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const rutas = [...app.matchAll(/registrarPantalla\('([^']+)',\s*pintarSacarCarro\)/g)].map((m) => m[1]);
+  assert.ok(rutas.length >= 2, `app.js tiene que registrar las dos entradas de esta pantalla (encontré ${JSON.stringify(rutas)})`);
+  for (const ruta of rutas) {
+    const deVerdad = ruta.replace('/:carroId', '/v1');
+    assert.ok(deVerdad.startsWith(PREFIJO_RUTA), `la pantalla no se reconoce en «${deVerdad}»: se iría sin dibujar`);
+  }
+  // Y la dirección con la reservación de origen, que lleva consulta.
+  assert.ok('#/sacar/v1?reserva=r1'.startsWith(PREFIJO_RUTA));
 });

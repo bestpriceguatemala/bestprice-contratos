@@ -1420,7 +1420,18 @@ export function empleadoParaEnter(filas, consulta) {
   return lista.length === 1 ? lista[0] : null;
 }
 
-const PREFIJO_RUTA = '#/sacar/';
+/**
+ * Con qué empieza la dirección de ESTA pantalla, para saber si el mostrador sigue aquí (`sigoVigente`).
+ *
+ * SIN la barra final, y eso importa: el 26 de noviembre de 2026 se agregó «Nuevo contrato», que entra por
+ * `#/sacar` a secas. Con `'#/sacar/'` esa dirección no calzaba, así que la pantalla se creía que él ya se
+ * había ido DESDE EL PRIMER INSTANTE: no dibujaba la flota («No hay carros en la flota» con carros en la
+ * flota), no se enteraba de lo que traía la nube, el alta de un cliente no lo dejaba escogido, y al
+ * guardar no lo llevaba a imprimir. Lo encontró él usándolo. (27 de noviembre de 2026.)
+ *
+ * `#/sacar/v1` y `#/sacar/v1?reserva=r1` siguen calzando igual.
+ */
+export const PREFIJO_RUTA = '#/sacar';
 let ultimoToken = 0;
 
 /**
