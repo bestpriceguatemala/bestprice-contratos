@@ -240,6 +240,56 @@ adivina*. Antes de pasarle a él una sola cifra del agente:
 4. Las 18 clases de CSS sin definir que quedan de antes (casi todas decorativas). La guardia nueva solo
    vigila los `btn-…`.
 
+## PAUSA del 27 de noviembre de 2026 — aquí se retoma
+
+### Lo primero: dos decisiones suyas, y hasta que no las dé no se tocan
+
+Viven como pruebas SALTADAS en `pruebas/adversario-vistas-de-dinero.test.mjs`, con la explicación entera en
+la cabecera del archivo. Son reales y están reproducidas; no se arreglan solas porque cada una pide que él
+escoja:
+
+1. **Con la lectura de dueños caída, ¿se marca «no está en la lista»?** Las dos pantallas de dinero hacen lo
+   contrario a propósito y cada una se defiende en su comentario. Recomendación dada: la de comisiones (no
+   marcarlo), porque con el internet malo él lo lee en TODAS las cuentas y el riesgo es que dé de alta otra
+   vez a dueños que ya existen.
+2. **La clave de las cuentas sin dueño anotado.** Dos cuentas pueden compartir dirección y la segunda no se
+   puede abrir ni pagar nunca. El arreglo es la clave del grupo (como comisiones), pero cambia direcciones
+   y pone en rojo 71 pruebas.
+
+### Lo que pasó este día, y la lección que hay que llevarse
+
+Un agente adversario puso a prueba lo construido y encontró cosas de verdad. **Nada suyo se reportó sin
+reproducirlo yo primero.** Se arreglaron: el dueño del subarrendado que se tiraba a la basura, un carro del
+taller que salía igual en el contrato, la opción del menú que cambiaba de carro, `enlazar` de dueños sin
+mirar la sesión, el aviso de borrado armado con la copia local vieja, y un carro borrado que revivía al
+guardar su ficha.
+
+**LA LECCIÓN, dos veces el mismo día:** el banco de pruebas mentía de dos maneras distintas, y las dos
+tapaban fallos reales con 3000 pruebas en verde.
+
+- La pantalla de mentira decidía quién era padre de quién contando cierres de etiqueta a ojo. `closest()`
+  devolvía hermanos ya cerrados —el cable con el que las dos pantallas de dinero enrutan TODOS sus clics— y
+  encontraba lo que estaba dentro de un comentario de HTML. Once defectos; se reescribió el lector con pila.
+- El arnés de «Sacar carro» **armaba él mismo la dirección** (`#/sacar/${ruta}`), que con el carro vacío da
+  «#/sacar/» —con barra—, y esa dirección la aplicación NUNCA la produce. Por esa barra, diez pruebas de
+  cableado en verde mientras «Nuevo contrato» estaba inservible en el navegador: no dibujaba la flota, el
+  alta de un cliente no lo dejaba escogido y al guardar no llevaba a imprimir. Lo encontró ÉL usándolo.
+
+De ahí la regla para lo que siga: **el arnés no inventa las entradas del programa, las toma de donde el
+programa las saca.** Cuando el banco y el programa no coinciden, el verde no vale nada.
+
+### Lo que sigue abierto, por orden
+
+1. Las dos decisiones de arriba.
+2. El cableado de «Sacar carro» está medido: **27.5 %** (488 de 673 errores pasan sin que nadie los note).
+   Es una función de 920 renglones con 11 pruebas. `pintarCuentas` de dinero empezó en 5.4 % y va en 55.8 %.
+3. La pantalla de CARROS no tiene pantalla de mentira: el cableado de «Borrar carro» (apretar → ver el
+   aviso → «Sí, borrar») sigue sin medirse, y una mutación que borra el carro EQUIVOCADO deja la suite
+   entera en verde.
+4. Las listas de resultados de los buscadores se rellenan dentro de un nodo y todavía no se pueden apretar:
+   «escoger un cliente de la lista» no se puede probar.
+5. Las 18 clases de CSS sin definir que quedan de antes (la guardia nueva solo vigila los `btn-…`).
+
 ## Cómo se trabaja esto
 
 - Agentes de a dos como mucho: comparten el cupo y mueren juntos a media tarea.
