@@ -382,7 +382,9 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
       // mandó. Antes se usaba `vehiculo.codigo`, y el primer carro que el
       // dueño daba de alta se guardaba bien pero el aviso decía "Carro
       // undefined guardado" (hallazgo importante de la revisión final).
-      const guardado = await guardarVehiculo(await alta.paraGuardar(vehiculo));
+      // `esAlta` dice si esto es un carro NUEVO o la edición de uno que ya existe. Sin eso, guardar la
+      // ficha de un carro que otra computadora borró lo REVIVÍA (ver `guardarVehiculo`).
+      const guardado = await guardarVehiculo(await alta.paraGuardar(vehiculo), { esAlta: esNuevo });
       alta.terminada();
       aviso(`Carro ${guardado.codigo} guardado.`, 'exito');
       location.hash = '#/carros';
@@ -516,6 +518,15 @@ async function dibujarFormulario(contenedor, carroId, flota, contratos, hoy, fal
     alLlegarTarde((nuevos) => {
       const masReciente = nuevos.flota.find((c) => c.id === carro.id);
       if (masReciente) carro = masReciente;
+      // Y lo que mira la FICHA misma, no solo el bloque de mantenimiento. El aviso de «Borrar carro» se
+      // arma con estos contratos (`loQueSePierdeAlBorrarElCarro`), y se quedaban como los trajo la copia
+      // local: con la de ayer, el aviso no veía el contrato que otra computadora abrió hoy, así que NO
+      // decía «este carro está AFUERA ahora mismo» ni «tiene N contratos». Él borraba creyendo que no se
+      // perdía nada, y el contrato abierto quedaba apuntando a un carro que ya no existe: `estadoCarro`
+      // no lo vuelve a mostrar y nadie persigue la devolución. Lo encontró un agente adversario.
+      // (27 de noviembre de 2026.)
+      contratos = nuevos.contratos;
+      falloContratos = nuevos.falloContratos;
       mantenimiento.actualizar({
         carro, contratos: nuevos.contratos, falloFlota: nuevos.falloFlota, falloContratos: nuevos.falloContratos,
       });

@@ -1216,9 +1216,23 @@ export async function siguienteCodigoCarro({ iniciar = iniciarFirebase } = {}) {
  * reintento cae en el mismo documento (`merge` no manda lo ajeno, así que tampoco lo toca). El código correlativo se pide en cada
  * intento, así que ese reintento gasta otro y deja un hueco en la numeración (se explica; un carro repetido, no).
  */
-export async function guardarVehiculo(vehiculo, deps = {}) {
+export async function guardarVehiculo(vehiculo, { esAlta, ...deps } = {}) {
   // Antes de gastar un código: un alta sin id no se puede repetir sin duplicarse (ver `guardarCliente`).
   exigirId(vehiculo);
+  // UN CARRO BORRADO NO REVIVE. Desde el 26 de noviembre de 2026 se pueden borrar carros, y eso le abrió
+  // un hueco a este guardado: el camino de abajo (sin código) escribe con `setDoc`, que CREA si no existe.
+  // Dos computadoras con la ficha abierta, una borra y la otra guarda, y el carro vuelve a la flota —
+  // además gastando un código del contador que ya es de otro carro—. El camino con código no tenía el
+  // problema: su transacción exige que el documento exista, y para eso está `MENSAJE_CARRO_NO_ESTA`.
+  // Quien llama DICE si esto es un alta. No se puede decidir aquí: crear un carro nuevo es legítimo y
+  // solo la pantalla sabe si viene de «#/carros/nuevo» o de editar una ficha. Lo que sí se puede es
+  // exigir que todos los llamadores lo digan, y eso lo vigila una prueba
+  // («todo guardado de un carro dice si es un alta»).
+  if (esAlta === false && !vehiculo.codigo) {
+    const { db, fsMod } = await (deps.iniciar ?? iniciarFirebase)();
+    const actual = await conLimiteDeTiempo(fsMod.getDoc(fsMod.doc(db, 'vehiculos', vehiculo.id)));
+    if (!actual.exists()) throw rechazo(MENSAJE_CARRO_NO_ESTA, CODIGO_DOCUMENTO_NO_ESTA, null);
+  }
   if (vehiculo.codigo) {
     return cambiarEnNubeYLocal('vehiculos', vehiculo.id, (fresco) => carroConLoDeLaFicha(fresco, vehiculo), deps);
   }

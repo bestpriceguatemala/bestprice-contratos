@@ -676,8 +676,8 @@ test('H-2: el carro nuevo reintentado cae en el mismo documento; el código corr
   const { nube, deps } = nubeLenta();
   const intencion = altaConIdFijo(() => nuevoIdVehiculo({ iniciar: nube.iniciar }));
   const vehiculo = ALTAS[3].registro();
-  await assert.rejects(guardarVehiculo(await intencion.paraGuardar(vehiculo), deps), /no respondió a tiempo/);
-  const guardado = await guardarVehiculo(await intencion.paraGuardar(vehiculo), deps);
+  await assert.rejects(guardarVehiculo(await intencion.paraGuardar(vehiculo), { ...deps, esAlta: true }), /no respondió a tiempo/);
+  const guardado = await guardarVehiculo(await intencion.paraGuardar(vehiculo), { ...deps, esAlta: true });
   assert.equal(documentosDe(nube, 'vehiculos').length, 1);
   assert.equal(guardado.codigo, 5, 'el reintento tomó el siguiente código: el 4 quedó sin usar, un hueco que se explica');
 });

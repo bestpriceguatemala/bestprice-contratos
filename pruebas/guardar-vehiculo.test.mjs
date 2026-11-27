@@ -250,7 +250,7 @@ test('cada marca del taller que traiga la ficha se ignora, también la que está
     }),
     fueraDeServicio: true,
     motivoFueraDeServicio: 'x',
-  }), deps);
+  }), { ...deps, esAlta: true });
   assert.equal(nube.leer(`vehiculos/${guardado.id}`).fueraDeServicio, undefined, 'un carro nuevo nace disponible');
 });
 
@@ -416,7 +416,7 @@ test('un carro NUEVO se crea como siempre: id decidido de antemano, código del 
   const nuevo = construirVehiculo({}, {
     id: undefined, codigo: undefined, placas: 'P-123ABC', tipo: 'Sedán', marca: 'Toyota', linea: 'Yaris', color: 'Blanco', modelo: '2022',
   });
-  const guardado = await guardarVehiculo(await alta.paraGuardar(nuevo), deps);
+  const guardado = await guardarVehiculo(await alta.paraGuardar(nuevo), { ...deps, esAlta: true });
 
   assert.equal(guardado.codigo, 4);
   assert.equal(guardado.propiedad, 'Propio');
@@ -435,10 +435,10 @@ test('el reintento de un alta que sí había llegado no toca el mantenimiento qu
   const nuevo = construirVehiculo({}, {
     id: undefined, codigo: undefined, placas: 'P-123ABC', tipo: 'Sedán', marca: 'Toyota', linea: 'Yaris', color: 'Blanco', modelo: '2022',
   });
-  const primero = await guardarVehiculo(await alta.paraGuardar(nuevo), deps); // llegó, aunque la pantalla se haya dado por vencida
+  const primero = await guardarVehiculo(await alta.paraGuardar(nuevo), { ...deps, esAlta: true }); // llegó, aunque la pantalla se haya dado por vencida
   await registrarServicioDelCarro(primero.id, servicio(), deps);
 
-  await guardarVehiculo(await alta.paraGuardar(nuevo), deps); // el reintento: mismo id, sin código
+  await guardarVehiculo(await alta.paraGuardar(nuevo), { ...deps, esAlta: true }); // el reintento: mismo id, sin código
 
   assert.deepEqual(ids(nube.leer(`vehiculos/${primero.id}`)), ['s-1']);
 });
@@ -466,7 +466,7 @@ test('un alta con un campo en `undefined` lo deja fuera en vez de mandárselo a 
   const nuevo = construirVehiculo({}, {
     id: undefined, codigo: undefined, placas: 'P-123ABC', tipo: 'Sedán', marca: 'Toyota', linea: 'Yaris', color: undefined, modelo: '2022',
   });
-  const guardado = await guardarVehiculo(await alta.paraGuardar(nuevo), deps);
+  const guardado = await guardarVehiculo(await alta.paraGuardar(nuevo), { ...deps, esAlta: true });
   assert.equal('color' in nube.leer(`vehiculos/${guardado.id}`), false);
   assert.equal(guardado.codigo, 4);
 });
@@ -568,7 +568,7 @@ test('ninguna de las escrituras al carro lleva `undefined`: alta, guardar, marca
   // El alta sale del formulario con `id` y `codigo` en `undefined` hasta que `guardarVehiculo` los decide.
   let carro = await guardarVehiculo(await alta.paraGuardar(construirVehiculo({}, {
     id: undefined, codigo: undefined, placas: 'P-123ABC', tipo: 'Sedán', marca: 'Toyota', linea: 'Yaris', color: 'Blanco', modelo: '2022',
-  })), deps);
+  })), { ...deps, esAlta: true });
   carro = await guardarDesdeElFormulario(carro, { color: 'Negro' }, deps);
   carro = await marcarCarroFueraDeServicio(carro.id, 'Taller', deps);
   carro = await habilitarCarro(carro.id, deps);
@@ -598,7 +598,9 @@ test('textoFalloAlGuardarElCarro: un carro que ya no está dice por qué; cualqu
 test('estructura: la ficha guarda con guardarVehiculo y los botones del taller con sus escritores, con el texto de fallo de la función pura', () => {
   const codigo = leerFuente('../js/pantallas/carros.js').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   assert.equal([...codigo.matchAll(/\bguardarVehiculo\(/g)].length, 1, '«Guardar carro» es el ÚNICO que escribe la ficha');
-  assert.match(codigo, /guardarVehiculo\(await alta\.paraGuardar\(vehiculo\)\)/);
+  // Desde el 27 de noviembre de 2026 la ficha DICE si es un alta, para que guardar la de un carro que
+  // otra computadora borró no lo vuelva a crear.
+  assert.match(codigo, /guardarVehiculo\(await alta\.paraGuardar\(vehiculo\), \{ esAlta: esNuevo \}\)/);
   assert.match(codigo, /await marcarCarroFueraDeServicio\(carro\.id, motivoTrim\)/);
   assert.equal([...codigo.matchAll(/await habilitarCarro\(carro\.id\)/g)].length, 2, 'la ficha y la ruta #/habilitar');
   assert.doesNotMatch(codigo, /fueraDeServicio: (true|false)|motivoFueraDeServicio:/, 'ninguna pantalla arma las marcas del taller: eso es del escritor');
@@ -660,4 +662,24 @@ test('borrarCarro: no toca ningún otro carro', async () => {
   dos.nube.docs.set('vehiculos/v2', { placas: 'P-999ZZZ' });
   await borrarCarro('v1', { ...dos.A.deps, borrarCopia: dos.A.copia.borrarCopia });
   assert.equal(dos.nube.docs.has('vehiculos/v2'), true, 'el otro carro sigue ahí');
+});
+
+test('todo guardado de un carro DICE si es un alta: la capa de datos no lo puede adivinar', () => {
+  // Por qué. Desde el 26 de noviembre de 2026 se pueden borrar carros, y `guardarVehiculo` tiene un camino
+  // que CREA con `setDoc` cuando el carro no trae código: guardar la ficha de un carro que otra
+  // computadora acaba de borrar lo revivía, gastando además un código del contador que ya es de otro.
+  //
+  // La capa de datos no puede decidirlo sola —crear un carro nuevo es legítimo, y solo la pantalla sabe si
+  // viene de «#/carros/nuevo» o de editar—. Lo que sí se puede exigir es que QUIEN LLAMA lo diga. Esta
+  // prueba es la que impide que un llamador nuevo se olvide, que es la única forma de que el hueco vuelva.
+  // (27 de noviembre de 2026, a partir de un hallazgo de un agente adversario.)
+  // Sin los comentarios: el archivo NOMBRA a `guardarVehiculo()` en uno de ellos, y una mención no es una
+  // llamada. (Lo descubrió esta misma prueba al estrenarse.)
+  const fuente = leerFuente('../js/pantallas/carros.js')
+    .split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const llamadas = [...fuente.matchAll(/guardarVehiculo\((?:[^()]|\([^()]*\))*\)/g)].map((m) => m[0]);
+  assert.ok(llamadas.length > 0, 'la pantalla de carros tiene que guardar carros en alguna parte');
+  for (const llamada of llamadas) {
+    assert.match(llamada, /esAlta:/, `este guardado no dice si es un alta: ${llamada}`);
+  }
 });

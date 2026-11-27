@@ -303,7 +303,11 @@ test('ADVERSARIO: «Guardar carro» nunca puede revivir un carro que ya se borr�
 
   // La computadora B tenía la ficha abierta y aprieta «Guardar carro».
   await assert.rejects(
-    guardarVehiculo({ id: 'v1', codigo: '', placas: 'P-1AAA', marca: 'Toyota' }, deps),
+    // `esAlta: false` es lo que manda la ficha al EDITAR, que es este caso: la computadora B tenía la ficha
+    // abierta. La capa de datos no puede adivinarlo —crear un carro nuevo es legítimo—, así que lo dice
+    // quien llama; que TODOS los llamadores lo digan lo vigila «todo guardado de un carro DICE si es un
+    // alta» (guardar-vehiculo.test.mjs).
+    guardarVehiculo({ id: 'v1', codigo: '', placas: 'P-1AAA', marca: 'Toyota' }, { ...deps, esAlta: false }),
     /ya no está en la flota/,
     'guardar la ficha de un carro borrado tiene que decirlo, no volverlo a crear',
   );
