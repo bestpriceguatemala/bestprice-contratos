@@ -4745,3 +4745,26 @@ test('armarVista: una ficha DAÑADA en la lista de dueños no tumba la pantalla'
   assert.equal(vista.ok, true, 'la pantalla se dibuja igual');
   assert.ok(vista.entradas.some((e) => e.duenoId === REGISTRO_LUCIA.id), 'y la ficha buena sigue ahí');
 });
+
+// ---------------------------------------------------------------------------------------------------
+// ADVERSARIO (27 de noviembre de 2026): «Enlazar» de dueños ESCRIBE con la sesión de dinero cerrada
+// ---------------------------------------------------------------------------------------------------
+
+test('ADVERSARIO: con la sesión de dinero cerrada, «Enlazar» no debe escribir nada en la nube', async () => {
+  // Las otras cuatro acciones de esta pantalla empiezan con `if (ui.ocupado || !haySesion()) return;`
+  // —anotar el costo, registrar el pago, anular un pago, la migración—. `enlazar` NO: empieza con
+  // `if (ui.ocupado || !entrada?.sinEnlazar) return;`, así que si Firebase cerró la sesión mientras la
+  // pantalla estaba dibujada, el clic en «Enlazar» igual pregunta, igual da de alta al dueño e igual
+  // escribe `duenoId` en los contratos. La guardia de abajo (después de escribir) solo evita que se toque
+  // la memoria. Su gemela de comisiones sí la trae: `if (ui.ocupado || !entrada?.sinEnlazar || !haySesion())`.
+  //
+  // Lo que cuesta: se cambia a quién se le debe el dinero de esos contratos sin la contraseña de dinero
+  // puesta, y él no se enteró de que pasó (no se canta el éxito: se le pide la contraseña).
+  const p = await pantallaDeDinero({ clave: CLAVE_A_MANO });
+  p.buscar('#dn-enlazar-dueno').value = 'd1';
+  p.cerrarLaSesion();
+  p.clic('[data-dn="enlazar"]');
+  await new Promise((ok) => { setTimeout(ok, 0); });
+  assert.deepEqual(p.enlaces, [], 'no se escribe el enlace sin sesión de dinero');
+  assert.deepEqual(p.preguntas, [], 'ni se pregunta: primero se pide la contraseña');
+});

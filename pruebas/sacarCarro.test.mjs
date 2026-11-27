@@ -2021,7 +2021,9 @@ test('sacar: los ajenos YA USADOS se ofrecen, y escoger uno rellena los campos',
   assert.equal(p.buscar('#sc-ajeno-usados-campo').hidden, false, 'se ofrece el que ya usó');
   assert.match(p.buscar('#sc-ajeno-usados').innerHTML, /P-555EEE/);
 
-  p.lanzar('change', '#sc-ajeno-usados', { value: '0' });
+  // El valor de la opción es la PLACA desde el 27 de noviembre de 2026: con el número de orden, la opción
+  // marcada pasaba a ser otro carro cuando llegaba un subarriendo más nuevo y la lista se rearmaba.
+  p.lanzar('change', '#sc-ajeno-usados', { value: 'P-555EEE' });
   assert.equal(p.buscar('#sc-ajeno-placas').value, 'P-555EEE', 'rellena las placas');
   assert.equal(p.buscar('#sc-ajeno-marca').value, 'Mazda');
   assert.equal(p.buscar('#sc-ajeno-color').value, 'Azul');

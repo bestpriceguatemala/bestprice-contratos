@@ -441,6 +441,7 @@ export function textoFalloAlGuardarElContrato(error) {
 export function motivoParaNoGuardar({
   hayCliente, ajeno, hayCarroPropio, falloFlota = false, placasAjeno, fechaSalida, dias, precioDia, empleado = null,
   listaDeEmpleados = { leida: true, fallo: false, cantidad: 1 }, cobrosExtra = {}, seEntroSinCarro = false,
+  carroFueraDeServicio = false,
 }) {
   if (!hayCliente) return 'Elige o da de alta un cliente antes de guardar.';
   if (!ajeno && !hayCarroPropio) {
@@ -453,6 +454,14 @@ export function motivoParaNoGuardar({
     return falloFlota
       ? 'No se pudo leer la flota, así que no se sabe si este carro está disponible. Revisa tu conexión e intenta de nuevo.'
       : 'Este carro ya no está disponible. Vuelve a la flota e intenta de nuevo.';
+  }
+  // Un carro que pasó al TALLER mientras él llenaba el formulario (otra computadora lo marcó) no puede
+  // salir en un contrato. La pantalla ya lo saca del menú cuando llega la sincronía, pero `carroPropio()`
+  // lo seguía encontrando porque sigue en la flota, y al guardar nadie lo miraba: la pantalla mostraba
+  // «escoge un carro» y el cliente firmaba por el que está en el taller. Lo encontró un agente adversario.
+  // (27 de noviembre de 2026.)
+  if (!ajeno && carroFueraDeServicio) {
+    return 'Ese carro está fuera de servicio, así que no puede salir. Escoge otro de la flota.';
   }
   if (ajeno && !placasAjeno) return 'Completa al menos las placas del carro ajeno.';
   if (fechaSalida && !esFechaISO(fechaSalida)) return 'La fecha de salida no es válida. Revisa el año.';
@@ -1576,8 +1585,12 @@ export async function pintarSacarCarro(contenedor, parametroRuta, {
       el('sc-ajeno-usados-campo').hidden = !usados.length;
       if (usados.length) {
         ajenosUsados = usados;
+        // El valor es la PLACA, no el número de orden. Con el índice, cuando llegaba un subarriendo más
+        // nuevo la lista se rearmaba por fecha y el `'0'` que quedaba marcado pasaba a ser OTRO carro: el
+        // menú señalaba uno y los campos tenían otro, justo antes de firmar. Lo encontró un agente
+        // adversario. (27 de noviembre de 2026.)
         ponerOpciones('sc-ajeno-usados',
-          usados.map((c, i) => ({ valor: String(i), texto: [c.placas, c.marca, c.modelo, c.dueno && `(${c.dueno})`].filter(Boolean).join(' · ') })),
+          usados.map((c) => ({ valor: c.placas, texto: [c.placas, c.marca, c.modelo, c.dueno && `(${c.dueno})`].filter(Boolean).join(' · ') })),
           '— Escribirlo a mano —');
       }
       caja.hidden = true;
@@ -1595,9 +1608,20 @@ export async function pintarSacarCarro(contenedor, parametroRuta, {
       caja.textContent = textoCarroPropioNoEncontrado(falloFlota);
       return;
     }
-    caja.className = 'sc-carro-info';
     const encabezado = [carro.placas, carro.marca, carro.linea].filter(Boolean).join(' · ');
     const detalle = [carro.tipo, carro.color, carro.modelo].filter(Boolean).join(' · ');
+    // Si el carro está en el TALLER se dice aquí, en rojo, y con el motivo. Antes el cuadro lo dibujaba
+    // igual que a cualquier otro: otra computadora podía mandarlo al taller mientras él llenaba el
+    // formulario y la pantalla no decía ni una palabra. Guardar ya se niega (`motivoParaNoGuardar`), pero
+    // enterarse al final, con el cliente enfrente, es enterarse tarde. (27 de noviembre de 2026.)
+    if (carro.fueraDeServicio) {
+      caja.className = 'sc-carro-info sc-carro-aviso';
+      const motivo = String(carro.motivoFueraDeServicio || '').trim();
+      caja.innerHTML = `<strong>${esc(encabezado || 'Sin datos')}</strong>`
+        + `FUERA DE SERVICIO${motivo ? `: ${esc(motivo)}` : ''} — este carro no puede salir.`;
+      return;
+    }
+    caja.className = 'sc-carro-info';
     caja.innerHTML = `<strong>${esc(encabezado || 'Sin datos')}</strong>${detalle ? esc(detalle) : ''}`;
   }
 
@@ -2059,6 +2083,7 @@ export async function pintarSacarCarro(contenedor, parametroRuta, {
       ajeno,
       hayCarroPropio: Boolean(carroPropio()),
       seEntroSinCarro: !carroId,
+      carroFueraDeServicio: Boolean(carroPropio()?.fueraDeServicio),
       falloFlota,
       placasAjeno: texto('sc-ajeno-placas'),
       fechaSalida: texto('sc-fecha-salida'),
@@ -2171,13 +2196,25 @@ export async function pintarSacarCarro(contenedor, parametroRuta, {
     // todo editable: si el dueño le cambió el color o las placas, él lo corrige antes de guardar, y lo que
     // se guarda es lo que esté escrito, no lo que se rellenó.
     if (ev.target.id === 'sc-ajeno-usados') {
-      const elegido = ajenosUsados[Number(ev.target.value)];
+      const elegido = ajenosUsados.find((c) => c.placas === ev.target.value);
       if (elegido) {
         el('sc-ajeno-placas').value = elegido.placas ?? '';
         el('sc-ajeno-tipo').value = elegido.tipo ?? '';
         el('sc-ajeno-marca').value = elegido.marca ?? '';
         el('sc-ajeno-color').value = elegido.color ?? '';
         el('sc-ajeno-modelo').value = elegido.modelo ?? '';
+        // Y EL DUEÑO, que es lo que decide a quién se le paga el subarriendo. Sin esto el contrato se
+        // guardaba con `duenoId: null` y `carroAjeno.dueno: ''`, y en `agruparPorDueno` todos los
+        // subarriendos sin dueño caen en UNA sola cuenta sin nombre: lo que se le debe a cada dueño queda
+        // revuelto y sin a quién. Lo encontró un agente adversario. (27 de noviembre de 2026.)
+        //
+        // Se escoge con `elegirDueno`, el mismo camino que si lo hubiera buscado a mano, para que la
+        // pantalla quede en el mismo estado (el nombre a la vista, el buscador cerrado) y no haya dos
+        // formas distintas de tener un dueño escogido.
+        if (elegido.duenoId) {
+          buscadorDuenos.pedir();
+          elegirDueno({ id: elegido.duenoId, nombre: elegido.dueno ?? '' });
+        }
         recalcular();
       }
     }

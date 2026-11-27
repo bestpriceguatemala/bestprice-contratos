@@ -1815,7 +1815,13 @@ async function pintarCuentas(contenedor, claveDeFicha, {
 
   // ----- Enlazar los contratos viejos a un dueño de la lista -----
   async function enlazar({ crear }) {
-    if (ui.ocupado || !entrada?.sinEnlazar) return;
+    // La sesión se mira ANTES de preguntar, no solo al volver. Su gemela de comisiones ya lo hacía y las
+    // otras cuatro acciones de esta pantalla también; solo «Enlazar» entraba sin mirar. Con la sesión
+    // cerrada por inactividad y la pantalla todavía dibujada, el clic daba de alta al dueño y le escribía
+    // `duenoId` a los contratos —las reglas lo permiten con la sesión del mostrador—, y como la guardia de
+    // abajo impide tocar la memoria, el éxito ni se cantaba: se cambiaba a quién se le debe el dinero y él
+    // no se enteraba. Lo encontró un agente adversario. (27 de noviembre de 2026.)
+    if (ui.ocupado || !entrada?.sinEnlazar || !haySesion()) return;
     let duenoId = raiz.querySelector('#dn-enlazar-dueno')?.value ?? '';
     let nombreDelDueno = vista.registros.find((d) => d.id === duenoId)?.nombre ?? '';
     if (!crear && !duenoId) { ui.mensajeEnlace = 'Escoge a qué dueño de la lista corresponde.'; dibujar(); return; }
