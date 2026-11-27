@@ -29,13 +29,72 @@ function atributosDe(etiqueta) {
 }
 
 /** Cada etiqueta de apertura del HTML, en orden, con dónde empieza y termina. */
+/**
+ * Las etiquetas que NO pueden contener nada: no llevan cierre. Sin esta lista, un `<input>` quedaría
+ * «abierto» para siempre y sería padre de todo lo que viniera después.
+ */
+const SIN_CIERRE = new Set(['input', 'img', 'br', 'hr', 'meta', 'link', 'source', 'col', 'area', 'embed']);
+
+/**
+ * Lee el HTML de verdad: con PILA, no contando cierres a ojo, y saltándose los comentarios.
+ *
+ * Esto reemplaza (26 de noviembre de 2026 → corregido el 27) a un recorrido que solo buscaba etiquetas de
+ * apertura con una expresión regular y decidía quién era ancestro de quién CONTANDO cierres y aperturas en
+ * el texto de por medio. Esa cuenta se equivocaba de tres maneras distintas, todas encontradas apretando:
+ *
+ * 1. Un HERMANO que ya se había cerrado salía como ancestro, porque otra etiqueta del mismo nombre abierta
+ *    después tapaba su cierre en la cuenta. `closest('[data-dn]')` desde un botón devolvía el `[data-dn]`
+ *    del bloque de al lado — y ése es el cable con el que las DOS pantallas de dinero enrutan sus clics.
+ * 2. Por lo mismo, un evento burbujeaba hacia hermanos ya cerrados: un Enter en el buscador de empleados
+ *    despertaba al alta de cliente Y a la de dueño, y la pantalla «guardaba un cliente» sin que nadie
+ *    estuviera ahí.
+ * 3. Lo que estaba DENTRO de un comentario de HTML se encontraba y se podía apretar, aunque el navegador
+ *    no lo dibuje. Las dos plantillas que este instrumento mide traen comentarios hoy, y comentar un
+ *    bloque es la forma más corta de apagar un botón.
+ *
+ * Con la pila, `padre` es el índice del padre de verdad (o -1), y los ancestros son una cadena, no una
+ * adivinanza.
+ */
 function etiquetasDe(html) {
-  return [...html.matchAll(/<([a-zA-Z][a-zA-Z0-9]*)\b([^>]*)>/g)].map((m) => ({
-    tag: m[1].toLowerCase(),
-    texto: m[0],
-    desde: m.index,
-    ...atributosDe(m[0]),
-  }));
+  const fuera = [];
+  const pila = [];
+  let i = 0;
+  while (i < html.length) {
+    const abre = html.indexOf('<', i);
+    if (abre < 0) break;
+    // Un comentario no se dibuja: se salta entero, con todo lo que tenga adentro.
+    if (html.startsWith('<!--', abre)) {
+      const cierra = html.indexOf('-->', abre + 4);
+      i = cierra < 0 ? html.length : cierra + 3;
+      continue;
+    }
+    if (html.startsWith('</', abre)) {
+      const m = /^<\/([a-zA-Z][a-zA-Z0-9]*)/.exec(html.slice(abre));
+      if (m) {
+        const tag = m[1].toLowerCase();
+        const donde = pila.map((n) => fuera[n].tag).lastIndexOf(tag);
+        if (donde >= 0) pila.length = donde;
+      }
+      i = html.indexOf('>', abre);
+      i = i < 0 ? html.length : i + 1;
+      continue;
+    }
+    // El `>` de cierre se busca RESPETANDO las comillas: con `[^>]*` un valor como `value="2 > 1"` cortaba
+    // la etiqueta a la mitad y los atributos de después desaparecían en silencio. (27 de noviembre de 2026.)
+    const m = /^<([a-zA-Z][a-zA-Z0-9]*)\b((?:"[^"]*"|'[^']*'|[^>"'])*)>/.exec(html.slice(abre));
+    if (!m) { i = abre + 1; continue; }
+    const tag = m[1].toLowerCase();
+    fuera.push({
+      tag,
+      texto: m[0],
+      desde: abre,
+      padre: pila.length ? pila[pila.length - 1] : -1,
+      ...atributosDe(m[0]),
+    });
+    if (!SIN_CIERRE.has(tag) && !m[0].endsWith('/>')) pila.push(fuera.length - 1);
+    i = abre + m[0].length;
+  }
+  return fuera;
 }
 
 /**
@@ -62,10 +121,45 @@ export function pantallaDeMentira() {
 
   /** Lo que hay escrito entre la etiqueta y su cierre, sin otras etiquetas de adentro. */
   const textoDe = (etiqueta) => {
+    if (SIN_CIERRE.has(etiqueta.tag)) return '';
     const desde = etiqueta.desde + etiqueta.texto.length;
-    const cierre = html.indexOf(`</${etiqueta.tag}>`, desde);
-    const crudo = html.slice(desde, cierre < 0 ? desde : cierre);
-    return crudo.replace(/<[^>]*>/g, '');
+    // Hasta SU cierre, no hasta el primero que aparezca: con `<div>antes<div>adentro</div>después</div>`
+    // el corte ingenuo daba «antesadentro» y se comía «después». Cualquier `doesNotMatch` sobre el texto
+    // de una caja con cajas adentro pasaba sin medir nada. (27 de noviembre de 2026.)
+    let hondo = 1;
+    let i = desde;
+    while (i < html.length && hondo > 0) {
+      const abre = html.indexOf(`<${etiqueta.tag}`, i);
+      const cierra = html.indexOf(`</${etiqueta.tag}>`, i);
+      if (cierra < 0) { i = html.length; break; }
+      if (abre >= 0 && abre < cierra) { hondo += 1; i = abre + 1; continue; }
+      hondo -= 1;
+      if (hondo === 0) { i = cierra; break; }
+      i = cierra + 1;
+    }
+    return html.slice(desde, Math.min(i, html.length)).replace(/<[^>]*>/g, '');
+  };
+
+  /** El valor de un `<select>`: el de su opción marcada, o el de la primera si ninguna lo está. */
+  const valorDelMenu = (etiqueta) => {
+    const todas = etiquetas();
+    const yo = todas.findIndex((e) => e.desde === etiqueta.desde);
+    const opciones = todas.filter((e) => e.tag === 'option' && e.padre === yo);
+    if (!opciones.length) return '';
+    const marcada = opciones.find((o) => / selected(?=[ >/])/.test(o.texto) || 'selected' in o.attrs);
+    const escogida = marcada ?? opciones[0];
+    return escogida.attrs.value ?? '';
+  };
+
+  /**
+   * ¿La etiqueta trae este atributo? Mirando los VALORES vaciados: `class="caja hidden grande"` daba
+   * `hidden: true` por la palabra dentro del valor, y `disabled="disabled"` daba `false` porque buscaba
+   * la palabra suelta. Los dos son marcas con las que las pantallas prenden y apagan bloques.
+   */
+  const hayAtributo = (etiqueta, nombre) => {
+    if (nombre in etiqueta.attrs) return true;
+    const pelado = etiqueta.texto.replace(/="[^"]*"/g, '=""').replace(/='[^']*'/g, "=''");
+    return new RegExp(`[ \t]${nombre}(?=[ >/=])`).test(pelado);
   };
 
   const nodoDeEtiqueta = (etiqueta) => {
@@ -83,11 +177,23 @@ export function pantallaDeMentira() {
       attrs: etiqueta.attrs,
       dataset: etiqueta.dataset,
       etiqueta,
-      value: etiqueta.attrs.value ?? '',
+      // Un `<select>` NO lleva atributo `value`: el suyo es el de su opción marcada, y si ninguna lo está,
+      // el de la primera. Leerlo como '' hacía que el instrumento no pudiera distinguir un menú que se lee
+      // bien de uno que no se lee en absoluto — y esta pantalla tiene menús para la forma de pago, el
+      // carro de la flota y los subarrendados usados. (27 de noviembre de 2026.)
+      value: etiqueta.tag === 'select' ? valorDelMenu(etiqueta) : (etiqueta.attrs.value ?? ''),
       checked: 'checked' in etiqueta.attrs || / checked(?=[ >])/.test(etiqueta.texto),
-      disabled: / disabled(?=[ >])/.test(etiqueta.texto),
-      hidden: / hidden(?=[ >])/.test(etiqueta.texto),
-      innerHTML: '',
+      // Atributos de verdad, no palabras que aparezcan en cualquier parte: `class="caja hidden grande"`
+      // daba `hidden: true` y `disabled="disabled"` daba `disabled: false`. Y `hidden` es justo la marca
+      // con la que se prenden y apagan los bloques nuevos. (27 de noviembre de 2026.)
+      disabled: hayAtributo(etiqueta, 'disabled'),
+      hidden: hayAtributo(etiqueta, 'hidden'),
+      // Escribir `innerHTML` BORRA el texto que había, como en el navegador. Aquí vivían aparte, así que
+      // lo escrito con `textContent` se quedaba para siempre y una prueba podía leer el texto de la pasada
+      // anterior con la caja ya mostrando otra cosa. Pasó de verdad, midiendo el cuadro del carro.
+      _html: '',
+      get innerHTML() { return this._html; },
+      set innerHTML(valor) { this._html = String(valor); this.textContent = ''; },
       textContent: textoDe(etiqueta),
       oyentes: {},
       // Un nodo suelto también puede tener sus propios manejadores: `dibujarEntrada` los engancha al
@@ -132,51 +238,21 @@ export function pantallaDeMentira() {
    * de apertura que hace juego, más cercana hacia atrás, que todavía no se ha cerrado. Alcanza para los
    * dos casos que usa el sistema (`[data-dn]` y `tr[data-dn-clave]`) y se niega a adivinar otros.
    */
-  /**
-   * Las etiquetas que NO pueden contener nada: no llevan cierre, así que la cuenta de «¿ya se cerró?» las
-   * daría siempre por abiertas y las tomaría por ancestros de todo lo que venga después. Lo encontró el
-   * control 20 el 26 de noviembre de 2026: un `<input>` salía como ancestro del campo de la fila de abajo.
-   */
-  const SIN_CIERRE = new Set(['input', 'img', 'br', 'hr', 'meta', 'link', 'source', 'col', 'area', 'embed']);
-
   const masCercano = (etiqueta, selector) => {
     const todas = etiquetas();
     const yo = todas.findIndex((e) => e.desde === etiqueta.desde);
     if (yo < 0) return null;
-    for (let i = yo; i >= 0; i--) {
-      if (!haceJuego(todas[i], selector)) continue;
-      if (i === yo) return nodoDeEtiqueta(todas[i]);
-      if (SIN_CIERRE.has(todas[i].tag)) continue;
-      // Que no se haya cerrado antes de mí: se cuenta su cierre en el texto de por medio.
-      const enMedio = html.slice(todas[i].desde, etiqueta.desde);
-      const cierres = (enMedio.match(new RegExp(`</${todas[i].tag}>`, 'g')) ?? []).length;
-      const aperturas = (enMedio.match(new RegExp(`<${todas[i].tag}\\b`, 'g')) ?? []).length - 1;
-      if (cierres <= aperturas) return nodoDeEtiqueta(todas[i]);
+    for (let i = yo; i >= 0; i = todas[i].padre) {
+      if (haceJuego(todas[i], selector)) return nodoDeEtiqueta(todas[i]);
     }
     return null;
   };
 
-  /**
-   * Los ancestros de una etiqueta, de adentro hacia afuera, con la MISMA regla que `masCercano`: una
-   * etiqueta de más atrás es ancestro solo si todavía no se había cerrado cuando empieza ésta.
-   *
-   * Hace falta para que un evento BURBUJEE como en el navegador. Hasta el 26 de noviembre de 2026
-   * `lanzar` solo avisaba al nodo y a la caja de arriba, así que un manejador enganchado en un nodo de
-   * EN MEDIO —«Sacar carro» engancha todo el `change` en su `<form>`— no se enteraba nunca, y una prueba
-   * que apretara algo quedaba verde sin que pasara nada.
-   */
   const ancestrosDe = (etiqueta) => {
     const todas = etiquetas();
     const yo = todas.findIndex((e) => e.desde === etiqueta.desde);
     const fuera = [];
-    if (yo < 0) return fuera;
-    for (let i = yo - 1; i >= 0; i--) {
-      if (SIN_CIERRE.has(todas[i].tag)) continue;
-      const enMedio = html.slice(todas[i].desde, etiqueta.desde);
-      const cierres = (enMedio.match(new RegExp(`</${todas[i].tag}>`, 'g')) ?? []).length;
-      const aperturas = (enMedio.match(new RegExp(`<${todas[i].tag}\\b`, 'g')) ?? []).length - 1;
-      if (cierres <= aperturas) fuera.push(todas[i]);
-    }
+    for (let i = yo < 0 ? -1 : todas[yo].padre; i >= 0; i = todas[i].padre) fuera.push(todas[i]);
     return fuera;
   };
 
@@ -203,19 +279,60 @@ export function pantallaDeMentira() {
     set innerHTML(valor) { escribirHtml(valor); },
     querySelector: buscar,
     querySelectorAll: raiz.querySelectorAll,
-    replaceChildren(hijo) { escribirHtml(''); if (hijo) hijo.isConnected = true; },
+    /**
+     * Colgar una caja: lo que traía escrito pasa a ser la página, y desde entonces lo que se le escriba a
+     * esa caja se ve. Sin hijo, la página queda vacía.
+     */
+    replaceChildren(hijo) {
+      escribirHtml(hijo?._html ?? '');
+      if (hijo) hijo.isConnected = true;
+    },
     addEventListener(tipo, fn) { (oyentes[tipo] ??= []).push(fn); },
   };
 
   const documento = {
-    createElement: () => raiz,
     /**
      * `getElementById` con la MISMA regla que todo lo demás de aquí: solo encuentra lo que la pantalla
-     * dibujó de verdad. «Sacar carro» busca sus campos así (`const el = (id) => doc.getElementById(id)`),
-     * y si un manejador apunta a un id que el HTML ya no trae, tiene que salir `null` —y la prueba caerse—
-     * en vez de quedarse verde apretando campos imaginarios. (26 de noviembre de 2026.)
+     * dibujó de verdad. «Sacar carro» busca sus campos así; si un manejador apunta a un id que el HTML ya
+     * no trae, tiene que salir `null` —y la prueba caerse— en vez de quedarse verde apretando campos
+     * imaginarios.
      */
     getElementById: (id) => buscar(`#${id}`),
+    /**
+     * Un nodo NUEVO cada vez, como el navegador — pero que solo se VE cuando se cuelga.
+     *
+     * Antes devolvía siempre `raiz`, la caja que ES la página: dos cajas creadas serían el mismo objeto y
+     * el error parecería de la pantalla. El primer arreglo (devolver una caja suelta cualquiera) rompió
+     * 133 pruebas de un golpe, porque lo que la pantalla dibujaba ya no llegaba a la página: la caja
+     * suelta se lo guardaba y nadie la colgaba de verdad.
+     *
+     * Así queda como en el navegador: escribir en una caja SUELTA no se ve; al colgarla con
+     * `replaceChildren`, su contenido pasa a ser la página y desde entonces lo que se le escriba se ve.
+     * (27 de noviembre de 2026.)
+     */
+    createElement: (tag = 'div') => {
+      const caja = {
+        tag: String(tag).toLowerCase(),
+        tagName: String(tag).toUpperCase(),
+        id: '',
+        attrs: {},
+        dataset: {},
+        isConnected: false,
+        oyentes: {},
+        _html: '',
+        get innerHTML() { return caja.isConnected ? html : caja._html; },
+        set innerHTML(valor) {
+          caja._html = String(valor);
+          if (caja.isConnected) escribirHtml(valor);
+        },
+        textContent: '',
+        addEventListener(tipo, fn) { (oyentes[tipo] ??= []).push(fn); },
+        replaceChildren() { caja._html = ''; if (caja.isConnected) escribirHtml(''); },
+        querySelector: buscar,
+        querySelectorAll: (selector) => etiquetas().filter((e) => haceJuego(e, selector)).map(nodoDeEtiqueta),
+      };
+      return caja;
+    },
   };
 
   /**
@@ -227,14 +344,27 @@ export function pantallaDeMentira() {
     const nodo = typeof cual === 'string' ? buscar(cual) : cual;
     if (!nodo) throw new Error(`No hay ningún «${cual}» en lo que la pantalla dibujó`);
     Object.assign(nodo, cambios);
-    const ev = { type: tipo, preventDefault() { ev.seEvito = true; }, seEvito: false, ...cambios };
+    const ev = {
+      type: tipo,
+      preventDefault() { ev.seEvito = true; ev.defaultPrevented = true; },
+      seEvito: false,
+      defaultPrevented: false,
+      // Sin `stopPropagation` un manejador que quiera parar el evento revienta con un TypeError; y ahora
+      // que los eventos burbujean de verdad, pararlos es justo lo que alguien va a querer hacer.
+      stopPropagation() { ev.sePropaga = false; },
+      sePropaga: true,
+      ...cambios,
+    };
     ev.target = nodo;
     for (const fn of nodo.oyentes?.[tipo] ?? []) fn(ev);
     // Y después los de cada ancestro, de adentro hacia afuera, como burbujea en el navegador: un
     // manejador enganchado en el `<form>` de en medio tiene que enterarse de lo que pasó en un campo.
+    // Quien llame a `stopPropagation()` lo para aquí, igual que allá.
     for (const padre of nodo.etiqueta ? ancestrosDe(nodo.etiqueta) : []) {
+      if (!ev.sePropaga) return ev;
       for (const fn of campos.get(padre.desde)?.oyentes?.[tipo] ?? []) fn(ev);
     }
+    if (!ev.sePropaga) return ev;
     for (const fn of oyentes[tipo] ?? []) fn(ev);
     return ev;
   };
